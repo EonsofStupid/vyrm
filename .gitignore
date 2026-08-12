@@ -1,0 +1,9 @@
+# Build artifacts (workspace also builds into CARGO_TARGET_DIR when set)
+/target
+
+# Session transcripts and hooks — operator-local, never part of the product
+/.chat
+
+# Local substrate instances created by ad-hoc runs
+*.fjall
+/store

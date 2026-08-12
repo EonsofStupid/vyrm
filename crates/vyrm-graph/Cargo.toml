@@ -1,0 +1,24 @@
+[package]
+name = "vyrm-graph"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "vyrm routing projection: attunement, symbol and dependency index, query routing."
+
+[dependencies]
+vyrm-core = { path = "../vyrm-core" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tree-sitter = "0.26"
+tree-sitter-rust = "0.24"
+tree-sitter-typescript = "0.23"
+tree-sitter-javascript = "0.25"
+tree-sitter-python = "0.25"
+tree-sitter-svelte-ng = "1.0"
+
+[dev-dependencies]
+# Persistence wiring is exercised from tests and examples only: the library
+# stays substrate-free until vyrm-node exists to own the composition.
+vyrm-store = { path = "../vyrm-store" }
+tempfile = "3"
