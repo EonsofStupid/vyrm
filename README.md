@@ -59,6 +59,10 @@ Every figure below is reproduced by an example in this repository, on a
 1,616-file reference repository, with the queries recorded in `PLAN.md`.
 Negative results are recorded with the same weight as positive ones.
 
+- **9.6× fewer tokens** than unstructured context in the controlled recall
+  A/B — 12,009 tokens of stacked journal sections against 1,254 tokens of
+  claims with provenance, same queries, same tokenizer
+  (`vyrm-cli/examples/recall_ab.rs`, fixtures checked in).
 - **13.9× fewer lines to read** than a text scan under the 1,000-line budget
   fill, with the declaration site ranked first on every query that has one
   (`examples/route_vs_scan.rs`).

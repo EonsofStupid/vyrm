@@ -123,6 +123,41 @@ fn adapter_matches_grounding_reference_across_the_corpus() {
 }
 
 #[test]
+fn recall_matches_grounding_reference_across_the_corpus() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(dir.path()).unwrap();
+    let mut reference = MemoryClaims::new();
+
+    let claims = corpus();
+    store.append_batch(&claims).unwrap();
+    for c in &claims {
+        reference.insert(c.clone()).unwrap();
+    }
+
+    // Subject-set recall must agree in claims, order, digest, and truncation —
+    // across instants and under budgets tight enough to truncate.
+    let subjects: Vec<Subject> = ["wp3", "wp3x", "wp", "wp4", "absent"]
+        .iter()
+        .map(|s| Subject::new(*s).unwrap())
+        .collect();
+    for at in (0..600).step_by(13) {
+        for budget in [1usize, 40, 10_000] {
+            let query = vyrm_core::RecallQuery {
+                subjects: subjects.clone(),
+                predicates: None,
+                as_of: at,
+            };
+            let from_store = vyrm_core::recall(&store, &query, budget).unwrap();
+            let from_reference = vyrm_core::recall(&reference, &query, budget).unwrap();
+            assert_eq!(
+                from_store, from_reference,
+                "recall divergence at as_of={at} budget={budget}"
+            );
+        }
+    }
+}
+
+#[test]
 fn batch_allocates_contiguous_sequences_and_advances_the_watermark() {
     let dir = tempfile::tempdir().unwrap();
     let store = Store::open(dir.path()).unwrap();

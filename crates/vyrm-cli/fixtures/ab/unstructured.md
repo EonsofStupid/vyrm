@@ -52,7 +52,7 @@ absence, not recollection.
 | §13.2 | Content-addressed objects | **Missing** | absent |
 | §14 | Clyffy consumer | **Missing** | absent |
 
-Implemented and verified: 118 tests, clippy clean at `-D warnings`. Known
+Implemented and verified: 107 tests, clippy clean at `-D warnings`. Known
 flake, observed once on 2026-08-11: `durability.rs::
 an_unflushed_index_is_as_empty_as_the_claims_it_indexes` found 37 recovered
 claims where it expects 0 — the test presumes an unflushed write is absent
@@ -328,7 +328,7 @@ that step, not to adopt unexamined. Build order: recall ledger (Step 4) →
 traces (Step T) → vyrmd protocol → panel shell (Rust-native) → Shippin
 embedding.
 
-### Step 4 · Recall and the effectiveness ledger — COMPLETE
+### Step 4 · Recall and the effectiveness ledger
 
 Retires F3, the central risk. Recall v1 resolves current claims for a subject
 set and returns a recall set with a token estimate — semantic content with
@@ -341,40 +341,6 @@ comparison with unstructured context on the same query (§13.1).
   both token counts and the outcome distribution. **A measured reduction is the
   deliverable. A reduction that does not appear is equally a result and is
   recorded as such.**
-
-**Landed (2026-08-12):**
-
-- `vyrm_core::recall` over a new `ClaimSource::subject_versions` port method
-  (one seek per subject via `key::subject_prefix`, never a store scan).
-  Deterministic budget fill, first claim always included, truncation visible;
-  content digest per §13.2. Six kernel tests; adapter conformance proven by a
-  recall differential against `MemoryClaims` across instants and budgets
-  (standing rule 3).
-- The §13.1 ledger extends the invocation record (one log, as
-  `invocation.rs` already prescribed): `Effectiveness` fields on recall
-  invocations, `Store::set_recall_outcome` to judge after the fact —
-  refusing to judge a non-recall, since that would poison the evidence base.
-- Operator surface: `vyrm recall` (recorded with its effectiveness fields),
-  `vyrm outcome`, `vyrm ledger` (records plus outcome distribution). Driven
-  end-to-end through the compiled binary in tests.
-
-**Measured outcome of the A/B (2026-08-12, `examples/recall_ab.rs`,
-fixtures checked in):** corpus = 32 claims extracted from the frozen
-2026-08-12 PLAN.md snapshot; baseline arm = every journal section mentioning
-a queried subject, stacked whole (mechanical md-stacking); both arms counted
-by o200k_base (a proxy tokenizer — no Claude tokenizer is public; the ratio
-cancels it). Across six queries: **12,009 baseline tokens vs 1,254 recall
-tokens — 9.58x** — range 2.18x (panel/observatory: young subjects, few
-matching sections) to 20.13x (persistence), no truncation at the 1,500-token
-budget. Six ledger records carry controlled baselines; the outcome
-distribution is all-`unknown` until recalls are judged in use, and is
-reported as such. Two-sided notes: the kernel's four-bytes-per-token
-estimate runs **20.3% under** the real count on this corpus — recorded, not
-retuned, because calibrating a constant to the single corpus that measured
-it would be overfitting; a second corpus decides. And the baseline arm's
-sections overlap heavily across queries (three queries each matched 2,456
-tokens), which is faithful to grep-stacking rather than a flattering
-construction.
 
 ### Step 5 · Projections, rebuild, grounding
 

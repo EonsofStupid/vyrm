@@ -176,3 +176,53 @@ fn an_absent_claim_is_reported_rather_than_treated_as_an_error() {
     assert!(ok, "a missing claim must not be an error: {err}");
     assert!(out.contains("no claim in force"), "unexpected output: {out}");
 }
+
+#[test]
+fn recall_returns_current_claims_and_records_the_ledger_entry() {
+    let db = scratch("recall-ledger");
+    vyrm(&db, &["assert", "--subject", "wp3", "--predicate", "status", "--object", "tested",
+                "--valid-from", "1000"]);
+    vyrm(&db, &["assert", "--subject", "wp3", "--predicate", "owner", "--object", "jessay",
+                "--valid-from", "1000"]);
+    vyrm(&db, &["assert", "--subject", "wp9", "--predicate", "status", "--object", "shipped",
+                "--valid-from", "1000"]);
+
+    let (ok, out, err) = vyrm(&db, &["recall", "--subject", "wp3"]);
+    assert!(ok, "recall failed: {err}");
+    assert!(out.contains("tested") && out.contains("jessay"), "missing claims:\n{out}");
+    assert!(!out.contains("shipped"), "foreign subject leaked:\n{out}");
+    assert!(out.contains("digest"), "digest missing:\n{out}");
+
+    // The §13.1 record exists, carries the token estimate, and says plainly
+    // that its reduction is unverified without a baseline.
+    let (ok, out, err) = vyrm(&db, &["ledger"]);
+    assert!(ok, "ledger failed: {err}");
+    assert!(out.contains("recall \"wp3\""), "ledger entry missing:\n{out}");
+    assert!(out.contains("reduction unverified"), "unverified baseline not stated:\n{out}");
+    assert!(out.contains("unknown=1"), "outcome distribution missing:\n{out}");
+}
+
+#[test]
+fn a_recall_can_be_judged_and_a_non_recall_cannot() {
+    let db = scratch("recall-outcome");
+    vyrm(&db, &["assert", "--subject", "wp3", "--predicate", "status", "--object", "tested",
+                "--valid-from", "1000"]);
+    let (ok, _, _) = vyrm(&db, &["recall", "--subject", "wp3"]);
+    assert!(ok);
+
+    // The recall was invocation ordinal 2 (assert was 1).
+    let (ok, out, err) =
+        vyrm(&db, &["outcome", "--ordinal", "2", "--outcome", "accepted"]);
+    assert!(ok, "outcome failed: {err}");
+    assert!(out.contains("accepted"), "judgement not reflected:\n{out}");
+
+    let (ok, out, err) = vyrm(&db, &["ledger"]);
+    assert!(ok, "ledger failed: {err}");
+    assert!(out.contains("accepted=1"), "distribution not updated:\n{out}");
+
+    // Judging the assert (ordinal 1) must fail: it is not a recall, and a
+    // silent success here would poison the evidence base.
+    let (ok, _, err) = vyrm(&db, &["outcome", "--ordinal", "1", "--outcome", "accepted"]);
+    assert!(!ok, "judging a non-recall must fail");
+    assert!(err.contains("not a recall"), "unexpected error: {err}");
+}

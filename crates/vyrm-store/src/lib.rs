@@ -30,7 +30,7 @@ mod writer;
 
 pub use error::{Error, Result};
 pub use gc::{PairStatus, RemovalReport, Verdict};
-pub use invocation::{Invocation, InvocationInput, Outcome, Trigger};
+pub use invocation::{Effectiveness, Invocation, InvocationInput, Outcome, RecallOutcome, Trigger};
 pub use keyspaces::Durability;
 pub use store::{AppendOutcome, Store};
 pub use writer::{Writer, WriterConfig, WriterStats};

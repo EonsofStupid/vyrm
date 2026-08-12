@@ -255,6 +255,7 @@ impl Store {
             outcome: input.outcome,
             duration_ms: input.duration_ms,
             detail: input.detail,
+            effectiveness: input.effectiveness,
         };
         tx.insert(
             &self.invocations,
@@ -266,6 +267,53 @@ impl Store {
             keyspaces::INVOCATION_WATERMARK,
             ordinal.to_string().as_bytes(),
         );
+        tx.commit()?;
+        Ok(record)
+    }
+
+    /// Judges a recall after the fact. `SPEC.md` §13.1: `outcome` is the
+    /// signal trigger policy is derived from, and it arrives later than the
+    /// recall it judges — so the record is rewritten in place, keyed as it was
+    /// written.
+    ///
+    /// The lookup scans the log for the ordinal, which is linear in the number
+    /// of invocations. Acceptable at stage 1 by construction: every invocation
+    /// is manual, so the log grows at operator speed. An ordinal index earns
+    /// its place when a measurement shows this scan mattering.
+    ///
+    /// Errors when the ordinal does not exist or names a non-recall record —
+    /// judging a flush as `accepted` would poison the evidence base silently.
+    pub fn set_recall_outcome(
+        &self,
+        ordinal: u64,
+        outcome: crate::invocation::RecallOutcome,
+    ) -> Result<Invocation> {
+        let mut tx = self
+            .db
+            .write_tx()
+            .durability(Durability::Authoritative.persist_mode());
+
+        let mut found: Option<(Vec<u8>, Invocation)> = None;
+        for guard in tx.range(&self.invocations, invocation::invocation_bound(0)..) {
+            let (key, value) = guard.into_inner()?;
+            let record: Invocation = serde_json::from_slice(&value)?;
+            if record.ordinal == ordinal {
+                found = Some((key.to_vec(), record));
+                break;
+            }
+        }
+        let Some((key, mut record)) = found else {
+            return Err(Error::Substrate(format!("no invocation with ordinal {ordinal}")));
+        };
+        let Some(effectiveness) = record.effectiveness.as_mut() else {
+            return Err(Error::Substrate(format!(
+                "invocation {ordinal} is `{}`, not a recall — refusing to judge it",
+                record.command
+            )));
+        };
+        effectiveness.outcome = outcome;
+
+        tx.insert(&self.invocations, key, serde_json::to_vec(&record)?);
         tx.commit()?;
         Ok(record)
     }
@@ -374,6 +422,27 @@ impl ClaimSource for Store {
 
     fn all_versions(&self, subject: &Subject, predicate: &Predicate) -> Result<Vec<Claim>> {
         self.scan(subject, predicate, key::version_prefix(subject, predicate))
+    }
+
+    fn subject_versions(&self, subject: &Subject) -> Result<Vec<Claim>> {
+        let prefix = key::subject_prefix(subject);
+        let snapshot = self.db.read_tx();
+        let mut out = Vec::new();
+        match key::prefix_end(&prefix) {
+            Some(end) => {
+                for guard in snapshot.range(&self.claims, prefix..end) {
+                    let (_, value) = guard.into_inner()?;
+                    out.push(serde_json::from_slice(&value)?);
+                }
+            }
+            None => {
+                for guard in snapshot.range(&self.claims, prefix..) {
+                    let (_, value) = guard.into_inner()?;
+                    out.push(serde_json::from_slice(&value)?);
+                }
+            }
+        }
+        Ok(out)
     }
 }
 

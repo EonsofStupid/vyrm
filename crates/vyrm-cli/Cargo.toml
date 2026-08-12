@@ -14,6 +14,11 @@ serde_json = { workspace = true }
 
 [dev-dependencies]
 tempfile = "3"
+# A/B harness only: real token counts for both arms of the controlled
+# comparison. o200k_base is a proxy tokenizer — no Claude tokenizer is
+# public — which is sound because the reported quantity is the ratio and
+# both arms are counted by the same tokenizer.
+tiktoken-rs = "0.12"
 
 [[bin]]
 name = "vyrm"

@@ -78,6 +78,14 @@ impl ClaimSource for MemoryClaims {
     ) -> std::result::Result<Vec<Claim>, Self::Error> {
         Ok(self.scan(subject, predicate, key::version_prefix(subject, predicate)))
     }
+
+    fn subject_versions(&self, subject: &Subject) -> std::result::Result<Vec<Claim>, Self::Error> {
+        let prefix = key::subject_prefix(subject);
+        Ok(match key::prefix_end(&prefix) {
+            Some(end) => self.rows.range(prefix..end).map(|(_, c)| c.clone()).collect(),
+            None => self.rows.range(prefix..).map(|(_, c)| c.clone()).collect(),
+        })
+    }
 }
 
 #[cfg(test)]

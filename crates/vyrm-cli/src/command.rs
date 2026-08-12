@@ -5,8 +5,21 @@
 //! through a parallel test-only entry point.
 
 use clap::{Parser, Subcommand};
-use vyrm_core::{Claim, ClaimReader, Millis, Predicate, Producer, Reader, Subject};
-use vyrm_store::{Outcome, Store, Trigger};
+use vyrm_core::{Claim, ClaimReader, Millis, Predicate, Producer, Reader, RecallQuery, Subject};
+use vyrm_store::{Effectiveness, Outcome, RecallOutcome, Store, Trigger};
+
+/// What a command produced: the operator-facing text, and — for a recall — the
+/// `SPEC.md` §13.1 effectiveness fields the invocation record must carry.
+pub struct Execution {
+    pub text: String,
+    pub effectiveness: Option<Effectiveness>,
+}
+
+impl From<String> for Execution {
+    fn from(text: String) -> Self {
+        Execution { text, effectiveness: None }
+    }
+}
 
 #[derive(Parser, Debug)]
 #[command(
@@ -82,6 +95,41 @@ pub enum Command {
         #[arg(long, default_value_t = 0)]
         since: Millis,
     },
+    /// Resolve the claims in force for a subject set into a recall set
+    /// (`SPEC.md` §10). Semantic content with provenance; rendering to a
+    /// prompt belongs to the consuming adapter.
+    Recall {
+        /// Subject to recall. Repeatable.
+        #[arg(long = "subject", required = true)]
+        subjects: Vec<String>,
+        /// Narrow to these predicates. Repeatable; absent recalls all.
+        #[arg(long = "predicate")]
+        predicates: Vec<String>,
+        /// Instant to resolve at. Defaults to now.
+        #[arg(long)]
+        at: Option<Millis>,
+        /// Token budget for the recall set.
+        #[arg(long, default_value_t = 1500)]
+        budget: usize,
+        /// Consumer the recall set is destined for, recorded in the ledger.
+        #[arg(long, default_value = "frontier:claude")]
+        provider: String,
+    },
+    /// Judge a recorded recall after the fact (`SPEC.md` §13.1): accepted,
+    /// corrected, or discarded. This is the signal trigger policy derives from.
+    Outcome {
+        /// Ordinal of the recall invocation being judged.
+        #[arg(long)]
+        ordinal: u64,
+        /// accepted | corrected | discarded | unknown
+        #[arg(long)]
+        outcome: String,
+    },
+    /// The effectiveness ledger: recall records and their outcome distribution.
+    Ledger {
+        #[arg(long, default_value_t = 0)]
+        since: Millis,
+    },
 }
 
 impl Command {
@@ -94,6 +142,9 @@ impl Command {
             Command::Status => "status",
             Command::Gc { .. } => "gc",
             Command::Invocations { .. } => "invocations",
+            Command::Recall { .. } => "recall",
+            Command::Outcome { .. } => "outcome",
+            Command::Ledger { .. } => "ledger",
         }
     }
 
@@ -129,6 +180,21 @@ impl Command {
             Command::Status => Vec::new(),
             Command::Gc { since } => vec![format!("since={since}")],
             Command::Invocations { since } => vec![format!("since={since}")],
+            Command::Recall { subjects, predicates, at, budget, provider } => {
+                let mut a: Vec<String> =
+                    subjects.iter().map(|s| format!("subject={s}")).collect();
+                a.extend(predicates.iter().map(|p| format!("predicate={p}")));
+                if let Some(t) = at {
+                    a.push(format!("at={t}"));
+                }
+                a.push(format!("budget={budget}"));
+                a.push(format!("provider={provider}"));
+                a
+            }
+            Command::Outcome { ordinal, outcome } => {
+                vec![format!("ordinal={ordinal}"), format!("outcome={outcome}")]
+            }
+            Command::Ledger { since } => vec![format!("since={since}")],
         }
     }
 }
@@ -138,9 +204,142 @@ impl Command {
 /// `now` is supplied rather than read here, so that tests are deterministic and
 /// the clock enters at exactly one place (`main`).
 pub fn execute(store: &Store, command: &Command, reader: &Reader, now: Millis, json: bool)
-    -> Result<String, Box<dyn std::error::Error>>
+    -> Result<Execution, Box<dyn std::error::Error>>
 {
     match command {
+        Command::Recall { subjects, predicates, at, budget, provider } => {
+            let query = RecallQuery {
+                subjects: subjects
+                    .iter()
+                    .map(|s| Subject::new(s.clone()))
+                    .collect::<vyrm_core::Result<Vec<_>>>()?,
+                predicates: if predicates.is_empty() {
+                    None
+                } else {
+                    Some(
+                        predicates
+                            .iter()
+                            .map(|p| Predicate::new(p.clone()))
+                            .collect::<vyrm_core::Result<Vec<_>>>()?,
+                    )
+                },
+                as_of: at.unwrap_or(now),
+            };
+            let set = vyrm_core::recall(store, &query, *budget)?;
+            // Every recalled claim is a read, recorded per SPEC.md §7.
+            for claim in &set.claims {
+                store.observe(reader, &claim.subject, &claim.predicate, now)?;
+            }
+            let effectiveness = Effectiveness {
+                query: query
+                    .subjects
+                    .iter()
+                    .map(|s| s.as_str())
+                    .collect::<Vec<_>>()
+                    .join(","),
+                claims_returned: set.claims.len(),
+                tokens_emitted: set.token_estimate as u64,
+                // A manual recall has no baseline arm; the reduction is
+                // unverified until the A/B harness supplies one (§13.1).
+                baseline_tokens: None,
+                baseline_mode: None,
+                provider: provider.clone(),
+                outcome: RecallOutcome::Unknown,
+            };
+            let text = if json {
+                serde_json::to_string_pretty(&set)?
+            } else {
+                let mut lines: Vec<String> = set
+                    .claims
+                    .iter()
+                    .map(|c| {
+                        format!(
+                            "{} {} = {}  [valid_from={} tx={} by {}]",
+                            c.subject.as_str(),
+                            c.predicate.as_str(),
+                            c.object,
+                            c.valid_from,
+                            c.tx_time,
+                            c.producer.actor,
+                        )
+                    })
+                    .collect();
+                lines.push(format!(
+                    "-- {} claim(s), ~{} token(s), digest {}{}",
+                    set.claims.len(),
+                    set.token_estimate,
+                    set.digest,
+                    if set.truncated { ", TRUNCATED by budget" } else { "" },
+                ));
+                lines.join("\n")
+            };
+            return Ok(Execution { text, effectiveness: Some(effectiveness) });
+        }
+
+        Command::Outcome { ordinal, outcome } => {
+            let judged = match outcome.as_str() {
+                "accepted" => RecallOutcome::Accepted,
+                "corrected" => RecallOutcome::Corrected,
+                "discarded" => RecallOutcome::Discarded,
+                "unknown" => RecallOutcome::Unknown,
+                other => {
+                    return Err(format!(
+                        "unknown outcome {other:?}: expected accepted | corrected | discarded | unknown"
+                    )
+                    .into())
+                }
+            };
+            let record = store.set_recall_outcome(*ordinal, judged)?;
+            return Ok(if json {
+                serde_json::to_string_pretty(&record)?.into()
+            } else {
+                record.render().into()
+            });
+        }
+
+        Command::Ledger { since } => {
+            let records: Vec<_> = store
+                .invocations_since(*since)?
+                .into_iter()
+                .filter(|i| i.effectiveness.is_some())
+                .collect();
+            let mut distribution: std::collections::BTreeMap<String, usize> =
+                std::collections::BTreeMap::new();
+            for record in &records {
+                let outcome = record.effectiveness.as_ref().expect("filtered").outcome;
+                *distribution.entry(outcome.to_string()).or_insert(0) += 1;
+            }
+            return Ok(if json {
+                serde_json::to_string_pretty(&serde_json::json!({
+                    "records": records,
+                    "outcome_distribution": distribution,
+                }))?
+                .into()
+            } else if records.is_empty() {
+                "no recall records".to_string().into()
+            } else {
+                let mut lines: Vec<String> = records.iter().map(|i| i.render()).collect();
+                lines.push(format!(
+                    "-- outcomes: {}",
+                    distribution
+                        .iter()
+                        .map(|(k, v)| format!("{k}={v}"))
+                        .collect::<Vec<_>>()
+                        .join(" ")
+                ));
+                lines.join("\n").into()
+            });
+        }
+
+        _ => {}
+    }
+
+    // Text-only commands, converted to an `Execution` in one place below.
+    let text = (|| -> Result<String, Box<dyn std::error::Error>> {
+        match command {
+        Command::Recall { .. } | Command::Outcome { .. } | Command::Ledger { .. } => {
+            unreachable!("handled above with an early return")
+        }
         Command::Assert { subject, predicate, object, valid_from, actor, on_behalf_of } => {
             let subject = Subject::new(subject.clone())?;
             let predicate = Predicate::new(predicate.clone())?;
@@ -280,11 +479,15 @@ pub fn execute(store: &Store, command: &Command, reader: &Reader, now: Millis, j
                     .join("\n")
             })
         }
-    }
+        }
+    })()?;
+    Ok(text.into())
 }
 
 /// Maps an execution result onto the recorded outcome.
-pub fn outcome_of(result: &Result<String, Box<dyn std::error::Error>>) -> (Outcome, Option<String>) {
+pub fn outcome_of(
+    result: &Result<Execution, Box<dyn std::error::Error>>,
+) -> (Outcome, Option<String>) {
     match result {
         Ok(_) => (Outcome::Ok, None),
         Err(error) => (Outcome::Error, Some(error.to_string())),

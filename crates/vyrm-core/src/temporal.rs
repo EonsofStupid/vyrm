@@ -29,6 +29,12 @@ pub trait ClaimSource {
         subject: &Subject,
         predicate: &Predicate,
     ) -> Result<Vec<Claim>, Self::Error>;
+
+    /// Every claim of `subject` across all predicates, ordered by predicate and
+    /// newest first within each predicate. Implementations do this as one seek
+    /// over `key::subject_prefix`. This is the port recall stands on: a
+    /// subject-set recall costs one seek per subject, never a store scan.
+    fn subject_versions(&self, subject: &Subject) -> Result<Vec<Claim>, Self::Error>;
 }
 
 /// Resolves the claim in force at `as_of` from newest-first candidates.

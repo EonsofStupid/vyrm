@@ -53,6 +53,7 @@ fn main() -> std::process::ExitCode {
 
     // The invocation is recorded whether the command succeeded or failed. A log
     // containing only successes would misrepresent which triggers are useful.
+    // A recall's §13.1 effectiveness fields travel in the same record.
     if let Err(error) = store.record_invocation(InvocationInput {
         at: now,
         trigger: CLI_TRIGGER,
@@ -61,6 +62,7 @@ fn main() -> std::process::ExitCode {
         outcome,
         duration_ms,
         detail,
+        effectiveness: result.as_ref().ok().and_then(|e| e.effectiveness.clone()),
     }) {
         // Recording is the point of this surface, so a failure to record is
         // reported rather than swallowed, even when the command itself worked.
@@ -68,8 +70,8 @@ fn main() -> std::process::ExitCode {
     }
 
     match result {
-        Ok(output) => {
-            println!("{output}");
+        Ok(execution) => {
+            println!("{}", execution.text);
             std::process::ExitCode::SUCCESS
         }
         Err(error) => {

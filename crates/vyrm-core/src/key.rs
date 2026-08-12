@@ -78,6 +78,20 @@ pub fn version_prefix(subject: &Subject, predicate: &Predicate) -> Vec<u8> {
     key
 }
 
+/// Prefix covering every claim of one subject, across all predicates.
+///
+/// A scan over this prefix yields claims ordered by predicate, and within each
+/// predicate newest first — the grouping recall relies on. One seek serves an
+/// entire subject, which is what makes a subject-set recall a bounded number of
+/// seeks rather than a scan of the store.
+pub fn subject_prefix(subject: &Subject) -> Vec<u8> {
+    let mut key = Vec::with_capacity(CLAIM_NS.len() + subject.as_str().len() + 1);
+    key.extend_from_slice(CLAIM_NS);
+    key.extend_from_slice(subject.as_str().as_bytes());
+    key.push(SEP);
+    key
+}
+
 /// Seek key for an as-of query. Range `seek_key(..as_of) .. prefix_end` and take
 /// the first entry: that is the newest version with `valid_from <= as_of`.
 pub fn seek_key(subject: &Subject, predicate: &Predicate, as_of: u64) -> Vec<u8> {
