@@ -280,6 +280,36 @@ default and free when off. Design decision, recorded before implementation:
   baselines before it merges; an unmeasured "zero-cost" claim is still a
   claim.
 
+### Step V · Estate topology and the observatory — DESIGNED, NOT STARTED
+
+Operator decision recorded 2026-08-12: **two surfaces, one kernel.** Shippin
+is the customer surface (a customer attunes and owns their Clyffy instance;
+access into their projects is explicitly scoped); vyrm is the estate — the
+operator's full-control memory system. The kernel is never forked: both
+surfaces compose the same crates through vyrm-gate/vyrm-node, because a
+forked memory layer would demand shadow-parity verification forever.
+
+Isolation lands on seams that already exist: one Fjall database directory
+per project/tenant (a vyrm store is a directory — process-level isolation is
+free), keyspace-per-scope within a store (adopted at blueprint triage), and
+estate-level claims that point at isolated projects without containing them.
+Gates decide what crosses.
+
+The observatory (UI) comes later and in two stages, so motion is visible
+before any bespoke UI exists:
+
+1. **Traces into Rerun** — Step T's spans logged through the Rerun Rust SDK
+   (time-aware ECS, column-chunk storage, built for streaming temporal
+   data). Refresh, routing, grounding, and claim flow become scrubbable on a
+   timeline in an existing scientific viewer at near-zero UI cost.
+2. **Bespoke estate map** — GPU force-directed graph rendering
+   (Cosmograph-class WebGPU/WebGL, millions of nodes) over the routing
+   projection and claim graph, with transaction-time scrubbing: vyrm is
+   bi-temporal, so "watch the estate as it was" is a query the kernel
+   already answers (`resolve_as_of`), not a feature the UI must invent.
+   Precedent validating the model: Zep/Graphiti ships bi-temporal
+   validity-interval knowledge graphs as agent memory at enterprise scale.
+
 ### Step 4 · Recall and the effectiveness ledger
 
 Retires F3, the central risk. Recall v1 resolves current claims for a subject
