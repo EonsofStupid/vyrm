@@ -310,6 +310,24 @@ before any bespoke UI exists:
    Precedent validating the model: Zep/Graphiti ships bi-temporal
    validity-interval knowledge graphs as agent memory at enterprise scale.
 
+**Panel decision (operator, 2026-08-12):** the operator panel is built once,
+at a protocol boundary, and becomes Shippin's master panel by embedding —
+neither a separate tool forever nor folded into a customer product that does
+not exist yet. The panel owns no logic: every capability is first a `vyrmd`
+endpoint, which is first a CLI-provable operation, so every pixel displays
+something already measured. Reference model: **Anytype** — local-first with
+the primary copy on-device, typed objects connected by relations forming a
+navigable graph, a graph view native to the daily tool rather than bolted
+on, and spaces as the shareable isolation boundary. The mapping is direct:
+claims and subjects are the typed objects and relations, a store-per-project
+directory is the space, gates are the sharing boundary, and the observatory
+is the graph view living inside the panel. Anytype's encrypted self-hosted
+sync (any-sync) is the recorded precedent for estate-to-tenant
+synchronization when the master/tenant tiers land — a design to study at
+that step, not to adopt unexamined. Build order: recall ledger (Step 4) →
+traces (Step T) → vyrmd protocol → panel shell (Rust-native) → Shippin
+embedding.
+
 ### Step 4 · Recall and the effectiveness ledger
 
 Retires F3, the central risk. Recall v1 resolves current claims for a subject
