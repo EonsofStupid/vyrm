@@ -328,6 +328,97 @@ that step, not to adopt unexamined. Build order: recall ledger (Step 4) →
 traces (Step T) → vyrmd protocol → panel shell (Rust-native) → Shippin
 embedding.
 
+### Step P · Preflight and the runtime experience — DESIGNED, NOT STARTED
+
+**The gap this step closes (operator, 2026-08-13):** everything landed so
+far is a library with a CLI — the agent must *know* to call `vyrm recall`,
+*remember* to journal, *volunteer* to wait. The product claim is the
+inverse: the agent lands in a repository and the memory layer is already in
+the loop. Recall arrives before reasoning starts; journaling happens as a
+side effect of work; gates are enforced by the harness, not by the model's
+discipline. A memory system the model has to remember to use is not a
+memory system.
+
+**Research adopted (2026-08-13, cited in this entry):**
+
+- **Claude Code hooks are the seam, and it is deterministic.** The 2026
+  hook lifecycle covers every moment vyrm needs: `SessionStart` (matchers
+  `startup`/`resume`/`compact` — context re-injected *after compaction*),
+  `UserPromptSubmit` (stdout injected into model context before reasoning,
+  30 s budget), `PreToolUse` (exit 2 / `permissionDecision: deny` blocks a
+  tool call, `if` conditions like `Bash(cargo *)` narrow per command),
+  `PostToolUse` (react to edits), `Stop` (turn ended), `PreCompact`
+  (snapshot before summarization). The field's stated decision framework:
+  *if it must be enforced, use hooks* — prompts hope, hooks guarantee.
+  Direct prior art: claude-mem builds session memory entirely on this
+  architecture.
+- **The 2026 agent-memory field converged on two lessons vyrm already
+  embodies plus one it must adopt.** (1) Letta: the *runtime* places memory
+  into context deterministically — do not hope the model reads a file.
+  (2) Zep/Graphiti: temporal validity intervals distinguishing current from
+  superseded facts — vyrm's bi-temporal kernel is this, stronger. (3) New:
+  **async memory writes are the default** — a write that blocks the
+  response pipeline is latency the user feels. vyrm's durability classes
+  map exactly: recall (the read) is the only synchronous path; journaling
+  rides Buffered and never blocks the turn.
+- **Portability:** AGENTS.md is the vendor-neutral discovery convention
+  (Codex, Cursor, Copilot, Gemini CLI, Zed, et al.); MCP is the
+  vendor-neutral tool surface, with rmcp 3.x as the official Rust SDK
+  (stdio transport; all logging to stderr — stdout belongs to the
+  protocol). Hooks are the Claude Code fast path; MCP via `vyrmd` is the
+  same operations for every other harness.
+
+**Design — one dispatch binary, harness wiring as data:**
+
+- `vyrm preflight` — the moment of attunement. Detects the stack from
+  marker files (`Cargo.toml` → cargo profile; `bun.lock`/`package.json` →
+  bun profile; extensible), opens or creates the store-per-project
+  directory, loads the persisted projection and refreshes it (228 ms load +
+  26 ms unchanged-tree check, both measured in Step R — inside the < 1 s
+  hook latency guidance), then emits a budgeted recall of the project's
+  current claims as injected context. Wired to `SessionStart`; the
+  `compact` matcher makes memory survive compaction *mechanically* — the
+  claim this system was pitched on, enforced by the harness.
+- `vyrm hook <event>` — single entrypoint reading the harness JSON on
+  stdin, dispatching by event. Mapping: `UserPromptSubmit` → subject
+  extraction + budgeted recall injection; `PostToolUse (Edit|Write)` →
+  freshness signal + observed claims; `PostToolUse (Bash, if cargo
+  test/bun test …)` → the *application journal*: test and build outcomes
+  recorded as claims with validity intervals — a failure is a claim that
+  stays in force until the run that retires it; `Stop` → invocation
+  journal for the turn; `PreCompact` → snapshot claims for anything only
+  present in conversation state; `PreToolUse` → the wait gate:
+  `route_fresh` semantics as `permissionDecision` — refresh-and-allow when
+  cheap, deny-with-reason when the projection is quarantined. "The AI
+  knows to wait" stops being prose and becomes an exit code.
+- `vyrm init --harness claude-code` — writes the hook wiring
+  (`.claude/settings.json`) and the AGENTS.md block. Turnkey means the
+  preflight installs itself; profiles are TOML data, never code forks.
+- Stack profiles own: build/test/run commands, the extractor set that
+  matters, and the journaling rules for application runs. `bun:` and
+  `cargo:` are the first two because they are the operator's stacks.
+- `vyrmd` (per Step V) grows an MCP server face (rmcp, stdio) exposing
+  recall/observe/route/ledger to non-Claude harnesses. The hook path and
+  the MCP path call the same operations; neither owns logic.
+
+**Acceptance (measured, two-sided):** end-to-end hook latency including
+process spawn measured against the < 1 s guidance — if spawn + open + recall
+blows the budget, that is a *result* and it forces the daemon forward in the
+build order rather than being tuned away. Injection cost measured in tokens
+per session against the Step 4 budget discipline. A scripted session
+transcript proving: recall present before first reasoning; a stale-tree
+route blocked and then unblocked by refresh; a failing `cargo test` run
+producing a claim and the passing re-run retiring it. Outcome auto-judging
+at `Stop` is **not** silently heuristic — a candidate judgement (e.g. the
+agent edited a file a recalled claim named) is recorded as a candidate,
+promotion to `accepted` is D-4.
+
+**Build-order revision (proposed 2026-08-13, awaiting operator go):** the
+runtime experience jumps ahead of the panel. Step 5 (grounding over claims)
+→ **Step P** → Step T traces (spans begin at hook dispatch, so the trace
+layer lands where the runtime enters) → vyrmd protocol + MCP → panel shell
+→ Shippin embedding.
+
 ### Step 4 · Recall and the effectiveness ledger — COMPLETE
 
 Retires F3, the central risk. Recall v1 resolves current claims for a subject
@@ -412,6 +503,7 @@ binding an API that is still changing would fix its shape prematurely.
 | D-1 | Gate predicate set and thresholds (§9.1) | Step 7 | Operator |
 | D-2 | Tier naming: `local`/`primary`/`tenant` versus alternatives (§9) | Cosmetic; earlier is cheaper | Operator |
 | D-3 | `events` keyspace: sequence index or removal (F1) | — | **Closed:** became `sequence_index` in Step 1 |
+| D-4 | Recall outcome auto-judging policy: which runtime evidence (edited a recalled file, reran a recalled command) may promote `unknown` → `accepted` without an operator, if any | Step P effectiveness loop | Operator |
 
 ## 6 · Standing acceptance rules
 
