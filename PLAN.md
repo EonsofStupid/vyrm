@@ -411,7 +411,61 @@ route blocked and then unblocked by refresh; a failing `cargo test` run
 producing a claim and the passing re-run retiring it. Outcome auto-judging
 at `Stop` is **not** silently heuristic — a candidate judgement (e.g. the
 agent edited a file a recalled claim named) is recorded as a candidate,
-promotion to `accepted` is D-4.
+promotion to `accepted` is D-4. Registry acceptance: an adapter whose
+verification claim has expired surfaces the warning at preflight (proven at
+a fixed `as_of` past the interval — the kernel never reads a clock, so the
+test doesn't either), and a harness with a closed interval refuses
+`vyrm init` with the retirement stated.
+
+**Harness registry and drift alarm (operator requirement, 2026-08-13):**
+the integration layer is tailored per harness, and it audits itself,
+because this space kills its own members: Gemini CLI — a harness any
+registry written in spring 2026 would have named — was shut down mid-2026.
+A hand-written adapter list without an expiry is wrong within a quarter.
+
+- **Three orthogonal axes, never conflated.** *Harness* (the agent runtime:
+  claude-code, codex-cli, opencode, grok-cli, kimi-cli, zcode/GLM …) ×
+  *provider* (the model backend: anthropic, openai, xai/grok,
+  moonshot/kimi, z.ai/glm …) × *billing mode* (subscription/rolling-quota
+  vs per-usage tokens). The combos are real and current — Z.ai ships an
+  Anthropic-compatible endpoint, so *Claude Code harness + GLM provider +
+  $10/mo subscription* is one configuration and *Claude Code + Anthropic +
+  Max plan* is another; Grok is per-usage API pricing ($3/$15 per Mtok).
+  A registry that models "Claude Code" as one thing cannot support either
+  cleanly.
+- **The registry is data**: one TOML per harness adapter declaring its
+  integration surface (hooks lifecycle? MCP client? MCP server? context
+  file convention — CLAUDE.md / AGENTS.md / config.toml), which wiring
+  `vyrm init --harness <name>` writes, and which capabilities degrade when
+  absent (no hooks → MCP-only → recall is on-demand, not injected; the
+  degradation is stated, not silent).
+- **Verification is a bi-temporal claim with an expiry — the noise is
+  `resolve_as_of`, not a scheduler.** Each adapter carries
+  `harness/<name> integration_verified = <harness version, evidence>` with
+  `valid_to = verified_at + 21 days`. Preflight resolves the claim as-of
+  now on every session start: expired → a warning surfaces in the injected
+  context and the panel ("codex-cli adapter unverified for 34 days —
+  re-audit"). `vyrm harness audit <name>` re-verifies against the vendor's
+  current release and writes the fresh claim; a harness that dies gets its
+  interval closed and stays in the registry as history. Gemini is the
+  registry's first bi-temporal fact: a row with a closed validity
+  interval, recorded 2026-08-13.
+- **Initial rows (verified 2026-08-13):** claude-code (hooks + MCP,
+  first-class, the fast path); codex-cli (AGENTS.md + MCP client *and*
+  server, `~/.codex/config.toml`); opencode (the 2026 open-source
+  breakout, MCP + Anthropic protocol); grok-cli (per-usage only);
+  kimi-cli (Kimi K3 coding plan); zcode/GLM (Anthropic-compatible
+  endpoint, cheapest subscription backend); gemini-cli (**retired
+  mid-2026**, closed interval). MCP went table-stakes across all
+  survivors, which is why vyrmd's MCP face is the portability layer and
+  hooks are the Claude Code optimization on top.
+- **The ledger prices both billing modes.** `Effectiveness.provider`
+  gains the billing mode, because the same measured 9.58x means two
+  different things: under per-usage, tokens are dollars — the reduction is
+  a *cost* figure; under subscription rolling quotas, tokens are headroom —
+  the reduction is *turns before the rate limit*. Shippin's subscription
+  and per-usage customer configurations both read their economics straight
+  from the ledger instead of from marketing arithmetic.
 
 **Build-order revision (proposed 2026-08-13, awaiting operator go):** the
 runtime experience jumps ahead of the panel. Step 5 (grounding over claims)
