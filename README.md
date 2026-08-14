@@ -95,6 +95,11 @@ Negative results are recorded with the same weight as positive ones.
   log, linear as specified; an incremental rebuild of one claim on a 100k
   log is 0.80 ms, independent of log size
   (`vyrm-store/examples/ground_cost.rs`).
+- **Traces cost 0.2 ms when off** (`VYRM_TRACE` unset; controlled A/B of
+  pre- and post-instrumentation binaries on identical stores) and ~1.3 ms
+  enabled — "free when off" is a measurement, not a slogan (`PLAN.md`
+  Step T). `VYRM_TRACE_FORMAT=json` feeds machines; stderr only, stdout
+  stays the answer channel.
 - Recorded negatives: PageRank centrality weighted into the ranking score
   cost lines on every ratio and improved nothing measurable, so it ships as
   a tie-breaker only; the tree-sitter swap left the routing ratio unchanged

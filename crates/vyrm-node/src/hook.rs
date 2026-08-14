@@ -72,6 +72,7 @@ pub struct HookContext<'a> {
 }
 
 /// Dispatches one event. `input` is the harness JSON from stdin.
+#[tracing::instrument(level = "debug", skip_all, fields(event = event.name()))]
 pub fn handle(
     ctx: &HookContext<'_>,
     event: HookEvent,

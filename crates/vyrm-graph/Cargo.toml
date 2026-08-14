@@ -10,6 +10,7 @@ description = "vyrm routing projection: attunement, symbol and dependency index,
 vyrm-core = { path = "../vyrm-core" }
 serde = { workspace = true }
 serde_json = { workspace = true }
+tracing = { workspace = true }
 tree-sitter = "0.26"
 tree-sitter-rust = "0.24"
 tree-sitter-typescript = "0.23"

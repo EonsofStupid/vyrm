@@ -203,3 +203,50 @@ fn init_writes_real_wiring_idempotently_and_refuses_a_dead_harness() {
     assert!(out.contains("RETIRED"), "gemini-cli's closed interval missing: {out}");
     assert!(out.contains("per_usage") && out.contains("subscription"), "billing axes missing: {out}");
 }
+
+#[test]
+fn traces_are_enableable_off_by_default_and_never_touch_stdout() {
+    let root = scratch("traced-project");
+    let db = root.join(".vyrm/store");
+
+    // Off by default: a normal invocation emits nothing on stderr.
+    let (ok, _, err) = vyrm(&db, &["assert", "--subject", "wp3", "--predicate", "status",
+                                   "--object", "quiet", "--valid-from", "1000"], None);
+    assert!(ok);
+    assert!(err.is_empty(), "no subscriber, no trace output: {err:?}");
+
+    // Enabled: spans appear on stderr, with the counts the reports compute.
+    let output = Command::new(env!("CARGO_BIN_EXE_vyrm"))
+        .arg("--db").arg(&db)
+        .args(["assert", "--subject", "wp3", "--predicate", "status",
+               "--object", "traced", "--valid-from", "2000"])
+        .env("VYRM_TRACE", "vyrm_store=debug")
+        .stdin(Stdio::null())
+        .output()
+        .expect("run vyrm traced");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stderr.contains("append_batch"), "span missing from stderr: {stderr}");
+    assert!(stderr.contains("record_invocation"), "recording span missing: {stderr}");
+    assert!(
+        !stdout.contains("append_batch"),
+        "stdout is the answer channel and must never carry diagnostics: {stdout}"
+    );
+
+    // JSON format for machine consumption.
+    let output = Command::new(env!("CARGO_BIN_EXE_vyrm"))
+        .arg("--db").arg(&db)
+        .args(["rebuild"])
+        .env("VYRM_TRACE", "vyrm_store=debug")
+        .env("VYRM_TRACE_FORMAT", "json")
+        .stdin(Stdio::null())
+        .output()
+        .expect("run vyrm json-traced");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let json_line = stderr.lines().find(|l| l.contains("rebuild advanced"))
+        .expect("rebuild span in json output");
+    assert!(
+        serde_json::from_str::<serde_json::Value>(json_line).is_ok(),
+        "trace lines must parse as JSON: {json_line}"
+    );
+}

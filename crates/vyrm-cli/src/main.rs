@@ -25,7 +25,28 @@ fn now_millis() -> u64 {
         .as_millis() as u64
 }
 
+/// Step T: traces are enableable, off by default, and free when off — no
+/// subscriber is installed unless `VYRM_TRACE` is set, and the `tracing`
+/// macros compile to a branch on a static in that case. Output goes to
+/// stderr always: stdout is the answer channel (hook injection, JSON
+/// decisions) and must never carry diagnostics. `VYRM_TRACE_FORMAT=json`
+/// switches to machine-readable lines for the observatory path.
+fn install_tracing() {
+    let Ok(filter) = std::env::var("VYRM_TRACE") else {
+        return;
+    };
+    let builder = tracing_subscriber::fmt()
+        .with_env_filter(tracing_subscriber::EnvFilter::new(filter))
+        .with_writer(std::io::stderr);
+    if std::env::var("VYRM_TRACE_FORMAT").as_deref() == Ok("json") {
+        builder.json().init();
+    } else {
+        builder.init();
+    }
+}
+
 fn main() -> std::process::ExitCode {
+    install_tracing();
     let cli = Cli::parse();
 
     let store = match Store::open(&cli.db) {

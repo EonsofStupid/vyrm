@@ -31,6 +31,7 @@ pub struct Preflight {
 
 /// Runs the preflight. `harness` names the adapter in use, if known, so its
 /// verification state can make noise; `budget` is the recall token budget.
+#[tracing::instrument(level = "debug", skip_all)]
 pub fn preflight(
     store: &Store,
     root: &std::path::Path,
@@ -120,5 +121,12 @@ pub fn preflight(
         outcome: RecallOutcome::Unknown,
     };
 
+    tracing::debug!(
+        stacks = stacks.join("+"),
+        claims = set.claims.len(),
+        tokens = set.token_estimate,
+        warnings = warnings.len(),
+        "preflight"
+    );
     Ok(Preflight { stacks, warnings, context: lines.join("\n"), effectiveness })
 }

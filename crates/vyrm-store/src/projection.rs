@@ -192,6 +192,7 @@ impl Store {
     /// the watermark in the same write as the projection. Refuses when
     /// quarantined — rebuilding on top of detected divergence would be the
     /// silent repair §8.3 forbids.
+    #[tracing::instrument(level = "debug", skip_all)]
     pub fn rebuild_current(&self) -> Result<RebuildOutcome> {
         let mut projection = self.current_projection()?;
         if let ProjectionStatus::Quarantined { at, .. } = &projection.status {
@@ -206,6 +207,7 @@ impl Store {
         projection.apply(&interval);
         projection.watermark = to;
         self.store_projection(&projection, Durability::Buffered)?;
+        tracing::debug!(from, to, applied, "rebuild advanced the watermark");
         Ok(RebuildOutcome { from, to, applied })
     }
 
@@ -214,6 +216,7 @@ impl Store {
     /// incrementally maintained state. Empty differential stamps `grounded`;
     /// any difference quarantines the projection with Authoritative
     /// durability and reports it. Never repairs.
+    #[tracing::instrument(level = "debug", skip_all)]
     pub fn ground_current(&self, at: Millis) -> Result<GroundingReport> {
         let mut projection = self.current_projection()?;
         if let ProjectionStatus::Quarantined { at, .. } = &projection.status {
@@ -234,6 +237,7 @@ impl Store {
             };
             projection.last_grounded = Some(stamp);
             self.store_projection(&projection, Durability::Buffered)?;
+            tracing::debug!(sequence = stamp.sequence, digest = stamp.digest, "grounded");
             return Ok(GroundingReport::Grounded(stamp));
         }
 
@@ -244,6 +248,7 @@ impl Store {
         // The one derived-state write that pays for durability: a quarantine a
         // crash could forget would un-halt a diverged projection silently.
         self.store_projection(&projection, Durability::Authoritative)?;
+        tracing::warn!(differences = differences.len(), "divergence — projection quarantined");
         Ok(GroundingReport::Divergence { differences })
     }
 

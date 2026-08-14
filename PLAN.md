@@ -265,7 +265,7 @@ persists across processes. Successor work belongs to later steps: recall
 integration (Step 4), projections over claims (Step 5), and the vyrm-node
 composition layer that will own persistence wiring in the product.
 
-### Step T · Enableable developer traces — DESIGNED, NOT STARTED
+### Step T · Enableable developer traces — COMPLETE
 
 Observability for the operator and for the effectiveness ledger, off by
 default and free when off. Design decision, recorded before implementation:
@@ -279,6 +279,35 @@ default and free when off. Design decision, recorded before implementation:
 - Instrumentation overhead is measured as its own change against the Step R
   baselines before it merges; an unmeasured "zero-cost" claim is still a
   claim.
+
+**Landed (2026-08-14):** `tracing` in vyrm-store (`append_batch`,
+`record_invocation`, `rebuild_current`, `ground_current` — divergence is a
+`warn`), vyrm-graph (`refresh`, `ground`, `route`, `from_bytes`, each event
+carrying the counts its report computes), and vyrm-node (`hook.handle` with
+the event name, `preflight` with stacks/claims/tokens). The kernel is
+untouched: `cargo tree -p vyrm-core` still shows serde alone. The
+subscriber installs only in `vyrm-cli` `main`, only when `VYRM_TRACE` is
+set, and writes to **stderr always** — stdout is the answer channel (hook
+injection, JSON gate decisions) and a binary test asserts diagnostics never
+touch it. `VYRM_TRACE_FORMAT=json` emits machine-readable lines (parsed
+back as JSON in the test) — the feed the Step V observatory's Rerun stage
+will consume. A blanket `VYRM_TRACE=debug` also surfaces Fjall's own spans:
+substrate visibility for free.
+
+**Measured overhead (2026-08-14, controlled):** the naive comparison was a
+trap and is recorded as such — the morning's 12.2 ms hook baseline had
+grown to 17.7 ms by evening *on the same store*, which is store growth (a
+day of journaled invocations), not instrumentation; measuring the new
+binary against the morning number would have blamed tracing for it. The
+controlled A/B (git-stashed pre-tracing binary vs tracing-compiled binary,
+identical fresh 40-claim stores, 30 runs each): **12.6 ms vs 12.8 ms** —
++0.2 ms (~1.6%), within run noise, for tracing compiled in but off.
+Enabled (`VYRM_TRACE=debug`, stderr fmt subscriber): **+1.3 ms** on the
+session-start path. Step R comparators with tracing compiled: projection
+load 205–224 ms against a 205–206 ms baseline, refresh 26–31 ms against
+26–27 ms — run-to-run spread, no attributable regression. The off-path
+claim ("free when off") is now a measurement: 0.2 ms bounds it.
+Workspace at 134 tests, clippy clean.
 
 ### Step V · Estate topology and the observatory — DESIGNED, NOT STARTED
 

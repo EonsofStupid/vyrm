@@ -106,6 +106,7 @@ impl Store {
     /// and advanced **inside** the transaction, so allocation does not depend on
     /// an external lock; increment uses `checked_add`; and the commit carries the
     /// single fsync.
+    #[tracing::instrument(level = "debug", skip_all, fields(claims = claims.len()))]
     pub fn append_batch(&self, claims: &[Claim]) -> Result<AppendOutcome> {
         if claims.is_empty() {
             let at = self.sequence()?;
@@ -153,6 +154,7 @@ impl Store {
 
         // Correction 3: the commit carries durability. No persist call follows.
         tx.commit()?;
+        tracing::debug!(first = start + 1, last = sequence, "append committed");
 
         Ok(AppendOutcome {
             first_sequence: start + 1,
@@ -244,6 +246,7 @@ impl Store {
     /// claim sequence is (§11 correction 1).
     ///
     /// Returns the recorded invocation, including its allocated ordinal.
+    #[tracing::instrument(level = "debug", skip_all, fields(command = input.command))]
     pub fn record_invocation(&self, input: InvocationInput<'_>) -> Result<Invocation> {
         let mut tx = self
             .db
@@ -277,6 +280,7 @@ impl Store {
             ordinal.to_string().as_bytes(),
         );
         tx.commit()?;
+        tracing::debug!(ordinal, "invocation recorded");
         Ok(record)
     }
 

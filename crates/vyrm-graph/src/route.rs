@@ -300,6 +300,7 @@ impl Index {
     /// An unchanged file is identified by modification time and length and is
     /// never read. That is where the saving is: the cost of a refresh is
     /// proportional to what changed, not to the size of the repository.
+    #[tracing::instrument(level = "debug", skip_all)]
     pub fn refresh(&mut self, profile: &Profile) -> std::io::Result<Refresh> {
         let started = Instant::now();
         let mut report = Refresh::default();
@@ -352,6 +353,14 @@ impl Index {
             self.rebuild_definitions();
         }
         report.duration_ms = started.elapsed().as_millis();
+        tracing::debug!(
+            added = report.added,
+            changed = report.changed,
+            removed = report.removed,
+            unread = report.skipped_unread,
+            ms = report.duration_ms,
+            "refresh"
+        );
         Ok(report)
     }
 
@@ -361,6 +370,7 @@ impl Index {
     /// quarantined. It is not silently repaired, because an incremental path that
     /// drifts from its source is the failure this layer exists to prevent, and
     /// repairing it in place would hide the defect that caused it.
+    #[tracing::instrument(level = "debug", skip_all)]
     pub fn ground(&self, profile: &Profile) -> std::io::Result<Grounding> {
         let started = Instant::now();
         let mut rebuilt = Index::default();
@@ -383,7 +393,7 @@ impl Index {
             .map(|p| (*p).clone())
             .collect();
 
-        Ok(Grounding {
+        let grounding = Grounding {
             agreed: only_in_incremental.is_empty()
                 && only_in_rebuild.is_empty()
                 && differing.is_empty(),
@@ -391,7 +401,18 @@ impl Index {
             only_in_rebuild,
             differing,
             duration_ms: started.elapsed().as_millis(),
-        })
+        };
+        if grounding.agreed {
+            tracing::debug!(ms = grounding.duration_ms, "grounded");
+        } else {
+            tracing::warn!(
+                only_incremental = grounding.only_in_incremental.len(),
+                only_rebuild = grounding.only_in_rebuild.len(),
+                differing = grounding.differing.len(),
+                "routing projection diverged"
+            );
+        }
+        Ok(grounding)
     }
 
     fn rebuild_definitions(&mut self) {
@@ -492,6 +513,7 @@ impl Index {
     }
 
     /// Routes a query to a ranked file list.
+    #[tracing::instrument(level = "debug", skip(self))]
     pub fn route(&self, query: &str, limit: usize) -> Vec<RoutedFile> {
         let definers: BTreeSet<PathBuf> =
             self.definitions.get(query).cloned().unwrap_or_default();
@@ -598,6 +620,7 @@ impl Index {
 
     /// Restores a persisted index and recomputes its derived state, so a
     /// loaded index is bit-identical in behavior to the one that was saved.
+    #[tracing::instrument(level = "debug", skip_all, fields(bytes = bytes.len()))]
     pub fn from_bytes(bytes: &[u8]) -> Result<Index, serde_json::Error> {
         let mut index: Index = serde_json::from_slice(bytes)?;
         index.rebuild_centrality();
