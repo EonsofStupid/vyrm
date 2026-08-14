@@ -8,6 +8,7 @@ description = "vyrm operator surface: explicit, recorded invocation of every tri
 
 [dependencies]
 vyrm-core = { path = "../vyrm-core" }
+vyrm-node = { path = "../vyrm-node" }
 vyrm-store = { path = "../vyrm-store" }
 clap = { version = "4", features = ["derive", "env"] }
 serde_json = { workspace = true }

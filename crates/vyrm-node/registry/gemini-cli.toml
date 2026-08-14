@@ -1,0 +1,14 @@
+# The registry's first closed interval, and the evidence the drift alarm is
+# required rather than cautious: Gemini CLI was shut down mid-2026, months
+# after any hand-written adapter list would have named it. Kept as history;
+# `vyrm init` refuses it with the retirement stated.
+name = "gemini-cli"
+display = "Google Gemini CLI"
+hooks = false
+mcp_client = true
+mcp_server = false
+context_file = "GEMINI.md"
+billing = ["subscription", "per_usage"]
+providers = ["google"]
+retired = "2026-07"
+notes = "Shut down mid-2026. Recorded 2026-08-13."

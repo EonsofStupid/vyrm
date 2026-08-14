@@ -46,12 +46,27 @@ What the substrate cannot provide is what vyrm is:
 | `vyrm-core` | Claims kernel: bi-temporal model, keys, validation | serde only |
 | `vyrm-store` | Substrate adapter: Fjall, durability classes, sequence index, projections keyspace | vyrm-core |
 | `vyrm-graph` | Routing projection: attunement, tree-sitter extraction, ranking, freshness, grounding, persistence | vyrm-core |
+| `vyrm-node` | Runtime experience: preflight, harness hook dispatch, stack profiles, harness registry with drift alarm | vyrm-core, vyrm-store |
 | `vyrm-cli` | Operator surface | the above |
 
 Future members, added as each layer lands: `vyrm-gate` (promotion gates),
-`vyrm-node` (embedding adapter; will own the composition of graph and store
-that tests and examples wire today), `vyrmd` (daemon). Dependency arrows
+`vyrmd` (daemon and MCP face for hookless harnesses). Dependency arrows
 point inward only.
+
+## The runtime experience
+
+A memory system the model has to remember to use is not a memory system.
+`vyrm init --harness claude-code` wires the harness's hook lifecycle so the
+loop closes without the model's discipline: session start (and every
+post-compaction restart) injects a budgeted recall of everything currently
+held true; a prompt naming known subjects gets their claims injected before
+reasoning; a `cargo test`/`bun test` run's outcome becomes a claim that the
+next run supersedes; and a quarantined projection *denies mutating tool
+calls* with the reason and the way out — the wait is an enforced decision,
+not advice. Harness, provider, and billing mode are separate axes in an
+embedded registry whose adapters carry 21-day verification claims:
+verification that lapses makes noise in the injected context itself,
+because this space retires its members mid-year.
 
 ## Measured, not asserted
 
@@ -72,6 +87,14 @@ Negative results are recorded with the same weight as positive ones.
   (`examples/route_persisted.rs`).
 - **26 ms** to confirm an unchanged tree; refresh cost is proportional to
   what changed, not to repository size.
+- **12–14 ms per hook dispatch, end-to-end** — process spawn, store open,
+  recall, and the invocation record's fsync included — against the
+  harness's 1 s budget; the pre-tool-use gate answers in 12.7 ms
+  (`PLAN.md` Step P, release binary, mean of 20).
+- **4.4 µs per claim** to ground the current-state projection against its
+  log, linear as specified; an incremental rebuild of one claim on a 100k
+  log is 0.80 ms, independent of log size
+  (`vyrm-store/examples/ground_cost.rs`).
 - Recorded negatives: PageRank centrality weighted into the ranking score
   cost lines on every ratio and improved nothing measurable, so it ships as
   a tie-breaker only; the tree-sitter swap left the routing ratio unchanged

@@ -1,0 +1,13 @@
+# Verified 2026-08-13 against the Claude Code hooks reference
+# (code.claude.com/docs/en/hooks). The fast path: a full hook lifecycle with
+# deterministic context injection and exit-code gating.
+name = "claude-code"
+display = "Claude Code"
+hooks = true
+mcp_client = true
+mcp_server = false
+context_file = "CLAUDE.md"
+config_path = ".claude/settings.json"
+billing = ["subscription", "per_usage"]
+providers = ["anthropic", "z.ai/glm (anthropic-compatible endpoint)"]
+notes = "SessionStart/UserPromptSubmit inject stdout into model context; PreToolUse gates via permissionDecision; SessionStart re-fires after compaction, so injected memory survives it mechanically."

@@ -387,6 +387,23 @@ impl Store {
         self.claims_in_range(0, self.sequence()?)
     }
 
+    /// Every distinct subject with at least one claim, in key order. Read
+    /// from the authoritative claims keyspace rather than a projection, so a
+    /// quarantined projection cannot silence recall. O(claims) by scan;
+    /// identifiers are parsed from keys, so no claim is deserialized.
+    pub fn subjects(&self) -> Result<Vec<Subject>> {
+        let snapshot = self.db.read_tx();
+        let mut out: Vec<Subject> = Vec::new();
+        for guard in snapshot.range(&self.claims, Vec::new()..) {
+            let (claim_key, _) = guard.into_inner()?;
+            let (subject, _) = key::parse_claim_key(&claim_key)?;
+            if out.last().map(|s| s.as_str()) != Some(subject.as_str()) {
+                out.push(subject);
+            }
+        }
+        Ok(out)
+    }
+
     /// Scans one subject and predicate from `from`, bounded by the version
     /// prefix. Reads take a snapshot and acquire no write lock
     /// (`SPEC.md` §11 correction 4).

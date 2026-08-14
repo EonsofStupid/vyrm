@@ -1,0 +1,11 @@
+# Verified 2026-08-13. Moonshot's CLI around the Kimi K3 coding plan
+# (rolling-quota subscription).
+name = "kimi-cli"
+display = "Kimi CLI"
+hooks = false
+mcp_client = true
+mcp_server = false
+context_file = "AGENTS.md"
+billing = ["subscription"]
+providers = ["moonshot/kimi"]
+notes = "Subscription rolling quota: ledger token reduction reads as turns of headroom before the rate limit."

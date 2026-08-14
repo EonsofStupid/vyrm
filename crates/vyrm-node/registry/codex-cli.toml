@@ -1,0 +1,13 @@
+# Verified 2026-08-13. Rust-native; AGENTS.md convention; MCP client AND
+# server via ~/.codex/config.toml. No hook lifecycle: recall is on-demand
+# through MCP once vyrmd lands — a stated degradation, not a silent one.
+name = "codex-cli"
+display = "OpenAI Codex CLI"
+hooks = false
+mcp_client = true
+mcp_server = true
+context_file = "AGENTS.md"
+config_path = "~/.codex/config.toml"
+billing = ["subscription", "per_usage"]
+providers = ["openai"]
+notes = "AGENTS.md is read natively; MCP tools configure in config.toml. Without hooks there is no pre-reasoning injection."

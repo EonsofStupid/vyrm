@@ -1,0 +1,12 @@
+# Verified 2026-08-13. The 2026 open-source breakout (~165k stars); speaks
+# the Anthropic protocol, so subscription coding-plan backends route through
+# it. MCP client; AGENTS.md convention.
+name = "opencode"
+display = "OpenCode"
+hooks = false
+mcp_client = true
+mcp_server = false
+context_file = "AGENTS.md"
+billing = ["subscription", "per_usage"]
+providers = ["anthropic", "openai", "z.ai/glm", "moonshot/kimi", "many (protocol-compatible)"]
+notes = "Provider-agnostic by design: the harness most likely to carry non-frontier subscription backends."

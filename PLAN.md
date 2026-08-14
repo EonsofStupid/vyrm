@@ -328,7 +328,7 @@ that step, not to adopt unexamined. Build order: recall ledger (Step 4) →
 traces (Step T) → vyrmd protocol → panel shell (Rust-native) → Shippin
 embedding.
 
-### Step P · Preflight and the runtime experience — DESIGNED, NOT STARTED
+### Step P · Preflight and the runtime experience — COMPLETE (v1)
 
 **The gap this step closes (operator, 2026-08-13):** everything landed so
 far is a library with a CLI — the agent must *know* to call `vyrm recall`,
@@ -467,11 +467,78 @@ A hand-written adapter list without an expiry is wrong within a quarter.
   and per-usage customer configurations both read their economics straight
   from the ledger instead of from marketing arithmetic.
 
-**Build-order revision (proposed 2026-08-13, awaiting operator go):** the
+**Build-order revision (ratified by operator "execute", 2026-08-14):** the
 runtime experience jumps ahead of the panel. Step 5 (grounding over claims)
 → **Step P** → Step T traces (spans begin at hook dispatch, so the trace
 layer lands where the runtime enters) → vyrmd protocol + MCP → panel shell
 → Shippin embedding.
+
+**Landed (2026-08-14, `crates/vyrm-node/` + CLI surface):** vyrm-node is the
+runtime layer — the composition Step V reserved the crate name for. Scope
+decision, stated not silent: **v1 is the store-side loop** (claims memory,
+registry, journaling, gate); the vyrm-graph routing composition (routing
+preflight attunement, `route_fresh` as a gate) joins at the traces/vyrmd
+step, its figures already measured standalone in Step R.
+
+- **Preflight** (`vyrm preflight`, wired to session-start): detects the
+  stack from markers (cargo; bun, whose lockfile outranks `package.json`;
+  node), surfaces estate health (a quarantine warns here and gates below)
+  and the adapter's drift alarm, then emits a budgeted recall of every
+  claim in force, rendered for injection. Subjects come from the
+  authoritative claims keyspace (`Store::subjects`), never the projection —
+  a quarantined projection cannot silence recall.
+- **Hook dispatch** (`vyrm hook <event>`): session-start → preflight
+  injection; user-prompt-submit → whole-word subject match against the
+  prompt, recall injected only when something matched, *nothing at all*
+  otherwise (a stray newline is not an answer); pre-tool-use → the wait
+  gate: a quarantined projection denies Edit/Write/NotebookEdit/Bash via
+  `permissionDecision: deny` with the reason and the way out, reads pass —
+  waiting applies to mutation, not to looking; post-tool-use (Bash) → the
+  application journal: a run matching a stack profile's prefixes becomes a
+  claim (`cargo-test status = failing (exit 101): …`) and the re-run
+  supersedes it — retirement by supersession, exactly like every claim.
+  Stop asserts nothing (D-4 stays open, not sneaked in); an unreported
+  exit code journals as "outcome unreported by harness", stated not
+  guessed. Unknown input shapes degrade to no-op, never to a session-
+  breaking error.
+- **Hook invocations record `Trigger::Event`** — the promotion the enum
+  was built for ("a change of value rather than a change of schema"), on
+  the operator's explicit directive, with the recording invariant intact:
+  automation that cannot forget to record itself.
+- **Registry + drift alarm**: seven embedded TOML rows (claude-code with
+  hooks as the fast path; codex-cli; opencode; grok-cli per-usage-only;
+  kimi-cli; zcode; gemini-cli as the closed interval). `vyrm harness
+  audit` writes the 21-day verification claim; `vyrm harness status` reads
+  every row's state; preflight surfaces expiry in the injected context.
+  Proven at fixed instants: current at TTL−1 ms, expired at TTL (half-open,
+  like every interval in this system), "unverified for 13 day(s)" in the
+  injected context at day 34.
+- **`vyrm init --harness <name>`**: writes the marker-delimited context
+  block idempotently (second init replaces, never stacks), writes
+  `.claude/settings.json` hook wiring for claude-code (SessionStart
+  matcher `startup|resume|compact` — memory survives compaction
+  mechanically) unless the file exists, in which case the wiring is
+  printed for manual merge rather than clobbered. A retired harness
+  refuses with the retirement stated. Hookless harnesses get their
+  degradation stated in the report.
+
+**Measured outcome (2026-08-14, release binary, ext4, 40-claim/12-subject
+store, mean of 20 runs each, *end-to-end including process spawn, store
+open, and the invocation record's fsync*):** session-start (preflight +
+injection) **12.2 ms**; user-prompt-submit with matched recall **12.4 ms**;
+pre-tool-use gate **12.7 ms**; post-tool-use journal **13.5 ms**. All ~75x
+under the harness's 1 s hook guidance — the daemon is not forced by
+latency at this store size, and the spawn-per-hook architecture holds for
+v1. Injection cost for the 14-claims-in-force estate: ~245 estimated
+tokens (1,682 bytes). Two-sided notes: each hook dispatch carries one
+Authoritative fsync for its invocation record (~0.4 ms of the 12), which
+is the recording guarantee priced in; latency was measured at one store
+size and rises with subjects (recall is per-subject seeks) — remeasure
+before calling it flat; and the scripted-session acceptance ran through
+the compiled binary (recall present before first reasoning, failing run
+journaled and retired by the passing re-run, gate denied under quarantine
+and reopened by reset, init idempotent and refusing the dead harness).
+Workspace at 131 tests, clippy clean.
 
 ### Step 4 · Recall and the effectiveness ledger — COMPLETE
 

@@ -1,11 +1,16 @@
 [workspace]
 resolver = "2"
-members = ["crates/vyrm-core", "crates/vyrm-store", "crates/vyrm-graph", "crates/vyrm-cli"]
+members = [
+    "crates/vyrm-core",
+    "crates/vyrm-store",
+    "crates/vyrm-graph",
+    "crates/vyrm-node",
+    "crates/vyrm-cli",
+]
 
 # Future members, added as each layer lands. Dependency arrows point inward:
 # core <- store <- graph <- gate <- {node, cli, vyrmd}
 #   "crates/vyrm-gate",
-#   "crates/vyrm-node",
 #   "crates/vyrmd",
 
 [workspace.package]
@@ -17,3 +22,4 @@ publish = false
 [workspace.dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+toml = "0.8"

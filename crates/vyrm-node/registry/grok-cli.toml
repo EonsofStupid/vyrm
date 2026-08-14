@@ -1,0 +1,12 @@
+# Verified 2026-08-13. xAI's CLI; pay-per-token API pricing only
+# (USD 3/15 per Mtok input/output for Grok 4 as of verification) — the
+# clean per-usage row: every recalled token is directly priced.
+name = "grok-cli"
+display = "Grok CLI"
+hooks = false
+mcp_client = true
+mcp_server = false
+context_file = "AGENTS.md"
+billing = ["per_usage"]
+providers = ["xai"]
+notes = "Per-usage only: the effectiveness ledger's token reduction reads directly as cost reduction here."

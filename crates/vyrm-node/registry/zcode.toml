@@ -1,0 +1,12 @@
+# Verified 2026-08-13. Z.ai's surface for the GLM coding plan; ships an
+# Anthropic-compatible endpoint, so the same plan also drives Claude Code —
+# the row that proves harness, provider, and billing are separate axes.
+name = "zcode"
+display = "ZCode (Z.ai GLM)"
+hooks = false
+mcp_client = true
+mcp_server = false
+context_file = "AGENTS.md"
+billing = ["subscription"]
+providers = ["z.ai/glm"]
+notes = "Cheapest dedicated subscription backend at verification (~USD 10/mo quarterly). Anthropic-compatible endpoint means the claude-code adapter can carry this provider."

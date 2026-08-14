@@ -13,7 +13,7 @@
 mod command;
 
 use clap::Parser;
-use command::{Cli, CLI_TRIGGER};
+use command::Cli;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use vyrm_core::Reader;
 use vyrm_store::{InvocationInput, Store};
@@ -49,14 +49,18 @@ fn main() -> std::process::ExitCode {
     let result = command::execute(&store, &cli.command, &reader, now, cli.json);
     let duration_ms = started.elapsed().as_millis() as u64;
 
-    let (outcome, detail) = command::outcome_of(&result);
+    let (outcome, error_detail) = command::outcome_of(&result);
+    // A successful execution may still carry a detail line (hook dispatches
+    // journal what they did through it); a failure's detail is the error.
+    let detail =
+        error_detail.or_else(|| result.as_ref().ok().and_then(|e| e.detail.clone()));
 
     // The invocation is recorded whether the command succeeded or failed. A log
     // containing only successes would misrepresent which triggers are useful.
     // A recall's §13.1 effectiveness fields travel in the same record.
     if let Err(error) = store.record_invocation(InvocationInput {
         at: now,
-        trigger: CLI_TRIGGER,
+        trigger: cli.command.trigger(),
         command: cli.command.name(),
         arguments: &cli.command.arguments(),
         outcome,
@@ -71,7 +75,11 @@ fn main() -> std::process::ExitCode {
 
     match result {
         Ok(execution) => {
-            println!("{}", execution.text);
+            // An empty answer prints nothing at all: hook stdout is injected
+            // into model context, and a stray newline is not an answer.
+            if !execution.text.is_empty() {
+                println!("{}", execution.text);
+            }
             std::process::ExitCode::SUCCESS
         }
         Err(error) => {

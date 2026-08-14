@@ -8,16 +8,18 @@ use clap::{Parser, Subcommand};
 use vyrm_core::{Claim, ClaimReader, Millis, Predicate, Producer, Reader, RecallQuery, Subject};
 use vyrm_store::{Effectiveness, GroundingReport, Outcome, RecallOutcome, Store, Trigger};
 
-/// What a command produced: the operator-facing text, and — for a recall — the
-/// `SPEC.md` §13.1 effectiveness fields the invocation record must carry.
+/// What a command produced: the operator-facing text, the `SPEC.md` §13.1
+/// effectiveness fields for recall-carrying commands, and a detail line for
+/// the invocation record.
 pub struct Execution {
     pub text: String,
     pub effectiveness: Option<Effectiveness>,
+    pub detail: Option<String>,
 }
 
 impl From<String> for Execution {
     fn from(text: String) -> Self {
-        Execution { text, effectiveness: None }
+        Execution { text, effectiveness: None, detail: None }
     }
 }
 
@@ -141,6 +143,63 @@ pub enum Command {
     /// Discard the current-state projection and recompute it from the claim
     /// log. The only exit from quarantine, and an explicit operator decision.
     ResetProjection,
+    /// The moment of attunement (`PLAN.md` Step P): detect the stack, check
+    /// estate health and adapter verification, and emit a budgeted recall of
+    /// every claim in force, rendered for context injection.
+    Preflight {
+        /// Project root for stack detection.
+        #[arg(long, default_value = ".")]
+        root: std::path::PathBuf,
+        /// Harness adapter in use, so its verification drift can make noise.
+        #[arg(long)]
+        harness: Option<String>,
+        #[arg(long, default_value_t = 1500)]
+        budget: usize,
+    },
+    /// Harness lifecycle dispatch: reads the harness JSON on stdin, answers
+    /// on stdout. Wired by `vyrm init`; recorded with trigger `event`.
+    Hook {
+        /// session-start | user-prompt-submit | pre-tool-use |
+        /// post-tool-use | stop | pre-compact
+        event: String,
+        #[arg(long)]
+        harness: Option<String>,
+        /// Project root override; defaults to the `cwd` field of the hook
+        /// input, then the working directory.
+        #[arg(long)]
+        root: Option<std::path::PathBuf>,
+        #[arg(long, default_value_t = 1500)]
+        budget: usize,
+    },
+    /// Write the harness wiring for this project: context-file block, plus
+    /// hook configuration where the harness supports it. Refuses retired
+    /// harnesses.
+    Init {
+        #[arg(long)]
+        harness: String,
+        #[arg(long, default_value = ".")]
+        root: std::path::PathBuf,
+    },
+    /// The harness registry and its drift alarm.
+    Harness {
+        #[command(subcommand)]
+        action: HarnessAction,
+    },
+}
+
+#[derive(Subcommand, Debug, Clone)]
+pub enum HarnessAction {
+    /// Record a verification for an adapter: a claim valid for 21 days. The
+    /// evidence names what was checked, because an audit without evidence is
+    /// an assertion.
+    Audit {
+        #[arg(long)]
+        name: String,
+        #[arg(long)]
+        evidence: String,
+    },
+    /// Every registry row with its verification state at now.
+    Status,
 }
 
 impl Command {
@@ -159,6 +218,21 @@ impl Command {
             Command::Rebuild => "rebuild",
             Command::Ground => "ground",
             Command::ResetProjection => "reset-projection",
+            Command::Preflight { .. } => "preflight",
+            Command::Hook { .. } => "hook",
+            Command::Init { .. } => "init",
+            Command::Harness { action: HarnessAction::Audit { .. } } => "harness-audit",
+            Command::Harness { action: HarnessAction::Status } => "harness-status",
+        }
+    }
+
+    /// What caused the invocation. Hook dispatches are the promoted
+    /// automation: they record `Event`, exactly as the `Trigger` enum
+    /// anticipated — a change of value, not of schema.
+    pub fn trigger(&self) -> Trigger {
+        match self {
+            Command::Hook { .. } => Trigger::Event,
+            _ => Trigger::Manual,
         }
     }
 
@@ -210,6 +284,30 @@ impl Command {
             }
             Command::Ledger { since } => vec![format!("since={since}")],
             Command::Rebuild | Command::Ground | Command::ResetProjection => Vec::new(),
+            Command::Preflight { root, harness, budget } => {
+                let mut a = vec![format!("root={}", root.display()), format!("budget={budget}")];
+                if let Some(h) = harness {
+                    a.push(format!("harness={h}"));
+                }
+                a
+            }
+            Command::Hook { event, harness, root, budget } => {
+                let mut a = vec![format!("event={event}"), format!("budget={budget}")];
+                if let Some(h) = harness {
+                    a.push(format!("harness={h}"));
+                }
+                if let Some(r) = root {
+                    a.push(format!("root={}", r.display()));
+                }
+                a
+            }
+            Command::Init { harness, root } => {
+                vec![format!("harness={harness}"), format!("root={}", root.display())]
+            }
+            Command::Harness { action: HarnessAction::Audit { name, evidence } } => {
+                vec![format!("name={name}"), format!("evidence={evidence}")]
+            }
+            Command::Harness { action: HarnessAction::Status } => Vec::new(),
         }
     }
 }
@@ -288,7 +386,7 @@ pub fn execute(store: &Store, command: &Command, reader: &Reader, now: Millis, j
                 ));
                 lines.join("\n")
             };
-            return Ok(Execution { text, effectiveness: Some(effectiveness) });
+            return Ok(Execution { text, effectiveness: Some(effectiveness), detail: None });
         }
 
         Command::Outcome { ordinal, outcome } => {
@@ -309,6 +407,53 @@ pub fn execute(store: &Store, command: &Command, reader: &Reader, now: Millis, j
                 serde_json::to_string_pretty(&record)?.into()
             } else {
                 record.render().into()
+            });
+        }
+
+        Command::Preflight { root, harness, budget } => {
+            let flight =
+                vyrm_node::preflight(store, root, harness.as_deref(), reader, now, *budget)?;
+            let detail = (!flight.warnings.is_empty())
+                .then(|| format!("{} warning(s)", flight.warnings.len()));
+            return Ok(Execution {
+                text: flight.context,
+                effectiveness: Some(flight.effectiveness),
+                detail,
+            });
+        }
+
+        Command::Hook { event, harness, root, budget } => {
+            let event = vyrm_node::HookEvent::parse(event)
+                .ok_or_else(|| format!("unknown hook event {event:?}"))?;
+            let mut raw = String::new();
+            std::io::Read::read_to_string(&mut std::io::stdin(), &mut raw)?;
+            let input: serde_json::Value = if raw.trim().is_empty() {
+                serde_json::Value::Object(Default::default())
+            } else {
+                serde_json::from_str(&raw)?
+            };
+            // Root precedence: explicit flag, then the harness's `cwd`, then
+            // the working directory the hook process inherited.
+            let root = root.clone().unwrap_or_else(|| {
+                input
+                    .get("cwd")
+                    .and_then(serde_json::Value::as_str)
+                    .map(Into::into)
+                    .unwrap_or_else(|| ".".into())
+            });
+            let ctx = vyrm_node::HookContext {
+                store,
+                root: &root,
+                harness: harness.as_deref(),
+                reader,
+                now,
+                budget: *budget,
+            };
+            let response = vyrm_node::handle(&ctx, event, &input)?;
+            return Ok(Execution {
+                text: response.stdout,
+                effectiveness: response.effectiveness,
+                detail: response.detail,
             });
         }
 
@@ -352,8 +497,74 @@ pub fn execute(store: &Store, command: &Command, reader: &Reader, now: Millis, j
     // Text-only commands, converted to an `Execution` in one place below.
     let text = (|| -> Result<String, Box<dyn std::error::Error>> {
         match command {
-        Command::Recall { .. } | Command::Outcome { .. } | Command::Ledger { .. } => {
+        Command::Recall { .. }
+        | Command::Outcome { .. }
+        | Command::Ledger { .. }
+        | Command::Preflight { .. }
+        | Command::Hook { .. } => {
             unreachable!("handled above with an early return")
+        }
+
+        Command::Init { harness, root } => {
+            let registry = vyrm_node::Registry::builtin();
+            let adapter = registry
+                .get(harness)
+                .ok_or_else(|| {
+                    format!(
+                        "no harness named {harness:?}; registry knows: {}",
+                        registry.all().iter().map(|h| h.name.as_str()).collect::<Vec<_>>().join(", ")
+                    )
+                })?;
+            let report = vyrm_node::init(root, adapter)?;
+            let mut lines: Vec<String> = report
+                .written
+                .iter()
+                .map(|p| format!("wrote {}", p.display()))
+                .collect();
+            lines.extend(report.notes.iter().map(|n| format!("note: {n}")));
+            Ok(lines.join("\n"))
+        }
+
+        Command::Harness { action: HarnessAction::Audit { name, evidence } } => {
+            let registry = vyrm_node::Registry::builtin();
+            let claim =
+                registry.record_verification(store, name, now, evidence, reader.as_str())?;
+            Ok(format!(
+                "recorded: {} verified until {} ({})",
+                name,
+                claim.valid_to.expect("verification claims carry an expiry"),
+                evidence
+            ))
+        }
+
+        Command::Harness { action: HarnessAction::Status } => {
+            let registry = vyrm_node::Registry::builtin();
+            let mut lines = Vec::new();
+            for adapter in registry.all() {
+                let state = if let Some(when) = &adapter.retired {
+                    format!("RETIRED ({when})")
+                } else {
+                    match registry.verification(store, adapter, now)? {
+                        vyrm_node::Verification::Current { until } => format!(
+                            "verified until {}",
+                            until.map(|u| u.to_string()).unwrap_or_else(|| "open".into())
+                        ),
+                        vyrm_node::Verification::Expired { days } => {
+                            format!("EXPIRED {days} day(s) ago — re-audit")
+                        }
+                        vyrm_node::Verification::Never => "never audited".to_string(),
+                    }
+                };
+                lines.push(format!(
+                    "{:<12} hooks={:<5} mcp={:<5} billing={:<24} {}",
+                    adapter.name,
+                    adapter.hooks,
+                    adapter.mcp_client,
+                    adapter.billing.join("+"),
+                    state,
+                ));
+            }
+            Ok(lines.join("\n"))
         }
         Command::Rebuild => {
             let outcome = store.rebuild_current()?;
@@ -573,6 +784,3 @@ pub fn outcome_of(
     }
 }
 
-/// Trigger for a command invoked from the operator surface. Always `Manual` at
-/// stage 1 (`SPEC.md` §13).
-pub const CLI_TRIGGER: Trigger = Trigger::Manual;
