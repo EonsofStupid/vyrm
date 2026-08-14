@@ -226,3 +226,55 @@ fn a_recall_can_be_judged_and_a_non_recall_cannot() {
     assert!(!ok, "judging a non-recall must fail");
     assert!(err.contains("not a recall"), "unexpected error: {err}");
 }
+
+#[test]
+fn grounding_is_operable_and_divergence_halts_until_reset() {
+    let db = scratch("ground-flow");
+    vyrm(&db, &["assert", "--subject", "wp3", "--predicate", "status", "--object", "planned",
+                "--valid-from", "1000"]);
+    vyrm(&db, &["assert", "--subject", "wp3", "--predicate", "status", "--object", "active",
+                "--valid-from", "2000"]);
+
+    let (ok, out, err) = vyrm(&db, &["rebuild"]);
+    assert!(ok, "rebuild failed: {err}");
+    assert!(out.contains("watermark 0 -> 2"), "unexpected output: {out}");
+
+    let (ok, out, err) = vyrm(&db, &["ground"]);
+    assert!(ok, "ground failed: {err}");
+    assert!(out.contains("grounded"), "no grounded stamp: {out}");
+    assert!(out.contains("digest"), "stamp carries no digest: {out}");
+
+    // Induce §8.3's divergence by corrupting the stored blob between binary
+    // invocations, bypassing the projection's own write path.
+    {
+        let store = vyrm_store::Store::open(&db).expect("open store");
+        let bytes = store
+            .get_projection(vyrm_store::CURRENT_PROJECTION)
+            .unwrap()
+            .expect("projection stored");
+        let corrupted =
+            String::from_utf8(bytes).unwrap().replacen("\"active\"", "\"drifted\"", 1);
+        store
+            .put_projection(vyrm_store::CURRENT_PROJECTION, corrupted.as_bytes())
+            .unwrap();
+    }
+
+    let (ok, out, err) = vyrm(&db, &["ground"]);
+    assert!(ok, "ground (diverged) failed to run: {err}");
+    assert!(out.contains("DIVERGENCE"), "divergence not reported: {out}");
+    assert!(out.contains("quarantined"), "quarantine not stated: {out}");
+    assert!(out.contains("wp3/status"), "differential does not name the pair: {out}");
+
+    // Halted: a rebuild refuses while quarantined.
+    let (ok, _, err) = vyrm(&db, &["rebuild"]);
+    assert!(!ok, "rebuild must refuse a quarantined projection");
+    assert!(err.contains("quarantined"), "unexpected error: {err}");
+
+    // The explicit reset recovers, and grounding passes again.
+    let (ok, out, err) = vyrm(&db, &["reset-projection"]);
+    assert!(ok, "reset failed: {err}");
+    assert!(out.contains("recomputed"), "unexpected output: {out}");
+    let (ok, out, err) = vyrm(&db, &["ground"]);
+    assert!(ok, "ground after reset failed: {err}");
+    assert!(out.contains("grounded"), "not grounded after reset: {out}");
+}

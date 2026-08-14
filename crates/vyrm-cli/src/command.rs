@@ -6,7 +6,7 @@
 
 use clap::{Parser, Subcommand};
 use vyrm_core::{Claim, ClaimReader, Millis, Predicate, Producer, Reader, RecallQuery, Subject};
-use vyrm_store::{Effectiveness, Outcome, RecallOutcome, Store, Trigger};
+use vyrm_store::{Effectiveness, GroundingReport, Outcome, RecallOutcome, Store, Trigger};
 
 /// What a command produced: the operator-facing text, and — for a recall — the
 /// `SPEC.md` §13.1 effectiveness fields the invocation record must carry.
@@ -130,6 +130,17 @@ pub enum Command {
         #[arg(long, default_value_t = 0)]
         since: Millis,
     },
+    /// Advance the current-state projection over the claim log (`SPEC.md`
+    /// §8.2). Applies the interval above the watermark and advances the
+    /// watermark in the same write.
+    Rebuild,
+    /// Rebuild to the current sequence, then difference the projection
+    /// against a full recomputation (`SPEC.md` §8.3). Divergence halts and
+    /// quarantines the projection; it is never repaired here.
+    Ground,
+    /// Discard the current-state projection and recompute it from the claim
+    /// log. The only exit from quarantine, and an explicit operator decision.
+    ResetProjection,
 }
 
 impl Command {
@@ -145,6 +156,9 @@ impl Command {
             Command::Recall { .. } => "recall",
             Command::Outcome { .. } => "outcome",
             Command::Ledger { .. } => "ledger",
+            Command::Rebuild => "rebuild",
+            Command::Ground => "ground",
+            Command::ResetProjection => "reset-projection",
         }
     }
 
@@ -195,6 +209,7 @@ impl Command {
                 vec![format!("ordinal={ordinal}"), format!("outcome={outcome}")]
             }
             Command::Ledger { since } => vec![format!("since={since}")],
+            Command::Rebuild | Command::Ground | Command::ResetProjection => Vec::new(),
         }
     }
 }
@@ -339,6 +354,70 @@ pub fn execute(store: &Store, command: &Command, reader: &Reader, now: Millis, j
         match command {
         Command::Recall { .. } | Command::Outcome { .. } | Command::Ledger { .. } => {
             unreachable!("handled above with an early return")
+        }
+        Command::Rebuild => {
+            let outcome = store.rebuild_current()?;
+            Ok(if json {
+                serde_json::to_string_pretty(&serde_json::json!({
+                    "from": outcome.from,
+                    "to": outcome.to,
+                    "applied": outcome.applied,
+                }))?
+            } else {
+                format!(
+                    "applied {} claim(s), watermark {} -> {}",
+                    outcome.applied, outcome.from, outcome.to
+                )
+            })
+        }
+
+        Command::Ground => {
+            // §8.3 reaches `as_of = now` by rebuilding first: grounding itself
+            // verifies incremental-equals-batch at the projection's watermark,
+            // and the rebuild carries that watermark to the current sequence.
+            store.rebuild_current()?;
+            let report = store.ground_current(now)?;
+            Ok(match (&report, json) {
+                (GroundingReport::Grounded(stamp), true) => {
+                    serde_json::to_string_pretty(&serde_json::json!({
+                        "grounded": { "at": stamp.at, "sequence": stamp.sequence, "digest": stamp.digest },
+                    }))?
+                }
+                (GroundingReport::Grounded(stamp), false) => format!(
+                    "grounded at={} sequence={} digest={:016x}",
+                    stamp.at, stamp.sequence, stamp.digest
+                ),
+                (GroundingReport::Divergence { differences }, true) => {
+                    serde_json::to_string_pretty(&serde_json::json!({
+                        "divergence": differences,
+                        "quarantined": true,
+                    }))?
+                }
+                (GroundingReport::Divergence { differences }, false) => {
+                    let mut lines = vec![format!(
+                        "DIVERGENCE: {} difference(s); projection quarantined",
+                        differences.len()
+                    )];
+                    lines.extend(differences.iter().map(|d| format!("  {d}")));
+                    lines.push("recover with `vyrm reset-projection`".into());
+                    lines.join("\n")
+                }
+            })
+        }
+
+        Command::ResetProjection => {
+            let outcome = store.reset_current()?;
+            Ok(if json {
+                serde_json::to_string_pretty(&serde_json::json!({
+                    "recomputed": outcome.applied,
+                    "watermark": outcome.to,
+                }))?
+            } else {
+                format!(
+                    "projection recomputed from the log: {} claim(s), watermark {}",
+                    outcome.applied, outcome.to
+                )
+            })
         }
         Command::Assert { subject, predicate, object, valid_from, actor, on_behalf_of } => {
             let subject = Subject::new(subject.clone())?;

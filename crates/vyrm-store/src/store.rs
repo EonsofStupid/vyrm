@@ -64,10 +64,19 @@ impl Store {
     /// authoritative fsync here would charge every projection refresh the
     /// 0.431 ms the durability classes exist to avoid (`SPEC.md` §7.1).
     pub fn put_projection(&self, name: &str, bytes: &[u8]) -> Result<()> {
-        let mut tx = self
-            .db
-            .write_tx()
-            .durability(Durability::Buffered.persist_mode());
+        self.put_projection_with(name, bytes, Durability::Buffered)
+    }
+
+    /// [`Store::put_projection`] with an explicit durability class. Exists for
+    /// the one derived-state write that must survive a crash: a quarantine
+    /// (`projection.rs`). Everything else takes the Buffered default.
+    pub(crate) fn put_projection_with(
+        &self,
+        name: &str,
+        bytes: &[u8],
+        durability: Durability,
+    ) -> Result<()> {
+        let mut tx = self.db.write_tx().durability(durability.persist_mode());
         tx.insert(&self.projections, name.as_bytes(), bytes);
         tx.commit()?;
         Ok(())

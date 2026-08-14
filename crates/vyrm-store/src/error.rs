@@ -17,6 +17,9 @@ pub enum Error {
     SequenceOverflow,
     /// A recorded watermark was not a valid sequence value.
     CorruptWatermark(String),
+    /// A projection was halted by grounding (`SPEC.md` §8.3) and refuses reads
+    /// and rebuilds until an operator resets it.
+    Quarantined(String),
 }
 
 impl fmt::Display for Error {
@@ -27,6 +30,7 @@ impl fmt::Display for Error {
             Error::Kernel(e) => write!(f, "kernel: {e}"),
             Error::SequenceOverflow => write!(f, "sequence allocation overflowed"),
             Error::CorruptWatermark(m) => write!(f, "corrupt sequence watermark: {m}"),
+            Error::Quarantined(m) => write!(f, "quarantined: {m}"),
         }
     }
 }

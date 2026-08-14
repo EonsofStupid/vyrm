@@ -521,7 +521,7 @@ sections overlap heavily across queries (three queries each matched 2,456
 tokens), which is faithful to grep-stacking rather than a flattering
 construction.
 
-### Step 5 · Projections, rebuild, grounding
+### Step 5 · Projections, rebuild, grounding — COMPLETE
 
 §8.2 and §8.3 on the Step 1 index. Grounding halts on divergence rather than
 repairing.
@@ -529,6 +529,36 @@ repairing.
 - **Acceptance:** an induced divergence halts and quarantines; a matching
   projection emits `grounded` with a digest; a crash mid-rebuild replays the
   interval rather than skipping it.
+
+**Landed (2026-08-14, `vyrm-store/src/projection.rs`):** the current-state
+projection — newest version per (subject, predicate) — as the first §8.2/§8.3
+projection over the claim log. The watermark lives in the same serialized
+blob as the entries, so §8.2's atomicity requirement holds by construction:
+there is no state in which the watermark moved and the entries did not, and
+a crash mid-rebuild replays the interval (proven by a test that folds the
+interval, "crashes" before the write, and grounds the replayed result
+against recomputation rather than against a hand-written expectation).
+Grounding recomputes at the projection's **own watermark**, not the current
+sequence — it verifies incremental-equals-batch over the same interval,
+while staleness beyond the watermark belongs to rebuild; conflating them
+would report honest lag as divergence. The operator `vyrm ground` reaches
+§8.3's `as_of = now` by rebuilding first. Divergence quarantines with the
+one derived-state write that pays for an fsync, because a quarantine a
+crash could forget would un-halt a diverged projection silently — proven by
+reopening the store with no flush and finding the quarantine held. The only
+exit is the explicit `vyrm reset-projection`; rebuild, read, and re-ground
+all refuse while quarantined. Operator surface: `vyrm rebuild`, `vyrm
+ground`, `vyrm reset-projection`, all invocation-recorded and driven
+end-to-end through the compiled binary in tests.
+
+**Measured outcome (2026-08-14, `examples/ground_cost.rs`, ext4):** rebuild
+and grounding are linear as §8.3 states — 10,000 claims: rebuild 32 ms,
+ground 31 ms; 100,000 claims: rebuild 447 ms, ground 440 ms (≈4.4 µs per
+claim, both O(claims)). The incremental case the sequence index exists for:
+one claim appended on top of the 100k log rebuilds in **0.80 ms**,
+independent of log size. The figures justify §8.3's SHOULD — grounding on a
+longer interval than rebuild — with a ratio: at 100k claims a ground costs
+~550x an incremental rebuild. Workspace at 123 tests, clippy clean.
 
 ### Step 6 · Differentials and change sets
 
