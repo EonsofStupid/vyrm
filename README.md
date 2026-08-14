@@ -21,6 +21,16 @@ name and wrapped, not rewritten. This project's own audit of a
 §2 forbids engine work without a measured mismatch, and none has been
 measured.
 
+The engine is a **port**, not a marriage: `vyrm_store::Engine` is eight
+primitives; assert, projections, rebuild, grounding, and quarantine are
+provided by the trait, so a backend implements the primitives and inherits
+the semantics. Two engines ship (Fjall, and the in-memory reference proven
+indistinguishable by differential); `vyrm-core/fixtures/golden-vectors.json`
+is the byte-level contract a parity engine in any language tests against —
+the Go/bbolt engine first. Engine replacement is gated on measured
+mismatches, which are recorded as tripwires in `PLAN.md` Step S — and the
+port is what makes that experiment safe to attempt when one trips.
+
 What the substrate cannot provide is what vyrm is:
 
 - **Bi-temporal claims.** Valid time and transaction time, half-open

@@ -1,0 +1,40 @@
+{
+  "access_key at=1234 reader=agent:x wp3/status": "3030303030303030303030303030303031323334006167656e743a780077703300737461747573",
+  "claim_json": {
+    "confidence": null,
+    "object": "active",
+    "predicate": "status",
+    "producer": {
+      "actor": "golden"
+    },
+    "promotion_state": "unpromoted",
+    "subject": "wp3",
+    "tier": "local",
+    "tx_time": 210,
+    "valid_from": 200,
+    "valid_to": null
+  },
+  "claim_key": {
+    "newer_sorts_before_older": true,
+    "wp3/status valid_from=1000 tx=2000": "632f77703300737461747573003138343436373434303733373039353530363135003138343436373434303733373039353439363135",
+    "wp3/status valid_from=1001 tx=2000": "632f77703300737461747573003138343436373434303733373039353530363134003138343436373434303733373039353439363135"
+  },
+  "comment": "regenerate with GOLDEN_WRITE=1; a diff here is a wire-format break",
+  "invert": {
+    "0": 18446744073709551615,
+    "1000": 18446744073709550615
+  },
+  "prefixes": {
+    "prefix_end(subject_prefix wp3)": "632f77703301",
+    "seek_key wp3/status as_of=1500": "632f7770330073746174757300313834343637343430373337303935353031313500",
+    "subject_prefix wp3": "632f77703300",
+    "version_prefix wp3/status": "632f7770330073746174757300"
+  },
+  "recall wp3 as_of=300 budget=10000": {
+    "claims_returned": 1,
+    "current_object": "active",
+    "digest": "a05b2250bd8cbbf2",
+    "token_estimate": 6
+  },
+  "sequence_key 42": "3030303030303030303030303030303030303432"
+}

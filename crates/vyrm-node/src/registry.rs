@@ -17,7 +17,7 @@
 
 use serde::Deserialize;
 use vyrm_core::{Claim, ClaimReader, Millis, Predicate, Producer, Subject};
-use vyrm_store::Store;
+use vyrm_store::Engine;
 
 /// How long a verification claim stays in force: 21 days, in milliseconds.
 /// Expiry is the alarm interval the operator asked for ("make noise every
@@ -121,9 +121,9 @@ impl Registry {
     /// [`VERIFICATION_TTL_MS`] from `now`, superseding the previous one. The
     /// evidence names what was checked (version, doc, endpoint), because an
     /// audit without evidence is an assertion.
-    pub fn record_verification(
+    pub fn record_verification<E: Engine>(
         &self,
-        store: &Store,
+        store: &E,
         name: &str,
         now: Millis,
         evidence: &str,
@@ -147,9 +147,9 @@ impl Registry {
 
     /// Verification state at `now`, resolved bi-temporally: current means a
     /// claim is in force, expired means the newest interval has closed.
-    pub fn verification(
+    pub fn verification<E: Engine>(
         &self,
-        store: &Store,
+        store: &E,
         harness: &Harness,
         now: Millis,
     ) -> Result<Verification, vyrm_store::Error> {

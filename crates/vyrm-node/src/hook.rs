@@ -12,7 +12,7 @@ use crate::preflight::{preflight, Preflight};
 use crate::stack;
 use serde_json::Value;
 use vyrm_core::{recall, Claim, Millis, Predicate, Producer, Reader, RecallQuery, Subject};
-use vyrm_store::{Effectiveness, ProjectionStatus, RecallOutcome, Store};
+use vyrm_store::{Effectiveness, Engine, ProjectionStatus, RecallOutcome};
 
 /// Lifecycle events the dispatcher answers. Kebab-case names match the CLI
 /// (`vyrm hook session-start`).
@@ -62,8 +62,8 @@ pub struct HookResponse {
 
 /// Everything a dispatch runs against: the estate, the project, the adapter,
 /// and the clock — which enters here and nowhere deeper, as everywhere else.
-pub struct HookContext<'a> {
-    pub store: &'a Store,
+pub struct HookContext<'a, E: Engine> {
+    pub store: &'a E,
     pub root: &'a std::path::Path,
     pub harness: Option<&'a str>,
     pub reader: &'a Reader,
@@ -73,8 +73,8 @@ pub struct HookContext<'a> {
 
 /// Dispatches one event. `input` is the harness JSON from stdin.
 #[tracing::instrument(level = "debug", skip_all, fields(event = event.name()))]
-pub fn handle(
-    ctx: &HookContext<'_>,
+pub fn handle<E: Engine>(
+    ctx: &HookContext<'_, E>,
     event: HookEvent,
     input: &Value,
 ) -> Result<HookResponse, Box<dyn std::error::Error>> {
@@ -215,8 +215,8 @@ pub fn handle(
 /// Subjects whose name appears in the prompt as a whole word
 /// (case-insensitive). Substring matching would recall `repo` for
 /// "repository"; word boundaries keep recall answerable for what it injects.
-fn matched_subjects(
-    store: &Store,
+fn matched_subjects<E: Engine>(
+    store: &E,
     prompt: &str,
 ) -> Result<Vec<Subject>, Box<dyn std::error::Error>> {
     let lowered = prompt.to_lowercase();

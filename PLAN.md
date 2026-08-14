@@ -615,6 +615,97 @@ journaled and retired by the passing re-run, gate denied under quarantine
 and reopened by reset, init idempotent and refusing the dead harness).
 Workspace at 131 tests, clippy clean.
 
+### Step S · The storage estate — port landed; tiers designed
+
+**Operator directive (2026-08-14):** the ability to fold in storage —
+bbolt for the Go portion (LFG: shippin is the canonical Rust authority,
+GoClyffy the shadow-parity implementation), Moka for the per-user
+instance, Dragonfly as the enterprise shared tier — and a straight answer
+on Fjall, not a repeated slogan.
+
+**The Fjall position, answered with numbers and tripwires, not
+handwaving.** What has been *measured* so far locates every win and every
+bottleneck **above** the engine: the 0.431 ms that dominates a write is
+the device's fsync — physics no engine rewrite recovers — and vyrm's
+durability classes are the answer to it; the 9.58x token reduction came
+from the claim model and recall; the 13.9x routing from the projection;
+the one-seek-per-subject recall from the **key encoding** (vyrm's design,
+which any engine executes). Today's footprint measurement says the
+per-store cost is not a mismatch either: **~180 KiB on disk per store**
+(the naive `du -sb` read 67 MB — Fjall's journal is *sparse-preallocated*
+at 64 MiB apparent; apparent-vs-allocated is recorded here as a
+measurement trap) and ~11 ms open — 258 stores ≈ 45 MiB, trivial. So §2's
+rule stands *because* it keeps vyrm honest: the prior runtime's
+"built-from-scratch AI database" was Fjall verbatim under branding, and
+vyrm will not repeat that claim without the work behind it. **This is a
+current position, not dogma.** The recorded tripwires that would justify
+vyrm-native engine work, each a measurement: (1) per-instance block-cache
+ceiling — Fjall reserves 32 MiB cache *capacity* per open store, and a
+vyrmd holding hundreds of stores must measure actual residency and either
+share or shrink it; (2) compaction pauses appearing in hook-latency tails
+(p99, not means) as stores grow; (3) write amplification measured on
+claim-sized values against the append-only, retirement-never-delete
+workload — an LSM designed for general workloads pays for deletes vyrm
+never issues; (4) a temporal-iteration pattern the key encoding cannot
+serve in one seek. Any of these crossing from projected to measured is
+the §2 mismatch, and **the port landed below makes the attempt safe**:
+a vyrm-native engine would implement eight primitives and be proven by
+the same differential and golden vectors as every other backend — an
+experiment, not a rewrite.
+
+**Landed (2026-08-14): the storage port.**
+
+- **`vyrm_store::Engine`** — the fold-in seam. Eight required primitives
+  (append_batch, sequence, claims_in_range, subjects, observe,
+  projection get/put-with-durability, plus the `ClaimSource` reads);
+  everything else is **provided by the trait**: assert, current-state
+  projection, rebuild with its watermark atomicity, grounding with
+  quarantine, reset. An engine implements the primitives and inherits the
+  semantic layer — which is the whole argument in one type signature:
+  vyrm is the layer, the engine is a port.
+- **`MemoryEngine`** — the reference engine (MemoryClaims + primitives).
+  The differential (`tests/engine.rs`, standing rule 3): Fjall and the
+  reference are indistinguishable through the port — same recall sets
+  and content digests, same grounding stamp digest, same quarantine
+  behaviour on an induced divergence.
+- **vyrm-node is generic over the port** (`tests/port.rs`): preflight and
+  prompt-recall run unchanged over `MemoryEngine`, proving the runtime
+  consumes `Engine`, not Fjall.
+- **Golden vectors** (`vyrm-core/fixtures/golden-vectors.json` +
+  `tests/golden.rs`): key encodings incl. the inverted-timestamp
+  newest-first ordering, prefixes and exclusive ends, canonical claim
+  JSON, and the recall digest — regenerated from the kernel on every
+  test run, so a wire-format change cannot land silently. **This file is
+  the Go/bbolt engine's conformance target**: the GoClyffy implementation
+  reproduces these bytes, implements the eight primitives over bbolt
+  (etcd-io fork, actively maintained, serializable ACID transactions,
+  single-writer MVCC — the same write discipline Fjall's
+  single-writer-tx gives the Rust side), and inherits parity.
+
+**Tiers, designed and recorded (build with vyrmd/Shippin, not before):**
+- **T0 · embedded durable (system of record):** Fjall (Rust), bbolt (Go).
+  One directory per project; the port above.
+- **T1 · per-instance hot tier:** Moka (in-process, does one job well) in
+  **vyrmd** — recall sets keyed by (store, query digest, as_of), 
+  invalidated by sequence watermark; projections cached across sessions.
+  Meaningless in one-shot CLI processes, which is why it waits for the
+  daemon; its acceptance is a measured hit-rate and latency delta, or it
+  comes back out.
+- **T2 · shared enterprise tier:** Dragonfly (BSL 1.1, Redis-protocol,
+  vertically scaled) for the Shippin estate: cross-instance recall
+  cache, session presence, estate pub/sub. Cache and coordination
+  **only** — claims never live in T2; the system of record stays T0 with
+  its fsync, and a cache tier that could disagree with the log would be
+  the divergence §8.3 exists to catch.
+
+Two-sided notes: the trait fixes `Error = vyrm_store::Error`, which is
+pragmatic and slightly wrong for a pure port (a Go engine obviously
+doesn't share the type; the *contract* is the differential + vectors, the
+Rust trait is one binding of it); invocation recording and gc are not yet
+port methods (CLI main still binds to `Store` concretely) — folded in
+when vyrmd needs a second engine end-to-end. Workspace at 137 tests,
+clippy clean.
+
 ### Step 4 · Recall and the effectiveness ledger — COMPLETE
 
 Retires F3, the central risk. Recall v1 resolves current claims for a subject

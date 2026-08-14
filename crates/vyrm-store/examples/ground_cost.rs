@@ -11,6 +11,7 @@
 
 use std::time::Instant;
 use vyrm_core::{Claim, Predicate, Producer, Subject};
+use vyrm_store::Engine;
 use vyrm_store::{GroundingReport, Store};
 
 fn main() {

@@ -6,7 +6,7 @@
 
 use clap::{Parser, Subcommand};
 use vyrm_core::{Claim, ClaimReader, Millis, Predicate, Producer, Reader, RecallQuery, Subject};
-use vyrm_store::{Effectiveness, GroundingReport, Outcome, RecallOutcome, Store, Trigger};
+use vyrm_store::{Effectiveness, Engine, GroundingReport, Outcome, RecallOutcome, Store, Trigger};
 
 /// What a command produced: the operator-facing text, the `SPEC.md` §13.1
 /// effectiveness fields for recall-carrying commands, and a detail line for

@@ -3,6 +3,7 @@
 //! digest; a crash mid-rebuild replays the interval rather than skipping it.
 
 use vyrm_core::{Claim, Predicate, Producer, Subject};
+use vyrm_store::Engine;
 use vyrm_store::{
     Error, GroundingReport, ProjectionStatus, Store, CURRENT_PROJECTION,
 };

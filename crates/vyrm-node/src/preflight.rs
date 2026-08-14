@@ -12,7 +12,7 @@
 use crate::registry::{Registry, Verification};
 use crate::stack;
 use vyrm_core::{recall, Millis, Reader, RecallQuery};
-use vyrm_store::{Effectiveness, ProjectionStatus, RecallOutcome, Store};
+use vyrm_store::{Effectiveness, Engine, ProjectionStatus, RecallOutcome};
 
 /// What a preflight produced. `context` is the injectable text; everything
 /// else is the evidence behind it.
@@ -32,8 +32,8 @@ pub struct Preflight {
 /// Runs the preflight. `harness` names the adapter in use, if known, so its
 /// verification state can make noise; `budget` is the recall token budget.
 #[tracing::instrument(level = "debug", skip_all)]
-pub fn preflight(
-    store: &Store,
+pub fn preflight<E: Engine>(
+    store: &E,
     root: &std::path::Path,
     harness: Option<&str>,
     reader: &Reader,

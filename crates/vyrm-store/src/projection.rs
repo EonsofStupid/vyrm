@@ -25,8 +25,6 @@
 //!    crash could silently forget would defeat the detection.
 
 use crate::error::{Error, Result};
-use crate::keyspaces::Durability;
-use crate::store::Store;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use vyrm_core::{Claim, Millis, Predicate, Subject};
@@ -92,7 +90,7 @@ pub struct CurrentProjection {
 }
 
 impl CurrentProjection {
-    fn empty() -> Self {
+    pub(crate) fn empty() -> Self {
         CurrentProjection {
             watermark: 0,
             status: ProjectionStatus::Active,
@@ -127,7 +125,7 @@ impl CurrentProjection {
     /// what makes the §8.2 crash-replay safe. On an exact (valid_from,
     /// tx_time) tie the later occurrence wins, matching the claims keyspace,
     /// where the second write of one claim key overwrites the first.
-    fn apply(&mut self, claims: &[Claim]) {
+    pub(crate) fn apply(&mut self, claims: &[Claim]) {
         for claim in claims {
             let key = (
                 claim.subject.as_str().to_owned(),
@@ -142,6 +140,19 @@ impl CurrentProjection {
                 }
             }
         }
+    }
+
+    pub(crate) fn to_stored_bytes(&self) -> Result<Vec<u8>> {
+        Ok(serde_json::to_vec(&self.to_stored())?)
+    }
+
+    pub(crate) fn from_stored_bytes(bytes: &[u8]) -> Result<CurrentProjection> {
+        Ok(CurrentProjection::from_stored(serde_json::from_slice(bytes)?))
+    }
+
+    /// The map itself, for the grounding differential in `engine.rs`.
+    pub(crate) fn entries(&self) -> &BTreeMap<(String, String), Claim> {
+        &self.entries
     }
 
     fn to_stored(&self) -> StoredProjection {
@@ -167,7 +178,7 @@ impl CurrentProjection {
     /// Content digest over the sorted entries. FNV-1a 64, the same
     /// construction §13.2 uses elsewhere; serde_json field order is
     /// struct-declared and therefore stable.
-    fn digest(&self) -> Result<u64> {
+    pub(crate) fn digest(&self) -> Result<u64> {
         let bytes = serde_json::to_vec(&self.to_stored().entries)?;
         let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
         for byte in bytes {
@@ -178,110 +189,10 @@ impl CurrentProjection {
     }
 }
 
-impl Store {
-    /// Loads the current-state projection. Absence is the empty projection at
-    /// watermark 0 — a recovery path, not an error.
-    pub fn current_projection(&self) -> Result<CurrentProjection> {
-        match self.get_projection(CURRENT_PROJECTION)? {
-            Some(bytes) => Ok(CurrentProjection::from_stored(serde_json::from_slice(&bytes)?)),
-            None => Ok(CurrentProjection::empty()),
-        }
-    }
-
-    /// §8.2: applies claims in `(watermark, current_sequence]` and advances
-    /// the watermark in the same write as the projection. Refuses when
-    /// quarantined — rebuilding on top of detected divergence would be the
-    /// silent repair §8.3 forbids.
-    #[tracing::instrument(level = "debug", skip_all)]
-    pub fn rebuild_current(&self) -> Result<RebuildOutcome> {
-        let mut projection = self.current_projection()?;
-        if let ProjectionStatus::Quarantined { at, .. } = &projection.status {
-            return Err(Error::Quarantined(format!(
-                "projection `{CURRENT_PROJECTION}` quarantined at {at}; reset to recover"
-            )));
-        }
-        let from = projection.watermark;
-        let to = self.sequence()?;
-        let interval = self.claims_in_range(from, to)?;
-        let applied = interval.len();
-        projection.apply(&interval);
-        projection.watermark = to;
-        self.store_projection(&projection, Durability::Buffered)?;
-        tracing::debug!(from, to, applied, "rebuild advanced the watermark");
-        Ok(RebuildOutcome { from, to, applied })
-    }
-
-    /// §8.3: recomputes the projection from the sequence index at the
-    /// projection's own watermark and differences the result against the
-    /// incrementally maintained state. Empty differential stamps `grounded`;
-    /// any difference quarantines the projection with Authoritative
-    /// durability and reports it. Never repairs.
-    #[tracing::instrument(level = "debug", skip_all)]
-    pub fn ground_current(&self, at: Millis) -> Result<GroundingReport> {
-        let mut projection = self.current_projection()?;
-        if let ProjectionStatus::Quarantined { at, .. } = &projection.status {
-            return Err(Error::Quarantined(format!(
-                "projection `{CURRENT_PROJECTION}` quarantined at {at}; reset to recover"
-            )));
-        }
-
-        let mut recomputed = CurrentProjection::empty();
-        recomputed.apply(&self.claims_in_range(0, projection.watermark)?);
-
-        let differences = difference(&recomputed.entries, &projection.entries);
-        if differences.is_empty() {
-            let stamp = GroundedStamp {
-                at,
-                sequence: projection.watermark,
-                digest: projection.digest()?,
-            };
-            projection.last_grounded = Some(stamp);
-            self.store_projection(&projection, Durability::Buffered)?;
-            tracing::debug!(sequence = stamp.sequence, digest = stamp.digest, "grounded");
-            return Ok(GroundingReport::Grounded(stamp));
-        }
-
-        projection.status = ProjectionStatus::Quarantined {
-            at,
-            differences: differences.clone(),
-        };
-        // The one derived-state write that pays for durability: a quarantine a
-        // crash could forget would un-halt a diverged projection silently.
-        self.store_projection(&projection, Durability::Authoritative)?;
-        tracing::warn!(differences = differences.len(), "divergence — projection quarantined");
-        Ok(GroundingReport::Divergence { differences })
-    }
-
-    /// Operator recovery: discards the projection and recomputes it from the
-    /// sequence index. This is the only exit from quarantine, and it is
-    /// explicit — recomputation *becoming* the projection is a decision, not
-    /// a background repair. Buffered: losing this write on crash resurrects
-    /// the quarantine, which fails closed.
-    pub fn reset_current(&self) -> Result<RebuildOutcome> {
-        let to = self.sequence()?;
-        let mut projection = CurrentProjection::empty();
-        let interval = self.claims_in_range(0, to)?;
-        let applied = interval.len();
-        projection.apply(&interval);
-        projection.watermark = to;
-        self.store_projection(&projection, Durability::Buffered)?;
-        Ok(RebuildOutcome { from: 0, to, applied })
-    }
-
-    fn store_projection(
-        &self,
-        projection: &CurrentProjection,
-        durability: Durability,
-    ) -> Result<()> {
-        let bytes = serde_json::to_vec(&projection.to_stored())?;
-        self.put_projection_with(CURRENT_PROJECTION, &bytes, durability)
-    }
-}
-
 /// Entry-level differential between the recomputed and incremental maps. Each
 /// line names the pair and the disagreement, so the divergence report is
 /// evidence rather than a boolean.
-fn difference(
+pub(crate) fn difference(
     recomputed: &BTreeMap<(String, String), Claim>,
     incremental: &BTreeMap<(String, String), Claim>,
 ) -> Vec<String> {

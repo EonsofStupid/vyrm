@@ -21,6 +21,7 @@
 //! external mutex in the prior runtime protected only correction 1; with that
 //! corrected, reads run concurrently.
 
+mod engine;
 mod error;
 mod gc;
 mod invocation;
@@ -29,6 +30,7 @@ mod projection;
 mod store;
 mod writer;
 
+pub use engine::{Engine, MemoryEngine};
 pub use error::{Error, Result};
 pub use gc::{PairStatus, RemovalReport, Verdict};
 pub use invocation::{Effectiveness, Invocation, InvocationInput, Outcome, RecallOutcome, Trigger};
