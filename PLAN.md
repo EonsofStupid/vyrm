@@ -522,6 +522,52 @@ step, its figures already measured standalone in Step R.
   refuses with the retirement stated. Hookless harnesses get their
   degradation stated in the report.
 
+**Attunement census and stack-profile expansion (2026-08-14):** the
+operator directed that the profile set be grounded in their actual estate,
+so the priority list is a measurement, not a guess. Census of all 258
+repositories under github.com/EonsofStupid (`gh repo list --json
+name,primaryLanguage,isArchived,pushedAt`, roots and `package.json`
+manifests fetched for the 115 repos active in 2026; aggregates recorded
+here, raw listing kept out of the repo):
+
+| Stack | Evidence | Priority signal |
+|---|---|---|
+| Rust / cargo | 52 repos, **50 active in 2026** | most active stack |
+| React + Vite | 33 active repos by deps; `vite.config.*` in 51 roots | dominant frontend |
+| bun | **39 lockfiles** vs 18 npm, 16 pnpm, 4 yarn | leading JS runtime |
+| TanStack Start | 11 active repos (`@tanstack/react-start`) | the operator's meta-framework |
+| Python | 16 repos, 13 active; `pyproject.toml` x8, `uv.lock` x4 | uv adoption underway |
+| Vite w/o React | 9 active | tool layer stands alone |
+| C++ / CMake | 5 repos, 4 active; `CMakeLists.txt` x3 | present |
+| Go | 3 repos, all active | present |
+| Next.js | 2 active | **no profile — stated omission** |
+
+Toolchain vocabularies verified against the 2026 state before encoding:
+Python consolidated on **uv + ruff** with `pyproject.toml` as single source
+(`uv run pytest`, `uv sync`, `ruff check`); **TanStack Start is a Vite
+plugin** since the vinxi migration, with Vite 8 stable 2026-03 — its runs
+are `vitest`/`vite build`, which is why vite is a profile of its own
+riding on bun or node; C++ standardized on CMake presets (`cmake --build`,
+`cmake --workflow --preset`, `ctest`); Go remains the single `go` tool
+plus `gotestsum`.
+
+Landed in `stack.rs`: profiles gained multi-marker evidence lists
+(python: pyproject/uv.lock/requirements/setup.py; cpp:
+CMakeLists/meson.build; vite: vite.config.*/vitest.config.ts), the four
+new stacks (python, go, cpp, vite), **word-boundary prefix matching**
+(`make` must not claim `makepkg` — caught by test), and the **framework
+facet**: `package.json` dependencies resolve to
+tanstack-start / next / react-vite / react, with the meta-framework
+outranking its parts, and corrupt manifests degrading to nothing rather
+than erroring. Preflight now announces the full shape — verified live:
+`stack=bun+vite+tanstack-start` on a TanStack-shaped project, with a
+failing `vitest run` journaled as `vitest status = failing (exit 1)`.
+Two-sided note: framework detection reads only the root `package.json`,
+so monorepo workspaces attune as their root until the routing projection
+joins the preflight (Step T/vyrmd); and the census counted primary
+language + root manifests, not per-directory reality inside monorepos —
+both recorded as limits of the measurement, not facts about the estate.
+
 **Measured outcome (2026-08-14, release binary, ext4, 40-claim/12-subject
 store, mean of 20 runs each, *end-to-end including process spawn, store
 open, and the invocation record's fsync*):** session-start (preflight +

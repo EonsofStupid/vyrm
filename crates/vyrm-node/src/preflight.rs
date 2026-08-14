@@ -39,7 +39,10 @@ pub fn preflight(
     now: Millis,
     budget: usize,
 ) -> Result<Preflight, Box<dyn std::error::Error>> {
-    let stacks: Vec<&'static str> = stack::detect(root).iter().map(|s| s.name).collect();
+    // Runtime stacks plus the framework facet: `bun+vite+tanstack-start`
+    // tells the agent what it landed in before it reads a single file.
+    let mut stacks: Vec<&'static str> = stack::detect(root).iter().map(|s| s.name).collect();
+    stacks.extend(stack::frameworks(root));
     let mut warnings = Vec::new();
 
     // Estate health: a quarantined projection is surfaced, and recall
