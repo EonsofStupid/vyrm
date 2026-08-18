@@ -2,7 +2,9 @@
 
 mod flight;
 
-pub use flight::{ContextMode, Flight, FlightEvent, FlightMetrics, FlightStatus, LaunchFlight};
+pub use flight::{
+    ContextMode, Flight, FlightEvent, FlightMetrics, FlightStatus, LaunchFlight, ReasoningProfile,
+};
 
 use serde::Serialize;
 use std::collections::BTreeMap;

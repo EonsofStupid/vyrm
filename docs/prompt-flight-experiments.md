@@ -65,31 +65,43 @@ continuity.
 The UI playback clock is presentational. Recorded `elapsed_ms` is the
 measurement; animation timing is never used as benchmark evidence.
 
-## Built-in weak/strong demonstration
+## One-run learning workflow
 
-The workbench opens with two editable prompts. The guided weak arm has no target
-or acceptance contract; the guided strong arm names the runtime stages, safety
-boundary, evidence requirements, metrics, and stop condition. Running that
-unchanged pair writes it through the production flight recorder as two record
-revisions and sixteen immutable events in one atomic runtime commit. Repeating
-the action returns the existing pair instead of polluting history with copies.
+The workbench opens with one editable prompt. Weak and strong examples are
+starting points, not a synthetic scorecard. Every click launches exactly one
+persisted flight. Repeating identical prompt bytes at another effort or context
+arm adds a run to the same digest cohort; changing the prompt starts a new
+cohort. The live goal/scope/evidence/success/stop indicators are lexical editing
+aids only. Runtime metrics begin only after the operator launches the flight.
 
-Editing either prompt changes the experiment into a custom A/B run. Both sides
-use the same selected context arm, provider, token budget, and acceptance marker
-and are pinned together in the interface. The live goal/scope/evidence/success/
-stop indicators are lexical editing aids only. Runtime metrics begin only after
-the operator runs the pair.
+The four UI profiles map to exact provider arguments:
 
-The timeline can be frozen at any event, scrubbed, rewound, or fast-forwarded.
-Event bursts encode the approximate size of the event's visible detail and
-typed payload; the expanded data modal shows the underlying keys and values.
-These deterministic numbers demonstrate the visual and persistence contract.
-They must never be cited as a frontier-model evaluation result.
+| Vyrm profile | Requested provider effort |
+|---|---|
+| Default | `medium` |
+| High | `high` |
+| Extreme | `xhigh` |
+| Ultra | `max` |
+
+These names are experiment controls. Ultra is Vyrm's quality-first label for
+provider `max`, not Codex's separate multi-agent ultra mode. The mapping follows
+the current [OpenAI model guidance](https://developers.openai.com/api/docs/guides/latest-model)
+and is recorded on the flight and its provider-spawn event.
+
+The timeline can be frozen at any event, scrubbed, rewound, resumed, or
+fast-forwarded. Its aligned lanes distinguish context/routing, provider model
+envelopes, tool activity, and outcome evidence. Packet height encodes only the
+captured visible detail plus raw payload byte count. The expanded micro-event
+shows the complete observable envelope. It does not infer or reconstruct hidden
+chain-of-thought.
 
 ## Metrics
 
 - `context_tokens`: Vyrm's declared rendered-context estimate;
 - `input_tokens` and `output_tokens`: provider-reported values when available;
+- `cached_input_tokens`: provider-reported cached input when available;
+- `reasoning_tokens`: provider-reported reasoning-token count when available;
+- `provider_events`: count of raw provider envelopes retained by the flight;
 - `tool_calls`: externally observable provider tool events;
 - `latency_ms`: launch through provider exit;
 - `acceptance_met`: successful process exit plus the optional literal marker.

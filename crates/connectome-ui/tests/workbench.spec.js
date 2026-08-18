@@ -1,4 +1,4 @@
-const { test, expect } = require('@playwright/test');
+import { test, expect } from '@playwright/test';
 
 const baseURL = process.env.CONNECTOME_URL || 'http://127.0.0.1:4387';
 
@@ -32,15 +32,17 @@ test('source routing and read-only transport are enforced', async ({ page, reque
 
 test('prompt flights can be launched, frozen, expanded, and compared', async ({ page }) => {
   await page.goto(`${baseURL}/#flight`);
-  await expect(page.getByRole('heading', { name: 'Prompt flight recorder' })).toBeVisible();
-  await page.locator('#flight-prompt-a').fill('inspect runtime from a deliberately vague prompt');
-  await page.locator('#flight-prompt-b').fill('Inspect runtime routing and verify the observed file path.');
+  await expect(page.getByRole('heading', { name: 'Reasoning flight lab' })).toBeVisible();
+  await page.locator('#flight-prompt').fill('Inspect runtime routing and verify the observed file path.');
   await page.locator('#flight-context').selectOption('fresh');
   await page.locator('#flight-provider').selectOption('observe');
-  await page.getByRole('button', { name: 'Run both prompts' }).click();
+  await page.locator('[data-reasoning-profile="high"]').click();
+  await page.getByRole('button', { name: 'Run one flight' }).click();
 
   await expect(page.locator('.flight-visual')).toBeVisible();
-  await expect(page.locator('.comparison-arm')).toHaveCount(2);
+  await expect(page.locator('.flight-switcher')).toContainText('CONFIGURED high');
+  await expect(page.locator('.telemetry-lane')).toHaveCount(4);
+  await expect(page.locator('.telemetry-packet')).not.toHaveCount(0);
   await expect(page.locator('.film-frame')).not.toHaveCount(0);
   await page.locator('.film-frame').nth(1).click();
   await expect(page.locator('.micro-event')).toContainText('Baseline context purged');
@@ -48,33 +50,37 @@ test('prompt flights can be launched, frozen, expanded, and compared', async ({ 
   await expect(page.locator('#inspector-body')).toContainText('prompt flight event');
 });
 
-test('weak and strong demos expose temporal bursts and bidirectional playback', async ({ page }) => {
+test('reasoning profiles expose exact effort and bidirectional event playback', async ({ page }) => {
   await page.goto(`${baseURL}/#flight`);
-  await page.getByRole('button', { name: 'Restore guided pair' }).click();
-  await page.getByRole('button', { name: 'Run both prompts' }).click();
+  await page.locator('[data-prompt-preset="strong"]').click();
+  await page.locator('[data-reasoning-profile="extreme"]').click();
+  await page.locator('#flight-context').selectOption('fresh');
+  await page.locator('#flight-provider').selectOption('observe');
+  await page.getByRole('button', { name: 'Run one flight' }).click();
 
-  await expect(page.locator('.comparison-arm')).toHaveCount(2);
-  await expect(page.locator('.comparison-arm.role-weak')).toContainText('Make this better.');
-  await expect(page.locator('.comparison-arm.role-strong')).toContainText('Trace one prompt');
-  await expect(page.locator('.comparison-verdict')).toContainText('less context');
-  await expect(page.locator('.burst-column')).toHaveCount(8);
+  await expect(page.locator('.flight-switcher')).toContainText('Extreme');
+  await expect(page.locator('.flight-switcher')).toContainText('xhigh');
+  await expect(page.locator('.visual-readout')).toContainText('EVENT MASS');
+  await expect(page.locator('.telemetry-river')).toBeVisible();
 
   await page.getByTitle('Latest event').click();
-  await expect(page.locator('.micro-event')).toContainText('Strong prompt produced');
+  await expect(page.locator('.micro-event')).toBeVisible();
   await page.getByTitle('Rewind through time').click();
   await expect(page.getByTitle('Play or freeze')).toContainText('Freeze time');
-  await page.locator('.burst-column').nth(2).click();
+  await page.locator('.telemetry-packet').first().click();
   await expect(page.getByTitle('Play or freeze')).toContainText('Resume time');
   await expect(page.locator('.event-data-strip')).toContainText('signal volume');
   await expect(page.locator('.payload-breakdown')).toBeVisible();
+  await page.locator('.event-envelope').click();
+  await expect(page.locator('.event-envelope pre')).toBeVisible();
 });
 
 test('custom prompt editing is stable while live snapshots and flight polling continue', async ({ page }) => {
   await page.goto(`${baseURL}/#flight`);
   const prompt = 'Compare the runtime graph and report verified evidence with a stop condition.';
-  await page.locator('#flight-prompt-a').fill(prompt);
-  await expect(page.locator('#prompt-contract-a')).toContainText('explicit signals');
+  await page.locator('#flight-prompt').fill(prompt);
+  await expect(page.locator('#prompt-contract')).toContainText('explicit signals');
   await page.waitForTimeout(5500);
-  await expect(page.locator('#flight-prompt-a')).toHaveValue(prompt);
+  await expect(page.locator('#flight-prompt')).toHaveValue(prompt);
   await expect(page.locator('.contract-signals .present')).not.toHaveCount(0);
 });

@@ -37,6 +37,31 @@ pub enum ContextMode {
     Full,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ReasoningProfile {
+    /// Balanced provider default for representative baseline runs.
+    #[default]
+    Default,
+    /// More deliberate exploration when it produces a measured quality gain.
+    High,
+    /// User-facing name for the provider's `xhigh` effort.
+    Extreme,
+    /// Quality-first profile mapped to the provider's `max` effort.
+    Ultra,
+}
+
+impl ReasoningProfile {
+    pub fn provider_effort(self) -> &'static str {
+        match self {
+            Self::Default => "medium",
+            Self::High => "high",
+            Self::Extreme => "xhigh",
+            Self::Ultra => "max",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum FlightStatus {
@@ -58,6 +83,8 @@ pub struct LaunchFlight {
     pub budget: usize,
     #[serde(default)]
     pub acceptance_marker: String,
+    #[serde(default)]
+    pub reasoning_profile: ReasoningProfile,
 }
 
 fn default_provider() -> String {
@@ -80,6 +107,12 @@ pub struct FlightMetrics {
     pub tool_calls: u64,
     pub latency_ms: Option<u64>,
     pub acceptance_met: Option<bool>,
+    #[serde(default)]
+    pub cached_input_tokens: Option<u64>,
+    #[serde(default)]
+    pub reasoning_tokens: Option<u64>,
+    #[serde(default)]
+    pub provider_events: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -141,6 +174,8 @@ pub struct Flight {
     pub output_preview: String,
     pub metrics: FlightMetrics,
     pub events: Vec<FlightEvent>,
+    #[serde(default)]
+    pub reasoning_profile: ReasoningProfile,
     /// Optional deterministic demonstration grouping. Normal prompt flights do
     /// not set these fields; demo pairs use them for cross-prompt comparison.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -210,6 +245,7 @@ impl FlightRecorder {
             output_preview: String::new(),
             metrics: FlightMetrics::default(),
             events: Vec::new(),
+            reasoning_profile: request.reasoning_profile,
             comparison_id: None,
             demo_role: None,
         };
@@ -487,7 +523,12 @@ impl FlightRecorder {
                 request.prompt
             )
         };
-        let mut command = provider_command(&request.provider, &self.binding.project_root, &packet)?;
+        let mut command = provider_command(
+            &request.provider,
+            &self.binding.project_root,
+            &packet,
+            request.reasoning_profile,
+        )?;
         command.stdout(Stdio::piped()).stderr(Stdio::piped());
         let mut child = command.spawn()?;
         let stdout = child.stdout.take().ok_or("provider stdout unavailable")?;
@@ -507,15 +548,23 @@ impl FlightRecorder {
                 "model",
                 "provider_spawned",
                 &format!("{} started in read-only mode", request.provider),
-                "The provider receives a new ephemeral session and cannot mutate the project.",
-                Value::Null,
+                "The provider receives a new ephemeral session and cannot mutate the project. The recorded effort is the exact requested provider value, not an inferred amount of thought.",
+                json!({
+                    "reasoning_profile": request.reasoning_profile,
+                    "requested_effort": request.reasoning_profile.provider_effort(),
+                    "sandbox": "read-only",
+                    "session": "ephemeral"
+                }),
             ),
         )?;
 
         let mut output = String::new();
         let mut input_tokens = None;
         let mut output_tokens = None;
+        let mut cached_input_tokens = None;
+        let mut reasoning_tokens = None;
         let mut tool_calls = 0_u64;
+        let mut provider_events = 0_u64;
         for line in BufReader::new(stdout).lines() {
             let line = line?;
             if line.trim().is_empty() {
@@ -526,8 +575,27 @@ impl FlightRecorder {
             let value =
                 serde_json::from_str::<Value>(&line).unwrap_or_else(|_| json!({"text": line}));
             let (stage, kind, label) = classify_provider_event(&value);
+            provider_events = provider_events.saturating_add(1);
             input_tokens = find_u64(&value, &["input_tokens", "inputTokens"]).or(input_tokens);
             output_tokens = find_u64(&value, &["output_tokens", "outputTokens"]).or(output_tokens);
+            cached_input_tokens = find_u64(
+                &value,
+                &[
+                    "cached_input_tokens",
+                    "cachedInputTokens",
+                    "cache_read_input_tokens",
+                ],
+            )
+            .or(cached_input_tokens);
+            reasoning_tokens = find_u64(
+                &value,
+                &[
+                    "reasoning_tokens",
+                    "reasoningTokens",
+                    "reasoning_output_tokens",
+                ],
+            )
+            .or(reasoning_tokens);
             if stage == "tools" {
                 tool_calls = tool_calls.saturating_add(1);
             }
@@ -565,6 +633,9 @@ impl FlightRecorder {
             flight.metrics.tool_calls = tool_calls;
             flight.metrics.latency_ms = Some(latency);
             flight.metrics.acceptance_met = Some(acceptance_met);
+            flight.metrics.cached_input_tokens = cached_input_tokens;
+            flight.metrics.reasoning_tokens = reasoning_tokens;
+            flight.metrics.provider_events = provider_events;
         })?;
         self.append_event(
             id,
@@ -790,8 +861,16 @@ fn demo_flight(at: u64, comparison_id: &str, role: &str) -> Flight {
             tool_calls: if strong { 3 } else { 7 },
             latency_ms: Some(if strong { 980 } else { 1_840 }),
             acceptance_met: Some(strong),
+            cached_input_tokens: Some(if strong { 220 } else { 80 }),
+            reasoning_tokens: Some(if strong { 184 } else { 390 }),
+            provider_events: if strong { 12 } else { 21 },
         },
         events,
+        reasoning_profile: if strong {
+            ReasoningProfile::High
+        } else {
+            ReasoningProfile::Default
+        },
         comparison_id: Some(comparison_id.into()),
         demo_role: Some(role.into()),
     }
@@ -923,6 +1002,10 @@ fn flight_record(flight: &Flight) -> Result<RuntimeMutation, Box<dyn std::error:
         "status".into(),
         RuntimeValue::String(format!("{:?}", flight.status).to_ascii_lowercase()),
     );
+    properties.insert(
+        "reasoning_effort".into(),
+        RuntimeValue::String(flight.reasoning_profile.provider_effort().into()),
+    );
     Ok(RuntimeMutation::Record {
         record: RuntimeRecord {
             reference: RuntimeRef::new(FLIGHT_TYPE, flight.id.clone())?,
@@ -1002,13 +1085,19 @@ fn provider_command(
     provider: &str,
     root: &std::path::Path,
     packet: &str,
+    reasoning_profile: ReasoningProfile,
 ) -> Result<Command, Box<dyn std::error::Error>> {
     let command = match provider {
         "codex" => {
             let mut command = Command::new("codex");
             command
+                .arg("exec")
+                .arg("--config")
+                .arg(format!(
+                    "model_reasoning_effort=\"{}\"",
+                    reasoning_profile.provider_effort()
+                ))
                 .args([
-                    "exec",
                     "--ephemeral",
                     "--sandbox",
                     "read-only",
@@ -1025,6 +1114,8 @@ fn provider_command(
             command
                 .args([
                     "-p",
+                    "--effort",
+                    reasoning_profile.provider_effort(),
                     "--permission-mode",
                     "plan",
                     "--allowedTools",
@@ -1127,9 +1218,50 @@ mod tests {
 
     #[test]
     fn token_metrics_are_found_inside_provider_envelopes() {
-        let value = json!({"type":"turn.completed","usage":{"input_tokens":41,"output_tokens":7}});
+        let value = json!({
+            "type":"turn.completed",
+            "response": {
+                "usage": {
+                    "input_tokens":41,
+                    "cached_input_tokens": 13,
+                    "output_tokens":7,
+                    "reasoning_output_tokens": 5
+                }
+            }
+        });
         assert_eq!(find_u64(&value, &["input_tokens"]), Some(41));
         assert_eq!(find_u64(&value, &["output_tokens"]), Some(7));
+        assert_eq!(find_u64(&value, &["cached_input_tokens"]), Some(13));
+        assert_eq!(
+            find_u64(&value, &["reasoning_tokens", "reasoning_output_tokens"]),
+            Some(5)
+        );
+    }
+
+    #[test]
+    fn reasoning_profiles_map_to_exact_runner_arguments() {
+        let root = std::path::Path::new("/tmp/vyrm-profile-test");
+        let codex = provider_command("codex", root, "inspect", ReasoningProfile::Extreme).unwrap();
+        let codex_args = codex
+            .get_args()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect::<Vec<_>>();
+        assert!(codex_args.contains(&"model_reasoning_effort=\"xhigh\"".into()));
+        assert!(codex_args
+            .windows(2)
+            .any(|args| args == ["--sandbox", "read-only"]));
+
+        let claude = provider_command("claude", root, "inspect", ReasoningProfile::Ultra).unwrap();
+        let claude_args = claude
+            .get_args()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect::<Vec<_>>();
+        assert!(claude_args
+            .windows(2)
+            .any(|args| args == ["--effort", "max"]));
+        assert!(claude_args
+            .windows(2)
+            .any(|args| args == ["--permission-mode", "plan"]));
     }
 
     #[test]
@@ -1173,6 +1305,7 @@ mod tests {
                     context_mode: ContextMode::Fresh,
                     budget: 1_500,
                     acceptance_marker: String::new(),
+                    reasoning_profile: ReasoningProfile::Default,
                 },
                 10,
             )
@@ -1185,6 +1318,7 @@ mod tests {
                     context_mode: ContextMode::Pruned,
                     budget: 1_500,
                     acceptance_marker: String::new(),
+                    reasoning_profile: ReasoningProfile::Default,
                 },
                 11,
             )

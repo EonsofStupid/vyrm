@@ -56,15 +56,15 @@ not roadmap language.
   explicit unauthenticated-transport override. Its read API now exposes
   resumable changes, graph-at-cursor/valid-time snapshots, and exact graph
   differentials for freeze/scrub tooling.
-- A deterministic weak/strong prompt demonstration now persists two flight
-  records and sixteen typed micro-events as one atomic runtime burst. The
-  workbench renders event-density bursts, typed payload breakdowns, measurable
-  cost differentials, event freezing, scrubbing, reverse playback, and up to
-  8× fast-forward without presenting synthetic values as benchmark results.
-- Prompt comparison is now a stable two-editor A/B lab instead of a polling-
-  sensitive run selector. Prompt drafts survive live refresh, local contract
-  signals react while typing, edited pairs execute through the real flight
-  path, observed traces stay pinned together, and the guided seed is idempotent.
+- The flight workbench is now a one-run-at-a-time learning instrument. Weak and
+  strong prompts are editable presets, custom drafts survive live polling, and
+  exact Default/High/Extreme/Ultra controls persist the requested provider
+  `medium`/`high`/`xhigh`/`max` effort on every run.
+- Observable events render as a typed event-mass river across context/routing,
+  model-envelope, tool, and outcome lanes. Operators can freeze any packet,
+  scrub, rewind, resume, fast-forward up to 8×, jump to boundaries, inspect the
+  entire retained envelope, and compare identical-prompt effort runs using
+  provider-reported token, cache, tool, latency, and acceptance evidence.
 
 ## Verification
 

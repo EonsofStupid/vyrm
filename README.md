@@ -87,16 +87,21 @@ Claims, reasoning runs, and prior flights remain available for audit and replay.
 This separation makes same-prompt comparisons meaningful without destroying the
 evidence needed to explain them.
 
-The prompt lab keeps **Prompt A** and **Prompt B** visible together. Its guided
-pair contrasts an unbounded “Make this better” request with a constrained,
-measurable prompt; running that unchanged pair creates one idempotent synthetic
-baseline through the real runtime recorder. Edit either prompt and **Run both
-prompts** to persist two actual observe/provider paths and pin them as an A/B
-comparison. Local contract indicators respond while typing but are explicitly
-heuristic—not a quality score. Freeze any burst, scrub or rewind the timeline,
-inspect typed payloads, and compare context, tool fanout, latency, and acceptance
-side by side. The guided demonstration validates the instrument; it is not
-benchmark evidence.
+The reasoning flight lab runs **one prompt at a time**. Start from the weak or
+strong example, or type a custom prompt, then choose an exact provider-effort
+profile. Default, High, Extreme, and Ultra request `medium`, `high`, `xhigh`,
+and `max` respectively. Ultra is Vyrm's label for provider `max`; it is not the
+separate Codex multi-agent “ultra mode.” Repeat identical prompt bytes at a
+different profile or context arm to form a comparable cohort.
+
+The visual stage renders every captured event in a typed context/model/tool/
+outcome lane. Packet height is derived from the visible event-detail and raw
+envelope byte count. Freeze any packet, scrub, rewind, resume, fast-forward, or
+jump to the first/latest event. The expanded micro-event exposes the complete
+captured provider envelope plus provider-reported input, output, cache, and
+reasoning-token fields when available. These are observable traces, never a
+claim to expose private chain-of-thought. Local prompt-contract indicators are
+lexical editing aids, not quality scores.
 
 The default `observe` provider assembles and visualizes the pipeline without
 launching a model. Frontier CLI execution requires an explicit opt-in:

@@ -14,6 +14,8 @@ copy Anytype's branding or source.
 | Global and local graph navigation | Global instance map exists, but local selection-centered graphs are the default |
 | Desktop frontend is separated from local middleware | The workbench is a browser UI over a local read-only Rust API; the store remains authoritative |
 | Graph rendering moves expensive simulation off the main UI path | Start with bounded SVG for runtime-sized snapshots; retain a worker/WebGL migration boundary when measurements require it |
+| Selecting one object recenters its local relationships and properties | A frozen micro-event becomes the focused object while typed context, model, tool, and outcome lanes preserve its surrounding sequence |
+| Composable blocks keep dense object data explorable | The flight stage, transport, event envelope, baseline, and inspector remain independently inspectable surfaces over one authoritative record |
 
 Primary references:
 
@@ -69,6 +71,10 @@ local Rust process as its instance-bound API. It currently provides:
 - stable hash routes and keyboard navigation.
 - controlled prompt flights across fresh, pruned, and full context arms;
 - live event playback with pause, step, scrub, stage jumps, and raw inspection;
+- a one-run reasoning lab with exact `medium`/`high`/`xhigh`/`max` effort
+  controls and explicit observable-only boundaries;
+- aligned event-mass lanes for context, model envelopes, tools, and outcomes,
+  with click-to-freeze packets and complete captured-envelope expansion;
 - same-prompt baseline comparison for context, provider tokens, tools, latency,
   and acceptance.
 
