@@ -143,6 +143,67 @@ impl Claim {
         }
         Ok(())
     }
+
+    /// Canonical, versioned bytes for content identity across adapters.
+    /// Every semantic and provenance field participates.
+    pub fn canonical_bytes(&self) -> Vec<u8> {
+        fn text(out: &mut Vec<u8>, value: &str) {
+            out.extend_from_slice(&(value.len() as u64).to_be_bytes());
+            out.extend_from_slice(value.as_bytes());
+        }
+        fn optional_text(out: &mut Vec<u8>, value: Option<&str>) {
+            out.push(u8::from(value.is_some()));
+            if let Some(value) = value { text(out, value); }
+        }
+        let mut out = b"vyrm-claim-v1\0".to_vec();
+        text(&mut out, self.subject.as_str());
+        text(&mut out, self.predicate.as_str());
+        text(&mut out, &self.object);
+        out.extend_from_slice(&self.valid_from.to_be_bytes());
+        out.push(u8::from(self.valid_to.is_some()));
+        if let Some(value) = self.valid_to { out.extend_from_slice(&value.to_be_bytes()); }
+        out.extend_from_slice(&self.tx_time.to_be_bytes());
+        text(&mut out, &self.producer.actor);
+        optional_text(&mut out, self.producer.on_behalf_of.as_deref());
+        optional_text(&mut out, self.producer.session.as_deref());
+        out.push(u8::from(self.confidence.is_some()));
+        if let Some(value) = self.confidence { out.extend_from_slice(&value.to_bits().to_be_bytes()); }
+        optional_text(&mut out, self.supersedes.as_deref());
+        optional_text(&mut out, self.signature.as_deref());
+        out.push(match self.tier { Tier::Local => 0, Tier::Primary => 1, Tier::Tenant => 2 });
+        out.push(match self.promotion_state {
+            PromotionState::Unpromoted => 0,
+            PromotionState::Pending => 1,
+            PromotionState::Promoted => 2,
+            PromotionState::Denied => 3,
+        });
+        out
+    }
+
+    /// Cryptographic identity of the complete claim, including provenance.
+    pub fn digest(&self) -> String {
+        crate::digest::sha256_hex(&self.canonical_bytes())
+    }
+}
+
+/// Produces immutable retirement-correction and successor log entries.
+/// The caller appends the pair atomically.
+pub fn supersede(previous: &Claim, mut successor: Claim) -> Result<[Claim; 2]> {
+    if previous.subject != successor.subject || previous.predicate != successor.predicate {
+        return Err(Error::SupersessionPairMismatch);
+    }
+    if successor.valid_from <= previous.valid_from || successor.tx_time <= previous.tx_time {
+        return Err(Error::InvalidSupersessionOrder);
+    }
+    let previous_id = previous.digest();
+    let mut retirement = previous.clone();
+    retirement.valid_to = Some(successor.valid_from);
+    retirement.tx_time = successor.tx_time;
+    retirement.supersedes = Some(previous_id.clone());
+    successor.supersedes = Some(previous_id);
+    retirement.validate()?;
+    successor.validate()?;
+    Ok([retirement, successor])
 }
 
 #[cfg(test)]
@@ -198,5 +259,30 @@ mod tests {
         let c = claim(100);
         let text = serde_json::to_string(&c).unwrap();
         assert_eq!(serde_json::from_str::<Claim>(&text).unwrap(), c);
+    }
+
+    #[test]
+    fn canonical_identity_covers_provenance_and_validity() {
+        let original = claim(100);
+        let mut changed = original.clone();
+        changed.producer.session = Some("different-session".into());
+        assert_ne!(original.digest(), changed.digest());
+        changed = original.clone();
+        changed.valid_to = Some(200);
+        assert_ne!(original.digest(), changed.digest());
+    }
+
+    #[test]
+    fn supersession_preserves_the_original_and_emits_a_retirement_correction() {
+        let previous = claim(100);
+        let mut successor = claim(200);
+        successor.object = "done".into();
+        successor.tx_time = 250;
+        let [retirement, successor] = supersede(&previous, successor).unwrap();
+        assert_eq!(previous.valid_to, None, "the original log entry stays immutable");
+        assert_eq!(retirement.valid_from, 100);
+        assert_eq!(retirement.valid_to, Some(200));
+        assert_eq!(retirement.tx_time, 250);
+        assert_eq!(successor.supersedes, Some(previous.digest()));
     }
 }

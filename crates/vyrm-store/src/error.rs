@@ -20,6 +20,10 @@ pub enum Error {
     /// A projection was halted by grounding (`SPEC.md` §8.3) and refuses reads
     /// and rebuilds until an operator resets it.
     Quarantined(String),
+    /// Optimistic concurrency rejected a writer that observed an older head.
+    RuntimeConflict { expected: u64, actual: u64 },
+    /// A relation or event named a record that is not present in its scope.
+    DanglingRuntimeReference(String),
 }
 
 impl fmt::Display for Error {
@@ -31,6 +35,13 @@ impl fmt::Display for Error {
             Error::SequenceOverflow => write!(f, "sequence allocation overflowed"),
             Error::CorruptWatermark(m) => write!(f, "corrupt sequence watermark: {m}"),
             Error::Quarantined(m) => write!(f, "quarantined: {m}"),
+            Error::RuntimeConflict { expected, actual } => write!(
+                f,
+                "runtime commit conflict: expected cursor {expected}, actual cursor {actual}"
+            ),
+            Error::DanglingRuntimeReference(reference) => {
+                write!(f, "dangling runtime reference: {reference}")
+            }
         }
     }
 }

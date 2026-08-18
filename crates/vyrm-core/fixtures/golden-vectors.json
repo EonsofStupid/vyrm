@@ -33,7 +33,7 @@
   "recall wp3 as_of=300 budget=10000": {
     "claims_returned": 1,
     "current_object": "active",
-    "digest": "a05b2250bd8cbbf2",
+    "digest": "a9a6398e7b6e4b047606554170eb7157ea7b99f1ceaf29994a1261a0782a2598",
     "token_estimate": 6
   },
   "sequence_key 42": "3030303030303030303030303030303030303432"

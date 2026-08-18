@@ -6,7 +6,7 @@
 //! engine in Rust, is correct exactly when this differential (and the
 //! golden key vectors in vyrm-core) holds for it.
 
-use vyrm_core::{recall, Claim, Predicate, Producer, RecallQuery, Subject};
+use vyrm_core::{recall, Claim, ClaimReader, Predicate, Producer, RecallQuery, Subject};
 use vyrm_store::{Engine, GroundingReport, MemoryEngine, Store};
 
 fn claim(subject: &str, predicate: &str, object: &str, from: u64) -> Claim {
@@ -86,6 +86,40 @@ fn two_engines_are_indistinguishable_through_the_port() {
         memory.rebuild_current(),
         Err(vyrm_store::Error::Quarantined(_))
     ));
+}
+
+#[test]
+fn a_rejected_batch_is_atomic_in_both_engines() {
+    let dir = tempfile::tempdir().unwrap();
+    let fjall = Store::open(dir.path()).unwrap();
+    let memory = MemoryEngine::new();
+    let valid = claim("wp3", "status", "valid", 100);
+    let mut invalid = claim("wp4", "status", "invalid", 200);
+    invalid.valid_to = Some(200);
+    assert!(Engine::append_batch(&fjall, &[valid.clone(), invalid.clone()]).is_err());
+    assert!(Engine::append_batch(&memory, &[valid, invalid]).is_err());
+    assert_eq!(Engine::sequence(&fjall).unwrap(), 0);
+    assert_eq!(Engine::sequence(&memory).unwrap(), 0);
+    assert!(Engine::subjects(&fjall).unwrap().is_empty());
+    assert!(Engine::subjects(&memory).unwrap().is_empty());
+}
+
+#[test]
+fn assert_retires_the_previous_claim_atomically() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(dir.path()).unwrap();
+    let first = claim("wp3", "status", "failing", 100);
+    let mut second = claim("wp3", "status", "passing", 200);
+    second.tx_time = 250;
+    Engine::assert(&store, &first).unwrap();
+    Engine::assert(&store, &second).unwrap();
+    let history = store.history(&first.subject, &first.predicate).unwrap();
+    let retired = history.iter()
+        .find(|candidate| candidate.object == "failing" && candidate.valid_to == Some(200))
+        .expect("retirement correction is retained in history");
+    assert_eq!(retired.tx_time, 250);
+    assert_eq!(store.as_of(&first.subject, &first.predicate, 150).unwrap().unwrap().object, "failing");
+    assert_eq!(store.as_of(&first.subject, &first.predicate, 250).unwrap().unwrap().object, "passing");
 }
 
 /// Object-safe loading helper so both engines take the corpus through the

@@ -10,7 +10,9 @@
 //! compaction and the preflight re-injects.
 
 use crate::registry::{Registry, Verification};
+use crate::routing::{ensure_routing_fresh, RoutingReady};
 use crate::stack;
+use crate::InstanceBinding;
 use vyrm_core::{recall, Millis, Reader, RecallQuery};
 use vyrm_store::{Effectiveness, Engine, ProjectionStatus, RecallOutcome};
 
@@ -19,6 +21,10 @@ use vyrm_store::{Effectiveness, Engine, ProjectionStatus, RecallOutcome};
 #[derive(Debug)]
 pub struct Preflight {
     pub stacks: Vec<&'static str>,
+    /// Persisted source-routing state established before recall is injected.
+    /// `None` means freshness could not be established and `warnings` says
+    /// why; the pre-tool gate will deny mutation under the same condition.
+    pub routing: Option<RoutingReady>,
     /// Estate and adapter warnings, already included in `context`.
     pub warnings: Vec<String>,
     /// The rendered injection: warnings, then recalled claims with
@@ -40,11 +46,28 @@ pub fn preflight<E: Engine>(
     now: Millis,
     budget: usize,
 ) -> Result<Preflight, Box<dyn std::error::Error>> {
+    let binding = InstanceBinding::discover(root)?;
+    binding.require_runtime_ready()?;
+    let root = binding.project_root.as_path();
+
     // Runtime stacks plus the framework facet: `bun+vite+tanstack-start`
     // tells the agent what it landed in before it reads a single file.
     let mut stacks: Vec<&'static str> = stack::detect(root).iter().map(|s| s.name).collect();
     stacks.extend(stack::frameworks(root));
     let mut warnings = Vec::new();
+
+    // Source routing is part of attunement, not an optional command the model
+    // must remember to run. Preflight remains available for recall if this
+    // fails, but makes the failure loud; the pre-tool barrier fails closed.
+    let routing = match ensure_routing_fresh(store, root) {
+        Ok(ready) => Some(ready),
+        Err(error) => {
+            warnings.push(format!(
+                "source-routing freshness could not be established: {error}"
+            ));
+            None
+        }
+    };
 
     // Estate health: a quarantined projection is surfaced, and recall
     // proceeds from the authoritative claims keyspace regardless — the gate
@@ -82,7 +105,11 @@ pub fn preflight<E: Engine>(
     }
 
     let subjects = store.subjects()?;
-    let query = RecallQuery { subjects, predicates: None, as_of: now };
+    let query = RecallQuery {
+        subjects,
+        predicates: None,
+        as_of: now,
+    };
     let set = recall(store, &query, budget)?;
     for claim in &set.claims {
         store.observe(reader, &claim.subject, &claim.predicate, now)?;
@@ -91,11 +118,22 @@ pub fn preflight<E: Engine>(
     let mut lines = Vec::new();
     lines.push(format!(
         "[vyrm] preflight: stack={}; {} claim(s) in force, ~{} token(s){}",
-        if stacks.is_empty() { "none detected".to_string() } else { stacks.join("+") },
+        if stacks.is_empty() {
+            "none detected".to_string()
+        } else {
+            stacks.join("+")
+        },
         set.claims.len(),
         set.token_estimate,
-        if set.truncated { ", TRUNCATED by budget" } else { "" },
+        if set.truncated {
+            ", TRUNCATED by budget"
+        } else {
+            ""
+        },
     ));
+    if let Some(ready) = &routing {
+        lines.push(format!("[vyrm] routing: {}", ready.render()));
+    }
     for warning in &warnings {
         lines.push(format!("[vyrm] WARNING: {warning}"));
     }
@@ -117,7 +155,9 @@ pub fn preflight<E: Engine>(
         tokens_emitted: set.token_estimate as u64,
         baseline_tokens: None,
         baseline_mode: None,
-        provider: harness.map(|h| format!("harness:{h}")).unwrap_or_else(|| "operator:cli".into()),
+        provider: harness
+            .map(|h| format!("harness:{h}"))
+            .unwrap_or_else(|| "operator:cli".into()),
         outcome: RecallOutcome::Unknown,
     };
 
@@ -128,5 +168,11 @@ pub fn preflight<E: Engine>(
         warnings = warnings.len(),
         "preflight"
     );
-    Ok(Preflight { stacks, warnings, context: lines.join("\n"), effectiveness })
+    Ok(Preflight {
+        stacks,
+        routing,
+        warnings,
+        context: lines.join("\n"),
+        effectiveness,
+    })
 }

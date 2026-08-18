@@ -53,6 +53,7 @@ fn verification_is_a_bitemporal_claim_that_expires_and_makes_noise() {
 #[test]
 fn preflight_surfaces_the_expired_adapter_at_a_fixed_instant() {
     let dir = tempfile::tempdir().unwrap();
+    vyrm_node::InstanceManifest::ensure_dedicated(dir.path()).unwrap();
     let store = Store::open(dir.path()).unwrap();
     let registry = Registry::builtin();
     registry

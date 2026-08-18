@@ -3,7 +3,7 @@
 | Field | Value |
 |-------|-------|
 | Status | Draft. Pre-release. Subject to revision without migration guarantees. |
-| Substrate | Fjall 3.1.8 (MIT OR Apache-2.0), embedded LSM key-value store |
+| Current compatibility substrate | Fjall 3.1.8; transitional until the Vyrm-native engine reaches conformance and performance parity |
 | Scope | Tier 0 only: development-time persistence and recall for a single operator |
 | Supersedes | Nothing. Extends `docs/architecture-journal.md` and `automaton/docs/00-abstract-layer.md`. |
 
@@ -40,8 +40,8 @@ under "Not" MUST NOT appear in vyrm source, documentation, or API surface.
 | **promotion** | A claim crossing a tier boundary by satisfying a gate. | publish, sync, escalation |
 | **recall** | Retrieval of claims for supply to a model context. | retrieval, lookup, fetch, search |
 | **recall set** | The result of a recall: claims plus provenance and a content digest. | context block, payload |
-| **substrate** | The embedded storage engine (Fjall). | engine, backend, database, wrapper, store |
-| **keyspace** | A Fjall 3.x keyspace: one LSM tree within one database. Named a *partition* prior to Fjall 3.0. | table, column family, bucket |
+| **substrate** | The persistence implementation behind the Vyrm storage port; currently the transitional Fjall adapter, ultimately Vyrm-native. | engine, backend, database, wrapper, store |
+| **keyspace** | A logical isolated ordered key-value space. The compatibility adapter maps it to a Fjall 3.x keyspace. | table, column family, bucket |
 | **durability class** | The persistence policy assigned to a keyspace. | sync mode, flush policy |
 | **port** | A trait the kernel defines for an external implementation. | interface, hook |
 | **adapter** | An implementation of a port. | driver, plugin, binding, client |
@@ -58,9 +58,10 @@ MUST cite the date and host on which they were obtained.
 
 ## 2 · Position
 
-vyrm is a semantic layer over a commodity substrate. vyrm is not a storage engine
-and MUST NOT be described as one in any documentation, API surface, or external
-communication.
+vyrm owns both its semantic contract and the target persistence architecture.
+The current release runs over a commodity compatibility substrate while a
+Vyrm-native substrate is built behind the same port. Fjall MUST NOT be described
+as the permanent architecture.
 
 Measured on `warden-devstation-01`, 2026-08-09:
 
@@ -70,16 +71,19 @@ Measured on `warden-devstation-01`, 2026-08-09:
 | Transport plus one substrate point read | 0.135 ms | Substrate: 0.004 ms / 2.8 % |
 | Transport plus three inserts and two fsync | 0.562 ms | Durability: 0.431 ms |
 
-The substrate accounts for 4 µs of a 135 µs read. There is no measured substrate
-deficiency, and therefore no basis for replacing it.
+The compatibility substrate accounts for 4 µs of a 135 µs read in this historical
+point-read measurement. That result remains a baseline for the native engine; it
+does not veto workloads or structures optimized for AI runtime persistence.
 
-Qdrant replaced RocksDB with Gridstore in v1.13 only after measuring a specific
-workload mismatch: compaction-induced latency variance on sequential integer keys.
-An equivalent measurement MUST exist before vyrm considers substrate replacement.
+The Vyrm-native engine MUST preserve the cross-adapter conformance differential
+and MUST meet or beat the compatibility substrate on representative runtime
+workloads: latency distribution, throughput, durability, crash recovery, and
+memory use. Performance claims require retained measurements.
 
-This requirement extends the Lance comparison guardrail recorded in
-`docs/architecture-journal.md` from capability claims to naming: adopt the
-semantics, do not claim the substrate.
+Existing Fjall and external-system measurements remain comparison evidence.
+They are not architectural ownership boundaries and do not prohibit native
+implementation of capabilities covered by the project's recorded permissions
+and provenance.
 
 ## 3 · Kernel API
 

@@ -13,7 +13,8 @@
 //! (`vyrm-core/fixtures/golden-vectors.json` is the cross-language proof)
 //! and the semantic layer above it is a translation, not a redesign.
 //!
-//! Two engines ship in Rust: [`Store`] (Fjall — the measured default) and
+//! Two engines ship in Rust today: [`Store`] (the transitional Fjall
+//! compatibility adapter) and
 //! [`MemoryEngine`] (the reference, for conformance differentials per
 //! standing rule 3). Cache tiers (Moka in-process, Dragonfly shared)
 //! compose *around* an engine rather than implementing this trait: they
@@ -26,10 +27,14 @@ use crate::projection::{
     CURRENT_PROJECTION,
 };
 use crate::store::{AppendOutcome, Store};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Mutex;
 use vyrm_core::reference::MemoryClaims;
-use vyrm_core::{Claim, ClaimSource, Millis, Predicate, Reader, Subject};
+use vyrm_core::{
+    resolve_as_of, Claim, ClaimSource, Millis, Predicate, Reader, RuntimeChange,
+    RuntimeChangePage, RuntimeCommit, RuntimeCommitOutcome, RuntimeMutation, RuntimeRef, ScopeId,
+    Subject,
+};
 
 pub trait Engine: ClaimSource<Error = Error> {
     // ---- primitives every backend supplies ----
@@ -63,11 +68,34 @@ pub trait Engine: ClaimSource<Error = Error> {
     fn put_projection_with(&self, name: &str, bytes: &[u8], durability: Durability)
         -> Result<()>;
 
+    /// Current global cursor of the authoritative typed runtime log.
+    fn runtime_cursor(&self) -> Result<u64>;
+
+    /// Atomically commits typed runtime mutations with exact-cursor conflict
+    /// detection. Embedded claims join the same storage transaction.
+    fn commit_runtime(&self, commit: &RuntimeCommit) -> Result<RuntimeCommitOutcome>;
+
+    /// Reads a bounded, resumable page of runtime changes.
+    fn runtime_changes_since(
+        &self,
+        after: u64,
+        limit: usize,
+        scope: Option<&ScopeId>,
+    ) -> Result<RuntimeChangePage>;
+
     // ---- provided: the semantic layer every engine inherits ----
 
     /// Appends a single claim. Equivalent to a batch of one.
     fn assert(&self, claim: &Claim) -> Result<AppendOutcome> {
-        self.append_batch(std::slice::from_ref(claim))
+        let candidates = self.versions_at_or_before(&claim.subject, &claim.predicate, claim.valid_from)?;
+        let previous = resolve_as_of(&candidates, claim.valid_from).cloned();
+        match previous {
+            Some(previous) if previous.valid_from < claim.valid_from => {
+                let pair = vyrm_core::supersede(&previous, claim.clone())?;
+                self.append_batch(&pair)
+            }
+            _ => self.append_batch(std::slice::from_ref(claim)),
+        }
     }
 
     /// [`Engine::put_projection_with`] at the Buffered default: a projection
@@ -210,6 +238,20 @@ impl Engine for Store {
     fn put_projection_with(&self, name: &str, bytes: &[u8], durability: Durability) -> Result<()> {
         Store::put_projection_with(self, name, bytes, durability)
     }
+    fn runtime_cursor(&self) -> Result<u64> {
+        Store::runtime_cursor(self)
+    }
+    fn commit_runtime(&self, commit: &RuntimeCommit) -> Result<RuntimeCommitOutcome> {
+        Store::commit_runtime(self, commit)
+    }
+    fn runtime_changes_since(
+        &self,
+        after: u64,
+        limit: usize,
+        scope: Option<&ScopeId>,
+    ) -> Result<RuntimeChangePage> {
+        Store::runtime_changes_since(self, after, limit, scope)
+    }
 }
 
 /// The reference engine: `MemoryClaims` plus the primitives, behind a
@@ -228,6 +270,8 @@ struct MemoryEngineInner {
     order: Vec<Claim>,
     projections: BTreeMap<String, Vec<u8>>,
     observes: u64,
+    runtime_changes: Vec<RuntimeChange>,
+    runtime_records: BTreeSet<(ScopeId, RuntimeRef)>,
 }
 
 impl MemoryEngine {
@@ -274,6 +318,9 @@ fn infallible<T>(result: std::result::Result<T, std::convert::Infallible>) -> T 
 impl Engine for MemoryEngine {
     fn append_batch(&self, claims: &[Claim]) -> Result<AppendOutcome> {
         let mut inner = self.inner.lock().expect("engine mutex");
+        // Match Fjall rollback: reject the whole batch before mutating either
+        // authoritative collection if any member is invalid.
+        for claim in claims { claim.validate()?; }
         let start = inner.order.len() as u64;
         for claim in claims {
             inner.claims.insert(claim.clone())?;
@@ -327,5 +374,128 @@ impl Engine for MemoryEngine {
             .projections
             .insert(name.to_owned(), bytes.to_vec());
         Ok(())
+    }
+
+    fn runtime_cursor(&self) -> Result<u64> {
+        Ok(self.inner.lock().expect("engine mutex").runtime_changes.len() as u64)
+    }
+
+    fn commit_runtime(&self, commit: &RuntimeCommit) -> Result<RuntimeCommitOutcome> {
+        commit.validate()?;
+        let mut inner = self.inner.lock().expect("engine mutex");
+        let start = inner.runtime_changes.len() as u64;
+        if start != commit.expected_cursor {
+            return Err(Error::RuntimeConflict {
+                expected: commit.expected_cursor,
+                actual: start,
+            });
+        }
+        let new_records = commit
+            .mutations
+            .iter()
+            .filter_map(|mutation| match mutation {
+                RuntimeMutation::Record { record } => Some(record.reference.clone()),
+                _ => None,
+            })
+            .collect::<BTreeSet<_>>();
+        for mutation in &commit.mutations {
+            let references: Vec<&RuntimeRef> = match mutation {
+                RuntimeMutation::Relation { relation } => vec![&relation.from, &relation.to],
+                RuntimeMutation::Event { event } => event.subject.iter().collect(),
+                RuntimeMutation::Claim { .. } | RuntimeMutation::Record { .. } => Vec::new(),
+            };
+            for reference in references {
+                if !new_records.contains(reference)
+                    && !inner.runtime_records.contains(&(commit.scope.clone(), reference.clone()))
+                {
+                    return Err(Error::DanglingRuntimeReference(format!(
+                        "{}/{} in scope {}",
+                        reference.kind, reference.id, commit.scope
+                    )));
+                }
+            }
+        }
+
+        let claims = commit
+            .mutations
+            .iter()
+            .filter_map(|mutation| match mutation {
+                RuntimeMutation::Claim { claim } => Some(claim.clone()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        for claim in &claims {
+            claim.validate()?;
+        }
+        let claim_start = inner.order.len() as u64;
+        for claim in claims.iter().cloned() {
+            inner.claims.insert(claim.clone())?;
+            inner.order.push(claim);
+        }
+
+        let commit_id = commit.digest();
+        let mut previous_digest = inner.runtime_changes.last().map(|change| change.digest.clone());
+        let mut committed = Vec::with_capacity(commit.mutations.len());
+        for (ordinal, mutation) in commit.mutations.iter().cloned().enumerate() {
+            let change = RuntimeChange::committed(
+                start + ordinal as u64 + 1,
+                commit,
+                &commit_id,
+                ordinal as u64,
+                mutation,
+                previous_digest.clone(),
+            );
+            previous_digest = Some(change.digest.clone());
+            committed.push(change);
+        }
+        for mutation in &commit.mutations {
+            if let RuntimeMutation::Record { record } = mutation {
+                inner.runtime_records.insert((commit.scope.clone(), record.reference.clone()));
+            }
+        }
+        inner.runtime_changes.extend(committed);
+        let claim_count = claims.len();
+        Ok(RuntimeCommitOutcome {
+            commit_id,
+            first_cursor: start + 1,
+            last_cursor: inner.runtime_changes.len() as u64,
+            count: commit.mutations.len(),
+            first_claim_sequence: (claim_count > 0).then_some(claim_start + 1),
+            last_claim_sequence: (claim_count > 0).then_some(claim_start + claim_count as u64),
+        })
+    }
+
+    fn runtime_changes_since(
+        &self,
+        after: u64,
+        limit: usize,
+        scope: Option<&ScopeId>,
+    ) -> Result<RuntimeChangePage> {
+        if limit == 0 {
+            return Err(Error::Substrate("runtime change page limit must be greater than zero".into()));
+        }
+        let inner = self.inner.lock().expect("engine mutex");
+        let head = inner.runtime_changes.len() as u64;
+        if after == u64::MAX || after >= head {
+            return Ok(RuntimeChangePage {
+                requested_after: after,
+                through_cursor: after,
+                head_cursor: head,
+                changes: Vec::new(),
+            });
+        }
+        let end = (after as usize).saturating_add(limit).min(inner.runtime_changes.len());
+        let examined = &inner.runtime_changes[after as usize..end];
+        let changes = examined
+            .iter()
+            .filter(|change| scope.is_none_or(|scope| scope == &change.scope))
+            .cloned()
+            .collect();
+        Ok(RuntimeChangePage {
+            requested_after: after,
+            through_cursor: end as u64,
+            head_cursor: head,
+            changes,
+        })
     }
 }

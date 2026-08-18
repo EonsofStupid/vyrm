@@ -25,12 +25,23 @@ pub const INVOCATIONS: &str = "invocations";
 /// Derived projections (the routing index among them). Derivable from their
 /// sources by construction, so loss on crash costs a rebuild, not truth.
 pub const PROJECTIONS: &str = "projections";
+/// Authoritative append-only runtime change log, keyed by global cursor.
+pub const RUNTIME_CHANGES: &str = "runtime_changes";
+/// Latest persisted version of each typed runtime record. Updated atomically
+/// with the authoritative change log and used for reference-integrity checks.
+pub const RUNTIME_RECORDS: &str = "runtime_records";
+/// Latest persisted version of each typed runtime relation.
+pub const RUNTIME_RELATIONS: &str = "runtime_relations";
 
 /// Key under which the claim sequence watermark is recorded.
 pub const SEQUENCE_WATERMARK: &[u8] = b"watermark/claims/sequence";
 
 /// Key under which the invocation ordinal watermark is recorded.
 pub const INVOCATION_WATERMARK: &[u8] = b"watermark/invocations/ordinal";
+
+/// Global cursor and hash-chain head for typed runtime changes.
+pub const RUNTIME_CURSOR: &[u8] = b"watermark/runtime/cursor";
+pub const RUNTIME_LAST_DIGEST: &[u8] = b"watermark/runtime/last-digest";
 
 /// Persistence policy for a write transaction.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

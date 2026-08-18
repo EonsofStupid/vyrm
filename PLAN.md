@@ -2,12 +2,55 @@
 
 | Field | Value |
 |-------|-------|
-| Status | Draft. Grounding result re-run 2026-08-10 after Step 1. |
+| Status | Runtime completion pass landed 2026-08-18; historical execution journal retained below. |
 | Governs | Sequencing and acceptance of work against `SPEC.md` |
 | Does not govern | Contracts, terminology, or requirements. Those are `SPEC.md` only. |
 
 This document sequences work. It does not restate requirements. Where the two
 disagree, `SPEC.md` is authoritative and this document is wrong.
+
+> **Current-state overlay (2026-08-18).** The original grounding table below is
+> retained as historical evidence and is not the current status board. The
+> completed runtime now includes `vyrm-node`, persisted graph freshness,
+> hash-chained reasoning runs, deny-by-default contract differentials, `vyrmd`
+> MCP, controlled provider evaluations, and CI regression checks. See
+> `STATUS.md` for current state and `eval/results/2026-08-18-summary.json` for
+> measured evaluation evidence.
+
+> **Instance-topology overlay (2026-08-18).** vyrm/connectome is rolled out as
+> an isolated, platform-molded instance for each major platform. Related small
+> projects may use an explicitly configured umbrella instance. There is no
+> implicit estate-wide store. The active follow-on is to enforce this boundary
+> with a versioned instance manifest and scoped runtime state. SurrealDB and
+> Qdrant capability adoption is postponed. See `docs/instance-topology.md`.
+
+> **Prompt-flight overlay (2026-08-18).** Connectome now records controlled
+> fresh/pruned/full prompt flights. Fresh means a new provider session with zero
+> injected Vyrm context; it never deletes the authoritative claim or reasoning
+> ledgers. Each externally observable micro-event is replayable, and exact
+> prompts form comparison cohorts. The next evidence pass is repeated vague-
+> prompt trials with non-trivial acceptance markers, not additional UI chrome.
+> See `docs/prompt-flight-experiments.md`.
+
+> **Temporal runtime-graph overlay (2026-08-18).** Vyrm now persists typed
+> records, relations, claims, and lifecycle events through one atomic
+> `RuntimeCommit`. Every mutation receives a monotonic global cursor and joins a
+> verified hash chain; stale expected cursors fail rather than overwrite.
+> Reasoning and prompt-flight ledgers have moved from whole-projection rewrites
+> to this append-only log. Connectome exposes cursor replay, graph-at-time, and
+> graph differential endpoints. This work deliberately excludes BM25,
+> embeddings, and semantic retrieval. Remaining work is a strict persisted
+> schema registry, content-addressed artifact bytes/backreferences, incremental
+> grounded graph lenses, and member-scoped authorization. See
+> `docs/runtime-graph.md`.
+
+> **Native-engine decision (2026-08-18).** Fjall is transitional and will be
+> removed in favor of a Vyrm-native substrate. Existing Fjall measurements and
+> tests remain comparison evidence, not an architectural veto. The
+> `vyrm_store::Engine` differential is now the migration harness: the native
+> engine must preserve wire/temporal/runtime semantics and meet or beat the
+> compatibility adapter on latency, throughput, durability, recovery, and
+> memory. Licensing is not the optimization boundary; measured behavior is.
 
 ## 1 · Grounding result
 

@@ -32,7 +32,7 @@ pub struct RecallQuery {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RecallSet {
     pub claims: Vec<Claim>,
-    /// FNV-1a over the identifying fields of the included claims, in order.
+    /// SHA-256 over canonical bytes of every included claim, in order.
     /// Two recalls with the same digest carry the same knowledge, so an
     /// unchanged recall can be retransmitted as a digest (`SPEC.md` §13.2).
     pub digest: String,
@@ -63,25 +63,15 @@ pub fn estimate_claim_tokens(claim: &Claim) -> usize {
     bytes.div_ceil(ESTIMATED_BYTES_PER_TOKEN)
 }
 
-/// FNV-1a 64 over the identifying fields of the included claims, in order.
 fn digest(claims: &[Claim]) -> String {
-    let mut hash: u64 = 0xcbf29ce484222325;
-    let mut eat = |bytes: &[u8]| {
-        for byte in bytes {
-            hash ^= *byte as u64;
-            hash = hash.wrapping_mul(0x100000001b3);
-        }
-        hash ^= 0x1f; // field separator folded into the stream
-        hash = hash.wrapping_mul(0x100000001b3);
-    };
+    let mut bytes = b"vyrm-recall-v1\0".to_vec();
+    bytes.extend_from_slice(&(claims.len() as u64).to_be_bytes());
     for claim in claims {
-        eat(claim.subject.as_str().as_bytes());
-        eat(claim.predicate.as_str().as_bytes());
-        eat(claim.object.as_bytes());
-        eat(&claim.valid_from.to_be_bytes());
-        eat(&claim.tx_time.to_be_bytes());
+        let canonical = claim.canonical_bytes();
+        bytes.extend_from_slice(&(canonical.len() as u64).to_be_bytes());
+        bytes.extend_from_slice(&canonical);
     }
-    format!("{hash:016x}")
+    crate::digest::sha256_hex(&bytes)
 }
 
 /// Resolves the claims in force for the query's subjects and fills the token
@@ -252,6 +242,19 @@ mod tests {
         assert_eq!(a.digest, b.digest, "a repeated subject must not change the content");
         let c = recall(&corpus(), &query(&["wp3", "wp9"], 250), 10_000).unwrap();
         assert_ne!(a.digest, c.digest, "different knowledge must not share a digest");
+    }
+
+    #[test]
+    fn digest_changes_when_recalled_provenance_changes() {
+        let original = corpus();
+        let a = recall(&original, &query(&["wp3"], 250), 10_000).unwrap();
+        let mut changed = MemoryClaims::new();
+        for mut claim in original.iter().cloned() {
+            claim.producer.session = Some("new-session".into());
+            changed.insert(claim).unwrap();
+        }
+        let b = recall(&changed, &query(&["wp3"], 250), 10_000).unwrap();
+        assert_ne!(a.digest, b.digest, "provenance is part of recalled knowledge");
     }
 
     #[test]

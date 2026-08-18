@@ -76,6 +76,12 @@ pub struct IndexedFile {
     /// Modification time and length, used to skip reading an unchanged file at
     /// all. This is where the refresh cost actually goes.
     pub mtime_secs: u64,
+    /// Sub-second component of the modification time. Older persisted indexes
+    /// deserialize with zero and are therefore read once before taking the fast
+    /// path. Whole-second timestamps plus length can miss a same-size rewrite
+    /// between two tool calls, which is not strong enough for a mutation gate.
+    #[serde(default)]
+    pub mtime_nanos: u32,
     pub byte_len: u64,
 }
 
@@ -124,7 +130,10 @@ pub struct Grounding {
 impl Grounding {
     pub fn render(&self) -> String {
         if self.agreed {
-            return format!("grounded: incremental index agrees with full rebuild ({} ms)", self.duration_ms);
+            return format!(
+                "grounded: incremental index agrees with full rebuild ({} ms)",
+                self.duration_ms
+            );
         }
         format!(
             "DIVERGENCE: {} stale, {} missing, {} differing — projection quarantined",
@@ -187,18 +196,17 @@ pub struct Index {
     generation: u64,
 }
 
-fn file_stats(path: &Path) -> (u64, u64) {
+fn file_stats(path: &Path) -> (u64, u32, u64) {
     std::fs::metadata(path)
         .map(|m| {
-            let secs = m
+            let modified = m
                 .modified()
                 .ok()
                 .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-                .map(|d| d.as_secs())
-                .unwrap_or(0);
-            (secs, m.len())
+                .unwrap_or_default();
+            (modified.as_secs(), modified.subsec_nanos(), m.len())
         })
-        .unwrap_or((0, 0))
+        .unwrap_or((0, 0, 0))
 }
 
 /// Lines mentioning each identifier-like term, lowercased.
@@ -258,11 +266,18 @@ fn extract_file(path: &Path, text: &str) -> IndexedFile {
     // Filename-level entity synthesis. Skipped when the file already declares
     // the name, so a real declaration line is never shadowed by line 1.
     if let Some(entity) = module_entity(path) {
-        if !occurrences.iter().any(|o| o.role == Role::Definition && o.name == entity) {
-            occurrences.push(Occurrence { name: entity, role: Role::Definition, line: 1 });
+        if !occurrences
+            .iter()
+            .any(|o| o.role == Role::Definition && o.name == entity)
+        {
+            occurrences.push(Occurrence {
+                name: entity,
+                role: Role::Definition,
+                line: 1,
+            });
         }
     }
-    let (mtime_secs, byte_len) = file_stats(path);
+    let (mtime_secs, mtime_nanos, byte_len) = file_stats(path);
     IndexedFile {
         path: path.to_path_buf(),
         language,
@@ -271,6 +286,7 @@ fn extract_file(path: &Path, text: &str) -> IndexedFile {
         terms: term_table(text),
         digest: digest(text.as_bytes()),
         mtime_secs,
+        mtime_nanos,
         byte_len,
     }
 }
@@ -280,6 +296,16 @@ impl Index {
     pub fn build(profile: &Profile) -> std::io::Result<Index> {
         let mut index = Index::default();
         index.refresh(profile)?;
+        Ok(index)
+    }
+
+    /// Builds an index while treating every unreadable indexable file as a
+    /// freshness failure. Runtime mutation gates use this variant: silently
+    /// omitting a file would turn an inability to establish freshness into an
+    /// allow decision.
+    pub fn build_strict(profile: &Profile) -> std::io::Result<Index> {
+        let mut index = Index::default();
+        index.refresh_strict(profile)?;
         Ok(index)
     }
 
@@ -295,6 +321,12 @@ impl Index {
         self.generation
     }
 
+    /// Indexed files in stable path order for read-only developer tooling.
+    /// Mutation remains available only through refresh/rebuild operations.
+    pub fn files(&self) -> impl Iterator<Item = &IndexedFile> {
+        self.files.values()
+    }
+
     /// Re-extracts only what changed.
     ///
     /// An unchanged file is identified by modification time and length and is
@@ -302,21 +334,45 @@ impl Index {
     /// proportional to what changed, not to the size of the repository.
     #[tracing::instrument(level = "debug", skip_all)]
     pub fn refresh(&mut self, profile: &Profile) -> std::io::Result<Refresh> {
+        self.refresh_with_policy(profile, false)
+    }
+
+    /// Refreshes with fail-closed read semantics for runtime enforcement.
+    /// The ordinary analytical API remains tolerant of unreadable files.
+    #[tracing::instrument(level = "debug", skip_all)]
+    pub fn refresh_strict(&mut self, profile: &Profile) -> std::io::Result<Refresh> {
+        self.refresh_with_policy(profile, true)
+    }
+
+    fn refresh_with_policy(&mut self, profile: &Profile, strict: bool) -> std::io::Result<Refresh> {
         let started = Instant::now();
         let mut report = Refresh::default();
         let present = profile.indexable_files()?;
         let present_set: BTreeSet<PathBuf> = present.iter().cloned().collect();
 
         for path in present {
-            let (mtime_secs, byte_len) = file_stats(&path);
+            let (mtime_secs, mtime_nanos, byte_len) = file_stats(&path);
             if let Some(existing) = self.files.get(&path) {
-                if existing.mtime_secs == mtime_secs && existing.byte_len == byte_len {
+                if existing.mtime_secs == mtime_secs
+                    && existing.mtime_nanos == mtime_nanos
+                    && existing.byte_len == byte_len
+                {
                     report.skipped_unread += 1;
                     continue;
                 }
             }
-            let Ok(text) = std::fs::read_to_string(&path) else {
-                continue; // binary or unreadable: skipped, not fatal
+            let text = match std::fs::read_to_string(&path) {
+                Ok(text) => text,
+                Err(error) if strict => {
+                    return Err(std::io::Error::new(
+                        error.kind(),
+                        format!(
+                            "cannot establish routing freshness for {}: {error}",
+                            path.display()
+                        ),
+                    ));
+                }
+                Err(_) => continue, // binary or unreadable: skipped, not fatal
             };
             let candidate = extract_file(&path, &text);
             match self.files.get(&path) {
@@ -515,8 +571,7 @@ impl Index {
     /// Routes a query to a ranked file list.
     #[tracing::instrument(level = "debug", skip(self))]
     pub fn route(&self, query: &str, limit: usize) -> Vec<RoutedFile> {
-        let definers: BTreeSet<PathBuf> =
-            self.definitions.get(query).cloned().unwrap_or_default();
+        let definers: BTreeSet<PathBuf> = self.definitions.get(query).cloned().unwrap_or_default();
         let definer_stems: Vec<String> = definers
             .iter()
             .filter_map(|p| p.file_stem())
@@ -568,7 +623,11 @@ impl Index {
                     score,
                     lines: file.lines,
                     centrality,
-                    justification: Justification { defines, reference_lines, imports_a_definer },
+                    justification: Justification {
+                        defines,
+                        reference_lines,
+                        imports_a_definer,
+                    },
                 });
             }
         }
@@ -578,7 +637,9 @@ impl Index {
                 .partial_cmp(&a.score)
                 .unwrap_or(std::cmp::Ordering::Equal)
                 .then_with(|| {
-                    b.centrality.partial_cmp(&a.centrality).unwrap_or(std::cmp::Ordering::Equal)
+                    b.centrality
+                        .partial_cmp(&a.centrality)
+                        .unwrap_or(std::cmp::Ordering::Equal)
                 })
                 .then_with(|| a.path.cmp(&b.path))
         });

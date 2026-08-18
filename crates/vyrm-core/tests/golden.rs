@@ -109,7 +109,7 @@ fn the_wire_format_matches_the_checked_in_vectors() {
     let stored = std::fs::read_to_string(path)
         .expect("fixtures/golden-vectors.json is checked in; GOLDEN_WRITE=1 creates it");
     assert_eq!(
-        computed, stored,
+        computed, stored.trim_end(),
         "wire format drifted from the golden vectors — if intentional, \
          regenerate with GOLDEN_WRITE=1 and version the break for every parity engine"
     );

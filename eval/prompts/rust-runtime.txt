@@ -1,0 +1,1 @@
+Runtime preflight says the routing projection is fresh and the current source declaration is the deciding evidence; stale prose must not override it. Read this repository using read-only tools. Return exactly one final line in the form ANSWER=<integer> for the current MAX_RETRIES value from authoritative source. Do not modify files.

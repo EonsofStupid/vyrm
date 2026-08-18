@@ -31,15 +31,28 @@
 //! are deterministic.
 
 pub mod claim;
+pub mod digest;
 pub mod error;
 pub mod ident;
 pub mod key;
 pub mod recall;
 pub mod reference;
+pub mod reasoning;
+pub mod runtime;
 pub mod temporal;
 
-pub use claim::{Claim, Millis, Producer, PromotionState, Tier};
+pub use claim::{supersede, Claim, Millis, Producer, PromotionState, Tier};
 pub use error::{Error, Result};
 pub use ident::{Predicate, Reader, Subject};
 pub use recall::{estimate_claim_tokens, recall, RecallQuery, RecallSet};
+pub use reasoning::{
+    Check, CheckStatus, DecisionKind, Evidence, ReasoningEvent, ReasoningPayload, ReasoningRun,
+    ReasoningState, RunOutcome,
+};
+pub use runtime::{
+    RuntimeChange, RuntimeChangePage, RuntimeCommit, RuntimeCommitOutcome, RuntimeEvent,
+    RuntimeGraphDiff, RuntimeGraphSnapshot, RuntimeId, RuntimeMutation, RuntimeProperties,
+    RuntimeRecord, RuntimeRecordChange, RuntimeRef, RuntimeRelation, RuntimeRelationChange,
+    RuntimeType, RuntimeValue, ScopeId,
+};
 pub use temporal::{changed_since, resolve_as_of, ClaimReader, ClaimSource};

@@ -1,0 +1,645 @@
+(() => {
+  'use strict';
+
+  const views = new Set(['overview', 'flight', 'graph', 'runs', 'claims', 'routes', 'activity']);
+  const initialView = location.hash.slice(1);
+  const state = {
+    data: null,
+    view: views.has(initialView) ? initialView : 'overview',
+    selected: null,
+    graphScope: 'local',
+    graphKinds: new Set(['instance', 'subject', 'claim', 'run', 'event', 'evidence', 'file', 'invocation', 'flight', 'flight_event']),
+    graphFocusKind: null,
+    flightId: null,
+    flightCursor: 0,
+    flightPlaying: false,
+    flightSpeed: 1,
+    flightDirection: 1,
+    flightTimer: null,
+    flightPollTimer: null,
+    refreshTimer: null,
+  };
+
+  const $ = (selector, root = document) => root.querySelector(selector);
+  const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
+  const escapeHtml = (value) => String(value ?? '')
+    .replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;').replaceAll("'", '&#039;');
+  const human = (value) => new Intl.NumberFormat().format(value ?? 0);
+  const ago = (millis) => {
+    const seconds = Math.max(0, Math.floor((Date.now() - millis) / 1000));
+    if (seconds < 5) return 'just now';
+    if (seconds < 60) return `${seconds}s ago`;
+    if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
+    return `${Math.floor(seconds / 3600)}h ago`;
+  };
+  const eventSummary = (event) => {
+    const payload = event.payload || {};
+    return payload.statement || payload.hypothesis || payload.summary || payload.rationale ||
+      (payload.checks ? `${payload.checks.length} verification check(s)` : payload.outcome || payload.kind);
+  };
+  const color = (kind) => ({
+    instance: '#8ce0ba', subject: '#75c9a6', claim: '#a7dfc7', run: '#b9a5f8',
+    event: '#8374be', evidence: '#79cdda', file: '#e8b86d', invocation: '#879087',
+    flight: '#f2f3ed', flight_event: '#d6c9ff'
+  }[kind] || '#879087');
+
+  async function load(silent = false) {
+    try {
+      const response = await fetch('/api/snapshot', { cache: 'no-store' });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
+      state.data = data;
+      $('#connection-dot').className = 'status-dot';
+      $('#connection-label').textContent = 'Local runtime';
+      if (!state.selected) {
+        const active = data.runs.find((run) => !run.complete);
+        state.selected = active ? `run:${active.id}` : `instance:${data.instance.id}`;
+      }
+      updateChrome();
+      render();
+      if (!silent) toast('Runtime snapshot refreshed');
+    } catch (error) {
+      $('#connection-dot').className = 'status-dot error';
+      $('#connection-label').textContent = 'Runtime unavailable';
+      if (!silent) toast(error.message, true);
+      if (!state.data) renderError(error.message);
+    }
+  }
+
+  async function pollFlights() {
+    if (!state.data || state.view !== 'flight') return;
+    try {
+      const response = await fetch('/api/flights', { cache: 'no-store' });
+      const flights = await response.json();
+      if (!response.ok) throw new Error(flights.error || `HTTP ${response.status}`);
+      const before = currentFlight()?.events.length || 0;
+      state.data.flights = flights;
+      $('#flight-count').textContent = flights.length;
+      const after = currentFlight()?.events.length || 0;
+      if (after !== before || !state.flightPlaying) renderFlight();
+    } catch (error) {
+      toast(error.message, true);
+    }
+  }
+
+  function updateChrome() {
+    const data = state.data;
+    $('.instance-title').textContent = data.instance.id;
+    $('.instance-title').classList.remove('skeleton');
+    $('.instance-meta').textContent = `${data.instance.mode} · ${data.instance.root}`;
+    $('#crumb-instance').textContent = data.instance.id;
+    $('#crumb-view').textContent = state.view;
+    $('#run-count').textContent = data.runs.length;
+    $('#flight-count').textContent = data.flights.length;
+    $('#claim-count').textContent = data.claims.length;
+    $('#file-count').textContent = data.files.length;
+    $('#snapshot-age').textContent = ago(data.generated_at);
+    $$('.nav-item').forEach((button) => button.classList.toggle('active', button.dataset.view === state.view));
+  }
+
+  function render() {
+    if (!state.data) return;
+    updateChrome();
+    const renderers = { overview: renderOverview, flight: renderFlight, graph: renderGraph, runs: renderRuns, claims: renderClaims, routes: renderRoutes, activity: renderActivity };
+    (renderers[state.view] || renderOverview)();
+    renderInspector();
+  }
+
+  function pageHead(title, description, extra = '') {
+    return `<header class="page-head"><div><div class="eyebrow">CONNECTOME / ${escapeHtml(state.view.toUpperCase())}</div><h1>${escapeHtml(title)}</h1><p>${escapeHtml(description)}</p></div>${extra}</header>`;
+  }
+
+  function renderOverview() {
+    const { health, runs, claims, invocations } = state.data;
+    const active = runs.find((run) => !run.complete);
+    const signals = [
+      ['mint', 'Current projection', health.projection_state, `watermark ${health.projection_watermark}`],
+      [health.routing_generation ? 'amber' : 'red', 'Source routing', health.routing_generation ? `generation ${health.routing_generation}` : 'projection absent', `${health.indexed_symbols} symbols`],
+      [active ? 'violet' : 'mint', 'Reasoning contract', active ? `${active.id} · ${active.state}` : 'no active run', `${runs.length} total run(s)`],
+      [health.last_grounded_at ? 'mint' : 'amber', 'Last grounding', health.last_grounded_at ? ago(health.last_grounded_at) : 'not yet grounded', 'differential evidence'],
+    ];
+    $('#main').innerHTML = pageHead('Runtime overview', 'A live, read-only view of the instance’s memory, reasoning contract, source projection, and operational evidence.', `<span class="badge ${health.state}"><span class="status-dot ${health.state === 'ready' ? '' : health.state}"></span>${health.state}</span>`) + `
+      <section class="metrics">
+        ${metric('Current claims', health.current_claims, `${health.subjects} subjects`)}
+        ${metric('Claim sequence', health.claim_sequence, `projection at ${health.projection_watermark}`)}
+        ${metric('Indexed source', health.indexed_files, `${health.indexed_symbols} symbols`)}
+        ${metric('Activity', invocations.length, `${runs.length} reasoning runs`)}
+      </section>
+      <section class="overview-grid">
+        <article class="panel"><div class="panel-head"><h2>Active reasoning run</h2><span>${active ? active.state : 'IDLE'}</span></div><div class="panel-body">${active ? timeline(active.events.slice(-7)) : empty('No active run', 'A goal begins the next externally auditable reasoning sequence.')}</div></article>
+        <article class="panel"><div class="panel-head"><h2>Runtime signals</h2><span>READ ONLY</span></div><div class="panel-body signal-list">${signals.map(([tone, name, detail, value]) => `<div class="signal-row"><span class="dot ${tone}"></span><div><div class="name">${escapeHtml(name)}</div><div class="detail">${escapeHtml(detail)}</div></div><div class="value">${escapeHtml(value)}</div></div>`).join('')}</div></article>
+        <article class="panel"><div class="panel-head"><h2>Recent claims</h2><span>${claims.length} CURRENT</span></div><div class="panel-body signal-list">${claims.slice(0, 6).map((claim) => `<button class="signal-row lens-row object-link" data-object="claim:${claim.id}"><span class="dot mint"></span><div><div class="name">${escapeHtml(claim.subject)} · ${escapeHtml(claim.predicate)}</div><div class="detail">${escapeHtml(claim.object)}</div></div><div class="value">${escapeHtml(claim.producer.actor)}</div></button>`).join('') || empty('No current claims', 'Record runtime knowledge through the existing claim surface.')}</div></article>
+        <article class="panel"><div class="panel-head"><h2>Recent activity</h2><span>${invocations.length} RECORDED</span></div><div class="panel-body signal-list">${invocations.slice(-6).reverse().map((item) => `<button class="signal-row lens-row object-link" data-object="invocation:${item.ordinal}"><span class="dot ${item.outcome === 'ok' ? 'mint' : 'red'}"></span><div><div class="name">${escapeHtml(item.command)}</div><div class="detail">${escapeHtml(item.detail || item.trigger)}</div></div><div class="value">${item.duration_ms} ms</div></button>`).join('') || empty('No activity', 'Every operator and lifecycle call will appear here.')}</div></article>
+      </section>`;
+    bindObjectLinks();
+  }
+
+  function metric(label, value, meta) {
+    return `<article class="metric-card"><div class="label">${escapeHtml(label)}</div><div class="value">${human(value)}</div><div class="meta">${escapeHtml(meta)}</div></article>`;
+  }
+
+  function empty(title, detail) {
+    return `<div class="empty-state"><div><strong>${escapeHtml(title)}</strong><span>${escapeHtml(detail)}</span></div></div>`;
+  }
+
+  function timeline(events) {
+    return `<div class="timeline">${events.map((event) => `<button class="timeline-event lens-row object-link" data-object="event:${event.run_id}:${event.ordinal}"><div><div class="event-kind">${escapeHtml(event.payload.kind)}</div><div class="event-summary">${escapeHtml(eventSummary(event))}</div><div class="event-meta">#${event.ordinal} · ${escapeHtml(event.actor)}</div></div></button>`).join('')}</div>`;
+  }
+
+  function currentFlight() {
+    const flights = state.data.flights || [];
+    if (!state.flightId && flights.length) state.flightId = flights[flights.length - 1].id;
+    return flights.find((flight) => flight.id === state.flightId) || flights[flights.length - 1] || null;
+  }
+
+  function renderFlight() {
+    const flight = currentFlight();
+    const enabled = state.data.capabilities.runners_enabled;
+    const providers = state.data.capabilities.providers || ['observe'];
+    $('#main').innerHTML = pageHead(
+      'Prompt flight recorder',
+      'Launch the same prompt through a fresh, pruned, or full context arm. Freeze any observable micro-event, expand it, and compare measured outcomes.',
+      `<div class="flight-head-actions"><button type="button" id="load-prompt-demo" class="demo-button">Load weak ↔ strong demo</button><span class="badge ${enabled ? 'ready' : 'attention'}">${enabled ? 'frontier runners armed' : 'observe mode'}</span></div>`
+    ) + `
+      <form id="flight-form" class="flight-composer">
+        <textarea id="flight-prompt" rows="3" maxlength="65536" placeholder="Post a prompt — vague prompts are useful here because each context arm is a controlled experiment." required></textarea>
+        <div class="flight-options">
+          <label><span>CONTEXT ARM</span><select id="flight-context"><option value="fresh">Fresh · zero injected context</option><option value="pruned" selected>Pruned · prompt matches only</option><option value="full">Full · preflight + prompt matches</option></select></label>
+          <label><span>PROVIDER</span><select id="flight-provider">${providers.map((provider) => `<option value="${escapeHtml(provider)}">${escapeHtml(provider === 'observe' ? 'Observe pipeline only' : provider)}</option>`).join('')}</select></label>
+          <label><span>CONTEXT BUDGET</span><input id="flight-budget" type="number" min="128" max="32000" value="1500"></label>
+          <label><span>ACCEPTANCE MARKER</span><input id="flight-acceptance" placeholder="optional output text"></label>
+          <button class="launch-button" type="submit"><span>Launch</span><b>↗</b></button>
+        </div>
+        <p class="composer-note">Fresh resets the provider session and injects zero Vyrm context; it never deletes authoritative history. Provider execution is read-only and must be explicitly armed at server startup.</p>
+      </form>
+      <div id="flight-stage">${flight ? flightExperience(flight) : empty('No prompt flights yet', 'Launch Observe pipeline only to inspect context assembly without spending a provider call.')}</div>`;
+    $('#flight-form').addEventListener('submit', launchFlight);
+    $('#load-prompt-demo').addEventListener('click', launchPromptDemo);
+    bindFlightControls(flight);
+  }
+
+  function flightExperience(flight) {
+    state.flightCursor = Math.min(state.flightCursor, Math.max(0, flight.events.length - 1));
+    const event = flight.events[state.flightCursor] || null;
+    const stages = ['prompt', 'context', 'recall', 'routing', 'model', 'tools', 'outcome'];
+    const activeStage = Math.max(0, stages.indexOf(event?.stage || 'prompt'));
+    const comparable = (state.data.flights || []).filter((candidate) => flight.comparison_id
+      ? candidate.comparison_id === flight.comparison_id
+      : candidate.cohort_id === flight.cohort_id);
+    const metrics = flight.metrics || {};
+    const burst = event ? signalVolume(event) : 0;
+    const payloadKeys = event && event.data && typeof event.data === 'object' ? Object.keys(event.data).slice(0, 6) : [];
+    return `
+      <section class="flight-switcher">
+        <div><span class="eyebrow">${flight.demo_role ? `${escapeHtml(flight.demo_role)} prompt demonstration` : `COHORT ${escapeHtml(flight.cohort_id.slice(0, 10))}`}</span><strong>${escapeHtml(flight.prompt)}</strong></div>
+        <select id="flight-select" aria-label="Recorded flight">${[...(state.data.flights || [])].reverse().map((candidate) => `<option value="${escapeHtml(candidate.id)}" ${candidate.id === flight.id ? 'selected' : ''}>${escapeHtml(candidate.demo_role || candidate.context_mode)} · ${escapeHtml(candidate.provider)} · ${escapeHtml(candidate.status)}</option>`).join('')}</select>
+      </section>
+      <section class="flight-metrics">
+        ${flightMetric('Context', metrics.context_tokens, 'tokens')}
+        ${flightMetric('Provider', (metrics.input_tokens ?? 0) + (metrics.output_tokens ?? 0), metrics.input_tokens == null ? 'unreported' : 'tokens')}
+        ${flightMetric('Tools', metrics.tool_calls, 'observable calls')}
+        ${flightMetric('Latency', metrics.latency_ms ?? '—', metrics.latency_ms == null ? 'in flight' : 'ms')}
+        ${flightMetric('Acceptance', metrics.acceptance_met == null ? '—' : metrics.acceptance_met ? 'met' : 'missed', escapeHtml(flight.status))}
+      </section>
+      <section class="flight-visual pos-${activeStage} ${flight.demo_role ? `demo-${escapeHtml(flight.demo_role)}` : ''}">
+        <div class="flight-aurora" aria-hidden="true"><i></i><i></i><i></i></div>
+        <div class="flight-rail"></div>
+        <div class="flight-particle" aria-hidden="true"><i></i></div>
+        <div class="flight-stages">${stages.map((stage, index) => `<button type="button" class="flight-node ${index < activeStage ? 'passed' : ''} ${index === activeStage ? 'active' : ''}" data-stage="${stage}"><span><i></i></span><b>${stage}</b><small>${flight.events.filter((item) => item.stage === stage).length}</small></button>`).join('')}</div>
+        <div class="event-burst burst-intensity-${burstLevel(burst)}" aria-hidden="true">${Array.from({ length: 12 }, (_, index) => `<i class="ray-${index}"></i>`).join('')}</div>
+        <div class="information-cloud" aria-hidden="true">${payloadKeys.map((key) => `<span>${escapeHtml(key.replaceAll('_', ' '))}</span>`).join('')}</div>
+        <div class="burst-map" aria-label="Information volume by event">${flight.events.map((item, index) => `<button type="button" data-burst-event="${index}" class="burst-column burst-${burstLevel(signalVolume(item))} ${index === state.flightCursor ? 'active' : ''}" aria-label="Freeze at event ${item.ordinal}: ${escapeHtml(item.label)}"><i></i><span>${item.ordinal}</span></button>`).join('')}</div>
+      </section>
+      <section class="flight-console">
+        <div class="playback-controls">
+          <button type="button" id="flight-start" class="transport-button" title="First event">|‹</button>
+          <button type="button" id="flight-rewind" class="transport-button" title="Rewind through time">◀ Rewind</button>
+          <button type="button" id="flight-play" class="transport-button primary" title="Play or freeze">${state.flightPlaying ? '❚❚ Freeze time' : '▶ Resume time'}</button>
+          <button type="button" id="flight-forward" class="transport-button" title="Fast-forward through time">Fast-forward ▶</button>
+          <button type="button" id="flight-end" class="transport-button" title="Latest event">›|</button>
+          <label class="scrubber"><span>#${event ? event.ordinal : 0}</span><input id="flight-scrub" type="range" min="0" max="${Math.max(0, flight.events.length - 1)}" value="${state.flightCursor}"><b>${flight.events.length} events</b></label>
+          <select id="flight-speed" aria-label="Playback speed"><option value="0.5" ${state.flightSpeed === .5 ? 'selected' : ''}>0.5×</option><option value="1" ${state.flightSpeed === 1 ? 'selected' : ''}>1×</option><option value="2" ${state.flightSpeed === 2 ? 'selected' : ''}>2×</option><option value="4" ${state.flightSpeed === 4 ? 'selected' : ''}>4×</option><option value="8" ${state.flightSpeed === 8 ? 'selected' : ''}>8×</option></select>
+        </div>
+        ${event ? microEvent(event, flight) : empty('Waiting for first event', 'The flight has been created but has not emitted an observable event.')}
+        <div class="event-filmstrip">${flight.events.map((item, index) => `<button type="button" data-flight-event="${index}" class="film-frame ${index === state.flightCursor ? 'active' : ''}"><span>${item.ordinal}</span><i class="stage-${escapeHtml(item.stage)}"></i><b>${escapeHtml(item.kind.replaceAll('_', ' '))}</b><small>+${human(item.elapsed_ms)} ms</small></button>`).join('')}</div>
+      </section>
+      ${comparison(comparable, flight)}`;
+  }
+
+  function signalVolume(event) {
+    return String(event?.detail || '').length + JSON.stringify(event?.data || {}).length;
+  }
+
+  function burstLevel(volume) {
+    return Math.max(1, Math.min(10, Math.ceil(volume / 38)));
+  }
+
+  function flightMetric(label, value, unit) {
+    return `<div><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong><small>${escapeHtml(unit)}</small></div>`;
+  }
+
+  function microEvent(event, flight) {
+    const before = flight.events[event.ordinal - 1];
+    const delta = before ? event.elapsed_ms - before.elapsed_ms : event.elapsed_ms;
+    const fields = event.data && typeof event.data === 'object' ? Object.keys(event.data) : [];
+    const stageEvents = flight.events.filter((candidate) => candidate.stage === event.stage).length;
+    return `<article class="micro-event">
+      <header><div><span class="eyebrow">FROZEN MICRO-EVENT · ${escapeHtml(event.stage)}</span><h2>${escapeHtml(event.label)}</h2></div><div class="event-clock"><strong>+${human(event.elapsed_ms)} ms</strong><span>Δ ${human(delta)} ms</span></div></header>
+      <div class="event-data-strip"><div><span>signal volume</span><strong>${human(signalVolume(event))} B</strong></div><div><span>typed fields</span><strong>${fields.length}</strong></div><div><span>stage events</span><strong>${stageEvents}</strong></div><div><span>timeline</span><strong>${event.ordinal + 1}/${flight.events.length}</strong></div></div>
+      <p>${escapeHtml(event.detail)}</p>
+      ${fields.length ? `<dl class="payload-breakdown">${fields.map((key) => `<div><dt>${escapeHtml(key.replaceAll('_', ' '))}</dt><dd>${escapeHtml(Array.isArray(event.data[key]) ? event.data[key].join(', ') : event.data[key])}</dd></div>`).join('')}</dl>` : ''}
+      <footer><span>${escapeHtml(event.kind)}</span><span>${new Date(event.at).toLocaleTimeString()}</span><button type="button" id="inspect-flight-event">Inspect raw event</button></footer>
+    </article>`;
+  }
+
+  function comparison(flights, selected) {
+    if (flights.length < 2) return `<section class="comparison-empty"><span class="eyebrow">BASELINE COMPARISON</span><p>Launch this exact prompt through another context arm to produce a paired comparison.</p></section>`;
+    const demos = flights.every((flight) => flight.demo_role);
+    const maxima = {
+      context: Math.max(...flights.map((flight) => flight.metrics.context_tokens || 0), 1),
+      tools: Math.max(...flights.map((flight) => flight.metrics.tool_calls || 0), 1),
+      latency: Math.max(...flights.map((flight) => flight.metrics.latency_ms || 0), 1),
+    };
+    const strong = flights.find((flight) => flight.demo_role === 'strong');
+    const weak = flights.find((flight) => flight.demo_role === 'weak');
+    const verdict = strong && weak
+      ? `The strong prompt used ${Math.round((1 - strong.metrics.context_tokens / weak.metrics.context_tokens) * 100)}% less context, ${weak.metrics.tool_calls - strong.metrics.tool_calls} fewer tool calls, and reached a verifiable outcome ${weak.metrics.latency_ms - strong.metrics.latency_ms} ms sooner.`
+      : 'Compare controlled arms using observable runtime cost and acceptance evidence.';
+    return `<section class="comparison-panel"><div class="panel-head"><h2>${demos ? 'Prompt quality differential' : 'Same-prompt baseline'}</h2><span>${flights.length} CONTROLLED TRACES</span></div><div class="comparison-grid">${flights.map((flight) => {
+      const tokens = (flight.metrics.input_tokens ?? 0) + (flight.metrics.output_tokens ?? 0);
+      return `<button type="button" data-compare-flight="${escapeHtml(flight.id)}" class="comparison-arm ${flight.id === selected.id ? 'selected' : ''} ${flight.demo_role ? `role-${escapeHtml(flight.demo_role)}` : ''}"><span>${escapeHtml(flight.demo_role || flight.context_mode)}</span><strong>${escapeHtml(flight.prompt)}</strong><div class="comparison-bars"><div><label>context <b>${human(flight.metrics.context_tokens)}</b></label><i class="level-${barLevel(flight.metrics.context_tokens, maxima.context)}"></i></div><div><label>tools <b>${human(flight.metrics.tool_calls)}</b></label><i class="level-${barLevel(flight.metrics.tool_calls, maxima.tools)}"></i></div><div><label>latency <b>${human(flight.metrics.latency_ms)} ms</b></label><i class="level-${barLevel(flight.metrics.latency_ms, maxima.latency)}"></i></div></div><dl><div><dt>provider tokens</dt><dd>${flight.metrics.input_tokens == null ? '—' : human(tokens)}</dd></div><div><dt>accepted</dt><dd>${flight.metrics.acceptance_met == null ? '—' : flight.metrics.acceptance_met ? 'yes' : 'no'}</dd></div></dl></button>`;
+    }).join('')}</div><p class="comparison-verdict">${escapeHtml(verdict)}</p></section>`;
+  }
+
+  function barLevel(value, maximum) {
+    return Math.max(1, Math.min(10, Math.ceil((Number(value || 0) / maximum) * 10)));
+  }
+
+  async function launchPromptDemo() {
+    const button = $('#load-prompt-demo');
+    button.disabled = true;
+    button.textContent = 'Building traces…';
+    try {
+      const response = await fetch('/api/demos/prompt-strength', { method: 'POST' });
+      const flights = await response.json();
+      if (!response.ok) throw new Error(flights.error || `HTTP ${response.status}`);
+      const strong = flights.find((flight) => flight.demo_role === 'strong') || flights[0];
+      state.flightId = strong.id;
+      state.flightCursor = 0;
+      state.flightPlaying = true;
+      state.flightDirection = 1;
+      await load(true);
+      toast('Weak and strong prompt traces created');
+    } catch (error) {
+      toast(error.message, true);
+      button.disabled = false;
+      button.textContent = 'Load weak ↔ strong demo';
+    }
+  }
+
+  async function launchFlight(event) {
+    event.preventDefault();
+    const button = $('.launch-button');
+    button.disabled = true;
+    button.querySelector('span').textContent = 'Preparing';
+    try {
+      const response = await fetch('/api/flights', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          prompt: $('#flight-prompt').value,
+          provider: $('#flight-provider').value,
+          context_mode: $('#flight-context').value,
+          budget: Number($('#flight-budget').value),
+          acceptance_marker: $('#flight-acceptance').value,
+        }),
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || `HTTP ${response.status}`);
+      state.flightId = result.id;
+      state.flightCursor = 0;
+      state.flightPlaying = true;
+      state.flightDirection = 1;
+      await load(true);
+      toast('Prompt flight launched');
+    } catch (error) {
+      toast(error.message, true);
+      button.disabled = false;
+      button.querySelector('span').textContent = 'Launch';
+    }
+  }
+
+  function bindFlightControls(flight) {
+    if (!flight) return;
+    $('#flight-select')?.addEventListener('change', (event) => {
+      state.flightId = event.target.value;
+      state.flightCursor = 0;
+      state.flightPlaying = false;
+      renderFlight();
+    });
+    $('#flight-play')?.addEventListener('click', () => {
+      state.flightPlaying = !state.flightPlaying;
+      renderFlight();
+      scheduleFlightStep();
+    });
+    $('#flight-start')?.addEventListener('click', () => freezeAt(0));
+    $('#flight-end')?.addEventListener('click', () => freezeAt(Math.max(0, flight.events.length - 1)));
+    $('#flight-rewind')?.addEventListener('click', () => playDirection(-1));
+    $('#flight-forward')?.addEventListener('click', () => playDirection(1));
+    $('#flight-scrub')?.addEventListener('input', (event) => freezeAt(Number(event.target.value)));
+    $('#flight-speed')?.addEventListener('change', (event) => { state.flightSpeed = Number(event.target.value); scheduleFlightStep(); });
+    $$('[data-flight-event]').forEach((button) => button.addEventListener('click', () => freezeAt(Number(button.dataset.flightEvent))));
+    $$('[data-burst-event]').forEach((button) => button.addEventListener('click', () => freezeAt(Number(button.dataset.burstEvent))));
+    $$('[data-stage]').forEach((button) => button.addEventListener('click', () => {
+      const index = flight.events.findIndex((event) => event.stage === button.dataset.stage);
+      if (index >= 0) freezeAt(index);
+    }));
+    $$('[data-compare-flight]').forEach((button) => button.addEventListener('click', () => {
+      state.flightId = button.dataset.compareFlight; state.flightCursor = 0; state.flightPlaying = false; renderFlight();
+    }));
+    $('#inspect-flight-event')?.addEventListener('click', () => select(`flight-event:${flight.id}:${state.flightCursor}`));
+    scheduleFlightStep();
+  }
+
+  function playDirection(direction) {
+    state.flightDirection = direction;
+    state.flightPlaying = true;
+    renderFlight();
+    scheduleFlightStep();
+  }
+
+  function freezeAt(index) {
+    state.flightPlaying = false;
+    state.flightCursor = index;
+    clearTimeout(state.flightTimer);
+    renderFlight();
+  }
+
+  function scheduleFlightStep() {
+    clearTimeout(state.flightTimer);
+    if (!state.flightPlaying || state.view !== 'flight') return;
+    state.flightTimer = setTimeout(() => {
+      const flight = currentFlight();
+      if (!flight) return;
+      const next = state.flightCursor + state.flightDirection;
+      if (next >= 0 && next < flight.events.length) {
+        state.flightCursor = next;
+        renderFlight();
+      } else if (state.flightDirection < 0 || !['preparing', 'running'].includes(flight.status)) {
+        state.flightPlaying = false;
+        renderFlight();
+      }
+    }, 850 / state.flightSpeed);
+  }
+
+  function renderGraph() {
+    const kinds = ['subject', 'claim', 'run', 'event', 'evidence', 'file', 'invocation', 'flight', 'flight_event'];
+    $('#main').innerHTML = pageHead('Runtime graph', 'Traverse local evidence neighborhoods by default. Switch to global only when orientation matters more than detail.') + `
+      <div class="toolbar"><div class="segmented"><button data-scope="local" class="${state.graphScope === 'local' ? 'active' : ''}">Local</button><button data-scope="global" class="${state.graphScope === 'global' ? 'active' : ''}">Global</button></div>${kinds.map((kind) => `<label class="filter-chip"><input type="checkbox" data-kind="${kind}" ${state.graphKinds.has(kind) ? 'checked' : ''}><span class="dot" style="background:${color(kind)}"></span>${kind}</label>`).join('')}</div>
+      <div id="graph-shell" class="graph-shell"><svg id="graph" role="img" aria-label="Runtime object graph"></svg><div class="graph-legend"><span>Scroll to zoom</span><span>Drag canvas to pan</span><span>Select for local graph</span></div><div id="graph-tip" class="graph-tip"></div></div>`;
+    $$('[data-scope]').forEach((button) => button.addEventListener('click', () => { state.graphScope = button.dataset.scope; renderGraph(); }));
+    $$('.filter-chip input').forEach((input) => input.addEventListener('change', () => { input.checked ? state.graphKinds.add(input.dataset.kind) : state.graphKinds.delete(input.dataset.kind); drawGraph(); }));
+    drawGraph();
+  }
+
+  function graphSubset() {
+    const allNodes = state.data.graph.nodes.filter((node) => node.kind === 'instance' || state.graphKinds.has(node.kind));
+    const allowed = new Set(allNodes.map((node) => node.id));
+    let edges = state.data.graph.edges.filter((edge) => allowed.has(edge.from) && allowed.has(edge.to));
+    if (state.graphScope === 'global' || !state.selected || !allowed.has(state.selected)) return { nodes: allNodes.slice(0, 180), edges };
+    const local = new Set([state.selected]);
+    for (let depth = 0; depth < 3; depth += 1) {
+      edges.forEach((edge) => {
+        if (local.has(edge.from)) local.add(edge.to);
+        if (local.has(edge.to)) local.add(edge.from);
+      });
+    }
+    const nodes = allNodes.filter((node) => local.has(node.id));
+    edges = edges.filter((edge) => local.has(edge.from) && local.has(edge.to));
+    return { nodes, edges };
+  }
+
+  function drawGraph() {
+    const svg = $('#graph');
+    if (!svg) return;
+    const shell = $('#graph-shell');
+    const width = shell.clientWidth || 900;
+    const height = shell.clientHeight || 600;
+    svg.setAttribute('viewBox', `0 0 ${width} ${height}`);
+    const graph = graphSubset();
+    const positions = layout(graph.nodes, width, height);
+    const ns = 'http://www.w3.org/2000/svg';
+    svg.replaceChildren();
+    const viewport = document.createElementNS(ns, 'g');
+    svg.append(viewport);
+    const edgeGroup = document.createElementNS(ns, 'g');
+    viewport.append(edgeGroup);
+    graph.edges.forEach((edge) => {
+      const from = positions.get(edge.from), to = positions.get(edge.to);
+      if (!from || !to) return;
+      const line = document.createElementNS(ns, 'line');
+      line.setAttribute('x1', from.x); line.setAttribute('y1', from.y);
+      line.setAttribute('x2', to.x); line.setAttribute('y2', to.y);
+      line.setAttribute('class', `graph-edge ${state.selected === edge.from || state.selected === edge.to ? 'highlight' : ''}`);
+      edgeGroup.append(line);
+    });
+    const nodeGroup = document.createElementNS(ns, 'g');
+    viewport.append(nodeGroup);
+    graph.nodes.forEach((node) => {
+      const p = positions.get(node.id);
+      const group = document.createElementNS(ns, 'g');
+      group.setAttribute('class', `graph-node ${state.selected === node.id ? 'selected' : ''}`);
+      group.setAttribute('transform', `translate(${p.x} ${p.y})`);
+      const circle = document.createElementNS(ns, 'circle');
+      circle.setAttribute('r', node.kind === 'instance' ? 13 : node.kind === 'run' ? 10 : 7);
+      circle.setAttribute('fill', color(node.kind));
+      const text = document.createElementNS(ns, 'text');
+      text.setAttribute('x', 11); text.setAttribute('y', 4);
+      text.textContent = node.label.length > 24 ? `${node.label.slice(0, 22)}…` : node.label;
+      group.append(circle, text);
+      group.addEventListener('click', () => { state.selected = node.id; renderInspector(); if (state.graphScope === 'local') drawGraph(); });
+      group.addEventListener('mouseenter', (event) => showTip(event, node));
+      group.addEventListener('mouseleave', hideTip);
+      nodeGroup.append(group);
+    });
+    enablePanZoom(svg, viewport);
+  }
+
+  function layout(nodes, width, height) {
+    const positions = new Map();
+    const buckets = Object.groupBy ? Object.groupBy(nodes, (node) => node.kind) : nodes.reduce((acc, node) => ((acc[node.kind] ||= []).push(node), acc), {});
+    const center = { x: width / 2, y: height / 2 };
+    const rings = { instance: 0, run: .20, event: .34, evidence: .47, subject: .45, claim: .58, flight: .24, flight_event: .39, file: .72, invocation: .83 };
+    Object.entries(buckets).forEach(([kind, list]) => {
+      const radius = Math.min(width, height) * (rings[kind] ?? .65);
+      list.forEach((node, index) => {
+        const offset = { run: -.8, event: -.35, evidence: .1, subject: 2.7, claim: 2.25, file: .6, invocation: 1.35 }[kind] ?? 0;
+        const angle = offset + (Math.PI * 2 * index / Math.max(1, list.length));
+        positions.set(node.id, { x: center.x + Math.cos(angle) * radius, y: center.y + Math.sin(angle) * radius });
+      });
+    });
+    return positions;
+  }
+
+  function enablePanZoom(svg, viewport) {
+    let scale = 1, x = 0, y = 0, dragging = false, last = null;
+    const apply = () => viewport.setAttribute('transform', `translate(${x} ${y}) scale(${scale})`);
+    svg.addEventListener('wheel', (event) => { event.preventDefault(); scale = Math.max(.35, Math.min(3, scale * (event.deltaY > 0 ? .9 : 1.1))); apply(); }, { passive: false });
+    svg.addEventListener('pointerdown', (event) => { if (event.target === svg) { dragging = true; last = event; svg.setPointerCapture(event.pointerId); } });
+    svg.addEventListener('pointermove', (event) => { if (!dragging) return; x += event.clientX - last.clientX; y += event.clientY - last.clientY; last = event; apply(); });
+    svg.addEventListener('pointerup', () => { dragging = false; });
+  }
+
+  function showTip(event, node) {
+    const tip = $('#graph-tip');
+    tip.innerHTML = `<strong>${escapeHtml(node.label)}</strong><span>${escapeHtml(node.kind)} · ${escapeHtml(node.detail)}</span>`;
+    tip.style.display = 'block'; tip.style.left = `${event.offsetX + 14}px`; tip.style.top = `${event.offsetY + 14}px`;
+  }
+  function hideTip() { const tip = $('#graph-tip'); if (tip) tip.style.display = 'none'; }
+
+  function renderRuns() {
+    const runs = [...state.data.runs].reverse();
+    $('#main').innerHTML = pageHead('Reasoning runs', 'The externally auditable goal → plan → attempt → observation → decision → verification → outcome contract.') + `<section class="run-list">${runs.map((run) => `<article class="run-card"><button class="run-summary lens-row object-link" data-object="run:${escapeHtml(run.id)}"><div><span class="badge ${run.complete ? 'ready' : 'attention'}">${run.complete ? 'complete' : 'active'}</span><h3>${escapeHtml(run.id)}</h3><p>${escapeHtml(run.state)} · ${run.events.length} recorded transition(s)</p></div></button><div class="run-events">${timeline(run.events)}</div></article>`).join('') || empty('No reasoning runs', 'Runs appear when the typed contract records its first goal.')}</section>`;
+    bindObjectLinks();
+  }
+
+  function renderClaims() {
+    const claims = state.data.claims;
+    $('#main').innerHTML = pageHead('Current claims', 'Bi-temporal assertions currently in force, with provenance and complete content identity.') + `<table class="data-table"><thead><tr><th>SUBJECT / PREDICATE</th><th>OBJECT</th><th>PRODUCER</th><th>VALID FROM</th><th>IDENTITY</th></tr></thead><tbody>${claims.map((claim) => `<tr data-object="claim:${claim.id}"><td class="object-cell"><strong>${escapeHtml(claim.subject)}</strong><span class="mono">${escapeHtml(claim.predicate)}</span></td><td><span class="truncate">${escapeHtml(claim.object)}</span></td><td>${escapeHtml(claim.producer.actor)}</td><td class="mono">${claim.valid_from}</td><td><code>${claim.id.slice(0, 10)}…</code></td></tr>`).join('')}</tbody></table>${claims.length ? '' : empty('No current claims', 'The authoritative log has no claims in force at this instant.')}`;
+    $$('[data-object]', $('#main')).forEach((row) => row.addEventListener('click', () => select(row.dataset.object)));
+  }
+
+  function renderRoutes() {
+    $('#main').innerHTML = pageHead('Source routes', 'Query the persisted routing projection. Results are complete files with visible ranking evidence, never detached fragments.') + `<form id="route-form" class="route-field"><input id="route-query" placeholder="Symbol, module, or concept" autocomplete="off"><button class="primary-button">Route source</button></form><div id="route-results" class="route-results">${empty('Enter a source query', `${state.data.health.indexed_files} files and ${state.data.health.indexed_symbols} symbols are indexed.`)}</div>`;
+    const global = $('#global-search').value.trim();
+    if (global) $('#route-query').value = global;
+    $('#route-form').addEventListener('submit', async (event) => { event.preventDefault(); await route($('#route-query').value); });
+  }
+
+  async function route(query) {
+    if (!query.trim()) return;
+    const target = $('#route-results');
+    target.innerHTML = empty('Routing…', 'Reading the persisted source projection.');
+    try {
+      const response = await fetch(`/api/route?query=${encodeURIComponent(query)}&limit=10`);
+      const results = await response.json();
+      if (!response.ok) throw new Error(results.error || `HTTP ${response.status}`);
+      target.innerHTML = results.length ? results.map((item, index) => `<button class="route-result lens-row object-link" data-object="file:${escapeHtml(item.path)}"><span class="route-rank">${index + 1}</span><div><strong>${escapeHtml(item.path)}</strong><p>${escapeHtml(renderJustification(item.justification))}</p></div><div class="route-score">${item.score.toFixed(1)}<br>${item.lines} lines</div></button>`).join('') : empty('No related files', 'The current projection found no definition or reference evidence for this query.');
+      bindObjectLinks();
+    } catch (error) { target.innerHTML = empty('Route unavailable', error.message); }
+  }
+
+  function renderJustification(value) {
+    const parts = [];
+    if (value.defines?.length) parts.push(`defines ${value.defines.join(', ')}`);
+    if (value.reference_lines) parts.push(`${value.reference_lines} reference line(s)`);
+    if (value.imports_a_definer) parts.push('imports a defining module');
+    return parts.join(' · ') || 'related source evidence';
+  }
+
+  function renderActivity() {
+    const items = [...state.data.invocations].reverse();
+    $('#main').innerHTML = pageHead('Runtime activity', 'Every operator and lifecycle invocation, including failures and recall-effectiveness evidence.') + `<table class="data-table"><thead><tr><th>#</th><th>COMMAND</th><th>TRIGGER</th><th>OUTCOME</th><th>DURATION</th><th>DETAIL</th></tr></thead><tbody>${items.map((item) => `<tr data-object="invocation:${item.ordinal}"><td class="mono">${item.ordinal}</td><td class="object-cell"><strong>${escapeHtml(item.command)}</strong><span class="mono">${new Date(item.at).toLocaleString()}</span></td><td>${escapeHtml(item.trigger)}</td><td><span class="badge ${item.outcome === 'ok' ? 'ready' : 'error'}">${item.outcome}</span></td><td class="mono">${item.duration_ms} ms</td><td><span class="truncate">${escapeHtml(item.detail || '—')}</span></td></tr>`).join('')}</tbody></table>${items.length ? '' : empty('No activity recorded', 'Runtime invocations will appear chronologically here.')}`;
+    $$('[data-object]', $('#main')).forEach((row) => row.addEventListener('click', () => select(row.dataset.object)));
+  }
+
+  function findObject(id) {
+    if (!id || !state.data) return null;
+    if (id.startsWith('claim:')) return state.data.claims.find((item) => `claim:${item.id}` === id);
+    if (id.startsWith('run:')) return state.data.runs.find((item) => `run:${item.id}` === id);
+    if (id.startsWith('event:')) return state.data.runs.flatMap((run) => run.events).find((item) => `event:${item.run_id}:${item.ordinal}` === id);
+    if (id.startsWith('file:')) return state.data.files.find((item) => `file:${item.path}` === id) || state.data.graph.nodes.find((item) => item.id === id);
+    if (id.startsWith('invocation:')) return state.data.invocations.find((item) => `invocation:${item.ordinal}` === id);
+    if (id.startsWith('flight-event:')) {
+      const [, , flightId, ordinal] = id.match(/^(flight-event):(.*):(\d+)$/) || [];
+      const flight = state.data.flights.find((item) => item.id === flightId);
+      return flight?.events[Number(ordinal)] || null;
+    }
+    return state.data.graph.nodes.find((item) => item.id === id);
+  }
+
+  function renderInspector() {
+    const object = findObject(state.selected);
+    if (!object) return;
+    const graphNode = state.data.graph.nodes.find((node) => node.id === state.selected);
+    const title = graphNode?.label || object.label || object.id || object.command || object.path || object.payload?.kind || 'Object';
+    $('#inspector-title').textContent = title;
+    const properties = inspectorProperties(object, graphNode);
+    $('#inspector-body').innerHTML = `<dl class="property-list">${properties.map(([name, value, cls = '']) => `<div class="property"><dt>${escapeHtml(name)}</dt><dd class="${cls}">${escapeHtml(value)}</dd></div>`).join('')}</dl><details><summary class="eyebrow">RAW OBJECT</summary><pre class="json-block">${escapeHtml(JSON.stringify(object, null, 2))}</pre></details>`;
+  }
+
+  function inspectorProperties(object, node) {
+    if (object.subject) return [['Type', 'claim'], ['Subject', object.subject], ['Predicate', object.predicate], ['Object', object.object], ['Producer', object.producer.actor], ['Valid interval', `${object.valid_from} → ${object.valid_to ?? 'open'}`], ['Transaction time', object.tx_time], ['Digest', object.id, 'digest']];
+    if (object.events) return [['Type', 'reasoning run'], ['Run', object.id], ['State', object.state], ['Complete', object.complete], ['Transitions', object.events.length]];
+    if (object.payload) return [['Type', 'reasoning event'], ['Transition', object.payload.kind], ['Run', object.run_id], ['Ordinal', object.ordinal], ['Actor', object.actor], ['Digest', object.digest, 'digest'], ['Summary', eventSummary(object)]];
+    if (object.command) return [['Type', 'invocation'], ['Command', object.command], ['Ordinal', object.ordinal], ['Trigger', object.trigger], ['Outcome', object.outcome], ['Duration', `${object.duration_ms} ms`], ['Detail', object.detail || '—']];
+    if (object.stage && object.kind) return [['Type', 'prompt flight event'], ['Stage', object.stage], ['Kind', object.kind], ['Ordinal', object.ordinal], ['Elapsed', `${object.elapsed_ms} ms`], ['Label', object.label], ['Detail', object.detail]];
+    if (object.path) return [['Type', 'indexed file'], ['Path', object.path], ['Language', object.language], ['Lines', object.lines], ['Symbols', object.symbols], ['Terms', object.terms]];
+    return [['Type', node?.kind || object.kind || 'object'], ['Identity', node?.id || object.id], ['State', node?.state || object.state || '—'], ['Detail', node?.detail || object.detail || '—']];
+  }
+
+  function select(id) {
+    state.selected = id;
+    renderInspector();
+    document.body.classList.remove('inspector-hidden');
+    $('#inspector').classList.remove('closed');
+    $('.app-shell').classList.remove('inspector-closed');
+  }
+
+  function bindObjectLinks() {
+    $$('.object-link').forEach((element) => element.addEventListener('click', () => select(element.dataset.object)));
+  }
+
+  function navigate(view, kind = null) {
+    state.view = view;
+    if (location.hash !== `#${view}`) history.pushState(null, '', `#${view}`);
+    state.graphFocusKind = kind;
+    if (kind) state.graphKinds = new Set(['instance', kind, ...(kind === 'run' ? ['event'] : kind === 'claim' ? ['subject'] : [])]);
+    render();
+    $('#main').focus();
+  }
+
+  function renderError(message) {
+    $('#main').innerHTML = pageHead('Runtime unavailable', 'The workbench could not read this local instance.') + empty('Connection failed', message);
+  }
+
+  function toast(message, error = false) {
+    const element = $('#toast');
+    element.textContent = message;
+    element.style.borderColor = error ? '#693d38' : '';
+    element.classList.add('show');
+    clearTimeout(toast.timer);
+    toast.timer = setTimeout(() => element.classList.remove('show'), 2200);
+  }
+
+  $$('.nav-item').forEach((button) => button.addEventListener('click', () => navigate(button.dataset.view)));
+  $$('.lens-row[data-view]').forEach((button) => button.addEventListener('click', () => navigate(button.dataset.view, button.dataset.kind)));
+  $('#refresh-button').addEventListener('click', () => load());
+  $('#inspector-toggle').addEventListener('click', () => { $('#inspector').classList.toggle('closed'); $('.app-shell').classList.toggle('inspector-closed'); });
+  $('#inspector-close').addEventListener('click', () => { $('#inspector').classList.add('closed'); $('.app-shell').classList.add('inspector-closed'); });
+  $('#global-search').addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') { navigate('routes'); setTimeout(() => route(event.target.value), 0); }
+    if (event.key === 'Escape') { event.target.value = ''; event.target.blur(); }
+  });
+  document.addEventListener('keydown', (event) => {
+    if (event.target.matches('input')) return;
+    const key = event.key.toLowerCase();
+    if (key === '/') { event.preventDefault(); $('#global-search').focus(); }
+    if (key === 'g') navigate('graph');
+    if (key === 'f') navigate('flight');
+    if (key === 'r') navigate('runs');
+    if (key === 'c') navigate('claims');
+    if (key === 'a') navigate('activity');
+    if (key === '1') navigate('overview');
+  });
+  window.addEventListener('hashchange', () => {
+    const view = location.hash.slice(1);
+    if (views.has(view) && view !== state.view) { state.view = view; render(); }
+  });
+
+  load(true);
+  state.refreshTimer = setInterval(() => load(true), 5000);
+  state.flightPollTimer = setInterval(pollFlights, 750);
+  setInterval(() => { if (state.data) $('#snapshot-age').textContent = ago(state.data.generated_at); }, 1000);
+})();

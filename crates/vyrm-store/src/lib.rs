@@ -1,6 +1,7 @@
 //! # vyrm-store
 //!
-//! Substrate adapter. Implements [`vyrm_core::ClaimSource`] over Fjall.
+//! Storage port and transitional Fjall compatibility adapter. The port is the
+//! contract the Vyrm-native substrate will implement and eventually replace.
 //!
 //! ## Corrections applied
 //!
@@ -40,4 +41,5 @@ pub use projection::{
     CURRENT_PROJECTION,
 };
 pub use store::{AppendOutcome, Store};
+pub use vyrm_core::{RuntimeChangePage, RuntimeCommitOutcome};
 pub use writer::{Writer, WriterConfig, WriterStats};

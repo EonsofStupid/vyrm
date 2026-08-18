@@ -1,0 +1,30 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Test workspace
+        run: cargo test --workspace --locked
+      - name: Deny warnings
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - name: Verify controlled evaluation evidence
+        run: cargo run --locked -p vyrm-eval -- verify eval/results/2026-08-18-summary.json
+      - name: Enforce kernel dependency boundary
+        run: |
+          tree="$(cargo tree --locked -p vyrm-core --edges normal --depth 1)"
+          printf '%s\n' "$tree"
+          test "$(printf '%s\n' "$tree" | tail -n +2 | wc -l)" -eq 1
+          printf '%s\n' "$tree" | tail -n 1 | grep -q 'serde v'

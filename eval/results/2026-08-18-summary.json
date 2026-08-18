@@ -1,0 +1,28 @@
+{
+  "date": "2026-08-18",
+  "design": "paired baseline/runtime, read-only subscription CLI runs",
+  "providers": ["codex", "claude"],
+  "repositories": ["rust-service", "ts-service"],
+  "scenarios": ["stale-evidence", "post-compaction"],
+  "trials": 8,
+  "successes": 8,
+  "paired_regressions": 0,
+  "retries": 0,
+  "total_latency_ms": 143167,
+  "trials_detail": [
+    {"provider":"claude","scenario":"stale-evidence","arm":"baseline","success":true,"input_tokens":136117,"output_tokens":1884,"tool_calls":7,"latency_ms":29437},
+    {"provider":"claude","scenario":"stale-evidence","arm":"runtime","success":true,"input_tokens":61573,"output_tokens":934,"tool_calls":1,"latency_ms":19066},
+    {"provider":"claude","scenario":"post-compaction","arm":"baseline","success":true,"input_tokens":102625,"output_tokens":755,"tool_calls":3,"latency_ms":18152},
+    {"provider":"claude","scenario":"post-compaction","arm":"runtime","success":true,"input_tokens":104589,"output_tokens":1016,"tool_calls":2,"latency_ms":24642},
+    {"provider":"codex","scenario":"stale-evidence","arm":"baseline","success":true,"input_tokens":40646,"output_tokens":288,"tool_calls":2,"latency_ms":16731},
+    {"provider":"codex","scenario":"stale-evidence","arm":"runtime","success":true,"input_tokens":26923,"output_tokens":129,"tool_calls":1,"latency_ms":11019},
+    {"provider":"codex","scenario":"post-compaction","arm":"baseline","success":true,"input_tokens":26968,"output_tokens":196,"tool_calls":1,"latency_ms":10177},
+    {"provider":"codex","scenario":"post-compaction","arm":"runtime","success":true,"input_tokens":40813,"output_tokens":303,"tool_calls":2,"latency_ms":13943}
+  ],
+  "interpretation": {
+    "task_success": "No regression was observed in this small controlled sample.",
+    "stale_evidence": "Both providers selected current source over stale prose in both arms; runtime reduced tokens, tools, and latency in this scenario.",
+    "post_compaction": "Both providers recovered the current value; runtime increased tokens and latency in this scenario, so a universal efficiency claim is not supported.",
+    "limits": "Two synthetic repositories and one trial per cell establish harness behavior, not statistical significance. Raw provider outputs remain outside the repository."
+  }
+}

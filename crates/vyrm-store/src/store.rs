@@ -5,9 +5,12 @@ use crate::gc::{build_report, RemovalReport, Tally};
 use crate::invocation::{self, Invocation, InvocationInput};
 use crate::keyspaces::{self, Durability};
 use fjall::{KeyspaceCreateOptions, Readable, SingleWriterTxDatabase, SingleWriterTxKeyspace};
-use std::collections::BTreeMap;
-use std::path::Path;
-use vyrm_core::{key, Claim, ClaimSource, Millis, Predicate, Reader, Subject};
+use std::collections::{BTreeMap, BTreeSet};
+use std::path::{Path, PathBuf};
+use vyrm_core::{
+    key, Claim, ClaimSource, Millis, Predicate, Reader, RuntimeChange, RuntimeChangePage,
+    RuntimeCommit, RuntimeCommitOutcome, RuntimeMutation, RuntimeRef, ScopeId, Subject,
+};
 
 /// Sequences assigned by an append.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -18,6 +21,7 @@ pub struct AppendOutcome {
 }
 
 pub struct Store {
+    path: PathBuf,
     db: SingleWriterTxDatabase,
     claims: SingleWriterTxKeyspace,
     /// Append sequence to claim key. Written in the same transaction as the
@@ -29,12 +33,18 @@ pub struct Store {
     invocations: SingleWriterTxKeyspace,
     /// Derived projections, stored whole under a caller-chosen name.
     projections: SingleWriterTxKeyspace,
+    /// Authoritative typed runtime log and transactionally maintained identity
+    /// indexes. The indexes never replace the log; they enforce references.
+    runtime_changes: SingleWriterTxKeyspace,
+    runtime_records: SingleWriterTxKeyspace,
+    runtime_relations: SingleWriterTxKeyspace,
 }
 
 impl Store {
     pub fn open(path: &Path) -> Result<Self> {
         std::fs::create_dir_all(path).map_err(|e| Error::Substrate(e.to_string()))?;
-        let db = SingleWriterTxDatabase::builder(path)
+        let path = std::fs::canonicalize(path).map_err(|e| Error::Substrate(e.to_string()))?;
+        let db = SingleWriterTxDatabase::builder(&path)
             .manual_journal_persist(true)
             .open()?;
         let claims = db.keyspace(keyspaces::CLAIMS, KeyspaceCreateOptions::default)?;
@@ -46,7 +56,14 @@ impl Store {
             db.keyspace(keyspaces::INVOCATIONS, KeyspaceCreateOptions::default)?;
         let projections =
             db.keyspace(keyspaces::PROJECTIONS, KeyspaceCreateOptions::default)?;
+        let runtime_changes =
+            db.keyspace(keyspaces::RUNTIME_CHANGES, KeyspaceCreateOptions::default)?;
+        let runtime_records =
+            db.keyspace(keyspaces::RUNTIME_RECORDS, KeyspaceCreateOptions::default)?;
+        let runtime_relations =
+            db.keyspace(keyspaces::RUNTIME_RELATIONS, KeyspaceCreateOptions::default)?;
         Ok(Self {
+            path,
             db,
             claims,
             sequence_index,
@@ -54,7 +71,16 @@ impl Store {
             meta,
             invocations,
             projections,
+            runtime_changes,
+            runtime_records,
+            runtime_relations,
         })
+    }
+
+    /// Canonical directory backing this store. Runtime entry points use it to
+    /// prove that a root cannot be paired with a different instance's state.
+    pub fn path(&self) -> &Path {
+        &self.path
     }
 
     /// Stores a derived projection under a name, replacing any prior value.
@@ -98,6 +124,234 @@ impl Store {
             Some(value) => decode_sequence(&value),
             None => Ok(0),
         }
+    }
+
+    /// Current global cursor of the typed runtime log.
+    pub fn runtime_cursor(&self) -> Result<u64> {
+        let snapshot = self.db.read_tx();
+        decode_optional_sequence(snapshot.get(&self.meta, keyspaces::RUNTIME_CURSOR)?)
+    }
+
+    /// Atomically appends a complete causal runtime transaction.
+    ///
+    /// The expected cursor is compared inside the Fjall write transaction.
+    /// Claims embedded in the commit advance the existing claim sequence in
+    /// that same transaction, while every mutation advances the runtime cursor
+    /// and hash chain. Relations and subject-bearing events fail closed when
+    /// their endpoint records do not exist in the commit's scope.
+    #[tracing::instrument(level = "debug", skip_all, fields(mutations = commit.mutations.len()))]
+    pub fn commit_runtime(&self, commit: &RuntimeCommit) -> Result<RuntimeCommitOutcome> {
+        commit.validate()?;
+        let commit_id = commit.digest();
+        let mut tx = self
+            .db
+            .write_tx()
+            .durability(Durability::Authoritative.persist_mode());
+
+        let start = decode_optional_sequence(tx.get(&self.meta, keyspaces::RUNTIME_CURSOR)?)?;
+        if start != commit.expected_cursor {
+            return Err(Error::RuntimeConflict {
+                expected: commit.expected_cursor,
+                actual: start,
+            });
+        }
+
+        let new_records = commit
+            .mutations
+            .iter()
+            .filter_map(|mutation| match mutation {
+                RuntimeMutation::Record { record } => Some(record.reference.clone()),
+                _ => None,
+            })
+            .collect::<BTreeSet<_>>();
+        for mutation in &commit.mutations {
+            let references: Vec<&RuntimeRef> = match mutation {
+                RuntimeMutation::Relation { relation } => vec![&relation.from, &relation.to],
+                RuntimeMutation::Event { event } => event.subject.iter().collect(),
+                RuntimeMutation::Claim { .. } | RuntimeMutation::Record { .. } => Vec::new(),
+            };
+            for reference in references {
+                if !new_records.contains(reference)
+                    && tx
+                        .get(
+                            &self.runtime_records,
+                            runtime_identity_key(&commit.scope, reference),
+                        )?
+                        .is_none()
+                {
+                    return Err(Error::DanglingRuntimeReference(format!(
+                        "{}/{} in scope {}",
+                        reference.kind, reference.id, commit.scope
+                    )));
+                }
+            }
+        }
+
+        let claim_count = commit
+            .mutations
+            .iter()
+            .filter(|mutation| matches!(mutation, RuntimeMutation::Claim { .. }))
+            .count();
+        let claim_start = decode_optional_sequence(
+            tx.get(&self.meta, keyspaces::SEQUENCE_WATERMARK)?,
+        )?;
+        let mut claim_sequence = claim_start;
+        let mut cursor = start;
+        let mut previous_digest = tx
+            .get(&self.meta, keyspaces::RUNTIME_LAST_DIGEST)?
+            .map(|bytes| String::from_utf8(bytes.to_vec()))
+            .transpose()
+            .map_err(|error| Error::CorruptWatermark(error.to_string()))?;
+
+        for (ordinal, mutation) in commit.mutations.iter().cloned().enumerate() {
+            if let RuntimeMutation::Claim { claim } = &mutation {
+                claim_sequence = claim_sequence.checked_add(1).ok_or(Error::SequenceOverflow)?;
+                let claim_key = key::claim_key(
+                    &claim.subject,
+                    &claim.predicate,
+                    claim.valid_from,
+                    claim.tx_time,
+                );
+                tx.insert(
+                    &self.sequence_index,
+                    key::sequence_key(claim_sequence),
+                    claim_key.clone(),
+                );
+                tx.insert(&self.claims, claim_key, serde_json::to_vec(claim)?);
+            }
+
+            cursor = cursor.checked_add(1).ok_or(Error::SequenceOverflow)?;
+            let change = RuntimeChange::committed(
+                cursor,
+                commit,
+                &commit_id,
+                ordinal as u64,
+                mutation.clone(),
+                previous_digest.clone(),
+            );
+            tx.insert(
+                &self.runtime_changes,
+                runtime_cursor_key(cursor),
+                serde_json::to_vec(&change)?,
+            );
+            match mutation {
+                RuntimeMutation::Record { record } => tx.insert(
+                    &self.runtime_records,
+                    runtime_identity_key(&commit.scope, &record.reference),
+                    serde_json::to_vec(&record)?,
+                ),
+                RuntimeMutation::Relation { relation } => tx.insert(
+                    &self.runtime_relations,
+                    runtime_identity_key(&commit.scope, &relation.reference),
+                    serde_json::to_vec(&relation)?,
+                ),
+                RuntimeMutation::Claim { .. } | RuntimeMutation::Event { .. } => {}
+            }
+            previous_digest = Some(change.digest);
+        }
+
+        if claim_count > 0 {
+            tx.insert(
+                &self.meta,
+                keyspaces::SEQUENCE_WATERMARK,
+                claim_sequence.to_string().as_bytes(),
+            );
+        }
+        tx.insert(
+            &self.meta,
+            keyspaces::RUNTIME_CURSOR,
+            cursor.to_string().as_bytes(),
+        );
+        tx.insert(
+            &self.meta,
+            keyspaces::RUNTIME_LAST_DIGEST,
+            previous_digest.as_deref().unwrap_or("").as_bytes(),
+        );
+        tx.commit()?;
+
+        Ok(RuntimeCommitOutcome {
+            commit_id,
+            first_cursor: start + 1,
+            last_cursor: cursor,
+            count: commit.mutations.len(),
+            first_claim_sequence: (claim_count > 0).then_some(claim_start + 1),
+            last_claim_sequence: (claim_count > 0).then_some(claim_sequence),
+        })
+    }
+
+    /// Replays at most `limit` global cursor positions after `after`. Scope
+    /// filtering happens after cursor advancement, so callers always resume at
+    /// `through_cursor` and cannot stall on other scopes' traffic.
+    pub fn runtime_changes_since(
+        &self,
+        after: u64,
+        limit: usize,
+        scope: Option<&ScopeId>,
+    ) -> Result<RuntimeChangePage> {
+        if limit == 0 {
+            return Err(Error::Substrate("runtime change page limit must be greater than zero".into()));
+        }
+        let snapshot = self.db.read_tx();
+        let head = decode_optional_sequence(snapshot.get(&self.meta, keyspaces::RUNTIME_CURSOR)?)?;
+        if after == u64::MAX || after >= head {
+            return Ok(RuntimeChangePage {
+                requested_after: after,
+                through_cursor: after,
+                head_cursor: head,
+                changes: Vec::new(),
+            });
+        }
+
+        let mut previous_digest = if after == 0 {
+            None
+        } else {
+            let bytes = snapshot
+                .get(&self.runtime_changes, runtime_cursor_key(after))?
+                .ok_or_else(|| {
+                    Error::Substrate(format!("runtime log is missing cursor {after}"))
+                })?;
+            let prior: RuntimeChange = serde_json::from_slice(&bytes)?;
+            if !prior.verify_digest() {
+                return Err(Error::Substrate(format!(
+                    "runtime change {after} failed digest verification"
+                )));
+            }
+            Some(prior.digest)
+        };
+        let mut through = after;
+        let mut changes = Vec::new();
+        for (expected_cursor, guard) in (after + 1..).zip(
+            snapshot.range(&self.runtime_changes, runtime_cursor_key(after + 1)..),
+        ) {
+            if through.saturating_sub(after) as usize >= limit {
+                break;
+            }
+            let (_, bytes) = guard.into_inner()?;
+            let change: RuntimeChange = serde_json::from_slice(&bytes)?;
+            if change.cursor != expected_cursor {
+                return Err(Error::Substrate(format!(
+                    "runtime log cursor gap: expected {expected_cursor}, found {}",
+                    change.cursor
+                )));
+            }
+            if change.previous_digest != previous_digest || !change.verify_digest() {
+                return Err(Error::Substrate(format!(
+                    "runtime change {} failed hash-chain verification",
+                    change.cursor
+                )));
+            }
+            through = change.cursor;
+            previous_digest = Some(change.digest.clone());
+            if scope.is_none_or(|scope| scope == &change.scope) {
+                changes.push(change);
+            }
+        }
+        Ok(RuntimeChangePage {
+            requested_after: after,
+            through_cursor: through,
+            head_cursor: head,
+            changes,
+        })
     }
 
     /// Appends claims in one transaction with one fsync.
@@ -166,7 +420,7 @@ impl Store {
     /// Appends a single claim. Equivalent to a batch of one; provided for call
     /// sites that genuinely have one claim, not as the preferred write path.
     pub fn assert(&self, claim: &Claim) -> Result<AppendOutcome> {
-        self.append_batch(std::slice::from_ref(claim))
+        <Self as crate::Engine>::assert(self, claim)
     }
 
     /// Records a read against a claim. Buffered: telemetry must not pay for
@@ -481,4 +735,24 @@ fn decode_sequence(value: &[u8]) -> Result<u64> {
         .map_err(|e| Error::CorruptWatermark(e.to_string()))?
         .parse::<u64>()
         .map_err(|e| Error::CorruptWatermark(e.to_string()))
+}
+
+fn decode_optional_sequence(value: Option<fjall::Slice>) -> Result<u64> {
+    value.as_deref().map(decode_sequence).transpose().map(Option::unwrap_or_default)
+}
+
+fn runtime_cursor_key(cursor: u64) -> [u8; 8] {
+    cursor.to_be_bytes()
+}
+
+fn runtime_identity_key(scope: &ScopeId, reference: &RuntimeRef) -> Vec<u8> {
+    let mut key = Vec::with_capacity(
+        scope.as_str().len() + reference.kind.as_str().len() + reference.id.as_str().len() + 2,
+    );
+    key.extend_from_slice(scope.as_str().as_bytes());
+    key.push(0);
+    key.extend_from_slice(reference.kind.as_str().as_bytes());
+    key.push(0);
+    key.extend_from_slice(reference.id.as_str().as_bytes());
+    key
 }

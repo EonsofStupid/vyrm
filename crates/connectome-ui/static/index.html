@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self'; script-src 'self'; img-src 'self' data:">
+  <title>Connectome Workbench</title>
+  <link rel="stylesheet" href="/app.css">
+</head>
+<body>
+  <div id="app" class="app-shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></div>
+        <div><strong>connectome</strong><span>runtime workbench</span></div>
+      </div>
+      <section class="instance-card" id="instance-card" aria-live="polite">
+        <div class="eyebrow">INSTANCE</div>
+        <div class="instance-title skeleton">Loading</div>
+        <div class="instance-meta">Connecting to local runtime…</div>
+      </section>
+      <nav class="primary-nav" aria-label="Workbench lenses">
+        <button data-view="overview" class="nav-item active"><span class="nav-icon">⌂</span>Overview<span class="shortcut">1</span></button>
+        <button data-view="flight" class="nav-item"><span class="nav-icon">✦</span>Prompt flights<span class="nav-count" id="flight-count">0</span></button>
+        <button data-view="graph" class="nav-item"><span class="nav-icon">⌘</span>Graph<span class="shortcut">G</span></button>
+        <button data-view="runs" class="nav-item"><span class="nav-icon">↳</span>Runs<span class="nav-count" id="run-count">0</span></button>
+        <button data-view="claims" class="nav-item"><span class="nav-icon">◇</span>Claims<span class="nav-count" id="claim-count">0</span></button>
+        <button data-view="routes" class="nav-item"><span class="nav-icon">⌁</span>Routes<span class="nav-count" id="file-count">0</span></button>
+        <button data-view="activity" class="nav-item"><span class="nav-icon">≋</span>Activity<span class="shortcut">A</span></button>
+      </nav>
+      <div class="sidebar-section">
+        <div class="eyebrow">RUNTIME LENSES</div>
+        <button class="lens-row" data-view="graph" data-kind="run"><span class="dot violet"></span>Reasoning topology</button>
+        <button class="lens-row" data-view="graph" data-kind="claim"><span class="dot mint"></span>Claim provenance</button>
+        <button class="lens-row" data-view="graph" data-kind="file"><span class="dot amber"></span>Source projection</button>
+      </div>
+      <div class="sidebar-footer">
+        <div><span id="connection-dot" class="status-dot waiting"></span><span id="connection-label">Connecting</span></div>
+        <button id="refresh-button" class="icon-button" title="Refresh snapshot">↻</button>
+      </div>
+    </aside>
+
+    <section class="workspace">
+      <header class="topbar">
+        <div class="breadcrumb"><span id="crumb-instance">instance</span><b>/</b><span id="crumb-view">overview</span></div>
+        <label class="command-field">
+          <span>⌕</span>
+          <input id="global-search" autocomplete="off" placeholder="Search runtime objects or route source…" aria-label="Search runtime">
+          <kbd>/</kbd>
+        </label>
+        <div class="top-actions">
+          <span id="snapshot-age" class="snapshot-age">—</span>
+          <button id="inspector-toggle" class="icon-button" title="Toggle inspector">◫</button>
+        </div>
+      </header>
+      <main id="main" class="main" tabindex="-1"></main>
+    </section>
+
+    <aside id="inspector" class="inspector">
+      <div class="inspector-head"><div><span class="eyebrow">INSPECTOR</span><h2 id="inspector-title">Nothing selected</h2></div><button id="inspector-close" class="icon-button">×</button></div>
+      <div id="inspector-body" class="inspector-body"><p class="muted">Select a claim, run, event, file, or invocation to inspect its runtime identity and evidence.</p></div>
+    </aside>
+  </div>
+  <div id="toast" class="toast" role="status"></div>
+  <script src="/app.js"></script>
+</body>
+</html>

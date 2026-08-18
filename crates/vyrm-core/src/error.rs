@@ -18,6 +18,10 @@ pub enum Error {
         valid_from: u64,
         valid_to: u64,
     },
+    /// A successor named a different subject or predicate.
+    SupersessionPairMismatch,
+    /// A successor must begin after the claim it retires and be recorded later.
+    InvalidSupersessionOrder,
     /// A key could not be parsed back into its fields.
     MalformedKey {
         reason: &'static str,
@@ -25,6 +29,10 @@ pub enum Error {
     /// Sequence allocation overflowed. Reported rather than saturated, so that
     /// overflow cannot degrade into silent key reuse.
     SequenceOverflow,
+    /// A typed runtime record, relation, event, or commit violated its contract.
+    InvalidRuntime {
+        reason: String,
+    },
 }
 
 impl fmt::Display for Error {
@@ -41,8 +49,16 @@ impl fmt::Display for Error {
                 f,
                 "validity window is empty or inverted: valid_from={valid_from} valid_to={valid_to}"
             ),
+            Error::SupersessionPairMismatch => {
+                write!(f, "a successor must have the same subject and predicate")
+            }
+            Error::InvalidSupersessionOrder => write!(
+                f,
+                "a successor must begin after and be recorded later than its predecessor"
+            ),
             Error::MalformedKey { reason } => write!(f, "malformed claim key: {reason}"),
             Error::SequenceOverflow => write!(f, "sequence allocation overflowed"),
+            Error::InvalidRuntime { reason } => write!(f, "invalid runtime object: {reason}"),
         }
     }
 }

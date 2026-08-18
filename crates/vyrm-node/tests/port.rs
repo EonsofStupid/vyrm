@@ -25,6 +25,7 @@ fn the_runtime_layer_is_generic_over_the_port() {
 
     let reader = vyrm_core::Reader::new("test:port").unwrap();
     let dir = tempfile::tempdir().unwrap();
+    vyrm_node::InstanceManifest::ensure_dedicated(dir.path()).unwrap();
     let flight =
         vyrm_node::preflight(&engine, dir.path(), None, &reader, 2_000, 1_500).unwrap();
     assert!(flight.context.contains("blocked-on-migration"));

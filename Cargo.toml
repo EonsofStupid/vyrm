@@ -6,12 +6,14 @@ members = [
     "crates/vyrm-graph",
     "crates/vyrm-node",
     "crates/vyrm-cli",
+    "crates/vyrmd",
+    "crates/vyrm-eval",
+    "crates/connectome-ui",
 ]
 
-# Future members, added as each layer lands. Dependency arrows point inward:
-# core <- store <- graph <- gate <- {node, cli, vyrmd}
+# Remaining future member. Current dependency arrows point inward:
+# core <- {store, graph} <- node <- {cli, vyrmd}; eval is standalone.
 #   "crates/vyrm-gate",
-#   "crates/vyrmd",
 
 [workspace.package]
 edition = "2021"

@@ -178,6 +178,32 @@ fn an_absent_claim_is_reported_rather_than_treated_as_an_error() {
 }
 
 #[test]
+fn reasoning_contract_rejects_skips_and_is_queryable_as_typed_json() {
+    let db = scratch("reasoning-contract");
+    let goal = r#"{"kind":"goal","statement":"ship it","acceptance":["tests pass"]}"#;
+    let (ok, out, err) = vyrm(
+        &db,
+        &["reasoning", "record", "--run", "r1", "--payload", goal],
+    );
+    assert!(ok, "goal failed: {err}");
+    assert!(out.contains("recorded goal #1"));
+
+    let skipped = r#"{"kind":"attempt","summary":"guess","actions":[]}"#;
+    let (ok, _, err) = vyrm(
+        &db,
+        &["reasoning", "record", "--run", "r1", "--payload", skipped],
+    );
+    assert!(!ok, "an attempt cannot skip the plan stage");
+    assert!(err.contains("invalid while reasoning run is NeedsPlan"));
+
+    let (_, out, _) = vyrm(&db, &["reasoning", "show", "--run", "r1", "--json"]);
+    let value: serde_json::Value = serde_json::from_str(&out).unwrap();
+    assert_eq!(value["state"], "needs_plan");
+    assert_eq!(value["events"][0]["payload"]["kind"], "goal");
+    assert_eq!(value["events"][0]["digest"].as_str().unwrap().len(), 64);
+}
+
+#[test]
 fn recall_returns_current_claims_and_records_the_ledger_entry() {
     let db = scratch("recall-ledger");
     vyrm(&db, &["assert", "--subject", "wp3", "--predicate", "status", "--object", "tested",
@@ -237,7 +263,8 @@ fn grounding_is_operable_and_divergence_halts_until_reset() {
 
     let (ok, out, err) = vyrm(&db, &["rebuild"]);
     assert!(ok, "rebuild failed: {err}");
-    assert!(out.contains("watermark 0 -> 2"), "unexpected output: {out}");
+    // The successor adds an immutable retirement correction and the new claim.
+    assert!(out.contains("watermark 0 -> 3"), "unexpected output: {out}");
 
     let (ok, out, err) = vyrm(&db, &["ground"]);
     assert!(ok, "ground failed: {err}");
