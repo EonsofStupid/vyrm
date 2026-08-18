@@ -173,7 +173,7 @@ kbd { background: var(--panel-3); border: 1px solid #373d37; border-radius: 4px;
 .route-result p { margin: 5px 0 0; color: var(--muted); font-size: 11px; }
 .route-score { text-align: right; color: var(--faint); font: 10px var(--mono); }
 
-.flight-composer { margin-bottom: 18px; border: 1px solid var(--line); border-radius: 14px; background: linear-gradient(145deg, #191d19, #141714); overflow: hidden; box-shadow: 0 18px 70px rgba(0,0,0,.18); }
+.flight-composer, .prompt-lab { margin-bottom: 18px; border: 1px solid var(--line); border-radius: 14px; background: linear-gradient(145deg, #191d19, #141714); overflow: hidden; box-shadow: 0 18px 70px rgba(0,0,0,.18); }
 .flight-composer textarea { display: block; width: 100%; min-height: 88px; resize: vertical; padding: 18px 19px; border: 0; border-bottom: 1px solid var(--line-soft); outline: 0; background: transparent; color: var(--text); font-size: 15px; line-height: 1.55; }
 .flight-composer textarea::placeholder { color: #626a62; }
 .flight-composer textarea:focus { box-shadow: inset 3px 0 var(--violet); }
@@ -187,10 +187,39 @@ kbd { background: var(--panel-3); border: 1px solid #373d37; border-radius: 4px;
 .launch-button:disabled { opacity: .5; }
 .composer-note { margin: 0; padding: 0 15px 12px; color: var(--faint); font: 9px/1.45 var(--mono); }
 
-.flight-switcher { display: flex; justify-content: space-between; align-items: center; gap: 20px; padding: 12px 15px; border: 1px solid var(--line); border-radius: 10px 10px 0 0; background: var(--panel); }
+.prompt-pair-editor { display: grid; grid-template-columns: minmax(0, 1fr) 54px minmax(0, 1fr); gap: 0; align-items: stretch; }
+.prompt-editor { min-width: 0; display: grid; grid-template-rows: auto minmax(118px, auto) auto; background: rgba(255,255,255,.008); }
+.prompt-editor.arm-a { box-shadow: inset 3px 0 rgba(240,138,128,.42); }
+.prompt-editor.arm-b { box-shadow: inset -3px 0 rgba(140,224,186,.48); }
+.prompt-editor-head { display: grid; gap: 3px; padding: 13px 16px 9px; border-bottom: 1px solid var(--line-soft); }
+.prompt-editor-head b { color: var(--text); font-size: 12px; }
+.prompt-editor.arm-a .prompt-editor-head b { color: var(--red); }
+.prompt-editor.arm-b .prompt-editor-head b { color: var(--mint); }
+.prompt-editor-head small { color: var(--faint); font: 8px/1.4 var(--mono); }
+.prompt-editor textarea { width: 100%; min-height: 118px; resize: vertical; padding: 14px 16px; border: 0; outline: 0; background: transparent; color: var(--text); font: 13px/1.55 var(--sans); }
+.prompt-editor textarea:focus { background: rgba(185,165,248,.025); box-shadow: inset 0 0 0 1px var(--violet-dim); }
+.pair-arrow { display: grid; place-content: center; justify-items: center; gap: 7px; border-inline: 1px solid var(--line-soft); background: #131613; color: var(--faint); }
+.pair-arrow span { font: 8px var(--mono); letter-spacing: .08em; }
+.pair-arrow i { color: var(--violet); font-style: normal; font-size: 18px; }
+.prompt-contract { padding: 9px 14px 11px; border-top: 1px solid var(--line-soft); background: rgba(0,0,0,.08); }
+.contract-summary { display: flex; justify-content: space-between; gap: 8px; color: var(--faint); font: 8px var(--mono); }
+.contract-summary b { color: var(--muted); font-weight: 500; }
+.contract-signals { display: grid; grid-template-columns: repeat(5, 1fr); gap: 5px; margin-top: 8px; }
+.contract-signals span { display: flex; align-items: center; gap: 4px; min-width: 0; color: #535b53; font: 7px var(--mono); text-transform: uppercase; }
+.contract-signals i { width: 5px; height: 5px; flex: 0 0 auto; border: 1px solid #485048; border-radius: 50%; }
+.contract-signals span.present { color: #aeb7ac; }
+.contract-signals span.present i { border-color: var(--mint); background: var(--mint); box-shadow: 0 0 7px rgba(140,224,186,.35); }
+.pair-options { border-top: 1px solid var(--line-soft); }
+
+.flight-switcher { display: grid; grid-template-columns: minmax(220px, 1fr) minmax(280px, .8fr); align-items: center; gap: 20px; padding: 12px 15px; border: 1px solid var(--line); border-radius: 10px 10px 0 0; background: var(--panel); }
 .flight-switcher > div { min-width: 0; }
 .flight-switcher strong { display: block; margin-top: 5px; max-width: 720px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: 12px; font-weight: 540; }
 .flight-switcher select, #flight-speed { height: 30px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel-2); color: var(--muted); padding: 0 8px; font-size: 10px; }
+.flight-pair-tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; }
+.flight-pair-tabs button { min-width: 0; display: grid; gap: 3px; padding: 7px 9px; border: 1px solid var(--line-soft); border-radius: 6px; background: #141714; text-align: left; }
+.flight-pair-tabs button.active { border-color: var(--violet-dim); background: #1e1a2a; }
+.flight-pair-tabs span { color: var(--faint); font: 7px var(--mono); text-transform: uppercase; }
+.flight-pair-tabs b { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--muted); font: 9px var(--mono); font-weight: 500; }
 .flight-metrics { display: grid; grid-template-columns: repeat(5, 1fr); border: 1px solid var(--line); border-top: 0; background: #141714; }
 .flight-metrics > div { min-width: 0; padding: 10px 14px; border-right: 1px solid var(--line-soft); }
 .flight-metrics > div:last-child { border-right: 0; }
@@ -341,6 +370,15 @@ kbd { background: var(--panel-3); border: 1px solid #373d37; border-radius: 4px;
 .comparison-arm dd { margin: 3px 0 0; color: var(--muted); font: 10px var(--mono); }
 .comparison-verdict { margin: 0; padding: 13px 16px 15px; border-top: 1px solid var(--line-soft); color: #bdc4ba; font: 10px/1.55 var(--mono); }
 
+.flight-history { margin-top: 12px; border: 1px solid var(--line-soft); border-radius: 9px; background: var(--panel); }
+.flight-history summary { padding: 11px 14px; color: var(--muted); font: 9px var(--mono); cursor: default; }
+.flight-history summary span { float: right; color: var(--faint); }
+.flight-history > div { display: flex; gap: 6px; padding: 0 10px 10px; overflow-x: auto; }
+.flight-history button { flex: 0 0 220px; display: grid; gap: 4px; padding: 9px; border: 1px solid var(--line-soft); border-radius: 6px; background: #141714; text-align: left; }
+.flight-history button span { color: var(--violet); font: 7px var(--mono); text-transform: uppercase; }
+.flight-history button b { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: 10px; font-weight: 500; }
+.flight-history button small { color: var(--faint); font: 7px var(--mono); }
+
 @keyframes drift { to { transform: translate(50px, -20px) scale(1.15); } }
 @keyframes ray { 0% { opacity: 0; transform: rotate(var(--angle)) translateX(8px) scaleX(.3); } 35% { opacity: .7; } 100% { opacity: 0; transform: rotate(var(--angle)) translateX(28px) scaleX(1.2); } }
 @keyframes cloud-pulse { to { opacity: .48; } }
@@ -369,6 +407,9 @@ kbd { background: var(--panel-3); border: 1px solid #373d37; border-radius: 4px;
   .overview-grid { grid-template-columns: 1fr; }
   .flight-options { grid-template-columns: 1fr 1fr; }
   .launch-button { grid-column: span 2; }
+  .prompt-pair-editor { grid-template-columns: 1fr; }
+  .pair-arrow { grid-auto-flow: column; border-inline: 0; border-block: 1px solid var(--line-soft); padding: 7px; }
+  .pair-arrow i { transform: rotate(90deg); }
 }
 
 @media (max-width: 760px) {
@@ -395,6 +436,8 @@ kbd { background: var(--panel-3); border: 1px solid #373d37; border-radius: 4px;
   .flight-head-actions { align-items: flex-end; flex-direction: column-reverse; }
   .information-cloud { display: none; }
   .event-data-strip { grid-template-columns: 1fr 1fr; }
+  .flight-switcher { grid-template-columns: 1fr; }
+  .contract-signals { grid-template-columns: repeat(3, 1fr); }
 }
 
 @media (prefers-reduced-motion: reduce) {

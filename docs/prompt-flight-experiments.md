@@ -67,12 +67,18 @@ measurement; animation timing is never used as benchmark evidence.
 
 ## Built-in weak/strong demonstration
 
-The workbench can seed an explicitly synthetic weak/strong pair for learning
-and UI verification. The weak arm has no target or acceptance contract; the
-strong arm names the runtime stages, safety boundary, evidence requirements,
-metrics, and stop condition. The pair is written through the production flight
-recorder as two record revisions and sixteen immutable events in one atomic
-runtime commit.
+The workbench opens with two editable prompts. The guided weak arm has no target
+or acceptance contract; the guided strong arm names the runtime stages, safety
+boundary, evidence requirements, metrics, and stop condition. Running that
+unchanged pair writes it through the production flight recorder as two record
+revisions and sixteen immutable events in one atomic runtime commit. Repeating
+the action returns the existing pair instead of polluting history with copies.
+
+Editing either prompt changes the experiment into a custom A/B run. Both sides
+use the same selected context arm, provider, token budget, and acceptance marker
+and are pinned together in the interface. The live goal/scope/evidence/success/
+stop indicators are lexical editing aids only. Runtime metrics begin only after
+the operator runs the pair.
 
 The timeline can be frozen at any event, scrubbed, rewound, or fast-forwarded.
 Event bursts encode the approximate size of the event's visible detail and

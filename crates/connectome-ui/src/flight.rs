@@ -248,15 +248,19 @@ impl FlightRecorder {
         })?;
 
         if request.provider == "observe" {
+            let elapsed_ms = started.elapsed().as_millis() as u64;
             self.append_event(&id, event(
                 now(),
-                started.elapsed().as_millis() as u64,
+                elapsed_ms,
                 "model",
                 "handoff_ready",
                 "Prompt packet prepared without launching a provider",
                 "Choose an enabled frontier runner to execute this packet, or inspect the context path as-is.",
                 Value::Null,
             ))?;
+            self.update(&id, |flight| {
+                flight.metrics.latency_ms = Some(elapsed_ms);
+            })?;
         } else {
             let recorder = Arc::clone(self);
             let flight_id = id.clone();
@@ -274,24 +278,28 @@ impl FlightRecorder {
     pub fn seed_prompt_demos(&self, at: u64) -> Result<Vec<Flight>, Box<dyn std::error::Error>> {
         self.binding.require_runtime_ready()?;
         self.binding.verify_store_path(self.store.path())?;
+        let _guard = self
+            .mutation
+            .lock()
+            .map_err(|_| "flight ledger lock poisoned")?;
+        let (mut ledger, migrate_legacy, observed_cursor) = load(self.store.as_ref())?;
+        if let Some(existing) = latest_demo_pair(&ledger.flights) {
+            return Ok(existing);
+        }
         let comparison_id = format!("prompt-strength-{at}");
         let flights = vec![
             demo_flight(at, &comparison_id, "weak"),
             demo_flight(at + 1, &comparison_id, "strong"),
         ];
-        self.mutate(|ledger| {
-            for flight in &flights {
-                if ledger
-                    .flights
-                    .iter()
-                    .any(|candidate| candidate.id == flight.id)
-                {
-                    return Err(format!("flight {:?} already exists", flight.id).into());
-                }
-            }
-            ledger.flights.extend(flights.clone());
-            Ok(())
-        })?;
+        let before = ledger.flights.clone();
+        ledger.flights.extend(flights.clone());
+        persist(
+            self.store.as_ref(),
+            &before,
+            &ledger,
+            migrate_legacy,
+            observed_cursor,
+        )?;
         Ok(flights)
     }
 
@@ -651,6 +659,36 @@ impl FlightRecorder {
             observed_cursor,
         )
     }
+}
+
+fn latest_demo_pair(flights: &[Flight]) -> Option<Vec<Flight>> {
+    let mut groups = BTreeMap::<&str, Vec<&Flight>>::new();
+    for flight in flights.iter().filter(|flight| flight.demo_role.is_some()) {
+        if let Some(comparison_id) = flight.comparison_id.as_deref() {
+            groups.entry(comparison_id).or_default().push(flight);
+        }
+    }
+    groups
+        .into_values()
+        .filter(|group| {
+            group
+                .iter()
+                .any(|flight| flight.demo_role.as_deref() == Some("weak"))
+                && group
+                    .iter()
+                    .any(|flight| flight.demo_role.as_deref() == Some("strong"))
+        })
+        .max_by_key(|group| {
+            group
+                .iter()
+                .map(|flight| flight.created_at)
+                .max()
+                .unwrap_or_default()
+        })
+        .map(|mut group| {
+            group.sort_by_key(|flight| flight.demo_role.as_deref() == Some("strong"));
+            group.into_iter().cloned().collect()
+        })
 }
 
 fn demo_flight(at: u64, comparison_id: &str, role: &str) -> Flight {
@@ -1197,6 +1235,12 @@ mod tests {
         let scope = ScopeId::new(FLIGHT_SCOPE).unwrap();
         let page = store.runtime_changes_since(0, 64, Some(&scope)).unwrap();
         assert_eq!(page.changes.len(), 18, "two records plus sixteen events");
+        assert_eq!(recorder.flights().unwrap().len(), 2);
+
+        let cursor = store.runtime_cursor().unwrap();
+        let repeated = recorder.seed_prompt_demos(2_000).unwrap();
+        assert_eq!(repeated[0].comparison_id, demos[0].comparison_id);
+        assert_eq!(store.runtime_cursor().unwrap(), cursor);
         assert_eq!(recorder.flights().unwrap().len(), 2);
     }
 }

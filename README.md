@@ -87,12 +87,16 @@ Claims, reasoning runs, and prior flights remain available for audit and replay.
 This separation makes same-prompt comparisons meaningful without destroying the
 evidence needed to explain them.
 
-The **Load weak ↔ strong demo** control creates an explicitly synthetic pair
-through the real runtime recorder. It contrasts an unbounded “Make this better”
-request with a constrained, measurable prompt. Both traces are durable graph
-events: freeze any burst, scrub or rewind the timeline, inspect typed payloads,
-and compare context, tool fanout, latency, and acceptance side by side. The
-demonstration validates the instrument; it is not benchmark evidence.
+The prompt lab keeps **Prompt A** and **Prompt B** visible together. Its guided
+pair contrasts an unbounded “Make this better” request with a constrained,
+measurable prompt; running that unchanged pair creates one idempotent synthetic
+baseline through the real runtime recorder. Edit either prompt and **Run both
+prompts** to persist two actual observe/provider paths and pin them as an A/B
+comparison. Local contract indicators respond while typing but are explicitly
+heuristic—not a quality score. Freeze any burst, scrub or rewind the timeline,
+inspect typed payloads, and compare context, tool fanout, latency, and acceptance
+side by side. The guided demonstration validates the instrument; it is not
+benchmark evidence.
 
 The default `observe` provider assembles and visualizes the pipeline without
 launching a model. Frontier CLI execution requires an explicit opt-in:

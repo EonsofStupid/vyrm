@@ -3,6 +3,10 @@
 
   const views = new Set(['overview', 'flight', 'graph', 'runs', 'claims', 'routes', 'activity']);
   const initialView = location.hash.slice(1);
+  const guidedPrompts = {
+    a: 'Make this better.',
+    b: 'Trace one prompt from intake through context, routing, tools, verification, and outcome. Preserve read-only execution, cite every observation by digest, stop on stale evidence, and report latency, token, and tool-call differentials.',
+  };
   const state = {
     data: null,
     view: views.has(initialView) ? initialView : 'overview',
@@ -18,6 +22,9 @@
     flightTimer: null,
     flightPollTimer: null,
     refreshTimer: null,
+    compareFlightIds: [],
+    promptDrafts: { ...guidedPrompts },
+    flightSettings: { context: 'pruned', provider: 'observe', budget: 1500, acceptance: '' },
   };
 
   const $ = (selector, root = document) => root.querySelector(selector);
@@ -46,6 +53,7 @@
 
   async function load(silent = false) {
     try {
+      const hadData = Boolean(state.data);
       const response = await fetch('/api/snapshot', { cache: 'no-store' });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
@@ -57,7 +65,8 @@
         state.selected = active ? `run:${active.id}` : `instance:${data.instance.id}`;
       }
       updateChrome();
-      render();
+      if (!silent || !hadData || state.view !== 'flight') render();
+      else renderInspector();
       if (!silent) toast('Runtime snapshot refreshed');
     } catch (error) {
       $('#connection-dot').className = 'status-dot error';
@@ -73,14 +82,20 @@
       const response = await fetch('/api/flights', { cache: 'no-store' });
       const flights = await response.json();
       if (!response.ok) throw new Error(flights.error || `HTTP ${response.status}`);
-      const before = currentFlight()?.events.length || 0;
+      const before = flightRevision(state.data.flights || []);
       state.data.flights = flights;
       $('#flight-count').textContent = flights.length;
-      const after = currentFlight()?.events.length || 0;
-      if (after !== before || !state.flightPlaying) renderFlight();
+      if (flightRevision(flights) !== before) renderFlightStage();
     } catch (error) {
       toast(error.message, true);
     }
+  }
+
+  function flightRevision(flights) {
+    return flights.map((flight) => {
+      const event = flight.events[flight.events.length - 1];
+      return `${flight.id}:${flight.status}:${flight.events.length}:${event?.ordinal ?? -1}:${flight.metrics?.latency_ms ?? ''}`;
+    }).join('|');
   }
 
   function updateChrome() {
@@ -149,8 +164,9 @@
 
   function currentFlight() {
     const flights = state.data.flights || [];
-    if (!state.flightId && flights.length) state.flightId = flights[flights.length - 1].id;
-    return flights.find((flight) => flight.id === state.flightId) || flights[flights.length - 1] || null;
+    const latest = [...flights].sort((a, b) => b.created_at - a.created_at)[0] || null;
+    if (!state.flightId && latest) state.flightId = latest.id;
+    return flights.find((flight) => flight.id === state.flightId) || latest;
   }
 
   function renderFlight() {
@@ -159,24 +175,63 @@
     const providers = state.data.capabilities.providers || ['observe'];
     $('#main').innerHTML = pageHead(
       'Prompt flight recorder',
-      'Launch the same prompt through a fresh, pruned, or full context arm. Freeze any observable micro-event, expand it, and compare measured outcomes.',
-      `<div class="flight-head-actions"><button type="button" id="load-prompt-demo" class="demo-button">Load weak ↔ strong demo</button><span class="badge ${enabled ? 'ready' : 'attention'}">${enabled ? 'frontier runners armed' : 'observe mode'}</span></div>`
+      'Put two prompts beside each other, run the same observable pipeline, then freeze and compare what changed. Edit either prompt to make the baseline your own.',
+      `<div class="flight-head-actions"><button type="button" id="restore-guided-prompts" class="demo-button">Restore guided pair</button><span class="badge ${enabled ? 'ready' : 'attention'}">${enabled ? 'frontier runners armed' : 'observe mode'}</span></div>`
     ) + `
-      <form id="flight-form" class="flight-composer">
-        <textarea id="flight-prompt" rows="3" maxlength="65536" placeholder="Post a prompt — vague prompts are useful here because each context arm is a controlled experiment." required></textarea>
-        <div class="flight-options">
-          <label><span>CONTEXT ARM</span><select id="flight-context"><option value="fresh">Fresh · zero injected context</option><option value="pruned" selected>Pruned · prompt matches only</option><option value="full">Full · preflight + prompt matches</option></select></label>
-          <label><span>PROVIDER</span><select id="flight-provider">${providers.map((provider) => `<option value="${escapeHtml(provider)}">${escapeHtml(provider === 'observe' ? 'Observe pipeline only' : provider)}</option>`).join('')}</select></label>
-          <label><span>CONTEXT BUDGET</span><input id="flight-budget" type="number" min="128" max="32000" value="1500"></label>
-          <label><span>ACCEPTANCE MARKER</span><input id="flight-acceptance" placeholder="optional output text"></label>
-          <button class="launch-button" type="submit"><span>Launch</span><b>↗</b></button>
+      <form id="flight-form" class="prompt-lab">
+        <div class="prompt-pair-editor">
+          ${promptEditor('a', 'Prompt A', 'Start with the shortest version of the request.', state.promptDrafts.a)}
+          <div class="pair-arrow" aria-hidden="true"><span>A/B</span><i>→</i></div>
+          ${promptEditor('b', 'Prompt B', 'Add only the constraints needed to make success observable.', state.promptDrafts.b)}
         </div>
-        <p class="composer-note">Fresh resets the provider session and injects zero Vyrm context; it never deletes authoritative history. Provider execution is read-only and must be explicitly armed at server startup.</p>
+        <div class="flight-options pair-options">
+          <label><span>CONTEXT ARM</span><select id="flight-context"><option value="fresh" ${state.flightSettings.context === 'fresh' ? 'selected' : ''}>Fresh · zero injected context</option><option value="pruned" ${state.flightSettings.context === 'pruned' ? 'selected' : ''}>Pruned · prompt matches only</option><option value="full" ${state.flightSettings.context === 'full' ? 'selected' : ''}>Full · preflight + prompt matches</option></select></label>
+          <label><span>PROVIDER</span><select id="flight-provider">${providers.map((provider) => `<option value="${escapeHtml(provider)}" ${state.flightSettings.provider === provider ? 'selected' : ''}>${escapeHtml(provider === 'observe' ? 'Observe pipeline only' : provider)}</option>`).join('')}</select></label>
+          <label><span>CONTEXT BUDGET</span><input id="flight-budget" type="number" min="128" max="32000" value="${state.flightSettings.budget}"></label>
+          <label><span>ACCEPTANCE MARKER</span><input id="flight-acceptance" value="${escapeHtml(state.flightSettings.acceptance)}" placeholder="optional output text"></label>
+          <button class="launch-button" type="submit"><span>Run both prompts</span><b>↗</b></button>
+        </div>
+        <p class="composer-note">The small contract indicators react locally while you type; they are guidance, not a model score. Running the pair creates real persisted flight events. The built-in pair uses deterministic demo evidence; edited prompts run the selected provider path.</p>
       </form>
       <div id="flight-stage">${flight ? flightExperience(flight) : empty('No prompt flights yet', 'Launch Observe pipeline only to inspect context assembly without spending a provider call.')}</div>`;
-    $('#flight-form').addEventListener('submit', launchFlight);
-    $('#load-prompt-demo').addEventListener('click', launchPromptDemo);
+    $('#flight-form').addEventListener('submit', launchPromptPair);
+    ['a', 'b'].forEach((arm) => $('#flight-prompt-' + arm).addEventListener('input', (event) => {
+      stopFlightPlayback();
+      state.promptDrafts[arm] = event.target.value;
+      $('#prompt-contract-' + arm).innerHTML = promptContract(event.target.value);
+    }));
+    $('#flight-context').addEventListener('change', (event) => { state.flightSettings.context = event.target.value; });
+    $('#flight-provider').addEventListener('change', (event) => { state.flightSettings.provider = event.target.value; });
+    $('#flight-budget').addEventListener('input', (event) => { state.flightSettings.budget = Number(event.target.value); });
+    $('#flight-acceptance').addEventListener('input', (event) => { state.flightSettings.acceptance = event.target.value; });
+    $('#restore-guided-prompts').addEventListener('click', restoreGuidedPrompts);
     bindFlightControls(flight);
+  }
+
+  function promptEditor(arm, label, hint, value) {
+    return `<label class="prompt-editor arm-${arm}"><span class="prompt-editor-head"><b>${label}</b><small>${hint}</small></span><textarea id="flight-prompt-${arm}" rows="5" maxlength="65536" required>${escapeHtml(value)}</textarea><div id="prompt-contract-${arm}" class="prompt-contract">${promptContract(value)}</div></label>`;
+  }
+
+  function promptContract(value) {
+    const text = value.trim();
+    const words = text ? text.split(/\s+/).length : 0;
+    const signals = [
+      ['goal', /\b(build|create|make|fix|trace|compare|explain|implement|review|measure|show|find|replace|optimi[sz]e)\b/i.test(text)],
+      ['scope', /\b(runtime|prompt|context|routing|tools?|verification|outcome|file|module|api|ui|graph|storage|read-only)\b/i.test(text)],
+      ['evidence', /\b(cite|digest|evidence|observe|measure|metric|test|verify|trace)\b/i.test(text)],
+      ['success', /\b(accept|pass|must|report|result|done when|ensure|confirm)\b/i.test(text)],
+      ['stop', /\b(stop|fail|deny|avoid|never|read-only|stale|boundary)\b/i.test(text)],
+    ];
+    return `<div class="contract-summary"><span>${words} words</span><b>${signals.filter(([, present]) => present).length}/5 explicit signals</b></div><div class="contract-signals">${signals.map(([name, present]) => `<span class="${present ? 'present' : ''}"><i></i>${name}</span>`).join('')}</div>`;
+  }
+
+  function restoreGuidedPrompts() {
+    state.promptDrafts = { ...guidedPrompts };
+    ['a', 'b'].forEach((arm) => {
+      $('#flight-prompt-' + arm).value = state.promptDrafts[arm];
+      $('#prompt-contract-' + arm).innerHTML = promptContract(state.promptDrafts[arm]);
+    });
+    toast('Guided weak and strong prompts restored');
   }
 
   function flightExperience(flight) {
@@ -184,16 +239,14 @@
     const event = flight.events[state.flightCursor] || null;
     const stages = ['prompt', 'context', 'recall', 'routing', 'model', 'tools', 'outcome'];
     const activeStage = Math.max(0, stages.indexOf(event?.stage || 'prompt'));
-    const comparable = (state.data.flights || []).filter((candidate) => flight.comparison_id
-      ? candidate.comparison_id === flight.comparison_id
-      : candidate.cohort_id === flight.cohort_id);
+    const comparable = comparableFlights(flight);
     const metrics = flight.metrics || {};
     const burst = event ? signalVolume(event) : 0;
     const payloadKeys = event && event.data && typeof event.data === 'object' ? Object.keys(event.data).slice(0, 6) : [];
     return `
       <section class="flight-switcher">
         <div><span class="eyebrow">${flight.demo_role ? `${escapeHtml(flight.demo_role)} prompt demonstration` : `COHORT ${escapeHtml(flight.cohort_id.slice(0, 10))}`}</span><strong>${escapeHtml(flight.prompt)}</strong></div>
-        <select id="flight-select" aria-label="Recorded flight">${[...(state.data.flights || [])].reverse().map((candidate) => `<option value="${escapeHtml(candidate.id)}" ${candidate.id === flight.id ? 'selected' : ''}>${escapeHtml(candidate.demo_role || candidate.context_mode)} · ${escapeHtml(candidate.provider)} · ${escapeHtml(candidate.status)}</option>`).join('')}</select>
+        <div class="flight-pair-tabs">${comparable.slice(0, 2).map((candidate, index) => `<button type="button" data-compare-flight="${escapeHtml(candidate.id)}" class="${candidate.id === flight.id ? 'active' : ''}"><span>${candidate.demo_role || `Prompt ${index ? 'B' : 'A'}`}</span><b>${escapeHtml(candidate.prompt)}</b></button>`).join('')}</div>
       </section>
       <section class="flight-metrics">
         ${flightMetric('Context', metrics.context_tokens, 'tokens')}
@@ -224,7 +277,27 @@
         ${event ? microEvent(event, flight) : empty('Waiting for first event', 'The flight has been created but has not emitted an observable event.')}
         <div class="event-filmstrip">${flight.events.map((item, index) => `<button type="button" data-flight-event="${index}" class="film-frame ${index === state.flightCursor ? 'active' : ''}"><span>${item.ordinal}</span><i class="stage-${escapeHtml(item.stage)}"></i><b>${escapeHtml(item.kind.replaceAll('_', ' '))}</b><small>+${human(item.elapsed_ms)} ms</small></button>`).join('')}</div>
       </section>
-      ${comparison(comparable, flight)}`;
+      ${comparison(comparable, flight)}
+      ${flightHistory(comparable)}`;
+  }
+
+  function comparableFlights(flight) {
+    const flights = state.data.flights || [];
+    if (state.compareFlightIds.length === 2 && state.compareFlightIds.includes(flight.id)) {
+      return state.compareFlightIds.map((id) => flights.find((candidate) => candidate.id === id)).filter(Boolean);
+    }
+    return flights.filter((candidate) => flight.comparison_id
+      ? candidate.comparison_id === flight.comparison_id
+      : candidate.cohort_id === flight.cohort_id);
+  }
+
+  function flightHistory(comparable) {
+    const active = new Set(comparable.map((flight) => flight.id));
+    const others = [...(state.data.flights || [])]
+      .filter((flight) => !active.has(flight.id))
+      .sort((a, b) => b.created_at - a.created_at);
+    if (!others.length) return '';
+    return `<details class="flight-history"><summary>Other recorded runs <span>${others.length}</span></summary><div>${others.map((flight) => `<button type="button" data-history-flight="${escapeHtml(flight.id)}"><span>${escapeHtml(flight.demo_role || flight.context_mode)}</span><b>${escapeHtml(flight.prompt)}</b><small>${escapeHtml(flight.status)} · ${flight.events.length} events</small></button>`).join('')}</div></details>`;
   }
 
   function signalVolume(event) {
@@ -265,10 +338,10 @@
     const weak = flights.find((flight) => flight.demo_role === 'weak');
     const verdict = strong && weak
       ? `The strong prompt used ${Math.round((1 - strong.metrics.context_tokens / weak.metrics.context_tokens) * 100)}% less context, ${weak.metrics.tool_calls - strong.metrics.tool_calls} fewer tool calls, and reached a verifiable outcome ${weak.metrics.latency_ms - strong.metrics.latency_ms} ms sooner.`
-      : 'Compare controlled arms using observable runtime cost and acceptance evidence.';
-    return `<section class="comparison-panel"><div class="panel-head"><h2>${demos ? 'Prompt quality differential' : 'Same-prompt baseline'}</h2><span>${flights.length} CONTROLLED TRACES</span></div><div class="comparison-grid">${flights.map((flight) => {
+      : 'The bars report observed cost only. Decide which prompt is better from acceptance evidence, not from shorter bars alone.';
+    return `<section class="comparison-panel"><div class="panel-head"><h2>${demos ? 'Prompt quality differential' : 'Prompt A/B baseline'}</h2><span>${flights.length} OBSERVED TRACES</span></div><div class="comparison-grid">${flights.map((flight, index) => {
       const tokens = (flight.metrics.input_tokens ?? 0) + (flight.metrics.output_tokens ?? 0);
-      return `<button type="button" data-compare-flight="${escapeHtml(flight.id)}" class="comparison-arm ${flight.id === selected.id ? 'selected' : ''} ${flight.demo_role ? `role-${escapeHtml(flight.demo_role)}` : ''}"><span>${escapeHtml(flight.demo_role || flight.context_mode)}</span><strong>${escapeHtml(flight.prompt)}</strong><div class="comparison-bars"><div><label>context <b>${human(flight.metrics.context_tokens)}</b></label><i class="level-${barLevel(flight.metrics.context_tokens, maxima.context)}"></i></div><div><label>tools <b>${human(flight.metrics.tool_calls)}</b></label><i class="level-${barLevel(flight.metrics.tool_calls, maxima.tools)}"></i></div><div><label>latency <b>${human(flight.metrics.latency_ms)} ms</b></label><i class="level-${barLevel(flight.metrics.latency_ms, maxima.latency)}"></i></div></div><dl><div><dt>provider tokens</dt><dd>${flight.metrics.input_tokens == null ? '—' : human(tokens)}</dd></div><div><dt>accepted</dt><dd>${flight.metrics.acceptance_met == null ? '—' : flight.metrics.acceptance_met ? 'yes' : 'no'}</dd></div></dl></button>`;
+      return `<button type="button" data-compare-flight="${escapeHtml(flight.id)}" class="comparison-arm ${flight.id === selected.id ? 'selected' : ''} ${flight.demo_role ? `role-${escapeHtml(flight.demo_role)}` : ''}"><span>${escapeHtml(flight.demo_role || `Prompt ${index ? 'B' : 'A'}`)}</span><strong>${escapeHtml(flight.prompt)}</strong><div class="comparison-bars"><div><label>context <b>${human(flight.metrics.context_tokens)}</b></label><i class="level-${barLevel(flight.metrics.context_tokens, maxima.context)}"></i></div><div><label>tools <b>${human(flight.metrics.tool_calls)}</b></label><i class="level-${barLevel(flight.metrics.tool_calls, maxima.tools)}"></i></div><div><label>latency <b>${human(flight.metrics.latency_ms)} ms</b></label><i class="level-${barLevel(flight.metrics.latency_ms, maxima.latency)}"></i></div></div><dl><div><dt>provider tokens</dt><dd>${flight.metrics.input_tokens == null ? '—' : human(tokens)}</dd></div><div><dt>accepted</dt><dd>${flight.metrics.acceptance_met == null ? '—' : flight.metrics.acceptance_met ? 'yes' : 'no'}</dd></div></dl></button>`;
     }).join('')}</div><p class="comparison-verdict">${escapeHtml(verdict)}</p></section>`;
   }
 
@@ -276,71 +349,87 @@
     return Math.max(1, Math.min(10, Math.ceil((Number(value || 0) / maximum) * 10)));
   }
 
-  async function launchPromptDemo() {
-    const button = $('#load-prompt-demo');
-    button.disabled = true;
-    button.textContent = 'Building traces…';
-    try {
-      const response = await fetch('/api/demos/prompt-strength', { method: 'POST' });
-      const flights = await response.json();
-      if (!response.ok) throw new Error(flights.error || `HTTP ${response.status}`);
-      const strong = flights.find((flight) => flight.demo_role === 'strong') || flights[0];
-      state.flightId = strong.id;
-      state.flightCursor = 0;
-      state.flightPlaying = true;
-      state.flightDirection = 1;
-      await load(true);
-      toast('Weak and strong prompt traces created');
-    } catch (error) {
-      toast(error.message, true);
-      button.disabled = false;
-      button.textContent = 'Load weak ↔ strong demo';
-    }
-  }
-
-  async function launchFlight(event) {
+  async function launchPromptPair(event) {
     event.preventDefault();
     const button = $('.launch-button');
     button.disabled = true;
-    button.querySelector('span').textContent = 'Preparing';
+    button.querySelector('span').textContent = 'Running A…';
     try {
-      const response = await fetch('/api/flights', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          prompt: $('#flight-prompt').value,
-          provider: $('#flight-provider').value,
-          context_mode: $('#flight-context').value,
-          budget: Number($('#flight-budget').value),
-          acceptance_marker: $('#flight-acceptance').value,
-        }),
-      });
-      const result = await response.json();
-      if (!response.ok) throw new Error(result.error || `HTTP ${response.status}`);
-      state.flightId = result.id;
+      state.promptDrafts.a = $('#flight-prompt-a').value;
+      state.promptDrafts.b = $('#flight-prompt-b').value;
+      state.flightSettings = {
+        context: $('#flight-context').value,
+        provider: $('#flight-provider').value,
+        budget: Number($('#flight-budget').value),
+        acceptance: $('#flight-acceptance').value,
+      };
+      const isGuided = state.promptDrafts.a.trim() === guidedPrompts.a
+        && state.promptDrafts.b.trim() === guidedPrompts.b;
+      let flights;
+      if (isGuided) {
+        const response = await fetch('/api/demos/prompt-strength', { method: 'POST' });
+        flights = await response.json();
+        if (!response.ok) throw new Error(flights.error || `HTTP ${response.status}`);
+      } else {
+        const shared = {
+          provider: state.flightSettings.provider,
+          context_mode: state.flightSettings.context,
+          budget: state.flightSettings.budget,
+          acceptance_marker: state.flightSettings.acceptance,
+        };
+        const first = await postFlight({ ...shared, prompt: state.promptDrafts.a });
+        button.querySelector('span').textContent = 'Running B…';
+        const second = await postFlight({ ...shared, prompt: state.promptDrafts.b });
+        flights = [first, second];
+      }
+      state.compareFlightIds = flights.map((flight) => flight.id);
+      state.flightId = flights[1]?.id || flights[0].id;
       state.flightCursor = 0;
       state.flightPlaying = true;
       state.flightDirection = 1;
       await load(true);
-      toast('Prompt flight launched');
+      renderFlightStage();
+      button.disabled = false;
+      button.querySelector('span').textContent = 'Run both prompts';
+      toast(isGuided ? 'Guided baseline ready' : 'Custom prompt pair recorded');
     } catch (error) {
       toast(error.message, true);
       button.disabled = false;
-      button.querySelector('span').textContent = 'Launch';
+      button.querySelector('span').textContent = 'Run both prompts';
     }
+  }
+
+  async function postFlight(payload) {
+    const response = await fetch('/api/flights', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const flight = await response.json();
+    if (!response.ok) throw new Error(flight.error || `HTTP ${response.status}`);
+    return flight;
+  }
+
+  function renderFlightStage() {
+    const stage = $('#flight-stage');
+    if (!stage) return renderFlight();
+    const flight = currentFlight();
+    stage.innerHTML = flight
+      ? flightExperience(flight)
+      : empty('No prompt flights yet', 'Run the two prompts to create the first observable baseline.');
+    bindFlightControls(flight);
+  }
+
+  function stopFlightPlayback() {
+    state.flightPlaying = false;
+    clearTimeout(state.flightTimer);
   }
 
   function bindFlightControls(flight) {
     if (!flight) return;
-    $('#flight-select')?.addEventListener('change', (event) => {
-      state.flightId = event.target.value;
-      state.flightCursor = 0;
-      state.flightPlaying = false;
-      renderFlight();
-    });
     $('#flight-play')?.addEventListener('click', () => {
       state.flightPlaying = !state.flightPlaying;
-      renderFlight();
+      renderFlightStage();
       scheduleFlightStep();
     });
     $('#flight-start')?.addEventListener('click', () => freezeAt(0));
@@ -356,7 +445,14 @@
       if (index >= 0) freezeAt(index);
     }));
     $$('[data-compare-flight]').forEach((button) => button.addEventListener('click', () => {
-      state.flightId = button.dataset.compareFlight; state.flightCursor = 0; state.flightPlaying = false; renderFlight();
+      state.flightId = button.dataset.compareFlight; state.flightCursor = 0; state.flightPlaying = false; renderFlightStage();
+    }));
+    $$('[data-history-flight]').forEach((button) => button.addEventListener('click', () => {
+      state.compareFlightIds = [];
+      state.flightId = button.dataset.historyFlight;
+      state.flightCursor = 0;
+      state.flightPlaying = false;
+      renderFlightStage();
     }));
     $('#inspect-flight-event')?.addEventListener('click', () => select(`flight-event:${flight.id}:${state.flightCursor}`));
     scheduleFlightStep();
@@ -365,7 +461,7 @@
   function playDirection(direction) {
     state.flightDirection = direction;
     state.flightPlaying = true;
-    renderFlight();
+    renderFlightStage();
     scheduleFlightStep();
   }
 
@@ -373,7 +469,7 @@
     state.flightPlaying = false;
     state.flightCursor = index;
     clearTimeout(state.flightTimer);
-    renderFlight();
+    renderFlightStage();
   }
 
   function scheduleFlightStep() {
@@ -385,10 +481,10 @@
       const next = state.flightCursor + state.flightDirection;
       if (next >= 0 && next < flight.events.length) {
         state.flightCursor = next;
-        renderFlight();
+        renderFlightStage();
       } else if (state.flightDirection < 0 || !['preparing', 'running'].includes(flight.status)) {
         state.flightPlaying = false;
-        renderFlight();
+        renderFlightStage();
       }
     }, 850 / state.flightSpeed);
   }

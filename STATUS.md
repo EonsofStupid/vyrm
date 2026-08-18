@@ -61,6 +61,10 @@ not roadmap language.
   workbench renders event-density bursts, typed payload breakdowns, measurable
   cost differentials, event freezing, scrubbing, reverse playback, and up to
   8× fast-forward without presenting synthetic values as benchmark results.
+- Prompt comparison is now a stable two-editor A/B lab instead of a polling-
+  sensitive run selector. Prompt drafts survive live refresh, local contract
+  signals react while typing, edited pairs execute through the real flight
+  path, observed traces stay pinned together, and the guided seed is idempotent.
 
 ## Verification
 
