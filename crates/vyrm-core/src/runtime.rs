@@ -5,7 +5,11 @@
 //! adapters allocate a single global cursor for every mutation, hash-chain the
 //! resulting changes, and reject a commit whose expected cursor is stale.
 
-use crate::{digest, Claim, Error, Millis, Result, RuntimeSchemaRegistry};
+use crate::{
+    digest, Claim, Error, GeoValue, Millis, ObjectReference, Result, RuntimeGeo,
+    RuntimeSchemaRegistry, RuntimeSeriesSample, RuntimeVector, SeriesValue, VectorNormalization,
+    VectorValue,
+};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fmt;
@@ -62,6 +66,7 @@ runtime_ident!(RuntimeId, "runtime id");
 runtime_ident!(SnapshotId, "snapshot id");
 runtime_ident!(RetentionPinId, "retention pin id");
 runtime_ident!(ProjectionId, "projection id");
+runtime_ident!(OutboxId, "outbox id");
 
 /// Wire version for the data-runtime transaction, snapshot, projection, and
 /// audit contracts. Unknown versions are rejected rather than guessed.
@@ -171,6 +176,18 @@ pub enum RuntimeMutation {
     Event {
         event: RuntimeEvent,
     },
+    Vector {
+        vector: RuntimeVector,
+    },
+    SeriesSample {
+        sample: RuntimeSeriesSample,
+    },
+    Geo {
+        geo: RuntimeGeo,
+    },
+    Object {
+        object: ObjectReference,
+    },
 }
 
 /// The caller-observed head is mandatory. This is the compare-and-swap that
@@ -222,6 +239,34 @@ impl RuntimeCommit {
                     }
                 }
                 RuntimeMutation::Event { event } => validate_properties(&event.properties)?,
+                RuntimeMutation::Vector { vector } => {
+                    vector.validate()?;
+                    validate_properties(&vector.properties)?;
+                    if !identities.insert(("vector", vector.reference.clone())) {
+                        return duplicate_identity("vector", &vector.reference);
+                    }
+                }
+                RuntimeMutation::SeriesSample { sample } => {
+                    sample.validate()?;
+                    validate_properties(&sample.properties)?;
+                    if !identities.insert(("series_sample", sample.reference.clone())) {
+                        return duplicate_identity("series sample", &sample.reference);
+                    }
+                }
+                RuntimeMutation::Geo { geo } => {
+                    geo.validate()?;
+                    validate_properties(&geo.properties)?;
+                    if !identities.insert(("geo", geo.reference.clone())) {
+                        return duplicate_identity("geo", &geo.reference);
+                    }
+                }
+                RuntimeMutation::Object { object } => {
+                    object.validate()?;
+                    validate_properties(&object.properties)?;
+                    if !identities.insert(("object", object.reference.clone())) {
+                        return duplicate_identity("object", &object.reference);
+                    }
+                }
             }
         }
         Ok(())
@@ -303,7 +348,7 @@ impl RuntimeChange {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RuntimeCommitOutcome {
     pub commit_id: String,
     pub first_cursor: u64,
@@ -311,6 +356,7 @@ pub struct RuntimeCommitOutcome {
     pub count: usize,
     pub first_claim_sequence: Option<u64>,
     pub last_claim_sequence: Option<u64>,
+    pub outbox_count: usize,
 }
 
 /// Exact logical state observed by a reader or transaction author.
@@ -717,7 +763,11 @@ impl DataTransaction {
                 RuntimeMutation::Claim { .. }
                 | RuntimeMutation::Schema { .. }
                 | RuntimeMutation::Record { .. }
-                | RuntimeMutation::Relation { .. } => {}
+                | RuntimeMutation::Relation { .. }
+                | RuntimeMutation::Vector { .. }
+                | RuntimeMutation::SeriesSample { .. }
+                | RuntimeMutation::Geo { .. }
+                | RuntimeMutation::Object { .. } => {}
             }
         }
         let records = records
@@ -824,6 +874,34 @@ impl DataTransactionView {
             _ => None,
         })
     }
+
+    pub fn vectors(&self) -> impl Iterator<Item = &RuntimeVector> {
+        self.pending.iter().filter_map(|mutation| match mutation {
+            RuntimeMutation::Vector { vector } => Some(vector),
+            _ => None,
+        })
+    }
+
+    pub fn series_samples(&self) -> impl Iterator<Item = &RuntimeSeriesSample> {
+        self.pending.iter().filter_map(|mutation| match mutation {
+            RuntimeMutation::SeriesSample { sample } => Some(sample),
+            _ => None,
+        })
+    }
+
+    pub fn geo_values(&self) -> impl Iterator<Item = &RuntimeGeo> {
+        self.pending.iter().filter_map(|mutation| match mutation {
+            RuntimeMutation::Geo { geo } => Some(geo),
+            _ => None,
+        })
+    }
+
+    pub fn objects(&self) -> impl Iterator<Item = &ObjectReference> {
+        self.pending.iter().filter_map(|mutation| match mutation {
+            RuntimeMutation::Object { object } => Some(object),
+            _ => None,
+        })
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -833,6 +911,110 @@ pub enum ProjectionState {
     Ready,
     Quarantined,
     Retiring,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProjectionFamily {
+    Scalar,
+    Graph,
+    Text,
+    Vector,
+    TimeSeries,
+    Geo,
+    Object,
+}
+
+/// Durable work emitted in the same transaction as its canonical source.
+/// Consumers acknowledge work in a later transaction; a projection is usable
+/// only when its published stamp covers the required source cursor.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProjectionWork {
+    pub contract_version: u16,
+    pub id: OutboxId,
+    pub scope: ScopeId,
+    pub source_cursor: u64,
+    pub commit_id: String,
+    pub commit_ordinal: u64,
+    pub family: ProjectionFamily,
+}
+
+impl ProjectionWork {
+    pub fn for_change(
+        scope: ScopeId,
+        source_cursor: u64,
+        commit_id: impl Into<String>,
+        commit_ordinal: u64,
+        family: ProjectionFamily,
+    ) -> Result<Self> {
+        let commit_id = commit_id.into();
+        validate_digest("outbox commit", &commit_id)?;
+        if source_cursor == 0 {
+            return Err(Error::InvalidRuntime {
+                reason: "outbox source cursor must be greater than zero".into(),
+            });
+        }
+        let mut bytes = b"vyrm-projection-work-v1\0".to_vec();
+        text(&mut bytes, scope.as_str());
+        bytes.extend_from_slice(&source_cursor.to_be_bytes());
+        text(&mut bytes, &commit_id);
+        bytes.extend_from_slice(&commit_ordinal.to_be_bytes());
+        bytes.push(projection_family_tag(family));
+        let id = OutboxId::new(digest::sha256_hex(&bytes))?;
+        Ok(Self {
+            contract_version: DATA_RUNTIME_CONTRACT_VERSION,
+            id,
+            scope,
+            source_cursor,
+            commit_id,
+            commit_ordinal,
+            family,
+        })
+    }
+
+    pub fn validate(&self) -> Result<()> {
+        let rebuilt = Self::for_change(
+            self.scope.clone(),
+            self.source_cursor,
+            self.commit_id.clone(),
+            self.commit_ordinal,
+            self.family,
+        )?;
+        if self.contract_version != DATA_RUNTIME_CONTRACT_VERSION || rebuilt.id != self.id {
+            return Err(Error::InvalidRuntime {
+                reason: "outbox identity or contract version is invalid".into(),
+            });
+        }
+        Ok(())
+    }
+}
+
+fn projection_family_tag(family: ProjectionFamily) -> u8 {
+    match family {
+        ProjectionFamily::Scalar => 0,
+        ProjectionFamily::Graph => 1,
+        ProjectionFamily::Text => 2,
+        ProjectionFamily::Vector => 3,
+        ProjectionFamily::TimeSeries => 4,
+        ProjectionFamily::Geo => 5,
+        ProjectionFamily::Object => 6,
+    }
+}
+
+/// Projection work required by a canonical mutation. Schema and claim changes
+/// are consumed directly by their existing authoritative paths.
+pub fn projection_family(mutation: &RuntimeMutation) -> Option<ProjectionFamily> {
+    match mutation {
+        RuntimeMutation::Record { .. } => Some(ProjectionFamily::Scalar),
+        RuntimeMutation::Relation { .. } | RuntimeMutation::Event { .. } => {
+            Some(ProjectionFamily::Graph)
+        }
+        RuntimeMutation::Vector { .. } => Some(ProjectionFamily::Vector),
+        RuntimeMutation::SeriesSample { .. } => Some(ProjectionFamily::TimeSeries),
+        RuntimeMutation::Geo { .. } => Some(ProjectionFamily::Geo),
+        RuntimeMutation::Object { .. } => Some(ProjectionFamily::Object),
+        RuntimeMutation::Claim { .. } | RuntimeMutation::Schema { .. } => None,
+    }
 }
 
 /// Common freshness and provenance identity for every derived index family.
@@ -891,6 +1073,31 @@ pub struct AuditEnvelope {
 }
 
 impl AuditEnvelope {
+    pub fn accepted_commit(
+        commit: &RuntimeCommit,
+        commit_id: &str,
+        outcome_cursor: u64,
+        previous_digest: Option<String>,
+    ) -> Result<Self> {
+        Self {
+            contract_version: DATA_RUNTIME_CONTRACT_VERSION,
+            request_id: commit_id.to_owned(),
+            parent_request_id: None,
+            at: commit.at,
+            actor: commit.actor.clone(),
+            scope: commit.scope.clone(),
+            operation: "runtime.commit".into(),
+            resource: format!("transaction:{commit_id}"),
+            read: None,
+            decision: AuditDecision::Allow,
+            outcome_cursor: Some(outcome_cursor),
+            duration_ms: 0,
+            previous_digest,
+            digest: String::new(),
+        }
+        .seal()
+    }
+
     pub fn seal(mut self) -> Result<Self> {
         self.validate_components()?;
         self.digest = digest::sha256_hex(&self.bytes_without_digest());
@@ -1084,7 +1291,12 @@ impl RuntimeGraphSnapshot {
                         );
                     }
                 }
-                RuntimeMutation::Claim { .. } | RuntimeMutation::Schema { .. } => {}
+                RuntimeMutation::Claim { .. }
+                | RuntimeMutation::Schema { .. }
+                | RuntimeMutation::Vector { .. }
+                | RuntimeMutation::SeriesSample { .. }
+                | RuntimeMutation::Geo { .. }
+                | RuntimeMutation::Object { .. } => {}
             }
         }
         let records = records
@@ -1369,7 +1581,142 @@ fn encode_mutation(out: &mut Vec<u8>, mutation: &RuntimeMutation) {
             }
             encode_properties(out, &event.properties);
         }
+        RuntimeMutation::Vector { vector } => {
+            out.push(5);
+            encode_ref(out, &vector.reference);
+            encode_ref(out, &vector.subject);
+            text(out, &vector.field);
+            encode_window(out, vector.valid_from, vector.valid_to);
+            encode_vector_value(out, &vector.value);
+            out.push(u8::from(vector.provenance.is_some()));
+            if let Some(provenance) = &vector.provenance {
+                text(out, &provenance.source_digest);
+                text(out, &provenance.model);
+                text(out, &provenance.model_digest);
+                out.extend_from_slice(&provenance.dimensions.to_be_bytes());
+                out.push(match provenance.normalization {
+                    VectorNormalization::None => 0,
+                    VectorNormalization::UnitL2 => 1,
+                });
+                encode_properties(out, &provenance.generation_parameters);
+            }
+            encode_properties(out, &vector.properties);
+        }
+        RuntimeMutation::SeriesSample { sample } => {
+            out.push(6);
+            encode_ref(out, &sample.reference);
+            encode_ref(out, &sample.series);
+            out.extend_from_slice(&sample.observed_at.to_be_bytes());
+            match &sample.value {
+                SeriesValue::Integer(value) => {
+                    out.push(0);
+                    out.extend_from_slice(&value.to_be_bytes());
+                }
+                SeriesValue::Unsigned(value) => {
+                    out.push(1);
+                    out.extend_from_slice(&value.to_be_bytes());
+                }
+                SeriesValue::Decimal(value) => {
+                    out.push(2);
+                    text(out, value);
+                }
+                SeriesValue::Bool(value) => {
+                    out.push(3);
+                    out.push(u8::from(*value));
+                }
+                SeriesValue::String(value) => {
+                    out.push(4);
+                    text(out, value);
+                }
+            }
+            encode_properties(out, &sample.properties);
+        }
+        RuntimeMutation::Geo { geo } => {
+            out.push(7);
+            encode_ref(out, &geo.reference);
+            encode_ref(out, &geo.subject);
+            text(out, &geo.field);
+            encode_window(out, geo.valid_from, geo.valid_to);
+            match geo.value {
+                GeoValue::Point { point } => {
+                    out.push(0);
+                    encode_f64(out, point.longitude);
+                    encode_f64(out, point.latitude);
+                }
+                GeoValue::BoundingBox {
+                    southwest,
+                    northeast,
+                } => {
+                    out.push(1);
+                    encode_f64(out, southwest.longitude);
+                    encode_f64(out, southwest.latitude);
+                    encode_f64(out, northeast.longitude);
+                    encode_f64(out, northeast.latitude);
+                }
+            }
+            encode_properties(out, &geo.properties);
+        }
+        RuntimeMutation::Object { object } => {
+            out.push(8);
+            encode_ref(out, &object.reference);
+            out.push(u8::from(object.subject.is_some()));
+            if let Some(subject) = &object.subject {
+                encode_ref(out, subject);
+            }
+            text(out, &object.sha256);
+            out.extend_from_slice(&object.length.to_be_bytes());
+            text(out, &object.media_type);
+            text(out, &object.receipt.backend);
+            text(out, &object.receipt.key);
+            optional_text(out, object.receipt.version.as_deref());
+            optional_text(out, object.receipt.etag.as_deref());
+            encode_properties(out, &object.properties);
+        }
     }
+}
+
+fn encode_vector_value(out: &mut Vec<u8>, value: &VectorValue) {
+    match value {
+        VectorValue::Dense { values } => {
+            out.push(0);
+            encode_f32s(out, values);
+        }
+        VectorValue::Sparse {
+            dimensions,
+            indices,
+            values,
+        } => {
+            out.push(1);
+            out.extend_from_slice(&dimensions.to_be_bytes());
+            out.extend_from_slice(&(indices.len() as u64).to_be_bytes());
+            for index in indices {
+                out.extend_from_slice(&index.to_be_bytes());
+            }
+            encode_f32s(out, values);
+        }
+        VectorValue::MultiDense {
+            dimensions,
+            vectors,
+        } => {
+            out.push(2);
+            out.extend_from_slice(&dimensions.to_be_bytes());
+            out.extend_from_slice(&(vectors.len() as u64).to_be_bytes());
+            for vector in vectors {
+                encode_f32s(out, vector);
+            }
+        }
+    }
+}
+
+fn encode_f32s(out: &mut Vec<u8>, values: &[f32]) {
+    out.extend_from_slice(&(values.len() as u64).to_be_bytes());
+    for value in values {
+        out.extend_from_slice(&value.to_bits().to_be_bytes());
+    }
+}
+
+fn encode_f64(out: &mut Vec<u8>, value: f64) {
+    out.extend_from_slice(&value.to_bits().to_be_bytes());
 }
 
 fn encode_schema(out: &mut Vec<u8>, registry: &RuntimeSchemaRegistry) {

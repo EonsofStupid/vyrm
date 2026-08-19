@@ -22,28 +22,37 @@
 //! external mutex in the prior runtime protected only correction 1; with that
 //! corrected, reads run concurrently.
 
+mod ds;
 mod engine;
 mod error;
 mod gc;
 mod invocation;
 mod keyspaces;
 mod native;
+mod object;
 mod persistent;
 mod projection;
+mod s3;
 mod store;
 mod writer;
 
+pub use ds::{DataRuntime, DataRuntimeStep};
 pub use engine::{Engine, MemoryEngine};
 pub use error::{Error, Result};
 pub use gc::{PairStatus, RemovalReport, Verdict};
 pub use invocation::{Effectiveness, Invocation, InvocationInput, Outcome, RecallOutcome, Trigger};
 pub use keyspaces::Durability;
 pub use native::NativeEngine;
+pub use object::{
+    ImmutableObjectStore, LocalObjectStore, ObjectInventory, ObjectInventoryEntry,
+    ObjectInventoryState, ObjectStep, VerifiedObject,
+};
 pub use persistent::{PersistentBackend, PersistentEngine};
 pub use projection::{
     CurrentProjection, GroundedStamp, GroundingReport, ProjectionStatus, RebuildOutcome,
     CURRENT_PROJECTION,
 };
+pub use s3::{ConditionalPut, S3CompatibleObjectStore, S3ObjectClient, S3ObjectMetadata};
 pub use store::{AppendOutcome, Store};
 pub use vyrm_core::{
     DataTransaction, DataTransactionView, ReadStamp, RetentionPin, RetentionPinId,

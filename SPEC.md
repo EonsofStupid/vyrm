@@ -513,6 +513,32 @@ Retransmission of an unchanged object then costs a digest rather than a payload.
 This is the mechanism used for differentials in §8.4: identity by content digest,
 transfer of the differential only.
 
+Object bytes MUST be staged, durably published at a canonical SHA-256 key, and
+read-verified before their `ObjectReference` can enter a data transaction. The
+reference MUST bind digest, length, media type, backend, key, and available
+version/ETag evidence. A remote object service is not the transaction
+coordinator: Vyrm guarantees atomic visibility of the verified reference, audit,
+and projection work. An upload abandoned by a failed commit is an inventoried
+orphan and MUST NOT become reachable implicitly. Reclamation MUST delete only an
+explicitly proven unreachable digest. Backend ETags MUST NOT be treated as
+content hashes.
+
+### 13.3 Unified canonical mutations
+
+One runtime transaction MAY atomically include claims, schema revisions, typed
+records, relations, lifecycle events, exact vector values, typed time-series
+samples, WGS84 values, and verified object references. Every mutation MUST join
+the same cursor/hash chain and its synchronous integrity index. Every
+projection-relevant mutation MUST emit durable outbox work in that transaction;
+every accepted transaction MUST emit chained audit evidence and a stored
+idempotent outcome. A projection, ANN index, time index, or spatial index is
+rebuildable and MUST NOT become canonical truth.
+
+Derived vectors MUST bind the source digest, model identity and digest,
+dimensions, normalization, and generation parameters. Vector values MUST be
+finite and dimensionally valid; sparse indices MUST be strictly increasing.
+Spatial coordinates MUST be finite and valid WGS84 longitude/latitude values.
+
 ## 14 · Consumer
 
 The first consumer is Clyffy, acting as task executor.
@@ -536,7 +562,7 @@ executor on behalf of a model MUST be attributable to both.
 
 ## 15 · Out of scope for v0
 
-Vector indexes and rank fusion. Claims are short, structured, and number in the
-thousands, which is a bi-temporal relational workload rather than a
-similarity-search workload. Rank fusion is a query-layer concern, is decoupled
-from this schema, and is introduced when a corpus justifies it.
+Approximate vector indexes, rank fusion, embedding execution, GPU builders, and
+distributed placement remain outside this revision. Canonical exact vectors are
+in scope under §13.3 so later search artifacts can be rebuilt without becoming
+truth. Search promotion requires exact-oracle and recall evidence.

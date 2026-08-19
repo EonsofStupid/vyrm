@@ -42,9 +42,9 @@ disagree, `SPEC.md` is authoritative and this document is wrong.
 > unknown types/properties, wrong value types, illegal endpoints, temporal
 > uniqueness collisions, and edge-cardinality violations; its migrations are
 > atomic runtime mutations and its active contract is visible in Connectome.
-> This work deliberately excludes BM25, embeddings, and semantic retrieval.
-> Remaining work is content-addressed artifact bytes/backreferences,
-> incremental grounded graph lenses, and member-scoped authorization. See
+> This work deliberately excludes BM25, embedding execution, and semantic
+> retrieval. Content-addressed artifact bytes/backreferences landed in M4;
+> incremental grounded graph lenses and member-scoped authorization remain. See
 > `docs/runtime-graph.md`.
 
 > **Native-engine decision (2026-08-18).** Fjall is transitional and will be
@@ -110,6 +110,19 @@ disagree, `SPEC.md` is authoritative and this document is wrong.
 > The product handoff, canonical package-event grammar, alpha release gates,
 > deployment/update tiers, and separate SurrealDB/Qdrant proof protocols are
 > frozen in `docs/clyffy-kernel-alpha.md`.
+
+> **M4 unified-data overlay (2026-08-19).** The local executable gate is closed.
+> Canonical vector, series, geo, and object-reference mutations now join the
+> same atomic cursor/hash-chain commit as claims, records, relations, and
+> events. Each accepted commit atomically persists latest-value indexes,
+> deterministic projection work, chained audit, and an idempotent outcome.
+> `vyrmDS::DataRuntime` implements stage → verify → commit visibility over a
+> synced local content-addressed store and a capability-explicit S3-compatible
+> adapter. Three-engine mixed-family rollback/reopen tests, publication/commit
+> fault injection, quarantine, orphan reclamation, and local/S3 semantic
+> differential are green. Live cloud transport certification and automatic
+> retention-aware object GC are deployment work; M5 exact vector/search is the
+> next subsystem gate. See `docs/vyrmds-object-contract.md`.
 
 ## 1 · Grounding result
 

@@ -11,9 +11,9 @@ use crate::{
 };
 use std::path::Path;
 use vyrm_core::{
-    Claim, ClaimSource, DataTransaction, DataTransactionView, Millis, Predicate, ReadStamp, Reader,
-    RetentionPin, RuntimeChangePage, RuntimeCommit, RuntimeCommitOutcome, RuntimeSchemaRegistry,
-    ScopeId, SnapshotHandle, SnapshotId, Subject,
+    AuditEnvelope, Claim, ClaimSource, DataTransaction, DataTransactionView, Millis, Predicate,
+    ProjectionWork, ReadStamp, Reader, RetentionPin, RuntimeChangePage, RuntimeCommit,
+    RuntimeCommitOutcome, RuntimeSchemaRegistry, ScopeId, SnapshotHandle, SnapshotId, Subject,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -310,6 +310,29 @@ impl Engine for PersistentEngine {
             Self::Native(engine) => Engine::runtime_changes_since(engine, after, limit, scope),
             Self::FjallCompatibility(engine) => {
                 Engine::runtime_changes_since(engine, after, limit, scope)
+            }
+        }
+    }
+
+    fn runtime_outbox_since(&self, after: u64, limit: usize) -> Result<Vec<ProjectionWork>> {
+        match self {
+            Self::Native(engine) => Engine::runtime_outbox_since(engine, after, limit),
+            Self::FjallCompatibility(engine) => Engine::runtime_outbox_since(engine, after, limit),
+        }
+    }
+
+    fn runtime_audit(&self, commit_id: &str) -> Result<Option<AuditEnvelope>> {
+        match self {
+            Self::Native(engine) => Engine::runtime_audit(engine, commit_id),
+            Self::FjallCompatibility(engine) => Engine::runtime_audit(engine, commit_id),
+        }
+    }
+
+    fn runtime_commit_outcome(&self, commit_id: &str) -> Result<Option<RuntimeCommitOutcome>> {
+        match self {
+            Self::Native(engine) => Engine::runtime_commit_outcome(engine, commit_id),
+            Self::FjallCompatibility(engine) => {
+                Engine::runtime_commit_outcome(engine, commit_id)
             }
         }
     }

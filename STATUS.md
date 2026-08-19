@@ -15,6 +15,17 @@ not roadmap language.
   SHA-256 hash chain. Exact-cursor compare-and-swap rejects concurrent stale
   writers. Relation endpoints and subject-bearing events cannot reference a
   missing node in their scope.
+- M4 extends that same transaction—not a parallel database—with exact
+  dense/sparse/multivectors, typed series samples, WGS84 values, and verified
+  content-addressed object references. Memory, Fjall, and native engines update
+  canonical latest-value indexes, deterministic projection outbox work,
+  chained accepted-operation audit, and an idempotent retry outcome atomically.
+  `vyrmDS::DataRuntime` stages and re-verifies bytes before reference commit.
+  Local storage has sync/rename/verify, orphan inventory/reclamation, and
+  corruption quarantine; the capability-explicit S3-compatible adapter requires
+  real conditional create and passes the same semantic differential fixture.
+  Failure injection covers every local publication boundary and both sides of
+  commit; mixed-family rollback and native flush/reopen are tested.
 - A persisted, revisioned schema registry now governs typed runtime records,
   relations, and events. Unknown types and properties fail closed; property
   value types, required fields, event subjects, legal edge endpoints, temporal
@@ -155,8 +166,11 @@ artifact even on failure.
   reinterpreted. Fjall source removal remains gated by explicit migration,
   mixed update/delete soak, and remote matrix reproduction—not by preserving it
   as an architectural dependency.
-- Evidence carries content digests, but general large artifact bytes and their
-  revision/backreference lifecycle do not yet have a dedicated object store.
+- M4 object storage is executable locally and has an S3-compatible semantic
+  adapter, but no particular cloud transport/endpoint is certified yet.
+  Automated retention-aware object GC remains gated on mapping logical runtime
+  snapshot pins to physical object reachability; reclamation currently requires
+  an explicit caller-proven digest set.
 - Prompt-flight acceptance without a marker proves process completion only.
   Model-quality conclusions require non-trivial evaluators and repeated trials;
   the flight UI deliberately does not turn one attractive trace into a claim.
@@ -174,9 +188,10 @@ artifact even on failure.
   lease/pin inventory, expiry, release, restart persistence, stamped reads, and
   a tested global-serializable same/disjoint conflict policy. A deterministic
   64-write mixed-scope backend differential is green. Physical segment pins
-  are implemented in native M3. M0, M1, and M2 are complete. Vector, object-store,
-  embedding, GPU, edge, and Multi-AZ capabilities remain sequenced work, not
-  current product claims. See
+  are implemented in native M3. M0 through M4 are complete at their local
+  executable gates. Exact/ANN vector search, embedding generation, GPU
+  builders, edge packaging, and Multi-AZ capabilities remain sequenced work,
+  not current product claims. See
   `docs/vyrmds-architecture-research.md`.
 
 - JavaScript application-run claims now use script-sensitive canonical event

@@ -39,6 +39,16 @@ pub enum Error {
     ReadStampUnavailable(String),
     /// A stamped transaction read does not match the retained hash/schema state.
     ReadStampMismatch(String),
+    /// Object-tier I/O or capability error.
+    Object(String),
+    /// A referenced immutable object is absent.
+    ObjectMissing(String),
+    /// Stored bytes do not match their content address.
+    ObjectCorrupt { expected: String, actual: String },
+    /// Stored bytes match the digest but not the committed length evidence.
+    ObjectLengthMismatch { expected: u64, actual: u64 },
+    /// Deterministic failure-injection boundary used by crash tests.
+    FaultInjected(&'static str),
 }
 
 impl fmt::Display for Error {
@@ -80,6 +90,17 @@ impl fmt::Display for Error {
             Error::ReadStampMismatch(id) => {
                 write!(f, "runtime read stamp does not match retained state: {id}")
             }
+            Error::Object(message) => write!(f, "object store: {message}"),
+            Error::ObjectMissing(digest) => write!(f, "object missing: {digest}"),
+            Error::ObjectCorrupt { expected, actual } => write!(
+                f,
+                "object corrupt: expected digest {expected}, actual digest {actual}"
+            ),
+            Error::ObjectLengthMismatch { expected, actual } => write!(
+                f,
+                "object length mismatch: expected {expected}, actual {actual}"
+            ),
+            Error::FaultInjected(point) => write!(f, "failure injected at {point}"),
         }
     }
 }
@@ -107,5 +128,11 @@ impl From<vyrm_core::Error> for Error {
 impl From<serde_json::Error> for Error {
     fn from(value: serde_json::Error) -> Self {
         Error::Codec(value.to_string())
+    }
+}
+
+impl From<std::io::Error> for Error {
+    fn from(value: std::io::Error) -> Self {
+        Error::Object(value.to_string())
     }
 }

@@ -31,10 +31,12 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Mutex;
 use vyrm_core::reference::MemoryClaims;
 use vyrm_core::{
-    resolve_as_of, Claim, ClaimSource, DataTransaction, DataTransactionView, Millis, Predicate,
-    ReadStamp, Reader, RetentionPin, RuntimeChange, RuntimeChangePage, RuntimeCommit,
-    RuntimeCommitOutcome, RuntimeGraphSnapshot, RuntimeMutation, RuntimeRecord, RuntimeRef,
-    RuntimeRelation, RuntimeSchemaRegistry, ScopeId, SnapshotHandle, SnapshotId, Subject,
+    projection_family, resolve_as_of, AuditEnvelope, Claim, ClaimSource, DataTransaction,
+    DataTransactionView, Millis, ObjectReference, Predicate, ProjectionWork, ReadStamp, Reader,
+    RetentionPin, RuntimeChange, RuntimeChangePage, RuntimeCommit, RuntimeCommitOutcome,
+    RuntimeGeo, RuntimeGraphSnapshot, RuntimeMutation, RuntimeRecord, RuntimeRef, RuntimeRelation,
+    RuntimeSchemaRegistry, RuntimeSeriesSample, RuntimeVector, ScopeId, SnapshotHandle, SnapshotId,
+    Subject,
 };
 
 pub trait Engine: ClaimSource<Error = Error> {
@@ -126,6 +128,15 @@ pub trait Engine: ClaimSource<Error = Error> {
         limit: usize,
         scope: Option<&ScopeId>,
     ) -> Result<RuntimeChangePage>;
+
+    /// Reads durable projection work after a source cursor.
+    fn runtime_outbox_since(&self, after: u64, limit: usize) -> Result<Vec<ProjectionWork>>;
+
+    /// Reads the accepted-operation audit envelope for one commit.
+    fn runtime_audit(&self, commit_id: &str) -> Result<Option<AuditEnvelope>>;
+
+    /// Looks up a durably accepted content identity for coordinator retry.
+    fn runtime_commit_outcome(&self, commit_id: &str) -> Result<Option<RuntimeCommitOutcome>>;
 
     /// Commits a mutation envelope bound to its exact read stamp. The existing
     /// runtime CAS remains the final race-proof authority.
@@ -379,6 +390,15 @@ impl Engine for Store {
     ) -> Result<RuntimeChangePage> {
         Store::runtime_changes_since(self, after, limit, scope)
     }
+    fn runtime_outbox_since(&self, after: u64, limit: usize) -> Result<Vec<ProjectionWork>> {
+        Store::runtime_outbox_since(self, after, limit)
+    }
+    fn runtime_audit(&self, commit_id: &str) -> Result<Option<AuditEnvelope>> {
+        Store::runtime_audit(self, commit_id)
+    }
+    fn runtime_commit_outcome(&self, commit_id: &str) -> Result<Option<RuntimeCommitOutcome>> {
+        Store::runtime_commit_outcome(self, commit_id)
+    }
 }
 
 /// The reference engine: `MemoryClaims` plus the primitives, behind a
@@ -400,6 +420,14 @@ struct MemoryEngineInner {
     runtime_changes: Vec<RuntimeChange>,
     runtime_records: BTreeMap<(ScopeId, RuntimeRef), RuntimeRecord>,
     runtime_relations: BTreeMap<(ScopeId, RuntimeRef), RuntimeRelation>,
+    runtime_vectors: BTreeMap<(ScopeId, RuntimeRef), RuntimeVector>,
+    runtime_series: BTreeMap<(ScopeId, RuntimeRef), RuntimeSeriesSample>,
+    runtime_geo: BTreeMap<(ScopeId, RuntimeRef), RuntimeGeo>,
+    runtime_objects: BTreeMap<(ScopeId, RuntimeRef), ObjectReference>,
+    runtime_outbox: BTreeMap<u64, ProjectionWork>,
+    runtime_audit: BTreeMap<String, AuditEnvelope>,
+    runtime_last_audit_digest: Option<String>,
+    runtime_commits: BTreeMap<String, RuntimeCommitOutcome>,
     runtime_schemas: BTreeMap<ScopeId, RuntimeSchemaRegistry>,
     runtime_snapshots: BTreeMap<SnapshotId, SnapshotHandle>,
 }
@@ -647,6 +675,7 @@ impl Engine for MemoryEngine {
     fn commit_runtime(&self, commit: &RuntimeCommit) -> Result<RuntimeCommitOutcome> {
         commit.validate()?;
         let mut inner = self.inner.lock().expect("engine mutex");
+        let commit_id = commit.digest();
         let start = inner.runtime_changes.len() as u64;
         if start != commit.expected_cursor {
             return Err(Error::RuntimeConflict {
@@ -712,6 +741,10 @@ impl Engine for MemoryEngine {
             let references: Vec<&RuntimeRef> = match mutation {
                 RuntimeMutation::Relation { relation } => vec![&relation.from, &relation.to],
                 RuntimeMutation::Event { event } => event.subject.iter().collect(),
+                RuntimeMutation::Vector { vector } => vec![&vector.subject],
+                RuntimeMutation::SeriesSample { sample } => vec![&sample.series],
+                RuntimeMutation::Geo { geo } => vec![&geo.subject],
+                RuntimeMutation::Object { object } => object.subject.iter().collect(),
                 RuntimeMutation::Claim { .. }
                 | RuntimeMutation::Schema { .. }
                 | RuntimeMutation::Record { .. } => Vec::new(),
@@ -747,15 +780,25 @@ impl Engine for MemoryEngine {
             inner.order.push(claim);
         }
 
-        let commit_id = commit.digest();
         let mut previous_digest = inner
             .runtime_changes
             .last()
             .map(|change| change.digest.clone());
         let mut committed = Vec::with_capacity(commit.mutations.len());
+        let mut pending_work = Vec::new();
         for (ordinal, mutation) in commit.mutations.iter().cloned().enumerate() {
+            let cursor = start + ordinal as u64 + 1;
+            if let Some(family) = projection_family(&mutation) {
+                pending_work.push(ProjectionWork::for_change(
+                    commit.scope.clone(),
+                    cursor,
+                    commit_id.clone(),
+                    ordinal as u64,
+                    family,
+                )?);
+            }
             let change = RuntimeChange::committed(
-                start + ordinal as u64 + 1,
+                cursor,
                 commit,
                 &commit_id,
                 ordinal as u64,
@@ -765,6 +808,13 @@ impl Engine for MemoryEngine {
             previous_digest = Some(change.digest.clone());
             committed.push(change);
         }
+        let last_cursor = start + commit.mutations.len() as u64;
+        let audit = AuditEnvelope::accepted_commit(
+            commit,
+            &commit_id,
+            last_cursor,
+            inner.runtime_last_audit_digest.clone(),
+        )?;
         for mutation in &commit.mutations {
             match mutation {
                 RuntimeMutation::Schema { registry } => {
@@ -784,19 +834,53 @@ impl Engine for MemoryEngine {
                         relation.clone(),
                     );
                 }
+                RuntimeMutation::Vector { vector } => {
+                    inner.runtime_vectors.insert(
+                        (commit.scope.clone(), vector.reference.clone()),
+                        vector.clone(),
+                    );
+                }
+                RuntimeMutation::SeriesSample { sample } => {
+                    inner.runtime_series.insert(
+                        (commit.scope.clone(), sample.reference.clone()),
+                        sample.clone(),
+                    );
+                }
+                RuntimeMutation::Geo { geo } => {
+                    inner
+                        .runtime_geo
+                        .insert((commit.scope.clone(), geo.reference.clone()), geo.clone());
+                }
+                RuntimeMutation::Object { object } => {
+                    inner.runtime_objects.insert(
+                        (commit.scope.clone(), object.reference.clone()),
+                        object.clone(),
+                    );
+                }
                 RuntimeMutation::Claim { .. } | RuntimeMutation::Event { .. } => {}
             }
         }
         inner.runtime_changes.extend(committed);
+        let outbox_count = pending_work.len();
+        for work in pending_work {
+            inner.runtime_outbox.insert(work.source_cursor, work);
+        }
+        inner.runtime_last_audit_digest = Some(audit.digest.clone());
+        inner.runtime_audit.insert(commit_id.clone(), audit);
         let claim_count = claims.len();
-        Ok(RuntimeCommitOutcome {
+        let outcome = RuntimeCommitOutcome {
             commit_id,
             first_cursor: start + 1,
             last_cursor: inner.runtime_changes.len() as u64,
             count: commit.mutations.len(),
             first_claim_sequence: (claim_count > 0).then_some(claim_start + 1),
             last_claim_sequence: (claim_count > 0).then_some(claim_start + claim_count as u64),
-        })
+            outbox_count,
+        };
+        inner
+            .runtime_commits
+            .insert(outcome.commit_id.clone(), outcome.clone());
+        Ok(outcome)
     }
 
     fn runtime_changes_since(
@@ -818,6 +902,41 @@ impl Engine for MemoryEngine {
             limit,
             scope,
         ))
+    }
+
+    fn runtime_outbox_since(&self, after: u64, limit: usize) -> Result<Vec<ProjectionWork>> {
+        if limit == 0 {
+            return Err(Error::Substrate(
+                "runtime outbox page limit must be greater than zero".into(),
+            ));
+        }
+        let inner = self.inner.lock().expect("engine mutex");
+        Ok(inner
+            .runtime_outbox
+            .range((after.saturating_add(1))..)
+            .take(limit)
+            .map(|(_, work)| work.clone())
+            .collect())
+    }
+
+    fn runtime_audit(&self, commit_id: &str) -> Result<Option<AuditEnvelope>> {
+        Ok(self
+            .inner
+            .lock()
+            .expect("engine mutex")
+            .runtime_audit
+            .get(commit_id)
+            .cloned())
+    }
+
+    fn runtime_commit_outcome(&self, commit_id: &str) -> Result<Option<RuntimeCommitOutcome>> {
+        Ok(self
+            .inner
+            .lock()
+            .expect("engine mutex")
+            .runtime_commits
+            .get(commit_id)
+            .cloned())
     }
 }
 

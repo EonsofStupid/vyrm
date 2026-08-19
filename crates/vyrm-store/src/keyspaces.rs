@@ -32,6 +32,20 @@ pub const RUNTIME_CHANGES: &str = "runtime_changes";
 pub const RUNTIME_RECORDS: &str = "runtime_records";
 /// Latest persisted version of each typed runtime relation.
 pub const RUNTIME_RELATIONS: &str = "runtime_relations";
+/// Latest canonical vector values. Vector indexes remain projections.
+pub const RUNTIME_VECTORS: &str = "runtime_vectors";
+/// Latest canonical time-series samples. Time indexes remain projections.
+pub const RUNTIME_SERIES: &str = "runtime_series";
+/// Latest canonical WGS84 values. Spatial indexes remain projections.
+pub const RUNTIME_GEO: &str = "runtime_geo";
+/// Canonical visibility records for verified immutable object bytes.
+pub const RUNTIME_OBJECTS: &str = "runtime_objects";
+/// Transactional projection work keyed by the source runtime cursor.
+pub const RUNTIME_OUTBOX: &str = "runtime_outbox";
+/// Accepted-operation audit envelopes keyed by commit identity.
+pub const RUNTIME_AUDIT: &str = "runtime_audit";
+/// Accepted transaction outcomes keyed by content identity for idempotent retry.
+pub const RUNTIME_COMMITS: &str = "runtime_commits";
 /// Latest authoritative schema registry for each runtime scope. Every update
 /// is also present in the hash-chained runtime change log.
 pub const RUNTIME_SCHEMAS: &str = "runtime_schemas";
@@ -49,6 +63,7 @@ pub const INVOCATION_WATERMARK: &[u8] = b"watermark/invocations/ordinal";
 /// Global cursor and hash-chain head for typed runtime changes.
 pub const RUNTIME_CURSOR: &[u8] = b"watermark/runtime/cursor";
 pub const RUNTIME_LAST_DIGEST: &[u8] = b"watermark/runtime/last-digest";
+pub const RUNTIME_LAST_AUDIT_DIGEST: &[u8] = b"watermark/runtime/last-audit-digest";
 
 /// Persistence policy for a write transaction.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

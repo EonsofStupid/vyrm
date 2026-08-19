@@ -122,9 +122,12 @@ measured local results, never universal superiority.
    Fjall matrix remotely and add mixed mutation/migration soak before removing
    the oracle. New CLI/MCP/workbench stores already select native; existing
    non-native directories remain explicitly compatibility-bound.
-4. Add unified object/vector mutations, then exact and ANN search.
-5. Bind declared package workflows to preflight/pre-tool/post-tool policy.
-6. Extend truthful temporal visualization across storage, search, and workflow
+4. **Complete at the local M4 gate:** unified vector/series/geo/object
+   mutations, verified content-addressed publication, atomic outbox/audit, and
+   idempotent retry. Live S3 endpoint certification remains deployment evidence.
+5. Build exact dense/sparse/multivector search and its oracle before ANN.
+6. Bind declared package workflows to preflight/pre-tool/post-tool policy.
+7. Extend truthful temporal visualization across storage, search, and workflow
    events and continue controlled provider evaluations.
-7. Cut the Vyrm alpha manifest; only then scaffold the separate Clyffy master
+8. Cut the Vyrm alpha manifest; only then scaffold the separate Clyffy master
    repository and its signed tier/update system.

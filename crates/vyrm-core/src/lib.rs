@@ -31,6 +31,7 @@
 //! are deterministic.
 
 pub mod claim;
+pub mod data;
 pub mod digest;
 pub mod error;
 pub mod ident;
@@ -43,6 +44,10 @@ pub mod schema;
 pub mod temporal;
 
 pub use claim::{supersede, Claim, Millis, Producer, PromotionState, Tier};
+pub use data::{
+    EmbeddingProvenance, GeoPoint, GeoValue, ObjectReceipt, ObjectReference, RuntimeGeo,
+    RuntimeSeriesSample, RuntimeVector, SeriesValue, VectorNormalization, VectorValue,
+};
 pub use error::{Error, Result};
 pub use ident::{Predicate, Reader, Subject};
 pub use reasoning::{
@@ -51,12 +56,13 @@ pub use reasoning::{
 };
 pub use recall::{estimate_claim_tokens, recall, RecallQuery, RecallSet};
 pub use runtime::{
-    AuditDecision, AuditEnvelope, DataTransaction, DataTransactionView, ProjectionId,
-    ProjectionStamp, ProjectionState, ReadStamp, RetentionPin, RetentionPinId, RuntimeChange,
-    RuntimeChangePage, RuntimeCommit, RuntimeCommitOutcome, RuntimeEvent, RuntimeGraphDiff,
-    RuntimeGraphSnapshot, RuntimeId, RuntimeMutation, RuntimeProperties, RuntimeRecord,
-    RuntimeRecordChange, RuntimeRef, RuntimeRelation, RuntimeRelationChange, RuntimeType,
-    RuntimeValue, ScopeId, SnapshotHandle, SnapshotId, DATA_RUNTIME_CONTRACT_VERSION,
+    projection_family, AuditDecision, AuditEnvelope, DataTransaction, DataTransactionView,
+    OutboxId, ProjectionFamily, ProjectionId, ProjectionStamp, ProjectionState, ProjectionWork,
+    ReadStamp, RetentionPin, RetentionPinId, RuntimeChange, RuntimeChangePage, RuntimeCommit,
+    RuntimeCommitOutcome, RuntimeEvent, RuntimeGraphDiff, RuntimeGraphSnapshot, RuntimeId,
+    RuntimeMutation, RuntimeProperties, RuntimeRecord, RuntimeRecordChange, RuntimeRef,
+    RuntimeRelation, RuntimeRelationChange, RuntimeType, RuntimeValue, ScopeId, SnapshotHandle,
+    SnapshotId, DATA_RUNTIME_CONTRACT_VERSION,
 };
 pub use schema::{
     RuntimeEventSchema, RuntimePropertySchema, RuntimeRecordSchema, RuntimeRelationSchema,

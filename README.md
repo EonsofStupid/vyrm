@@ -26,14 +26,18 @@ prompt
 Vyrm provides:
 
 - bi-temporal claims with immutable supersession and provenance;
-- atomic typed runtime commits spanning claims, graph records, relations, and
-  lifecycle events;
+- atomic typed runtime commits spanning claims, graph records, relations,
+  lifecycle events, vectors, series samples, geospatial values, and verified
+  object references;
 - one hash-chained global runtime cursor with resumable, scope-filtered replay;
 - optimistic concurrency that rejects stale writers instead of losing updates;
 - content-addressed read stamps, persisted snapshot leases, and replay that is
   bounded to the exact captured cursor/hash/schema state;
 - prospective transaction views that read pending typed mutations without
   presenting them as committed evidence;
+- content-addressed local and capability-explicit S3-compatible object tiers,
+  with atomic reference visibility, deterministic projection outbox work,
+  chained accepted-operation audit, and idempotent commit retry;
 - hash-chained, typed reasoning runs;
 - one-attempt/one-observation mutation authorization;
 - freshness barriers and deny-by-default policy differentials;
@@ -153,7 +157,7 @@ measurement contract.
 | Crate | Responsibility |
 |---|---|
 | `vyrm-core` | Claim, reasoning, typed runtime graph, traversal, and differential contracts; serde-only boundary |
-| `vyrm-store` | Storage port with native `vyrmKV`, transitional Fjall, and memory adapters; atomic runtime commits, hash-chained changefeed, durability classes, sequences, projections |
+| `vyrm-store` | `vyrmDS` coordination plus native `vyrmKV`, transitional Fjall, and memory adapters; unified atomic commits, content-addressed objects, outbox/audit, sequences, projections |
 | `vyrm-graph` | Parsing, incremental freshness, grounding, source routing |
 | `vyrm-node` | Runtime lifecycle, instance binding, policy, append-only reasoning composition |
 | `vyrm-cli` | Operator surface |
@@ -217,6 +221,9 @@ statistically significant model-performance claim.
 - [`docs/vyrmds-architecture-research.md`](docs/vyrmds-architecture-research.md)
   — pinned upstream research, target data-runtime boundaries, and gated build
   sequence for `vyrmQL`/`vyrmMX`/`vyrmDS`/native `vyrmKV`
+- [`docs/vyrmds-object-contract.md`](docs/vyrmds-object-contract.md) — M4
+  canonical vector/series/geo/object values, object publication, atomic
+  visibility, outbox/audit, failure recovery, and adapter evidence
 - [`docs/vyrmkv-format.md`](docs/vyrmkv-format.md) — frozen native WAL, segment,
   recovery, and manifest format contract
 - [`docs/vyrmkv-benchmark.md`](docs/vyrmkv-benchmark.md) — isolated

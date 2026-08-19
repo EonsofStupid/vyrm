@@ -422,6 +422,13 @@ recovery idempotency; reference differential; latency/throughput/RSS benchmarks.
 
 ### M4 — objects and unified model mutations
 
+**Local executable gate complete (2026-08-19).** Canonical contracts,
+three-engine atomic persistence, deterministic outbox/audit, idempotent retry,
+local object publication/quarantine/reclamation, and the S3-compatible semantic
+differential are implemented. A named cloud endpoint still requires transport
+certification, and automatic object GC remains gated on physical retention-pin
+reachability. See `vyrmds-object-contract.md`.
+
 - Add content-addressed local and S3-compatible object adapters.
 - Add vector, series, geo, and blob-reference mutation contracts.
 - Publish object references, outbox work, and audit atomically.

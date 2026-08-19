@@ -16,10 +16,10 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard};
 use vyrm_core::{
-    key, Claim, ClaimSource, Millis, Predicate, ReadStamp, Reader, RetentionPin, RuntimeChange,
-    RuntimeChangePage, RuntimeCommit, RuntimeCommitOutcome, RuntimeMutation, RuntimeRecord,
-    RuntimeRef, RuntimeRelation, RuntimeSchemaRegistry, ScopeId, SnapshotHandle, SnapshotId,
-    Subject,
+    key, projection_family, AuditEnvelope, Claim, ClaimSource, Millis, Predicate, ProjectionWork,
+    ReadStamp, Reader, RetentionPin, RuntimeChange, RuntimeChangePage, RuntimeCommit,
+    RuntimeCommitOutcome, RuntimeMutation, RuntimeRecord, RuntimeRef, RuntimeRelation,
+    RuntimeSchemaRegistry, ScopeId, SnapshotHandle, SnapshotId, Subject,
 };
 use vyrm_kv::{
     CompactionOutcome, Database, GarbageCollectionReport, Manifest, Mutation, Snapshot, WriteBatch,
@@ -585,6 +585,7 @@ impl Engine for NativeEngine {
         commit.validate()?;
         let mut database = self.lock()?;
         let snapshot = database.snapshot();
+        let commit_id = commit.digest();
         let start = read_sequence(&database, snapshot, keyspaces::RUNTIME_CURSOR)?;
         if start != commit.expected_cursor {
             return Err(Error::RuntimeConflict {
@@ -671,6 +672,10 @@ impl Engine for NativeEngine {
             let references: Vec<&RuntimeRef> = match mutation {
                 RuntimeMutation::Relation { relation } => vec![&relation.from, &relation.to],
                 RuntimeMutation::Event { event } => event.subject.iter().collect(),
+                RuntimeMutation::Vector { vector } => vec![&vector.subject],
+                RuntimeMutation::SeriesSample { sample } => vec![&sample.series],
+                RuntimeMutation::Geo { geo } => vec![&geo.subject],
+                RuntimeMutation::Object { object } => object.subject.iter().collect(),
                 RuntimeMutation::Claim { .. }
                 | RuntimeMutation::Schema { .. }
                 | RuntimeMutation::Record { .. } => Vec::new(),
@@ -711,8 +716,18 @@ impl Engine for NativeEngine {
         .transpose()
         .map_err(|error| Error::CorruptWatermark(error.to_string()))?
         .filter(|digest| !digest.is_empty());
-        let commit_id = commit.digest();
+        let previous_audit_digest = get(
+            &database,
+            snapshot,
+            keyspaces::META,
+            keyspaces::RUNTIME_LAST_AUDIT_DIGEST,
+        )
+        .map(String::from_utf8)
+        .transpose()
+        .map_err(|error| Error::CorruptWatermark(error.to_string()))?
+        .filter(|digest| !digest.is_empty());
         let mut operations = Vec::new();
+        let mut outbox_count = 0;
 
         for (ordinal, mutation) in commit.mutations.iter().cloned().enumerate() {
             if let RuntimeMutation::Claim { claim } = &mutation {
@@ -755,6 +770,22 @@ impl Engine for NativeEngine {
                 &cursor.to_be_bytes(),
                 serde_json::to_vec(&change)?,
             );
+            if let Some(family) = projection_family(&mutation) {
+                let work = ProjectionWork::for_change(
+                    commit.scope.clone(),
+                    cursor,
+                    commit_id.clone(),
+                    ordinal as u64,
+                    family,
+                )?;
+                put(
+                    &mut operations,
+                    keyspaces::RUNTIME_OUTBOX,
+                    &cursor.to_be_bytes(),
+                    serde_json::to_vec(&work)?,
+                );
+                outbox_count += 1;
+            }
             match mutation {
                 RuntimeMutation::Schema { registry } => put(
                     &mut operations,
@@ -774,6 +805,30 @@ impl Engine for NativeEngine {
                     &runtime_identity_key(&commit.scope, &relation.reference),
                     serde_json::to_vec(&relation)?,
                 ),
+                RuntimeMutation::Vector { vector } => put(
+                    &mut operations,
+                    keyspaces::RUNTIME_VECTORS,
+                    &runtime_identity_key(&commit.scope, &vector.reference),
+                    serde_json::to_vec(&vector)?,
+                ),
+                RuntimeMutation::SeriesSample { sample } => put(
+                    &mut operations,
+                    keyspaces::RUNTIME_SERIES,
+                    &runtime_identity_key(&commit.scope, &sample.reference),
+                    serde_json::to_vec(&sample)?,
+                ),
+                RuntimeMutation::Geo { geo } => put(
+                    &mut operations,
+                    keyspaces::RUNTIME_GEO,
+                    &runtime_identity_key(&commit.scope, &geo.reference),
+                    serde_json::to_vec(&geo)?,
+                ),
+                RuntimeMutation::Object { object } => put(
+                    &mut operations,
+                    keyspaces::RUNTIME_OBJECTS,
+                    &runtime_identity_key(&commit.scope, &object.reference),
+                    serde_json::to_vec(&object)?,
+                ),
                 RuntimeMutation::Claim { .. } | RuntimeMutation::Event { .. } => {}
             }
             previous_digest = Some(change.digest);
@@ -792,16 +847,38 @@ impl Engine for NativeEngine {
             keyspaces::RUNTIME_LAST_DIGEST,
             previous_digest.as_deref().unwrap_or("").as_bytes().to_vec(),
         );
-        write(&mut database, operations, Durability::Authoritative)?;
-
-        Ok(RuntimeCommitOutcome {
+        let audit =
+            AuditEnvelope::accepted_commit(commit, &commit_id, cursor, previous_audit_digest)?;
+        put(
+            &mut operations,
+            keyspaces::RUNTIME_AUDIT,
+            commit_id.as_bytes(),
+            serde_json::to_vec(&audit)?,
+        );
+        put(
+            &mut operations,
+            keyspaces::META,
+            keyspaces::RUNTIME_LAST_AUDIT_DIGEST,
+            audit.digest.as_bytes().to_vec(),
+        );
+        let outcome = RuntimeCommitOutcome {
             commit_id,
             first_cursor: start + 1,
             last_cursor: cursor,
             count: commit.mutations.len(),
             first_claim_sequence: (claim_count > 0).then_some(claim_start + 1),
             last_claim_sequence: (claim_count > 0).then_some(claim_sequence),
-        })
+            outbox_count,
+        };
+        put(
+            &mut operations,
+            keyspaces::RUNTIME_COMMITS,
+            outcome.commit_id.as_bytes(),
+            serde_json::to_vec(&outcome)?,
+        );
+        write(&mut database, operations, Durability::Authoritative)?;
+
+        Ok(outcome)
     }
 
     fn runtime_changes_since(
@@ -814,6 +891,53 @@ impl Engine for NativeEngine {
         let snapshot = database.snapshot();
         let head = read_sequence(&database, snapshot, keyspaces::RUNTIME_CURSOR)?;
         native_change_page(&database, snapshot, head, after, limit, scope)
+    }
+
+    fn runtime_outbox_since(&self, after: u64, limit: usize) -> Result<Vec<ProjectionWork>> {
+        if limit == 0 {
+            return Err(Error::Substrate(
+                "runtime outbox page limit must be greater than zero".into(),
+            ));
+        }
+        let database = self.lock()?;
+        let snapshot = database.snapshot();
+        let start = after
+            .checked_add(1)
+            .ok_or(Error::SequenceOverflow)?
+            .to_be_bytes();
+        scan_space_from(&database, snapshot, keyspaces::RUNTIME_OUTBOX, &start)
+            .into_iter()
+            .take(limit)
+            .map(|(_, bytes)| {
+                let work: ProjectionWork = serde_json::from_slice(&bytes)?;
+                work.validate()?;
+                Ok(work)
+            })
+            .collect()
+    }
+
+    fn runtime_audit(&self, commit_id: &str) -> Result<Option<AuditEnvelope>> {
+        let database = self.lock()?;
+        let audit: Option<AuditEnvelope> = get_json(
+            &database,
+            database.snapshot(),
+            keyspaces::RUNTIME_AUDIT,
+            commit_id.as_bytes(),
+        )?;
+        if let Some(value) = &audit {
+            value.validate()?;
+        }
+        Ok(audit)
+    }
+
+    fn runtime_commit_outcome(&self, commit_id: &str) -> Result<Option<RuntimeCommitOutcome>> {
+        let database = self.lock()?;
+        get_json(
+            &database,
+            database.snapshot(),
+            keyspaces::RUNTIME_COMMITS,
+            commit_id.as_bytes(),
+        )
     }
 }
 

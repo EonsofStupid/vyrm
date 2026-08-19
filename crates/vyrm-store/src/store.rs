@@ -9,10 +9,10 @@ use serde::de::DeserializeOwned;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use vyrm_core::{
-    key, Claim, ClaimSource, Millis, Predicate, ReadStamp, Reader, RetentionPin, RuntimeChange,
-    RuntimeChangePage, RuntimeCommit, RuntimeCommitOutcome, RuntimeMutation, RuntimeRecord,
-    RuntimeRef, RuntimeRelation, RuntimeSchemaRegistry, ScopeId, SnapshotHandle, SnapshotId,
-    Subject,
+    key, projection_family, AuditEnvelope, Claim, ClaimSource, Millis, Predicate, ProjectionWork,
+    ReadStamp, Reader, RetentionPin, RuntimeChange, RuntimeChangePage, RuntimeCommit,
+    RuntimeCommitOutcome, RuntimeMutation, RuntimeRecord, RuntimeRef, RuntimeRelation,
+    RuntimeSchemaRegistry, ScopeId, SnapshotHandle, SnapshotId, Subject,
 };
 
 /// Sequences assigned by an append.
@@ -41,6 +41,13 @@ pub struct Store {
     runtime_changes: SingleWriterTxKeyspace,
     runtime_records: SingleWriterTxKeyspace,
     runtime_relations: SingleWriterTxKeyspace,
+    runtime_vectors: SingleWriterTxKeyspace,
+    runtime_series: SingleWriterTxKeyspace,
+    runtime_geo: SingleWriterTxKeyspace,
+    runtime_objects: SingleWriterTxKeyspace,
+    runtime_outbox: SingleWriterTxKeyspace,
+    runtime_audit: SingleWriterTxKeyspace,
+    runtime_commits: SingleWriterTxKeyspace,
     runtime_schemas: SingleWriterTxKeyspace,
     runtime_snapshots: SingleWriterTxKeyspace,
 }
@@ -65,6 +72,19 @@ impl Store {
             db.keyspace(keyspaces::RUNTIME_RECORDS, KeyspaceCreateOptions::default)?;
         let runtime_relations =
             db.keyspace(keyspaces::RUNTIME_RELATIONS, KeyspaceCreateOptions::default)?;
+        let runtime_vectors =
+            db.keyspace(keyspaces::RUNTIME_VECTORS, KeyspaceCreateOptions::default)?;
+        let runtime_series =
+            db.keyspace(keyspaces::RUNTIME_SERIES, KeyspaceCreateOptions::default)?;
+        let runtime_geo = db.keyspace(keyspaces::RUNTIME_GEO, KeyspaceCreateOptions::default)?;
+        let runtime_objects =
+            db.keyspace(keyspaces::RUNTIME_OBJECTS, KeyspaceCreateOptions::default)?;
+        let runtime_outbox =
+            db.keyspace(keyspaces::RUNTIME_OUTBOX, KeyspaceCreateOptions::default)?;
+        let runtime_audit =
+            db.keyspace(keyspaces::RUNTIME_AUDIT, KeyspaceCreateOptions::default)?;
+        let runtime_commits =
+            db.keyspace(keyspaces::RUNTIME_COMMITS, KeyspaceCreateOptions::default)?;
         let runtime_schemas =
             db.keyspace(keyspaces::RUNTIME_SCHEMAS, KeyspaceCreateOptions::default)?;
         let runtime_snapshots =
@@ -81,6 +101,13 @@ impl Store {
             runtime_changes,
             runtime_records,
             runtime_relations,
+            runtime_vectors,
+            runtime_series,
+            runtime_geo,
+            runtime_objects,
+            runtime_outbox,
+            runtime_audit,
+            runtime_commits,
             runtime_schemas,
             runtime_snapshots,
         })
@@ -376,6 +403,10 @@ impl Store {
             let references: Vec<&RuntimeRef> = match mutation {
                 RuntimeMutation::Relation { relation } => vec![&relation.from, &relation.to],
                 RuntimeMutation::Event { event } => event.subject.iter().collect(),
+                RuntimeMutation::Vector { vector } => vec![&vector.subject],
+                RuntimeMutation::SeriesSample { sample } => vec![&sample.series],
+                RuntimeMutation::Geo { geo } => vec![&geo.subject],
+                RuntimeMutation::Object { object } => object.subject.iter().collect(),
                 RuntimeMutation::Claim { .. }
                 | RuntimeMutation::Schema { .. }
                 | RuntimeMutation::Record { .. } => Vec::new(),
@@ -411,6 +442,12 @@ impl Store {
             .map(|bytes| String::from_utf8(bytes.to_vec()))
             .transpose()
             .map_err(|error| Error::CorruptWatermark(error.to_string()))?;
+        let previous_audit_digest = tx
+            .get(&self.meta, keyspaces::RUNTIME_LAST_AUDIT_DIGEST)?
+            .map(|bytes| String::from_utf8(bytes.to_vec()))
+            .transpose()
+            .map_err(|error| Error::CorruptWatermark(error.to_string()))?;
+        let mut outbox_count = 0;
 
         for (ordinal, mutation) in commit.mutations.iter().cloned().enumerate() {
             if let RuntimeMutation::Claim { claim } = &mutation {
@@ -445,6 +482,21 @@ impl Store {
                 runtime_cursor_key(cursor),
                 serde_json::to_vec(&change)?,
             );
+            if let Some(family) = projection_family(&mutation) {
+                let work = ProjectionWork::for_change(
+                    commit.scope.clone(),
+                    cursor,
+                    commit_id.clone(),
+                    ordinal as u64,
+                    family,
+                )?;
+                tx.insert(
+                    &self.runtime_outbox,
+                    runtime_cursor_key(cursor),
+                    serde_json::to_vec(&work)?,
+                );
+                outbox_count += 1;
+            }
             match mutation {
                 RuntimeMutation::Schema { registry } => tx.insert(
                     &self.runtime_schemas,
@@ -460,6 +512,26 @@ impl Store {
                     &self.runtime_relations,
                     runtime_identity_key(&commit.scope, &relation.reference),
                     serde_json::to_vec(&relation)?,
+                ),
+                RuntimeMutation::Vector { vector } => tx.insert(
+                    &self.runtime_vectors,
+                    runtime_identity_key(&commit.scope, &vector.reference),
+                    serde_json::to_vec(&vector)?,
+                ),
+                RuntimeMutation::SeriesSample { sample } => tx.insert(
+                    &self.runtime_series,
+                    runtime_identity_key(&commit.scope, &sample.reference),
+                    serde_json::to_vec(&sample)?,
+                ),
+                RuntimeMutation::Geo { geo } => tx.insert(
+                    &self.runtime_geo,
+                    runtime_identity_key(&commit.scope, &geo.reference),
+                    serde_json::to_vec(&geo)?,
+                ),
+                RuntimeMutation::Object { object } => tx.insert(
+                    &self.runtime_objects,
+                    runtime_identity_key(&commit.scope, &object.reference),
+                    serde_json::to_vec(&object)?,
                 ),
                 RuntimeMutation::Claim { .. } | RuntimeMutation::Event { .. } => {}
             }
@@ -483,16 +555,35 @@ impl Store {
             keyspaces::RUNTIME_LAST_DIGEST,
             previous_digest.as_deref().unwrap_or("").as_bytes(),
         );
-        tx.commit()?;
-
-        Ok(RuntimeCommitOutcome {
+        let audit =
+            AuditEnvelope::accepted_commit(commit, &commit_id, cursor, previous_audit_digest)?;
+        tx.insert(
+            &self.runtime_audit,
+            commit_id.as_bytes(),
+            serde_json::to_vec(&audit)?,
+        );
+        tx.insert(
+            &self.meta,
+            keyspaces::RUNTIME_LAST_AUDIT_DIGEST,
+            audit.digest.as_bytes(),
+        );
+        let outcome = RuntimeCommitOutcome {
             commit_id,
             first_cursor: start + 1,
             last_cursor: cursor,
             count: commit.mutations.len(),
             first_claim_sequence: (claim_count > 0).then_some(claim_start + 1),
             last_claim_sequence: (claim_count > 0).then_some(claim_sequence),
-        })
+            outbox_count,
+        };
+        tx.insert(
+            &self.runtime_commits,
+            outcome.commit_id.as_bytes(),
+            serde_json::to_vec(&outcome)?,
+        );
+        tx.commit()?;
+
+        Ok(outcome)
     }
 
     /// Replays at most `limit` global cursor positions after `after`. Scope
@@ -507,6 +598,49 @@ impl Store {
         let snapshot = self.db.read_tx();
         let head = decode_optional_sequence(snapshot.get(&self.meta, keyspaces::RUNTIME_CURSOR)?)?;
         runtime_change_page(&snapshot, &self.runtime_changes, head, after, limit, scope)
+    }
+
+    pub fn runtime_outbox_since(&self, after: u64, limit: usize) -> Result<Vec<ProjectionWork>> {
+        if limit == 0 {
+            return Err(Error::Substrate(
+                "runtime outbox page limit must be greater than zero".into(),
+            ));
+        }
+        let start = after.checked_add(1).ok_or(Error::SequenceOverflow)?;
+        let snapshot = self.db.read_tx();
+        snapshot
+            .range(&self.runtime_outbox, runtime_cursor_key(start)..)
+            .take(limit)
+            .map(|guard| {
+                let (_, bytes) = guard.into_inner()?;
+                let work: ProjectionWork = serde_json::from_slice(&bytes)?;
+                work.validate()?;
+                Ok(work)
+            })
+            .collect()
+    }
+
+    pub fn runtime_audit(&self, commit_id: &str) -> Result<Option<AuditEnvelope>> {
+        let snapshot = self.db.read_tx();
+        let audit = snapshot
+            .get(&self.runtime_audit, commit_id.as_bytes())?
+            .map(|bytes| serde_json::from_slice::<AuditEnvelope>(&bytes))
+            .transpose()?;
+        if let Some(value) = &audit {
+            value.validate()?;
+        }
+        Ok(audit)
+    }
+
+    pub fn runtime_commit_outcome(
+        &self,
+        commit_id: &str,
+    ) -> Result<Option<RuntimeCommitOutcome>> {
+        let snapshot = self.db.read_tx();
+        snapshot
+            .get(&self.runtime_commits, commit_id.as_bytes())?
+            .map(|bytes| serde_json::from_slice(&bytes).map_err(Error::from))
+            .transpose()
     }
 
     /// Appends claims in one transaction with one fsync.

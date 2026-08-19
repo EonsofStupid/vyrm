@@ -173,7 +173,12 @@ impl RuntimeSchemaRegistry {
         let mutations = mutations.into_iter().collect::<Vec<_>>();
         for mutation in &mutations {
             match mutation {
-                RuntimeMutation::Claim { .. } | RuntimeMutation::Schema { .. } => {}
+                RuntimeMutation::Claim { .. }
+                | RuntimeMutation::Schema { .. }
+                | RuntimeMutation::Vector { .. }
+                | RuntimeMutation::SeriesSample { .. }
+                | RuntimeMutation::Geo { .. }
+                | RuntimeMutation::Object { .. } => {}
                 RuntimeMutation::Record { record } => self.validate_record(record)?,
                 RuntimeMutation::Relation { relation } => self.validate_relation(relation)?,
                 RuntimeMutation::Event { event } => self.validate_event(event)?,
@@ -198,7 +203,11 @@ impl RuntimeSchemaRegistry {
                 }
                 RuntimeMutation::Claim { .. }
                 | RuntimeMutation::Event { .. }
-                | RuntimeMutation::Schema { .. } => {}
+                | RuntimeMutation::Schema { .. }
+                | RuntimeMutation::Vector { .. }
+                | RuntimeMutation::SeriesSample { .. }
+                | RuntimeMutation::Geo { .. }
+                | RuntimeMutation::Object { .. } => {}
             }
         }
         self.validate_record_uniqueness(records.values())?;
