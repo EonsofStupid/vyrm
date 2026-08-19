@@ -13,9 +13,9 @@
 //! (`vyrm-core/fixtures/golden-vectors.json` is the cross-language proof)
 //! and the semantic layer above it is a translation, not a redesign.
 //!
-//! Two engines ship in Rust today: [`Store`] (the transitional Fjall
-//! compatibility adapter) and
-//! [`MemoryEngine`] (the reference, for conformance differentials per
+//! Three engines ship in Rust today: [`Store`] (the transitional Fjall
+//! compatibility adapter), [`crate::NativeEngine`] (the Vyrm-native target),
+//! and [`MemoryEngine`] (the reference, for conformance differentials per
 //! standing rule 3). Cache tiers (Moka in-process, Dragonfly shared)
 //! compose *around* an engine rather than implementing this trait: they
 //! accelerate reads and must never be the system of record.
@@ -382,7 +382,7 @@ impl Engine for Store {
 }
 
 /// The reference engine: `MemoryClaims` plus the primitives, behind a
-/// mutex. Exists so conformance is a differential between two engines
+/// mutex. Exists so conformance is a differential across all engines
 /// (standing rule 3) and so the runtime layer is provably generic over the
 /// port. Not a production store — nothing here survives the process.
 #[derive(Default)]

@@ -98,16 +98,28 @@ repeating identical bytes is idempotent, rebinding a name fails closed, and
 release is explicit and directory-synced. Retention and GC consume this
 inventory rather than inferring reachability from filenames.
 
-The native `Engine` adapter now passes Memory/Fjall/native semantic and exact
-query differentials, including flush/reopen. Compaction and systematic fault
-matrices are subsequent M3 gates. Until those and comparative benchmarks pass,
-Fjall remains the compatibility store and no native performance claim is made.
+The native `Engine` adapter passes Memory/Fjall/native semantic and exact query
+differentials, including flush/reopen. Compaction retains the newest version
+visible at every explicitly protected physical sequence plus the durable head;
+an obsolete tombstone with no retained older value disappears. Runtime leases
+create physical manifest checkpoints and reconcile them on reopen,
+compaction, release, and expiry. GC validates the complete root inventory,
+then removes only manifests, segments, and WALs unreachable from `CURRENT` or
+a named checkpoint.
+
+Deterministic crash and storage-full injection covers the WAL-sync,
+segment-sync, successor-WAL-sync, and manifest-publication flush boundaries,
+plus compaction segment and manifest publication. Every cell reopens, verifies
+the accepted data, continues writing, and reopens again. Comparative benchmarks
+remain the final M3 gate; until they pass, Fjall remains live and no native
+performance claim is made.
 
 Manifest publication now holds an OS-level exclusive lock for the publication
 session. It validates expected `CURRENT`, generation, and parent; syncs immutable
 manifest bytes; atomically renames a separately checksummed `CURRENT` pointer;
 then syncs the containing directory. Stale compare-and-swap expectations fail
-without changing reachability. Compaction remains open.
+without changing reachability. Compaction publishes through the same CAS
+boundary and leaves its input graph unreachable—but intact—until GC.
 
 Database flush follows the crash-safe publication order directly: sync the
 active WAL, write/sync/rename the content-addressed segment, create and sync the

@@ -112,6 +112,12 @@ impl Segment {
             })
             .collect()
     }
+
+    pub(crate) fn all_versions(&self) -> impl Iterator<Item = (&[u8], &[VersionedValue])> {
+        self.versions
+            .iter()
+            .map(|(key, versions)| (key.as_slice(), versions.as_slice()))
+    }
 }
 
 fn encode(table: &Memtable) -> Result<Vec<u8>> {

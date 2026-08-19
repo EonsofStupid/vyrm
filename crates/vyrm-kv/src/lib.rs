@@ -14,7 +14,10 @@ mod segment;
 mod wal;
 
 pub use batch::{Mutation, WriteBatch, BATCH_FORMAT_VERSION};
-pub use database::{Database, Snapshot};
+pub use database::{
+    CompactionBoundary, CompactionOutcome, Database, FailureMode, FlushBoundary,
+    GarbageCollectionReport, Snapshot,
+};
 pub use error::{Error, Result};
 pub use manifest::{
     Checkpoint, CurrentPointer, Manifest, ManifestStore, SegmentDescriptor, MANIFEST_FORMAT_VERSION,

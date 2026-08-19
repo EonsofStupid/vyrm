@@ -110,6 +110,6 @@ The following are not represented as complete:
 4. Retention checkpoints and archival for high-volume event histories.
 
 Fjall is the transitional compatibility adapter, not the destination. The
-Vyrm-native engine will replace it behind the same contracts, which are also
-proven against `MemoryEngine`. The Fjall baselines remain useful only as
-performance and correctness thresholds the native engine must meet or beat.
+Vyrm-native engine now implements the same contracts, proven against both
+Fjall and `MemoryEngine`. Fjall remains useful as a live compatibility path and
+as the performance/correctness threshold the native engine must meet or beat.

@@ -19,7 +19,11 @@ use vyrm_core::{
     RuntimeRef, RuntimeRelation, RuntimeSchemaRegistry, ScopeId, SnapshotHandle, SnapshotId,
     Subject,
 };
-use vyrm_kv::{Database, Manifest, Mutation, Snapshot, WriteBatch};
+use vyrm_kv::{
+    CompactionOutcome, Database, GarbageCollectionReport, Manifest, Mutation, Snapshot, WriteBatch,
+};
+
+const RUNTIME_CHECKPOINT_PREFIX: &str = "runtime-";
 
 pub struct NativeEngine {
     path: PathBuf,
@@ -31,11 +35,12 @@ impl NativeEngine {
     /// An existing but invalid directory fails closed rather than being
     /// silently reinitialized.
     pub fn open(path: &Path) -> Result<Self> {
-        let database = if path.exists() {
+        let mut database = if path.exists() {
             Database::open(path)?
         } else {
             Database::create(path)?
         };
+        reconcile_runtime_checkpoints(&mut database, None, 0)?;
         let path = database.root().to_owned();
         Ok(Self {
             path,
@@ -54,6 +59,26 @@ impl NativeEngine {
 
     pub fn manifest(&self) -> Result<Manifest> {
         Ok(self.lock()?.manifest().clone())
+    }
+
+    /// Compacts native state after reconciling physical manifest pins with the
+    /// authoritative logical snapshot catalog.
+    pub fn compact(&self, now: Millis, at: Millis) -> Result<Option<CompactionOutcome>> {
+        let mut database = self.lock()?;
+        reconcile_runtime_checkpoints(&mut database, Some(now), at)?;
+        database.compact(&[], at).map_err(Error::from)
+    }
+
+    /// Reclaims only objects unreachable from `CURRENT` or a live runtime
+    /// snapshot's physical checkpoint.
+    pub fn garbage_collect(
+        &self,
+        now: Millis,
+        at: Millis,
+    ) -> Result<GarbageCollectionReport> {
+        let mut database = self.lock()?;
+        reconcile_runtime_checkpoints(&mut database, Some(now), at)?;
+        database.garbage_collect().map_err(Error::from)
     }
 
     fn lock(&self) -> Result<MutexGuard<'_, Database>> {
@@ -285,6 +310,18 @@ impl Engine for NativeEngine {
             now,
             ttl,
         )?;
+        if let Some(persisted) = get_json::<SnapshotHandle>(
+            &database,
+            database.snapshot(),
+            keyspaces::RUNTIME_SNAPSHOTS,
+            handle.id.as_str().as_bytes(),
+        )? {
+            if persisted != handle {
+                return Err(Error::SnapshotMismatch(handle.id.to_string()));
+            }
+            ensure_runtime_checkpoint(&mut database, &handle, now)?;
+            return Ok(handle);
+        }
         write(
             &mut database,
             vec![Mutation::Put {
@@ -293,6 +330,19 @@ impl Engine for NativeEngine {
             }],
             Durability::Authoritative,
         )?;
+        if let Err(error) = ensure_runtime_checkpoint(&mut database, &handle, now) {
+            write(
+                &mut database,
+                vec![Mutation::Delete {
+                    key: storage_key(
+                        keyspaces::RUNTIME_SNAPSHOTS,
+                        handle.id.as_str().as_bytes(),
+                    ),
+                }],
+                Durability::Authoritative,
+            )?;
+            return Err(error);
+        }
         Ok(handle)
     }
 
@@ -343,6 +393,7 @@ impl Engine for NativeEngine {
             vec![Mutation::Delete { key }],
             Durability::Authoritative,
         )?;
+        database.release_checkpoint(&runtime_checkpoint_name(id))?;
         Ok(true)
     }
 
@@ -640,6 +691,72 @@ fn scan_claims(database: &Database, prefix: Vec<u8>, from: Vec<u8>) -> Result<Ve
         .into_iter()
         .map(|(_, value)| serde_json::from_slice(&value).map_err(Error::from))
         .collect()
+}
+
+fn ensure_runtime_checkpoint(
+    database: &mut Database,
+    handle: &SnapshotHandle,
+    at: Millis,
+) -> Result<()> {
+    let name = runtime_checkpoint_name(&handle.id);
+    if database
+        .checkpoints()?
+        .iter()
+        .any(|checkpoint| checkpoint.name == name)
+    {
+        return Ok(());
+    }
+    let created_at = at.max(database.manifest().created_at);
+    database.flush_memtable(created_at)?;
+    database.checkpoint(&name, created_at)?;
+    Ok(())
+}
+
+fn reconcile_runtime_checkpoints(
+    database: &mut Database,
+    now: Option<Millis>,
+    at: Millis,
+) -> Result<()> {
+    let snapshot = database.snapshot();
+    let handles = scan_space(
+        database,
+        snapshot,
+        keyspaces::RUNTIME_SNAPSHOTS,
+        &[],
+    )
+    .into_iter()
+    .map(|(_, bytes)| serde_json::from_slice::<SnapshotHandle>(&bytes).map_err(Error::from))
+    .collect::<Result<Vec<_>>>()?;
+    for handle in &handles {
+        handle.validate()?;
+    }
+    let desired = handles
+        .iter()
+        .filter(|handle| now.is_none_or(|now| !handle.is_expired(now)))
+        .map(|handle| runtime_checkpoint_name(&handle.id))
+        .collect::<BTreeSet<_>>();
+    let checkpoints = database.checkpoints()?;
+    let existing = checkpoints
+        .iter()
+        .filter(|checkpoint| checkpoint.name.starts_with(RUNTIME_CHECKPOINT_PREFIX))
+        .map(|checkpoint| checkpoint.name.clone())
+        .collect::<BTreeSet<_>>();
+    let missing = desired.difference(&existing).cloned().collect::<Vec<_>>();
+    if !missing.is_empty() {
+        let created_at = at.max(database.manifest().created_at);
+        database.flush_memtable(created_at)?;
+        for name in missing {
+            database.checkpoint(&name, created_at)?;
+        }
+    }
+    for name in existing.difference(&desired) {
+        database.release_checkpoint(name)?;
+    }
+    Ok(())
+}
+
+fn runtime_checkpoint_name(id: &SnapshotId) -> String {
+    format!("{RUNTIME_CHECKPOINT_PREFIX}{}", id.as_str())
 }
 
 fn native_read_stamp(database: &Database, snapshot: Snapshot, scope: &ScopeId) -> Result<ReadStamp> {

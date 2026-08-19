@@ -479,7 +479,8 @@ underneath—the compatibility adapter. WAL, atomic mutation, immutable segment,
 manifest, and `CURRENT` formats are frozen; torn/corrupt recovery, MVCC,
 checkpoints, manifest CAS, segment flush, WAL rotation, and reopen at the
 manifest replay boundary are covered. The native `Engine` adapter and
-Memory/Fjall/native semantic/query differential are now green. Next implement
-pinned-snapshot compaction/GC and the crash/disk-full/recovery matrix, followed
-by comparative benchmarks. Do not begin vectors, S3, GPU, or clustering before
-native correctness and measurement close.
+Memory/Fjall/native semantic/query differential are green. Snapshot-aware
+compaction/GC, physical lease pins, and crash/storage-full recovery matrices are
+also green. Next run comparative latency, throughput, recovery, and RSS
+benchmarks and freeze promotion thresholds. Do not begin vectors, S3, GPU, or
+clustering before native correctness and measurement close.

@@ -106,8 +106,13 @@ not roadmap language.
   onto stable prefixed keys and atomic native batches. Three-backend tests cover
   claims, projections, schema/cardinality enforcement, hash-chain replay,
   leased snapshots, stamped transactions, concurrent global CAS, flush/reopen,
-  and exact `vyrmQL` execution. Compaction/GC, systematic fault matrices, and
-  performance claims remain open.
+  and exact `vyrmQL` execution. Snapshot-aware compaction retains versions at
+  explicitly protected physical sequences; native runtime leases create and
+  reconcile manifest checkpoints; GC deletes only manifests, segments, and
+  WALs unreachable from `CURRENT` or a checkpoint. Deterministic crash and
+  storage-full injection covers each flush and compaction durability boundary,
+  followed by reopen and continued writes. Comparative performance claims
+  remain open.
 
 ## Verification
 

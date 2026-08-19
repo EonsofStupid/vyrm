@@ -185,6 +185,39 @@ fn native_snapshot_catalog_survives_flush_and_restart() {
     assert_eq!(page.changes.len(), 1);
 }
 
+#[test]
+fn native_snapshot_leases_pin_physical_manifests_until_release_or_expiry() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("native");
+    let scope = ScopeId::new("instance:physical-pin").unwrap();
+    let store = NativeEngine::open(&path).unwrap();
+    store.commit_runtime(&bootstrap(&scope, 0)).unwrap();
+    let handle = store
+        .open_runtime_snapshot(&scope, "agent:pin", 1_000, 100)
+        .unwrap();
+    let checkpoint = path
+        .join("checkpoints")
+        .join(format!("runtime-{}.json", handle.id));
+    assert!(checkpoint.exists());
+
+    store.commit_runtime(&pulse(&scope, 1)).unwrap();
+    store.compact(1_050, 1_050).unwrap();
+    store.garbage_collect(1_050, 1_050).unwrap();
+    assert!(checkpoint.exists());
+    let frozen = store
+        .runtime_snapshot_changes(&handle, 0, 10, 1_050)
+        .unwrap();
+    assert_eq!(frozen.head_cursor, 1);
+
+    store.compact(1_100, 1_100).unwrap();
+    store.garbage_collect(1_100, 1_100).unwrap();
+    assert!(!checkpoint.exists());
+    assert!(matches!(
+        store.runtime_snapshot_changes(&handle, 0, 10, 1_100),
+        Err(Error::SnapshotExpired { .. })
+    ));
+}
+
 fn assert_data_transaction_contract(engine: &dyn Engine) {
     let scope = ScopeId::new("instance:transaction").unwrap();
     let read = engine.runtime_read_stamp(&scope).unwrap();

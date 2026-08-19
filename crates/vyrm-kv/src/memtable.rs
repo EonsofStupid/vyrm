@@ -37,6 +37,41 @@ impl Memtable {
         }
     }
 
+    pub(crate) fn from_versions(
+        versions: BTreeMap<Vec<u8>, Vec<VersionedValue>>,
+        maximum_sequence: u64,
+    ) -> Result<Self> {
+        let mut approximate_bytes = 0usize;
+        for (key, values) in &versions {
+            if key.is_empty() || values.is_empty() {
+                return Err(Error::InvalidSegment(
+                    "compacted memtable contains an empty key/version set".into(),
+                ));
+            }
+            let mut previous = 0;
+            for value in values {
+                if value.sequence == 0
+                    || value.sequence <= previous
+                    || value.sequence > maximum_sequence
+                {
+                    return Err(Error::InvalidSegment(
+                        "compacted versions are not strictly ordered".into(),
+                    ));
+                }
+                previous = value.sequence;
+                approximate_bytes = approximate_bytes
+                    .saturating_add(key.len())
+                    .saturating_add(value.value.as_ref().map_or(0, Vec::len))
+                    .saturating_add(std::mem::size_of::<VersionedValue>());
+            }
+        }
+        Ok(Self {
+            versions,
+            maximum_sequence,
+            approximate_bytes,
+        })
+    }
+
     pub fn apply(&mut self, recovered: &RecoveredBatch) -> Result<()> {
         let batch = WriteBatch::decode(&recovered.payload)?;
         let operation_count = u64::try_from(batch.len())

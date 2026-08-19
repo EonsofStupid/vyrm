@@ -24,6 +24,10 @@ pub enum Error {
         offset: u64,
     },
     PoisonedWriter,
+    InjectedFailure {
+        mode: &'static str,
+        boundary: &'static str,
+    },
 }
 
 impl fmt::Display for Error {
@@ -51,6 +55,9 @@ impl fmt::Display for Error {
                 formatter,
                 "WAL writer is poisoned after a failed append and must be reopened"
             ),
+            Self::InjectedFailure { mode, boundary } => {
+                write!(formatter, "injected {mode} failure at {boundary}")
+            }
         }
     }
 }

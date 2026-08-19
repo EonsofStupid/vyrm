@@ -87,8 +87,11 @@ disagree, `SPEC.md` is authoritative and this document is wrong.
 > semantic port over prefixed native keys and one atomic `vyrmKV` batch per
 > commit. Memory/Fjall/native differentials cover claims, projections, runtime
 > schemas and hash chains, snapshots, restart, concurrent CAS, and exact query
-> results. Compaction/GC, fault matrices, and performance proof remain open.
-> Fjall remains live.
+> results. Snapshot-aware compaction retains only versions visible at protected
+> physical snapshots; runtime leases create/reconcile manifest checkpoints; GC
+> derives reachability from `CURRENT` plus those pins. Crash and storage-full
+> injection now cover every flush and compaction durability boundary. Native
+> performance proof remains open, so Fjall remains live.
 > The product handoff, canonical package-event grammar, alpha release gates,
 > deployment/update tiers, and separate SurrealDB/Qdrant proof protocols are
 > frozen in `docs/clyffy-kernel-alpha.md`.
