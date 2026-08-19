@@ -57,7 +57,9 @@ Vyrm provides:
   executable and versioned local supervisor protocol now prove process-isolated
   crash/restart, leader replacement during a live transport partition,
   reconciliation, post-purge learner snapshot catch-up, identity confusion
-  denial, and corrupt-pointer refusal (production clustering remains gated);
+  denial, hot leaf and trust-root rotation, CRL revocation, stale restart denial,
+  and corrupt-pointer refusal (automatic workload issuance and production
+  clustering remain gated);
 - identical lifecycle semantics through hooks, CLI, and MCP;
 - isolated per-platform instances with explicit store/root binding.
 

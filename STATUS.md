@@ -76,9 +76,17 @@ not roadmap language.
   physical snapshot catch-up, leaf/node identity confusion denial before
   readiness, and corrupt VyrmKV `CURRENT` refusal on restart. The monotonic
   wait contract is stress-tested against learners that advance beyond the
-  requested index. Independent hosts/hardware faults, certificate
-  rotation/revocation, production observability, and Multi-AZ deployment remain
-  unclaimed.
+  requested index. Complete TLS states can now be hot-reloaded by exact-successor
+  generation: leaf/key, full trust-root set, and complete CRL set swap together
+  for every new one-RPC connection. WebPKI checks CRLs fail closed on unknown or
+  expired revocation state. Real-TCP evidence preserves Raft through leaf
+  replacement, two-root overlap, migration to a second CA, old-root retirement,
+  and denial of revoked and retired-root leaves. The process matrix distributes
+  revocation, proves a restarted stale leaf cannot catch up, reapplies the full
+  set, and then completes partition/reconciliation/snapshot recovery. This is a
+  file-fed supervisor contract; SPIFFE Workload API streaming, automatic
+  issuance, durable supervisor generation, independent hosts/hardware faults,
+  production observability, and Multi-AZ deployment remain unclaimed.
   Placement epochs are now explicit replicated `placement_transition`
   operations: initialization must be epoch 1, advances must be exact successors,
   and declared voter canonical ids/zones must equal the applied OpenRaft

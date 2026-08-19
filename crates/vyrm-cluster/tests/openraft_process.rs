@@ -1,8 +1,9 @@
 #![cfg(feature = "openraft-transport")]
 
 use rcgen::{
-    BasicConstraints, Certificate, CertificateParams, ExtendedKeyUsagePurpose, IsCa, Issuer,
-    KeyPair, KeyUsagePurpose, SanType,
+    date_time_ymd, BasicConstraints, Certificate, CertificateParams,
+    CertificateRevocationListParams, ExtendedKeyUsagePurpose, IsCa, Issuer, KeyIdMethod, KeyPair,
+    KeyUsagePurpose, RevocationReason, RevokedCertParams, SanType, SerialNumber,
 };
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
@@ -16,8 +17,8 @@ use tempfile::TempDir;
 use vyrm_cluster::{
     ClusterId, NodeId, PlacementPolicy, ReplicaPlacement, ReplicaRole, ShardId, ShardPlacement,
     VyrmNodeCommand, VyrmNodeConfig, VyrmNodeReply, VyrmNodeRequest, VyrmNodeResult,
-    VyrmNodeStatus, VyrmRaftNode, VyrmTransportBinding, ZoneId, CLUSTER_CONTRACT_VERSION,
-    VYRM_NODE_CONFIG_VERSION, VYRM_NODE_CONTROL_VERSION,
+    VyrmNodeStatus, VyrmRaftNode, VyrmTlsFiles, VyrmTransportBinding, ZoneId,
+    CLUSTER_CONTRACT_VERSION, VYRM_NODE_CONFIG_VERSION, VYRM_NODE_CONTROL_VERSION,
 };
 
 const SHARD: ShardId = ShardId(11);
@@ -52,6 +53,12 @@ impl ProcessNode {
     }
 
     fn command(&mut self, command: &VyrmNodeCommand) -> VyrmNodeResult {
+        let reply = self.command_reply(command);
+        assert!(reply.ok, "node command failed: {command:?}: {reply:?}");
+        reply.value.unwrap()
+    }
+
+    fn command_reply(&mut self, command: &VyrmNodeCommand) -> VyrmNodeReply {
         let request_id = format!("test-{}", self.next_request);
         self.next_request += 1;
         serde_json::to_writer(
@@ -67,8 +74,7 @@ impl ProcessNode {
         self.input.flush().unwrap();
         let reply = read_reply(&mut self.output);
         assert_eq!(reply.request_id.as_deref(), Some(request_id.as_str()));
-        assert!(reply.ok, "node command failed: {command:?}: {reply:?}");
-        reply.value.unwrap()
+        reply
     }
 
     fn status(&mut self) -> VyrmNodeStatus {
@@ -145,6 +151,28 @@ fn independent_processes_recover_fail_over_snapshot_and_reject_corruption() {
     wait_applied(&mut node2, first_index);
     wait_applied(&mut node3, first_index);
 
+    let rotated = node1.command(&VyrmNodeCommand::RotateCredentials {
+        expected_generation: 1,
+        files: fixture.rotations[&1].clone(),
+    });
+    assert!(matches!(
+        rotated,
+        VyrmNodeResult::Credentials { credentials } if credentials.generation == 2
+    ));
+    let rejected = node1.command_reply(&VyrmNodeCommand::RotateCredentials {
+        expected_generation: 1,
+        files: fixture.rotations[&1].clone(),
+    });
+    assert!(!rejected.ok, "stale credential generation was accepted");
+    for node in [&mut node2, &mut node3] {
+        let node_id = node.status().raft_node_id;
+        let rotated = node.command(&VyrmNodeCommand::RotateCredentials {
+            expected_generation: 1,
+            files: fixture.rotations[&node_id].clone(),
+        });
+        assert!(matches!(rotated, VyrmNodeResult::Credentials { .. }));
+    }
+
     node2.crash();
     let second_index = write_index(node1.command(&VyrmNodeCommand::Probe {
         request_id: "process-probe-2".into(),
@@ -153,6 +181,10 @@ fn independent_processes_recover_fail_over_snapshot_and_reject_corruption() {
         payload: b"while-node-two-is-down".to_vec(),
     }));
     node2 = ProcessNode::start(&fixture.configs[&2]);
+    node2.command(&VyrmNodeCommand::RotateCredentials {
+        expected_generation: 1,
+        files: fixture.rotations[&2].clone(),
+    });
     wait_applied(&mut node2, second_index);
 
     node1.crash();
@@ -173,6 +205,18 @@ fn independent_processes_recover_fail_over_snapshot_and_reject_corruption() {
     wait_applied(&mut node3, failover_index);
 
     node1 = ProcessNode::start(&fixture.configs[&1]);
+    let denied = node1.command_reply(&VyrmNodeCommand::WaitApplied {
+        index: failover_index,
+        timeout_millis: 500,
+    });
+    assert!(
+        !denied.ok,
+        "revoked pre-rotation leaf unexpectedly rejoined after restart"
+    );
+    node1.command(&VyrmNodeCommand::RotateCredentials {
+        expected_generation: 1,
+        files: fixture.rotations[&1].clone(),
+    });
     wait_applied(&mut node1, failover_index);
 
     assert_eq!(
@@ -351,6 +395,7 @@ struct ProcessFixture {
     configs: BTreeMap<u64, PathBuf>,
     certificates: BTreeMap<u64, PathBuf>,
     data_roots: BTreeMap<u64, PathBuf>,
+    rotations: BTreeMap<u64, VyrmTlsFiles>,
 }
 
 impl ProcessFixture {
@@ -384,9 +429,12 @@ impl ProcessFixture {
         let (ca, issuer) = test_ca();
         let trust_root = directory.path().join("ca.der");
         fs::write(&trust_root, ca.der()).unwrap();
+        let crl_path = directory.path().join("ca.crl.der");
+        fs::write(&crl_path, test_crl(&issuer, 10_001)).unwrap();
         let mut configs = BTreeMap::new();
         let mut certificates = BTreeMap::new();
         let mut data_roots = BTreeMap::new();
+        let mut rotations = BTreeMap::new();
         for id in 1..=4 {
             let binding = VyrmTransportBinding {
                 trust_domain: trust_domain.into(),
@@ -399,11 +447,22 @@ impl ProcessFixture {
                 &issuer,
                 &format!("process-node-{id}.vyrm.test"),
                 &binding.spiffe_id().unwrap(),
+                10_000 + id,
             );
             let certificate_path = directory.path().join(format!("node-{id}.der"));
             let key_path = directory.path().join(format!("node-{id}.key.der"));
             fs::write(&certificate_path, certificate).unwrap();
             fs::write(&key_path, key).unwrap();
+            let (rotated_certificate, rotated_key) = test_identity(
+                &issuer,
+                &format!("process-node-{id}.vyrm.test"),
+                &binding.spiffe_id().unwrap(),
+                20_000 + id,
+            );
+            let rotated_certificate_path = directory.path().join(format!("node-{id}.rotated.der"));
+            let rotated_key_path = directory.path().join(format!("node-{id}.rotated.key.der"));
+            fs::write(&rotated_certificate_path, rotated_certificate).unwrap();
+            fs::write(&rotated_key_path, rotated_key).unwrap();
             let data_root = directory.path().join(format!("node-{id}-data"));
             let config = VyrmNodeConfig {
                 version: VYRM_NODE_CONFIG_VERSION,
@@ -423,6 +482,15 @@ impl ProcessFixture {
             configs.insert(id, config_path);
             certificates.insert(id, certificate_path);
             data_roots.insert(id, data_root);
+            rotations.insert(
+                id,
+                VyrmTlsFiles {
+                    certificate_der: rotated_certificate_path,
+                    private_key_der: rotated_key_path,
+                    trust_root_ders: vec![trust_root.clone()],
+                    revocation_list_ders: vec![crl_path.clone()],
+                },
+            );
         }
         drop(reservations);
         Self {
@@ -431,6 +499,7 @@ impl ProcessFixture {
             configs,
             certificates,
             data_roots,
+            rotations,
         }
     }
 
@@ -473,8 +542,10 @@ fn test_identity(
     issuer: &Issuer<'static, KeyPair>,
     dns_name: &str,
     spiffe_id: &str,
+    serial: u64,
 ) -> (Vec<u8>, Vec<u8>) {
     let mut params = CertificateParams::new(vec![dns_name.to_owned()]).unwrap();
+    params.serial_number = Some(SerialNumber::from(serial));
     params
         .subject_alt_names
         .push(SanType::URI(spiffe_id.try_into().unwrap()));
@@ -486,4 +557,24 @@ fn test_identity(
     let key = KeyPair::generate().unwrap();
     let certificate = params.signed_by(&key, issuer).unwrap();
     (certificate.der().to_vec(), key.serialize_der())
+}
+
+fn test_crl(issuer: &Issuer<'static, KeyPair>, revoked_serial: u64) -> Vec<u8> {
+    CertificateRevocationListParams {
+        this_update: date_time_ymd(2026, 1, 1),
+        next_update: date_time_ymd(2030, 1, 1),
+        crl_number: SerialNumber::from(1_u64),
+        issuing_distribution_point: None,
+        revoked_certs: vec![RevokedCertParams {
+            serial_number: SerialNumber::from(revoked_serial),
+            revocation_time: date_time_ymd(2026, 1, 1),
+            reason_code: Some(RevocationReason::Superseded),
+            invalidity_date: None,
+        }],
+        key_identifier_method: KeyIdMethod::Sha256,
+    }
+    .signed_by(issuer)
+    .unwrap()
+    .der()
+    .to_vec()
 }

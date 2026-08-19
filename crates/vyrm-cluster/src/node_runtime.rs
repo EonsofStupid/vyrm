@@ -7,14 +7,16 @@
 //! management plane.
 
 use crate::{
-    build_vyrm_tls_configs, verify_vyrm_certificate_identity, ClusterError, ClusterId, NodeId,
-    Result as ClusterResult, ShardId, ShardPlacement, VyrmRaftCommand, VyrmRaftNetworkFactory,
-    VyrmRaftNode, VyrmRaftResponse, VyrmRaftStore, VyrmRaftTlsServer, VyrmTlsMaterial,
-    VyrmTransportBinding, VyrmTransportGate, VyrmTransportTrust,
+    ClusterError, ClusterId, NodeId, Result as ClusterResult, ShardId, ShardPlacement,
+    VyrmRaftCommand, VyrmRaftNetworkFactory, VyrmRaftNode, VyrmRaftResponse, VyrmRaftStore,
+    VyrmRaftTlsServer, VyrmTlsGeneration, VyrmTlsMaterial, VyrmTlsReloader, VyrmTransportBinding,
+    VyrmTransportGate, VyrmTransportTrust,
 };
 use openraft::metrics::Metric;
 use openraft::{Config, Raft, SnapshotPolicy};
-use rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer};
+use rustls::pki_types::{
+    CertificateDer, CertificateRevocationListDer, PrivateKeyDer, PrivatePkcs8KeyDer,
+};
 use rustls::RootCertStore;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
@@ -132,7 +134,21 @@ pub enum VyrmNodeCommand {
     SetTransportEnabled {
         enabled: bool,
     },
+    RotateCredentials {
+        expected_generation: u64,
+        files: VyrmTlsFiles,
+    },
     Shutdown,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct VyrmTlsFiles {
+    pub certificate_der: PathBuf,
+    pub private_key_der: PathBuf,
+    pub trust_root_ders: Vec<PathBuf>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub revocation_list_ders: Vec<PathBuf>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -169,6 +185,7 @@ pub struct VyrmNodeStatus {
     pub snapshot_index: Option<u64>,
     pub purged_index: Option<u64>,
     pub state: String,
+    pub credentials: VyrmTlsGeneration,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -184,6 +201,9 @@ pub enum VyrmNodeResult {
     Write {
         log_index: u64,
         response: VyrmRaftResponse,
+    },
+    Credentials {
+        credentials: VyrmTlsGeneration,
     },
 }
 
@@ -238,12 +258,19 @@ pub async fn run_vyrm_node(config: VyrmNodeConfig) -> ClusterResult<()> {
             NodeId::new(node.canonical_id.clone()).expect("validated node identity"),
         )
     }))?;
-    let material = load_tls_material(&config)?;
-    verify_vyrm_certificate_identity(Some(&material.certificate_chain), &binding)?;
-    let (client_tls, server_tls) = build_vyrm_tls_configs(material)?;
+    let material = load_tls_material(&VyrmTlsFiles {
+        certificate_der: config.certificate_der.clone(),
+        private_key_der: config.private_key_der.clone(),
+        trust_root_ders: vec![config.trust_root_der.clone()],
+        revocation_list_ders: Vec::new(),
+    })?;
+    let credentials = VyrmTlsReloader::new(binding.clone(), 1, material)?;
     let transport_gate = VyrmTransportGate::enabled();
-    let network =
-        VyrmRaftNetworkFactory::new_with_gate(binding.clone(), client_tls, transport_gate.clone())?;
+    let network = VyrmRaftNetworkFactory::new_reloadable(
+        binding.clone(),
+        credentials.clone(),
+        transport_gate.clone(),
+    )?;
     let (log, state_machine) = VyrmRaftStore::open(&config.data_root, config.shard)?;
     let raft_config = Arc::new(
         Config {
@@ -267,11 +294,11 @@ pub async fn run_vyrm_node(config: VyrmNodeConfig) -> ClusterResult<()> {
     let listener = TcpListener::bind(&config.raft_listen)
         .await
         .map_err(|error| ClusterError::Unavailable(format!("bind Raft transport: {error}")))?;
-    let server = VyrmRaftTlsServer::new_with_gate(
+    let server = VyrmRaftTlsServer::new_reloadable(
         binding,
         trust,
         raft.clone(),
-        server_tls,
+        credentials.clone(),
         transport_gate.clone(),
     )?;
     let server_task = tokio::spawn(async move { server.serve(listener).await });
@@ -315,7 +342,9 @@ pub async fn run_vyrm_node(config: VyrmNodeConfig) -> ClusterResult<()> {
                     request_id,
                     command,
                     ..
-                }) => match execute_command(&raft, &config, &transport_gate, command).await {
+                }) => match execute_command(&raft, &config, &transport_gate, &credentials, command)
+                    .await
+                {
                     Ok(value) => VyrmNodeReply::success(Some(request_id), value),
                     Err(error) => VyrmNodeReply::failure(Some(request_id), error),
                 },
@@ -387,11 +416,12 @@ async fn execute_command(
     raft: &VyrmRaft,
     config: &VyrmNodeConfig,
     transport_gate: &VyrmTransportGate,
+    credentials: &VyrmTlsReloader,
     command: VyrmNodeCommand,
 ) -> Result<VyrmNodeResult, String> {
     match command {
         VyrmNodeCommand::Status => Ok(VyrmNodeResult::Status {
-            status: node_status(raft),
+            status: node_status(raft, credentials)?,
         }),
         VyrmNodeCommand::Initialize => raft
             .initialize(BTreeMap::from([(
@@ -480,7 +510,8 @@ async fn execute_command(
                 )
                 .await
                 .map(|_| VyrmNodeResult::Status {
-                    status: node_status(raft),
+                    status: node_status(raft, credentials)
+                        .expect("validated TLS credential state remains readable"),
                 })
                 .map_err(|error| error.to_string())
         }
@@ -488,6 +519,16 @@ async fn execute_command(
             transport_gate.set_enabled(enabled);
             Ok(VyrmNodeResult::Ack)
         }
+        VyrmNodeCommand::RotateCredentials {
+            expected_generation,
+            files,
+        } => credentials
+            .rotate(
+                expected_generation,
+                load_tls_material(&files).map_err(|error| error.to_string())?,
+            )
+            .map(|credentials| VyrmNodeResult::Credentials { credentials })
+            .map_err(|error| error.to_string()),
         VyrmNodeCommand::Shutdown => unreachable!("shutdown is handled by the control loop"),
     }
 }
@@ -506,9 +547,9 @@ async fn write_command(
     })
 }
 
-fn node_status(raft: &VyrmRaft) -> VyrmNodeStatus {
+fn node_status(raft: &VyrmRaft, credentials: &VyrmTlsReloader) -> Result<VyrmNodeStatus, String> {
     let metrics = raft.metrics().borrow().clone();
-    VyrmNodeStatus {
+    Ok(VyrmNodeStatus {
         raft_node_id: metrics.id,
         current_term: metrics.current_term,
         current_leader: metrics.current_leader,
@@ -517,21 +558,39 @@ fn node_status(raft: &VyrmRaft) -> VyrmNodeStatus {
         snapshot_index: metrics.snapshot.map(|log| log.index),
         purged_index: metrics.purged.map(|log| log.index),
         state: format!("{:?}", metrics.state).to_ascii_lowercase(),
-    }
+        credentials: credentials.identity().map_err(|error| error.to_string())?,
+    })
 }
 
-fn load_tls_material(config: &VyrmNodeConfig) -> ClusterResult<VyrmTlsMaterial> {
-    let certificate = read_bounded_der(&config.certificate_der, "certificate")?;
-    let private_key = read_bounded_der(&config.private_key_der, "private key")?;
-    let trust_root = read_bounded_der(&config.trust_root_der, "trust root")?;
+fn load_tls_material(files: &VyrmTlsFiles) -> ClusterResult<VyrmTlsMaterial> {
+    if files.trust_root_ders.is_empty()
+        || files.trust_root_ders.len() > 32
+        || files.revocation_list_ders.len() > 32
+    {
+        return Err(ClusterError::Invalid(
+            "TLS file set requires 1..=32 roots and at most 32 CRLs".into(),
+        ));
+    }
+    let certificate = read_bounded_der(&files.certificate_der, "certificate")?;
+    let private_key = read_bounded_der(&files.private_key_der, "private key")?;
     let mut roots = RootCertStore::empty();
-    roots
-        .add(CertificateDer::from(trust_root))
-        .map_err(|error| ClusterError::Invalid(format!("trust root DER: {error}")))?;
+    for path in &files.trust_root_ders {
+        roots
+            .add(CertificateDer::from(read_bounded_der(path, "trust root")?))
+            .map_err(|error| ClusterError::Invalid(format!("trust root DER: {error}")))?;
+    }
+    let revocation_lists = files
+        .revocation_list_ders
+        .iter()
+        .map(|path| {
+            read_bounded_der(path, "revocation list").map(CertificateRevocationListDer::from)
+        })
+        .collect::<ClusterResult<Vec<_>>>()?;
     Ok(VyrmTlsMaterial {
         certificate_chain: vec![CertificateDer::from(certificate)],
         private_key: PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(private_key)),
         trust_roots: roots,
+        revocation_lists,
     })
 }
 

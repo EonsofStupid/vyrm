@@ -174,6 +174,49 @@ network; the transport gate is controlled fault injection, not a kernel/network
 appliance; and the corrupted object is one authenticated pointer, not an
 exhaustive disk/controller fault campaign.
 
+## Credential lifecycle v1
+
+Transport credentials are no longer permanently captured when a node starts.
+`VyrmTlsReloader` owns a complete immutable leaf/key/trust-root/CRL state and an
+exact-successor process-local generation. A replacement validates the leaf's
+canonical SPIFFE identity and key before one write-lock publication. Every new
+outbound RPC obtains a client config from the latest state and every accepted
+connection obtains a server config from that same state; an already established
+one-request connection may finish, but no later connection can reuse the old
+state. Stale or concurrent generation updates fail closed.
+
+When CRLs are present, both client and server WebPKI verification checks the end
+entity, denies unknown revocation status, and enforces CRL expiration. Root
+rotation therefore supplies the complete root and CRL set for every active
+issuer: introduce old+new roots and both CRLs, rotate leaves, then publish only
+the new root and its CRL. An RPC envelope generation was deliberately rejected
+as a revocation mechanism because a compromised leaf could lie about that
+unenforced number; revocation remains cryptographic.
+
+The real-TCP test proves uninterrupted Raft replication after a leaf hot swap,
+stale local generation denial, CRL denial of an otherwise CA-valid leaf,
+two-root overlap, migration of every node to a second CA, removal of the first
+CA, continued quorum writes, and denial of a leaf signed by the retired CA. The
+four-process test rotates the active identities, distributes a CRL revoking node
+one's original leaf, crashes and restarts nodes, proves the restarted stale leaf
+cannot catch up, reapplies the latest complete file set, then proceeds through
+live partition/heal and snapshot catch-up.
+
+This design follows the SPIFFE Workload API's full-set streaming model: updates
+replace the entire SVID/bundle/CRL view and can be pushed on rotation or CRL
+change. The current implementation accepts bounded DER files from the inherited
+supervisor protocol; it does not yet connect to a Workload API socket or persist
+an external issuer generation. On restart, the supervisor must replay the latest
+full set, and peers' retained CRLs prevent a stale leaf from silently rejoining.
+
+Primary sources, retrieved 2026-08-19:
+
+- [SPIFFE Workload API stream and full-response contract](https://spiffe.io/docs/latest/spiffe-specs/spiffe_workload_api/)
+- [SPIFFE SVID and trust-bundle rotation concepts](https://spiffe.io/docs/latest/spiffe/concepts/)
+- [rustls dynamic client certificate resolver](https://docs.rs/rustls/latest/rustls/client/trait.ResolvesClientCert.html)
+- [rustls dynamic server certificate resolver](https://docs.rs/rustls/latest/rustls/server/trait.ResolvesServerCert.html)
+- [rustls WebPKI client-certificate verifier](https://rustls.dev/docs/server/struct.ClientVerifierBuilder.html)
+
 Research sources, retrieved 2026-08-19:
 
 - [OpenRaft releases](https://github.com/databendlabs/openraft/releases)
@@ -251,9 +294,10 @@ also enumerate leader-minority partitions and require no acknowledgement.
 
 ## What is not yet claimed
 
-This gate still does not contain dynamic membership discovery, certificate
-issuance/rotation/revocation, per-identity rate policy, production transport
-telemetry, multi-shard atomic commit, or metadata-shard reshard cutover.
+This gate still does not contain dynamic membership discovery, automatic
+certificate issuance or Workload API streaming, durable supervisor generation,
+per-identity rate policy, production transport telemetry, multi-shard atomic
+commit, or metadata-shard reshard cutover.
 Application state currently proves ordered
 identity/CAS/digest semantics and now atomically dispatches canonical
 `RuntimeCommit` transactions into native VyrmKV and transfers that runtime state
@@ -266,7 +310,8 @@ limited to 1 MiB and physical snapshot envelopes to 1 GiB until compact and
 streaming codecs land.
 
 The next M7 slice must extend the passing one-host process matrix to independent
-hosts and real network/disk fault mechanisms, and prove a credential lifecycle
-compatible with rotating and revoking workload identity. File-backed,
-bounded-memory snapshot creation/receipt is also required before high-volume
-cluster claims. Only that evidence can advance a Multi-AZ claim.
+hosts and real network/disk fault mechanisms, connect the passing credential
+state machine to an attested Workload API source, and retain production
+telemetry. File-backed, bounded-memory snapshot creation/receipt is also
+required before high-volume cluster claims. Only that evidence can advance a
+Multi-AZ claim.

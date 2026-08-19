@@ -151,9 +151,12 @@ measured local results, never universal superiority.
    post-purge snapshot catch-up. A real node executable and versioned local
    supervisor contract additionally pass four-process crash/restart, live
    partition failover, reconciliation, post-purge snapshot catch-up, identity
-   denial, and corrupt-pointer restart denial on one host. Independent-host and
-   hardware chaos, credential rotation/revocation, file-backed bounded-memory
-   snapshot handling, and Multi-AZ evidence remain open.
+   denial, hot credential replacement/revocation, stale-leaf restart denial,
+   and corrupt-pointer restart denial on one host. A real-TCP matrix also passes
+   two-root overlap and old-root retirement. Independent-host and hardware
+   chaos, automatic SPIFFE issuance/streaming, durable supervisor generation,
+   file-backed bounded-memory snapshot handling, and Multi-AZ evidence remain
+   open.
 8. Bind declared package workflows to preflight/pre-tool/post-tool policy.
 9. Extend truthful temporal visualization across storage, search, and workflow
    events and continue controlled provider evaluations.

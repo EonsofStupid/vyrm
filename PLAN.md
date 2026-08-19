@@ -227,6 +227,20 @@ disagree, `SPEC.md` is authoritative and this document is wrong.
 > one host, not independent-host, credential-lifecycle, production telemetry,
 > bounded-memory snapshot, or Multi-AZ certification.
 
+> **M7 credential-lifecycle overlay (2026-08-19).** `VyrmTlsReloader` atomically
+> replaces one complete leaf/key/trust-root/CRL state at an exact-successor local
+> generation; every new outbound and inbound one-RPC TLS connection snapshots
+> the latest state. CRLs use rustls WebPKI with end-entity checks, unknown status
+> denial, and expiration enforcement. Real-TCP evidence passes leaf hot reload,
+> stale-generation denial, two-root overlap, migration to a second CA, old-root
+> retirement, and revoked/retired leaf denial without restarting Raft. The
+> four-process matrix rotates live identities, distributes a CRL, proves an old
+> leaf cannot rejoin after restart, reapplies the full credential set, then
+> completes partition/heal and snapshot recovery. The delivery surface is
+> deliberately compatible with SPIFFE's complete streamed SVID/bundle/CRL
+> replacement model, but the actual Workload API client, automatic issuance,
+> and durable external supervisor generation remain open.
+
 > **M7 canonical-runtime overlay (2026-08-19).** Adapter format `v2` first added a
 > typed `runtime_commit` operation. `NativeEngine` now exposes a validated
 > no-write plan, allowing canonical mutations, audit/outbox work, the Raft
@@ -236,8 +250,9 @@ disagree, `SPEC.md` is authoritative and this document is wrong.
 > canonical runtime truth through `NativeEngine` on every voter. Runtime-bearing
 > snapshots are now transferred by adapter v4's physical ownership split and
 > the opt-in authenticated transport. One-host process-isolation chaos now
-> passes through the node runner; independent-host faults, credential lifecycle,
-> and Multi-AZ evidence remain open.
+> passes through the node runner; hot file-fed credential lifecycle also passes,
+> while independent-host faults, automatic workload issuance, and Multi-AZ
+> evidence remain open.
 
 ## 1 · Grounding result
 

@@ -18,7 +18,8 @@ use openraft::raft::{
     VoteRequest, VoteResponse,
 };
 use openraft::Raft;
-use rustls::pki_types::{CertificateDer, PrivateKeyDer, ServerName};
+use rustls::client::WebPkiServerVerifier;
+use rustls::pki_types::{CertificateDer, CertificateRevocationListDer, PrivateKeyDer, ServerName};
 use rustls::server::WebPkiClientVerifier;
 use rustls::{ClientConfig, RootCertStore, ServerConfig};
 use serde::{Deserialize, Serialize};
@@ -26,7 +27,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::io;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 use std::time::Duration;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
@@ -114,6 +115,7 @@ pub struct VyrmTlsMaterial {
     pub certificate_chain: Vec<CertificateDer<'static>>,
     pub private_key: PrivateKeyDer<'static>,
     pub trust_roots: RootCertStore,
+    pub revocation_lists: Vec<CertificateRevocationListDer<'static>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -158,21 +160,145 @@ pub fn build_vyrm_tls_configs(
             "TLS identity requires a certificate chain and at least one trust root".into(),
         ));
     }
-    let verifier = WebPkiClientVerifier::builder(Arc::new(material.trust_roots.clone()))
-        .build()
-        .map_err(|error| ClusterError::Invalid(format!("client verifier: {error}")))?;
+    let client_verifier = if material.revocation_lists.is_empty() {
+        WebPkiClientVerifier::builder(Arc::new(material.trust_roots.clone())).build()
+    } else {
+        WebPkiClientVerifier::builder(Arc::new(material.trust_roots.clone()))
+            .with_crls(material.revocation_lists.clone())
+            .only_check_end_entity_revocation()
+            .enforce_revocation_expiration()
+            .build()
+    }
+    .map_err(|error| ClusterError::Invalid(format!("client verifier: {error}")))?;
     let server = ServerConfig::builder()
-        .with_client_cert_verifier(verifier)
+        .with_client_cert_verifier(client_verifier)
         .with_single_cert(
             material.certificate_chain.clone(),
             material.private_key.clone_key(),
         )
         .map_err(|error| ClusterError::Invalid(format!("server TLS identity: {error}")))?;
+    let server_verifier = if material.revocation_lists.is_empty() {
+        WebPkiServerVerifier::builder(Arc::new(material.trust_roots)).build()
+    } else {
+        WebPkiServerVerifier::builder(Arc::new(material.trust_roots))
+            .with_crls(material.revocation_lists)
+            .only_check_end_entity_revocation()
+            .enforce_revocation_expiration()
+            .build()
+    }
+    .map_err(|error| ClusterError::Invalid(format!("server verifier: {error}")))?;
     let client = ClientConfig::builder()
-        .with_root_certificates(material.trust_roots)
+        .dangerous()
+        .with_custom_certificate_verifier(server_verifier)
         .with_client_auth_cert(material.certificate_chain, material.private_key)
         .map_err(|error| ClusterError::Invalid(format!("client TLS identity: {error}")))?;
     Ok((Arc::new(client), Arc::new(server)))
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct VyrmTlsGeneration {
+    pub generation: u64,
+    pub leaf_digest: String,
+}
+
+#[derive(Debug)]
+struct VyrmTlsState {
+    identity: VyrmTlsGeneration,
+    client: Arc<ClientConfig>,
+    server: Arc<ServerConfig>,
+}
+
+#[derive(Debug, Clone)]
+pub struct VyrmTlsReloader {
+    binding: VyrmTransportBinding,
+    state: Arc<RwLock<VyrmTlsState>>,
+}
+
+impl VyrmTlsReloader {
+    pub fn new(
+        binding: VyrmTransportBinding,
+        generation: u64,
+        material: VyrmTlsMaterial,
+    ) -> ClusterResult<Self> {
+        if generation == 0 {
+            return Err(ClusterError::Invalid(
+                "TLS credential generation must begin above zero".into(),
+            ));
+        }
+        let state = build_tls_state(&binding, generation, material)?;
+        Ok(Self {
+            binding,
+            state: Arc::new(RwLock::new(state)),
+        })
+    }
+
+    pub fn rotate(
+        &self,
+        expected_generation: u64,
+        material: VyrmTlsMaterial,
+    ) -> ClusterResult<VyrmTlsGeneration> {
+        let next_generation = expected_generation
+            .checked_add(1)
+            .ok_or_else(|| ClusterError::Invalid("TLS credential generation overflow".into()))?;
+        let next = build_tls_state(&self.binding, next_generation, material)?;
+        let identity = next.identity.clone();
+        let mut state = self
+            .state
+            .write()
+            .map_err(|_| ClusterError::Unavailable("TLS credential state is poisoned".into()))?;
+        if state.identity.generation != expected_generation {
+            return Err(ClusterError::Denied(format!(
+                "TLS credential generation expected {expected_generation} but was {}",
+                state.identity.generation
+            )));
+        }
+        *state = next;
+        Ok(identity)
+    }
+
+    pub fn identity(&self) -> ClusterResult<VyrmTlsGeneration> {
+        self.state
+            .read()
+            .map(|state| state.identity.clone())
+            .map_err(|_| ClusterError::Unavailable("TLS credential state is poisoned".into()))
+    }
+
+    fn client_config(&self) -> ClusterResult<Arc<ClientConfig>> {
+        self.state
+            .read()
+            .map(|state| Arc::clone(&state.client))
+            .map_err(|_| ClusterError::Unavailable("TLS credential state is poisoned".into()))
+    }
+
+    fn server_config(&self) -> ClusterResult<Arc<ServerConfig>> {
+        self.state
+            .read()
+            .map(|state| Arc::clone(&state.server))
+            .map_err(|_| ClusterError::Unavailable("TLS credential state is poisoned".into()))
+    }
+}
+
+fn build_tls_state(
+    binding: &VyrmTransportBinding,
+    generation: u64,
+    material: VyrmTlsMaterial,
+) -> ClusterResult<VyrmTlsState> {
+    verify_vyrm_certificate_identity(Some(&material.certificate_chain), binding)?;
+    let leaf = material
+        .certificate_chain
+        .first()
+        .ok_or_else(|| ClusterError::Invalid("TLS identity has no leaf certificate".into()))?;
+    let identity = VyrmTlsGeneration {
+        generation,
+        leaf_digest: sha256_hex(leaf.as_ref()),
+    };
+    let (client, server) = build_vyrm_tls_configs(material)?;
+    Ok(VyrmTlsState {
+        identity,
+        client,
+        server,
+    })
 }
 
 #[derive(Clone)]
@@ -180,6 +306,7 @@ pub struct VyrmRaftNetworkFactory {
     binding: VyrmTransportBinding,
     connector: TlsConnector,
     gate: VyrmTransportGate,
+    reloader: Option<VyrmTlsReloader>,
 }
 
 impl VyrmRaftNetworkFactory {
@@ -197,6 +324,27 @@ impl VyrmRaftNetworkFactory {
             binding,
             connector: TlsConnector::from(client),
             gate,
+            reloader: None,
+        })
+    }
+
+    pub fn new_reloadable(
+        binding: VyrmTransportBinding,
+        credentials: VyrmTlsReloader,
+        gate: VyrmTransportGate,
+    ) -> ClusterResult<Self> {
+        if binding != credentials.binding {
+            return Err(ClusterError::Denied(
+                "TLS credential binding differs from the Raft network binding".into(),
+            ));
+        }
+        let client = credentials.client_config()?;
+        binding.validate()?;
+        Ok(Self {
+            binding,
+            connector: TlsConnector::from(client),
+            gate,
+            reloader: Some(credentials),
         })
     }
 }
@@ -207,6 +355,7 @@ pub struct VyrmRaftNetworkClient {
     target: VyrmRaftNode,
     connector: TlsConnector,
     gate: VyrmTransportGate,
+    reloader: Option<VyrmTlsReloader>,
 }
 
 impl RaftNetworkFactory<VyrmRaftTypeConfig> for VyrmRaftNetworkFactory {
@@ -219,6 +368,7 @@ impl RaftNetworkFactory<VyrmRaftTypeConfig> for VyrmRaftNetworkFactory {
             target: node.clone(),
             connector: self.connector.clone(),
             gate: self.gate.clone(),
+            reloader: self.reloader.clone(),
         }
     }
 }
@@ -332,8 +482,15 @@ impl VyrmRaftNetworkClient {
             .map_err(|error| RPCError::Unreachable(Unreachable::new(&error)))?;
         let server_name = ServerName::try_from(endpoint.server_name.clone())
             .map_err(|error| unreachable(format!("invalid TLS server name: {error}")))?;
-        let mut stream = self
-            .connector
+        let connector = self
+            .reloader
+            .as_ref()
+            .map(VyrmTlsReloader::client_config)
+            .transpose()
+            .map_err(|error| unreachable(error.to_string()))?
+            .map(TlsConnector::from)
+            .unwrap_or_else(|| self.connector.clone());
+        let mut stream = connector
             .connect(server_name, stream)
             .await
             .map_err(|error| RPCError::Unreachable(Unreachable::new(&error)))?;
@@ -360,6 +517,7 @@ pub struct VyrmRaftTlsServer {
     acceptor: TlsAcceptor,
     admission: Arc<Semaphore>,
     gate: VyrmTransportGate,
+    reloader: Option<VyrmTlsReloader>,
 }
 
 impl VyrmRaftTlsServer {
@@ -387,6 +545,32 @@ impl VyrmRaftTlsServer {
             acceptor: TlsAcceptor::from(server),
             admission: Arc::new(Semaphore::new(VYRM_RAFT_MAX_IN_FLIGHT_RPCS)),
             gate,
+            reloader: None,
+        })
+    }
+
+    pub fn new_reloadable(
+        binding: VyrmTransportBinding,
+        trust: VyrmTransportTrust,
+        raft: VyrmRaft,
+        credentials: VyrmTlsReloader,
+        gate: VyrmTransportGate,
+    ) -> ClusterResult<Self> {
+        if binding != credentials.binding {
+            return Err(ClusterError::Denied(
+                "TLS credential binding differs from the Raft server binding".into(),
+            ));
+        }
+        let server = credentials.server_config()?;
+        binding.validate()?;
+        Ok(Self {
+            binding,
+            trust,
+            raft,
+            acceptor: TlsAcceptor::from(server),
+            admission: Arc::new(Semaphore::new(VYRM_RAFT_MAX_IN_FLIGHT_RPCS)),
+            gate,
+            reloader: Some(credentials),
         })
     }
 
@@ -416,7 +600,15 @@ impl VyrmRaftTlsServer {
                 "local Raft transport is disabled",
             ));
         }
-        let mut stream = self.acceptor.accept(stream).await?;
+        let acceptor = self
+            .reloader
+            .as_ref()
+            .map(VyrmTlsReloader::server_config)
+            .transpose()
+            .map_err(|error| io::Error::other(error.to_string()))?
+            .map(TlsAcceptor::from)
+            .unwrap_or_else(|| self.acceptor.clone());
+        let mut stream = acceptor.accept(stream).await?;
         let peer = certificate_spiffe_id(stream.get_ref().1.peer_certificates())?;
         let envelope: WireEnvelope = read_frame(&mut stream).await?;
         envelope.validate(&self.binding, &self.trust, &peer)?;
