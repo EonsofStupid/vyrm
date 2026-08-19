@@ -124,3 +124,34 @@ fn a_tampered_current_pointer_fails_closed() {
     let reopened = ManifestStore::open(directory.path()).unwrap();
     assert!(reopened.current().is_err());
 }
+
+#[test]
+fn named_checkpoints_pin_historical_manifests_until_explicit_release() {
+    let directory = tempfile::tempdir().unwrap();
+    let store = ManifestStore::open(directory.path()).unwrap();
+    let first = Manifest::new(1, None, 100, 0, 1, Vec::new()).unwrap();
+    store.publish(&first, None).unwrap();
+    let checkpoint = store
+        .checkpoint("before-migration", &first.digest, 101)
+        .unwrap();
+    assert_eq!(checkpoint.manifest, first.digest);
+    assert_eq!(
+        store
+            .checkpoint("before-migration", &first.digest, 101)
+            .unwrap(),
+        checkpoint,
+        "identical checkpoint creation is idempotent"
+    );
+    let second = Manifest::new(2, Some(first.digest.clone()), 102, 0, 1, Vec::new()).unwrap();
+    store.publish(&second, Some(&first.digest)).unwrap();
+    assert_eq!(store.checkpoints().unwrap(), vec![checkpoint]);
+    assert_eq!(store.load(&first.digest).unwrap(), first);
+    assert!(matches!(
+        store.checkpoint("before-migration", &second.digest, 103),
+        Err(Error::InvalidManifest(_))
+    ));
+    assert!(store.release_checkpoint("before-migration").unwrap());
+    assert!(!store.release_checkpoint("before-migration").unwrap());
+    assert!(store.checkpoints().unwrap().is_empty());
+    assert!(store.checkpoint("../escape", &second.digest, 103).is_err());
+}

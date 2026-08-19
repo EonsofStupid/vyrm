@@ -17,7 +17,7 @@ pub use batch::{Mutation, WriteBatch, BATCH_FORMAT_VERSION};
 pub use database::{Database, Snapshot};
 pub use error::{Error, Result};
 pub use manifest::{
-    CurrentPointer, Manifest, ManifestStore, SegmentDescriptor, MANIFEST_FORMAT_VERSION,
+    Checkpoint, CurrentPointer, Manifest, ManifestStore, SegmentDescriptor, MANIFEST_FORMAT_VERSION,
 };
 pub use memtable::{Memtable, VersionedValue};
 pub use segment::{Segment, SEGMENT_FORMAT_VERSION};

@@ -95,8 +95,10 @@ not roadmap language.
   Content-addressed immutable segments now retain MVCC history and fail closed
   on corruption. Locked manifest publication syncs immutable bytes before an
   atomic, separately checksummed `CURRENT` update and rejects stale parent CAS.
-  Checkpoints, segment/WAL lifecycle integration, compaction, the native
-  `Engine` adapter, and performance claims remain open.
+  Named checkpoints now pin historical manifest generations with canonical
+  names, idempotent creation, and explicit directory-synced release.
+  Segment/WAL lifecycle integration, compaction, the native `Engine` adapter,
+  and performance claims remain open.
 
 ## Verification
 

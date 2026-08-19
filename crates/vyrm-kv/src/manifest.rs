@@ -10,6 +10,7 @@ use vyrm_core::digest;
 pub const MANIFEST_FORMAT_VERSION: u16 = 1;
 const CURRENT_FILE: &str = "CURRENT";
 const MANIFEST_DIRECTORY: &str = "manifests";
+const CHECKPOINT_DIRECTORY: &str = "checkpoints";
 static POINTER_TEMPORARY_ID: AtomicU64 = AtomicU64::new(1);
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -199,6 +200,63 @@ pub struct CurrentPointer {
     pub checksum: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Checkpoint {
+    pub format_version: u16,
+    pub name: String,
+    pub manifest: String,
+    pub generation: u64,
+    pub created_at: u64,
+    pub checksum: String,
+}
+
+impl Checkpoint {
+    fn new(name: &str, manifest: &Manifest, created_at: u64) -> Result<Self> {
+        validate_checkpoint_name(name)?;
+        let mut checkpoint = Self {
+            format_version: MANIFEST_FORMAT_VERSION,
+            name: name.to_owned(),
+            manifest: manifest.digest.clone(),
+            generation: manifest.generation,
+            created_at,
+            checksum: String::new(),
+        };
+        checkpoint.checksum = checkpoint.expected_checksum();
+        Ok(checkpoint)
+    }
+
+    fn validate(&self) -> Result<()> {
+        if self.format_version != MANIFEST_FORMAT_VERSION {
+            return Err(Error::UnsupportedVersion {
+                object: "checkpoint",
+                version: self.format_version,
+            });
+        }
+        validate_checkpoint_name(&self.name)?;
+        if !is_sha256(&self.manifest)
+            || !is_sha256(&self.checksum)
+            || self.generation == 0
+            || self.checksum != self.expected_checksum()
+        {
+            return Err(Error::InvalidManifest(
+                "invalid checkpoint identity or checksum".into(),
+            ));
+        }
+        Ok(())
+    }
+
+    fn expected_checksum(&self) -> String {
+        let mut bytes = b"vyrm-checkpoint-v1\0".to_vec();
+        bytes.extend_from_slice(&self.format_version.to_be_bytes());
+        bytes.extend_from_slice(self.name.as_bytes());
+        bytes.push(0);
+        bytes.extend_from_slice(self.manifest.as_bytes());
+        bytes.extend_from_slice(&self.generation.to_be_bytes());
+        bytes.extend_from_slice(&self.created_at.to_be_bytes());
+        digest::sha256_hex(&bytes)
+    }
+}
+
 impl CurrentPointer {
     fn new(manifest: &Manifest) -> Self {
         let mut pointer = Self {
@@ -250,6 +308,7 @@ pub struct ManifestStore {
 impl ManifestStore {
     pub fn open(root: &Path) -> Result<Self> {
         std::fs::create_dir_all(root.join(MANIFEST_DIRECTORY))?;
+        std::fs::create_dir_all(root.join(CHECKPOINT_DIRECTORY))?;
         let lock = OpenOptions::new()
             .read(true)
             .write(true)
@@ -331,6 +390,72 @@ impl ManifestStore {
         Ok(pointer)
     }
 
+    pub fn checkpoint(
+        &self,
+        name: &str,
+        manifest_digest: &str,
+        created_at: u64,
+    ) -> Result<Checkpoint> {
+        let manifest = self.load(manifest_digest)?;
+        let checkpoint = Checkpoint::new(name, &manifest, created_at)?;
+        let directory = self.root.join(CHECKPOINT_DIRECTORY);
+        let path = directory.join(format!("{name}.json"));
+        let bytes = serde_json::to_vec(&checkpoint)?;
+        if path.exists() {
+            let existing: Checkpoint = serde_json::from_slice(&std::fs::read(&path)?)?;
+            existing.validate()?;
+            if existing == checkpoint {
+                return Ok(existing);
+            }
+            return Err(Error::InvalidManifest(format!(
+                "checkpoint {name:?} already pins another manifest or instant"
+            )));
+        }
+        let temporary = directory.join(format!(
+            ".{name}.{}.tmp",
+            POINTER_TEMPORARY_ID.fetch_add(1, Ordering::Relaxed)
+        ));
+        persist_rename(&directory, &temporary, &path, &bytes)?;
+        Ok(checkpoint)
+    }
+
+    pub fn checkpoints(&self) -> Result<Vec<Checkpoint>> {
+        let directory = self.root.join(CHECKPOINT_DIRECTORY);
+        let mut checkpoints = Vec::new();
+        for entry in std::fs::read_dir(directory)? {
+            let entry = entry?;
+            if entry.path().extension().and_then(|value| value.to_str()) != Some("json") {
+                continue;
+            }
+            let checkpoint: Checkpoint = serde_json::from_slice(&std::fs::read(entry.path())?)?;
+            checkpoint.validate()?;
+            let manifest = self.load(&checkpoint.manifest)?;
+            if manifest.generation != checkpoint.generation {
+                return Err(Error::InvalidManifest(format!(
+                    "checkpoint {:?} generation differs from its manifest",
+                    checkpoint.name
+                )));
+            }
+            checkpoints.push(checkpoint);
+        }
+        checkpoints.sort_by(|left, right| left.name.cmp(&right.name));
+        Ok(checkpoints)
+    }
+
+    pub fn release_checkpoint(&self, name: &str) -> Result<bool> {
+        validate_checkpoint_name(name)?;
+        let directory = self.root.join(CHECKPOINT_DIRECTORY);
+        let path = directory.join(format!("{name}.json"));
+        match std::fs::remove_file(path) {
+            Ok(()) => {
+                File::open(directory)?.sync_all()?;
+                Ok(true)
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+            Err(error) => Err(error.into()),
+        }
+    }
+
     fn persist_manifest(&self, manifest: &Manifest) -> Result<()> {
         let directory = self.root.join(MANIFEST_DIRECTORY);
         let path = directory.join(format!("{}.json", manifest.digest));
@@ -359,6 +484,20 @@ impl ManifestStore {
         ));
         persist_rename(&self.root, &temporary, &path, &serde_json::to_vec(pointer)?)
     }
+}
+
+fn validate_checkpoint_name(name: &str) -> Result<()> {
+    if name.is_empty()
+        || name.len() > 128
+        || !name
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.'))
+    {
+        return Err(Error::InvalidManifest(format!(
+            "invalid checkpoint name {name:?}"
+        )));
+    }
+    Ok(())
 }
 
 fn persist_rename(directory: &Path, temporary: &Path, target: &Path, bytes: &[u8]) -> Result<()> {
