@@ -24,6 +24,10 @@ pub enum Error {
     RuntimeConflict { expected: u64, actual: u64 },
     /// A relation or event named a record that is not present in its scope.
     DanglingRuntimeReference(String),
+    /// A typed write was attempted before its scope installed a registry.
+    RuntimeSchemaMissing(String),
+    /// A schema update skipped or repeated a persisted revision.
+    RuntimeSchemaConflict { expected: u64, actual: u64 },
 }
 
 impl fmt::Display for Error {
@@ -42,6 +46,13 @@ impl fmt::Display for Error {
             Error::DanglingRuntimeReference(reference) => {
                 write!(f, "dangling runtime reference: {reference}")
             }
+            Error::RuntimeSchemaMissing(scope) => {
+                write!(f, "runtime schema is not installed for scope {scope}")
+            }
+            Error::RuntimeSchemaConflict { expected, actual } => write!(
+                f,
+                "runtime schema conflict: expected revision {expected}, actual revision {actual}"
+            ),
         }
     }
 }

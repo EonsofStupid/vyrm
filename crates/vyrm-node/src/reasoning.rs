@@ -4,11 +4,12 @@
 //! projection remains readable and is migrated atomically on its next mutation.
 
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use vyrm_core::{
     Millis, ReasoningEvent, ReasoningPayload, ReasoningRun, RuntimeCommit, RuntimeEvent,
-    RuntimeMutation, RuntimeProperties, RuntimeRecord, RuntimeRef, RuntimeType, RuntimeValue,
-    ScopeId,
+    RuntimeEventSchema, RuntimeMutation, RuntimeProperties, RuntimePropertySchema, RuntimeRecord,
+    RuntimeRecordSchema, RuntimeRef, RuntimeSchemaRegistry, RuntimeType, RuntimeValue,
+    RuntimeValueType, ScopeId,
 };
 use vyrm_store::Engine;
 
@@ -75,9 +76,7 @@ fn load_legacy<E: Engine>(store: &E) -> Result<Ledger, Box<dyn std::error::Error
 
 /// Returns `None` when the typed log contains no reasoning events, which is
 /// how the caller distinguishes a legacy store requiring migration.
-fn load_runtime<E: Engine>(
-    store: &E,
-) -> Result<(Option<Ledger>, u64), Box<dyn std::error::Error>> {
+fn load_runtime<E: Engine>(store: &E) -> Result<(Option<Ledger>, u64), Box<dyn std::error::Error>> {
     let scope = ScopeId::new(REASONING_SCOPE)?;
     let observed_head = store.runtime_cursor()?;
     let mut cursor = 0;
@@ -106,8 +105,7 @@ fn load_runtime<E: Engine>(
                 .into());
             };
             let reasoning: ReasoningEvent = serde_json::from_str(encoded)?;
-            if event.subject.as_ref()
-                != Some(&RuntimeRef::new(RUN_TYPE, reasoning.run_id.clone())?)
+            if event.subject.as_ref() != Some(&RuntimeRef::new(RUN_TYPE, reasoning.run_id.clone())?)
             {
                 return Err(format!(
                     "reasoning runtime event at cursor {} names the wrong run",
@@ -151,7 +149,10 @@ fn event_mutation(event: &ReasoningEvent) -> Result<RuntimeMutation, Box<dyn std
         "event_json".into(),
         RuntimeValue::String(serde_json::to_string(event)?),
     );
-    properties.insert("event_digest".into(), RuntimeValue::Digest(event.digest.clone()));
+    properties.insert(
+        "event_digest".into(),
+        RuntimeValue::Digest(event.digest.clone()),
+    );
     properties.insert("ordinal".into(), RuntimeValue::Unsigned(event.ordinal));
     properties.insert(
         "payload_kind".into(),
@@ -171,7 +172,10 @@ fn run_record(run: &ReasoningRun) -> Result<RuntimeMutation, Box<dyn std::error:
         .events()
         .first()
         .ok_or("cannot persist an empty reasoning run")?;
-    let last = run.events().last().expect("first established non-empty run");
+    let last = run
+        .events()
+        .last()
+        .expect("first established non-empty run");
     let mut properties = RuntimeProperties::new();
     properties.insert(
         "state".into(),
@@ -190,6 +194,72 @@ fn run_record(run: &ReasoningRun) -> Result<RuntimeMutation, Box<dyn std::error:
             properties,
         },
     })
+}
+
+fn reasoning_schema_update<E: Engine>(
+    store: &E,
+) -> Result<Option<RuntimeSchemaRegistry>, Box<dyn std::error::Error>> {
+    let scope = ScopeId::new(REASONING_SCOPE)?;
+    let current = store.runtime_schema(&scope)?;
+    let mut registry = current
+        .clone()
+        .unwrap_or_else(|| RuntimeSchemaRegistry::empty(1, "bootstrap reasoning runtime schema"));
+    let run_schema = RuntimeRecordSchema {
+        properties: BTreeMap::from([
+            (
+                "state".into(),
+                RuntimePropertySchema::required(RuntimeValueType::String),
+            ),
+            (
+                "complete".into(),
+                RuntimePropertySchema::required(RuntimeValueType::Bool),
+            ),
+            (
+                "last_event_digest".into(),
+                RuntimePropertySchema::required(RuntimeValueType::Digest),
+            ),
+        ]),
+        ..RuntimeRecordSchema::default()
+    };
+    let event_schema = RuntimeEventSchema {
+        subject_required: true,
+        subject_types: BTreeSet::from([RuntimeType::new(RUN_TYPE)?]),
+        properties: BTreeMap::from([
+            (
+                "event_json".into(),
+                RuntimePropertySchema::required(RuntimeValueType::String),
+            ),
+            (
+                "event_digest".into(),
+                RuntimePropertySchema::required(RuntimeValueType::Digest),
+            ),
+            (
+                "ordinal".into(),
+                RuntimePropertySchema::required(RuntimeValueType::Unsigned),
+            ),
+            (
+                "payload_kind".into(),
+                RuntimePropertySchema::required(RuntimeValueType::String),
+            ),
+        ]),
+        ..RuntimeEventSchema::default()
+    };
+    let unchanged = registry.records.get(&RuntimeType::new(RUN_TYPE)?) == Some(&run_schema)
+        && registry.events.get(&RuntimeType::new(EVENT_TYPE)?) == Some(&event_schema);
+    if unchanged {
+        return Ok(None);
+    }
+    registry
+        .records
+        .insert(RuntimeType::new(RUN_TYPE)?, run_schema);
+    registry
+        .events
+        .insert(RuntimeType::new(EVENT_TYPE)?, event_schema);
+    if let Some(current) = current {
+        registry.revision = current.revision.saturating_add(1);
+        registry.migration = "register reasoning runtime types".into();
+    }
+    Ok(Some(registry))
 }
 
 /// Records exactly one validated state transition as one optimistic,
@@ -248,6 +318,9 @@ pub fn record_reasoning<E: Engine>(
     } else {
         mutations.push(run_record(&run)?);
         mutations.push(event_mutation(&event)?);
+    }
+    if let Some(registry) = reasoning_schema_update(store)? {
+        mutations.insert(0, RuntimeMutation::Schema { registry });
     }
 
     let commit = RuntimeCommit {

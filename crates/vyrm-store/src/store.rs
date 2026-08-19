@@ -5,11 +5,13 @@ use crate::gc::{build_report, RemovalReport, Tally};
 use crate::invocation::{self, Invocation, InvocationInput};
 use crate::keyspaces::{self, Durability};
 use fjall::{KeyspaceCreateOptions, Readable, SingleWriterTxDatabase, SingleWriterTxKeyspace};
+use serde::de::DeserializeOwned;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use vyrm_core::{
     key, Claim, ClaimSource, Millis, Predicate, Reader, RuntimeChange, RuntimeChangePage,
-    RuntimeCommit, RuntimeCommitOutcome, RuntimeMutation, RuntimeRef, ScopeId, Subject,
+    RuntimeCommit, RuntimeCommitOutcome, RuntimeMutation, RuntimeRecord, RuntimeRef,
+    RuntimeRelation, RuntimeSchemaRegistry, ScopeId, Subject,
 };
 
 /// Sequences assigned by an append.
@@ -38,6 +40,7 @@ pub struct Store {
     runtime_changes: SingleWriterTxKeyspace,
     runtime_records: SingleWriterTxKeyspace,
     runtime_relations: SingleWriterTxKeyspace,
+    runtime_schemas: SingleWriterTxKeyspace,
 }
 
 impl Store {
@@ -52,16 +55,16 @@ impl Store {
             db.keyspace(keyspaces::SEQUENCE_INDEX, KeyspaceCreateOptions::default)?;
         let access = db.keyspace(keyspaces::ACCESS, KeyspaceCreateOptions::default)?;
         let meta = db.keyspace(keyspaces::META, KeyspaceCreateOptions::default)?;
-        let invocations =
-            db.keyspace(keyspaces::INVOCATIONS, KeyspaceCreateOptions::default)?;
-        let projections =
-            db.keyspace(keyspaces::PROJECTIONS, KeyspaceCreateOptions::default)?;
+        let invocations = db.keyspace(keyspaces::INVOCATIONS, KeyspaceCreateOptions::default)?;
+        let projections = db.keyspace(keyspaces::PROJECTIONS, KeyspaceCreateOptions::default)?;
         let runtime_changes =
             db.keyspace(keyspaces::RUNTIME_CHANGES, KeyspaceCreateOptions::default)?;
         let runtime_records =
             db.keyspace(keyspaces::RUNTIME_RECORDS, KeyspaceCreateOptions::default)?;
         let runtime_relations =
             db.keyspace(keyspaces::RUNTIME_RELATIONS, KeyspaceCreateOptions::default)?;
+        let runtime_schemas =
+            db.keyspace(keyspaces::RUNTIME_SCHEMAS, KeyspaceCreateOptions::default)?;
         Ok(Self {
             path,
             db,
@@ -74,6 +77,7 @@ impl Store {
             runtime_changes,
             runtime_records,
             runtime_relations,
+            runtime_schemas,
         })
     }
 
@@ -132,6 +136,15 @@ impl Store {
         decode_optional_sequence(snapshot.get(&self.meta, keyspaces::RUNTIME_CURSOR)?)
     }
 
+    /// Latest authoritative schema registry for one scope.
+    pub fn runtime_schema(&self, scope: &ScopeId) -> Result<Option<RuntimeSchemaRegistry>> {
+        let snapshot = self.db.read_tx();
+        snapshot
+            .get(&self.runtime_schemas, scope.as_str().as_bytes())?
+            .map(|bytes| serde_json::from_slice(&bytes).map_err(Error::from))
+            .transpose()
+    }
+
     /// Atomically appends a complete causal runtime transaction.
     ///
     /// The expected cursor is compared inside the Fjall write transaction.
@@ -156,6 +169,68 @@ impl Store {
             });
         }
 
+        let previous_schema = tx
+            .get(&self.runtime_schemas, commit.scope.as_str().as_bytes())?
+            .map(|bytes| serde_json::from_slice::<RuntimeSchemaRegistry>(&bytes))
+            .transpose()?;
+        let proposed_schema = commit.mutations.iter().find_map(|mutation| match mutation {
+            RuntimeMutation::Schema { registry } => Some(registry),
+            _ => None,
+        });
+        let effective_schema = match (previous_schema.as_ref(), proposed_schema) {
+            (None, Some(registry)) if registry.revision == 1 => registry,
+            (None, Some(registry)) => {
+                return Err(Error::RuntimeSchemaConflict {
+                    expected: 1,
+                    actual: registry.revision,
+                });
+            }
+            (Some(previous), Some(registry))
+                if registry.revision == previous.revision.saturating_add(1) =>
+            {
+                registry
+            }
+            (Some(previous), Some(registry)) => {
+                return Err(Error::RuntimeSchemaConflict {
+                    expected: previous.revision.saturating_add(1),
+                    actual: registry.revision,
+                });
+            }
+            (Some(previous), None) => previous,
+            (None, None) => {
+                return Err(Error::RuntimeSchemaMissing(commit.scope.to_string()));
+            }
+        };
+        // Existing bodies are needed only for constraints whose truth depends
+        // on other live objects. Strict type/property/endpoint checks validate
+        // the incoming mutations directly; avoiding a full scoped scan keeps
+        // high-volume event appends independent of retained history size.
+        let existing_records = if effective_schema
+            .records
+            .values()
+            .any(|schema| !schema.unique_properties.is_empty())
+        {
+            runtime_values_for_scope::<RuntimeRecord, _>(&tx, &self.runtime_records, &commit.scope)?
+        } else {
+            Vec::new()
+        };
+        let existing_relations = if effective_schema.relations.values().any(|schema| {
+            schema.unique_pair || schema.max_outgoing.is_some() || schema.max_incoming.is_some()
+        }) {
+            runtime_values_for_scope::<RuntimeRelation, _>(
+                &tx,
+                &self.runtime_relations,
+                &commit.scope,
+            )?
+        } else {
+            Vec::new()
+        };
+        effective_schema.validate_objects(
+            &commit.mutations,
+            &existing_records,
+            &existing_relations,
+        )?;
+
         let new_records = commit
             .mutations
             .iter()
@@ -168,7 +243,9 @@ impl Store {
             let references: Vec<&RuntimeRef> = match mutation {
                 RuntimeMutation::Relation { relation } => vec![&relation.from, &relation.to],
                 RuntimeMutation::Event { event } => event.subject.iter().collect(),
-                RuntimeMutation::Claim { .. } | RuntimeMutation::Record { .. } => Vec::new(),
+                RuntimeMutation::Claim { .. }
+                | RuntimeMutation::Schema { .. }
+                | RuntimeMutation::Record { .. } => Vec::new(),
             };
             for reference in references {
                 if !new_records.contains(reference)
@@ -192,9 +269,8 @@ impl Store {
             .iter()
             .filter(|mutation| matches!(mutation, RuntimeMutation::Claim { .. }))
             .count();
-        let claim_start = decode_optional_sequence(
-            tx.get(&self.meta, keyspaces::SEQUENCE_WATERMARK)?,
-        )?;
+        let claim_start =
+            decode_optional_sequence(tx.get(&self.meta, keyspaces::SEQUENCE_WATERMARK)?)?;
         let mut claim_sequence = claim_start;
         let mut cursor = start;
         let mut previous_digest = tx
@@ -205,7 +281,9 @@ impl Store {
 
         for (ordinal, mutation) in commit.mutations.iter().cloned().enumerate() {
             if let RuntimeMutation::Claim { claim } = &mutation {
-                claim_sequence = claim_sequence.checked_add(1).ok_or(Error::SequenceOverflow)?;
+                claim_sequence = claim_sequence
+                    .checked_add(1)
+                    .ok_or(Error::SequenceOverflow)?;
                 let claim_key = key::claim_key(
                     &claim.subject,
                     &claim.predicate,
@@ -235,6 +313,11 @@ impl Store {
                 serde_json::to_vec(&change)?,
             );
             match mutation {
+                RuntimeMutation::Schema { registry } => tx.insert(
+                    &self.runtime_schemas,
+                    commit.scope.as_str().as_bytes(),
+                    serde_json::to_vec(&registry)?,
+                ),
                 RuntimeMutation::Record { record } => tx.insert(
                     &self.runtime_records,
                     runtime_identity_key(&commit.scope, &record.reference),
@@ -289,7 +372,9 @@ impl Store {
         scope: Option<&ScopeId>,
     ) -> Result<RuntimeChangePage> {
         if limit == 0 {
-            return Err(Error::Substrate("runtime change page limit must be greater than zero".into()));
+            return Err(Error::Substrate(
+                "runtime change page limit must be greater than zero".into(),
+            ));
         }
         let snapshot = self.db.read_tx();
         let head = decode_optional_sequence(snapshot.get(&self.meta, keyspaces::RUNTIME_CURSOR)?)?;
@@ -320,9 +405,9 @@ impl Store {
         };
         let mut through = after;
         let mut changes = Vec::new();
-        for (expected_cursor, guard) in (after + 1..).zip(
-            snapshot.range(&self.runtime_changes, runtime_cursor_key(after + 1)..),
-        ) {
+        for (expected_cursor, guard) in (after + 1..)
+            .zip(snapshot.range(&self.runtime_changes, runtime_cursor_key(after + 1)..))
+        {
             if through.saturating_sub(after) as usize >= limit {
                 break;
             }
@@ -388,8 +473,12 @@ impl Store {
             // Correction 2: overflow is reported, never saturated.
             sequence = sequence.checked_add(1).ok_or(Error::SequenceOverflow)?;
             let encoded = serde_json::to_vec(claim)?;
-            let claim_key =
-                key::claim_key(&claim.subject, &claim.predicate, claim.valid_from, claim.tx_time);
+            let claim_key = key::claim_key(
+                &claim.subject,
+                &claim.predicate,
+                claim.valid_from,
+                claim.tx_time,
+            );
             // The index entry is written in this same transaction, so it cannot
             // diverge from the watermark advanced below.
             tx.insert(
@@ -439,7 +528,11 @@ impl Store {
             .db
             .write_tx()
             .durability(Durability::Buffered.persist_mode());
-        tx.insert(&self.access, key::access_key(at, reader, subject, predicate), []);
+        tx.insert(
+            &self.access,
+            key::access_key(at, reader, subject, predicate),
+            [],
+        );
         tx.commit()?;
         Ok(())
     }
@@ -570,7 +663,9 @@ impl Store {
             }
         }
         let Some((key, mut record)) = found else {
-            return Err(Error::Substrate(format!("no invocation with ordinal {ordinal}")));
+            return Err(Error::Substrate(format!(
+                "no invocation with ordinal {ordinal}"
+            )));
         };
         let Some(effectiveness) = record.effectiveness.as_mut() else {
             return Err(Error::Substrate(format!(
@@ -665,12 +760,7 @@ impl Store {
     /// Scans one subject and predicate from `from`, bounded by the version
     /// prefix. Reads take a snapshot and acquire no write lock
     /// (`SPEC.md` §11 correction 4).
-    fn scan(
-        &self,
-        subject: &Subject,
-        predicate: &Predicate,
-        from: Vec<u8>,
-    ) -> Result<Vec<Claim>> {
+    fn scan(&self, subject: &Subject, predicate: &Predicate, from: Vec<u8>) -> Result<Vec<Claim>> {
         let prefix = key::version_prefix(subject, predicate);
         let snapshot = self.db.read_tx();
         let mut out = Vec::new();
@@ -738,7 +828,11 @@ fn decode_sequence(value: &[u8]) -> Result<u64> {
 }
 
 fn decode_optional_sequence(value: Option<fjall::Slice>) -> Result<u64> {
-    value.as_deref().map(decode_sequence).transpose().map(Option::unwrap_or_default)
+    value
+        .as_deref()
+        .map(decode_sequence)
+        .transpose()
+        .map(Option::unwrap_or_default)
 }
 
 fn runtime_cursor_key(cursor: u64) -> [u8; 8] {
@@ -755,4 +849,36 @@ fn runtime_identity_key(scope: &ScopeId, reference: &RuntimeRef) -> Vec<u8> {
     key.push(0);
     key.extend_from_slice(reference.id.as_str().as_bytes());
     key
+}
+
+fn runtime_values_for_scope<T: DeserializeOwned, R: Readable>(
+    reader: &R,
+    keyspace: &SingleWriterTxKeyspace,
+    scope: &ScopeId,
+) -> Result<Vec<T>> {
+    let mut prefix = scope.as_str().as_bytes().to_vec();
+    prefix.push(0);
+    let Some(end) = prefix_end(&prefix) else {
+        return Err(Error::Substrate(
+            "runtime scope prefix has no finite upper bound".into(),
+        ));
+    };
+    let mut values = Vec::new();
+    for guard in reader.range(keyspace, prefix..end) {
+        let (_, bytes) = guard.into_inner()?;
+        values.push(serde_json::from_slice(&bytes)?);
+    }
+    Ok(values)
+}
+
+fn prefix_end(prefix: &[u8]) -> Option<Vec<u8>> {
+    let mut end = prefix.to_vec();
+    for index in (0..end.len()).rev() {
+        if end[index] != u8::MAX {
+            end[index] += 1;
+            end.truncate(index + 1);
+            return Some(end);
+        }
+    }
+    None
 }

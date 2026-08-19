@@ -1,4 +1,4 @@
-# Runtime status — 2026-08-18
+# Runtime status — 2026-08-19
 
 vyrm now implements the complete runtime loop described by the current plan.
 It is pre-release software, but the listed behavior is executable and tested,
@@ -15,6 +15,13 @@ not roadmap language.
   SHA-256 hash chain. Exact-cursor compare-and-swap rejects concurrent stale
   writers. Relation endpoints and subject-bearing events cannot reference a
   missing node in their scope.
+- A persisted, revisioned schema registry now governs typed runtime records,
+  relations, and events. Unknown types and properties fail closed; property
+  value types, required fields, event subjects, legal edge endpoints, temporal
+  uniqueness, pair uniqueness, and incoming/outgoing cardinality are enforced
+  before the atomic commit. Schema migrations share the hash chain and must
+  advance exactly one revision. Fjall reopen and in-memory differential tests
+  prove the same contract.
 - Reasoning and prompt-flight state no longer rewrites authoritative JSON
   ledger blobs. Both append typed node revisions and immutable micro-events to
   the runtime log. Existing v1 projection ledgers remain readable and migrate
@@ -56,6 +63,9 @@ not roadmap language.
   explicit unauthenticated-transport override. Its read API now exposes
   resumable changes, graph-at-cursor/valid-time snapshots, and exact graph
   differentials for freeze/scrub tooling.
+- The workbench adds a Schema lens and `GET /api/runtime/schema`, making the
+  active revision, migration, types, property rules, subject constraints, and
+  edge cardinality visible instead of leaving enforcement buried in code.
 - The flight workbench is now a one-run-at-a-time learning instrument. Weak and
   strong prompts are editable presets, custom drafts survive live polling, and
   exact Default/High/Extreme/Ultra controls persist the requested provider
@@ -79,10 +89,6 @@ tests cover operator commands, hooks, explicit recovery, and both MCP eras.
 - MCP cannot intercept another runtime's private tools. Hookless clients receive
   identical semantics through `vyrm_lifecycle` and must place that call around
   their mutations; server-owned operations remain directly enforceable.
-- Record/relation endpoint integrity is enforced, but a persisted schema
-  registry for allowed types, endpoint combinations, cardinality, and migration
-  versions is still open. Until it lands, type names are validated but not
-  centrally registered.
 - Runtime scopes are present in every commit and feed query. Current reasoning
   and flight composition uses the physically isolated store's
   `instance:default` scope; umbrella member routing and capability-based remote

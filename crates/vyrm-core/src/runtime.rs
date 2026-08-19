@@ -5,7 +5,7 @@
 //! adapters allocate a single global cursor for every mutation, hash-chain the
 //! resulting changes, and reject a commit whose expected cursor is stale.
 
-use crate::{digest, Claim, Error, Millis, Result};
+use crate::{digest, Claim, Error, Millis, Result, RuntimeSchemaRegistry};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fmt;
@@ -146,10 +146,24 @@ pub struct RuntimeEvent {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "mutation", rename_all = "snake_case")]
 pub enum RuntimeMutation {
-    Claim { claim: Claim },
-    Record { record: RuntimeRecord },
-    Relation { relation: RuntimeRelation },
-    Event { event: RuntimeEvent },
+    Claim {
+        claim: Claim,
+    },
+    /// A complete, versioned registry replacing the prior registry for this
+    /// scope. Storage validates revision continuity and every co-committed
+    /// object against the resulting schema before writing anything.
+    Schema {
+        registry: RuntimeSchemaRegistry,
+    },
+    Record {
+        record: RuntimeRecord,
+    },
+    Relation {
+        relation: RuntimeRelation,
+    },
+    Event {
+        event: RuntimeEvent,
+    },
 }
 
 /// The caller-observed head is mandatory. This is the compare-and-swap that
@@ -173,9 +187,19 @@ impl RuntimeCommit {
         }
 
         let mut identities = BTreeSet::new();
+        let mut schema_count = 0;
         for mutation in &self.mutations {
             match mutation {
                 RuntimeMutation::Claim { claim } => claim.validate()?,
+                RuntimeMutation::Schema { registry } => {
+                    schema_count += 1;
+                    registry.validate()?;
+                    if schema_count > 1 {
+                        return Err(Error::InvalidRuntime {
+                            reason: "runtime commit may contain at most one schema mutation".into(),
+                        });
+                    }
+                }
                 RuntimeMutation::Record { record } => {
                     validate_window(record.valid_from, record.valid_to)?;
                     validate_properties(&record.properties)?;
@@ -397,7 +421,7 @@ impl RuntimeGraphSnapshot {
                         );
                     }
                 }
-                RuntimeMutation::Claim { .. } => {}
+                RuntimeMutation::Claim { .. } | RuntimeMutation::Schema { .. } => {}
             }
         }
         let records = records
@@ -646,6 +670,10 @@ fn encode_mutation(out: &mut Vec<u8>, mutation: &RuntimeMutation) {
             out.extend_from_slice(&(bytes.len() as u64).to_be_bytes());
             out.extend_from_slice(&bytes);
         }
+        RuntimeMutation::Schema { registry } => {
+            out.push(4);
+            encode_schema(out, registry);
+        }
         RuntimeMutation::Record { record } => {
             out.push(1);
             encode_ref(out, &record.reference);
@@ -669,6 +697,76 @@ fn encode_mutation(out: &mut Vec<u8>, mutation: &RuntimeMutation) {
             }
             encode_properties(out, &event.properties);
         }
+    }
+}
+
+fn encode_schema(out: &mut Vec<u8>, registry: &RuntimeSchemaRegistry) {
+    out.extend_from_slice(&registry.revision.to_be_bytes());
+    text(out, &registry.migration);
+    out.extend_from_slice(&(registry.records.len() as u64).to_be_bytes());
+    for (kind, schema) in &registry.records {
+        text(out, kind.as_str());
+        encode_property_schemas(out, &schema.properties);
+        out.push(u8::from(schema.allow_additional_properties));
+        out.extend_from_slice(&(schema.unique_properties.len() as u64).to_be_bytes());
+        for property in &schema.unique_properties {
+            text(out, property);
+        }
+    }
+    out.extend_from_slice(&(registry.relations.len() as u64).to_be_bytes());
+    for (kind, schema) in &registry.relations {
+        text(out, kind.as_str());
+        encode_type_set(out, &schema.from);
+        encode_type_set(out, &schema.to);
+        encode_property_schemas(out, &schema.properties);
+        out.push(u8::from(schema.allow_additional_properties));
+        out.push(u8::from(schema.unique_pair));
+        encode_optional_u64(out, schema.max_outgoing);
+        encode_optional_u64(out, schema.max_incoming);
+    }
+    out.extend_from_slice(&(registry.events.len() as u64).to_be_bytes());
+    for (kind, schema) in &registry.events {
+        text(out, kind.as_str());
+        out.push(u8::from(schema.subject_required));
+        encode_type_set(out, &schema.subject_types);
+        encode_property_schemas(out, &schema.properties);
+        out.push(u8::from(schema.allow_additional_properties));
+    }
+}
+
+fn encode_property_schemas(
+    out: &mut Vec<u8>,
+    properties: &BTreeMap<String, crate::RuntimePropertySchema>,
+) {
+    out.extend_from_slice(&(properties.len() as u64).to_be_bytes());
+    for (name, schema) in properties {
+        text(out, name);
+        out.push(match schema.value_type {
+            crate::RuntimeValueType::Null => 0,
+            crate::RuntimeValueType::Bool => 1,
+            crate::RuntimeValueType::Integer => 2,
+            crate::RuntimeValueType::Unsigned => 3,
+            crate::RuntimeValueType::Decimal => 4,
+            crate::RuntimeValueType::String => 5,
+            crate::RuntimeValueType::Digest => 6,
+            crate::RuntimeValueType::List => 7,
+            crate::RuntimeValueType::Map => 8,
+        });
+        out.push(u8::from(schema.required));
+    }
+}
+
+fn encode_type_set(out: &mut Vec<u8>, values: &BTreeSet<RuntimeType>) {
+    out.extend_from_slice(&(values.len() as u64).to_be_bytes());
+    for value in values {
+        text(out, value.as_str());
+    }
+}
+
+fn encode_optional_u64(out: &mut Vec<u8>, value: Option<u64>) {
+    out.push(u8::from(value.is_some()));
+    if let Some(value) = value {
+        out.extend_from_slice(&value.to_be_bytes());
     }
 }
 

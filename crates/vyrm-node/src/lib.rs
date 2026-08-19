@@ -35,7 +35,9 @@ pub use instance::{
 };
 pub use policy::{evaluate_tool, ContractDifferential, ToolPolicy};
 pub use preflight::{preflight, Preflight};
-pub use reasoning::{active_reasoning_run, reasoning_run, reasoning_runs, record_reasoning};
+pub use reasoning::{
+    active_reasoning_run, reasoning_run, reasoning_runs, record_reasoning, REASONING_SCOPE,
+};
 pub use registry::{Harness, Registry, Verification, VERIFICATION_TTL_MS};
 pub use routing::{ensure_routing_fresh, load_routing, reset_routing, RoutingReady};
 pub use stack::{detect, StackProfile};

@@ -53,11 +53,12 @@ cargo run -p connectome-ui -- --root .
 # http://127.0.0.1:4387
 ```
 
-Connectome provides seven lenses:
+Connectome provides eight lenses:
 
 | Lens | Purpose |
 |---|---|
 | Prompt flights | Launch, replay, freeze, inspect, and compare prompt experiments |
+| Schema | Inspect the persisted type, property, endpoint, uniqueness, and cardinality contract |
 | Overview | Runtime health, freshness, grounding, and active work |
 | Graph | Selection-centered claim, evidence, run, flight, and source topology |
 | Runs | Typed reasoning timelines |
@@ -70,6 +71,7 @@ The local API also exposes the authoritative persistence layer:
 | Endpoint | Purpose |
 |---|---|
 | `GET /api/changes?after=N&limit=N` | Resume the verified runtime changefeed |
+| `GET /api/runtime/schema` | Read the active persisted schema revision for this instance scope |
 | `GET /api/runtime/graph?valid_at=T&cursor=N` | Freeze the typed graph at valid time and transaction cursor |
 | `GET /api/runtime/diff?from=A&to=B&valid_at=T` | Inspect exact structural change between cursors |
 | `POST /api/demos/prompt-strength` | Persist a deterministic weak/strong trace pair for temporal playback |

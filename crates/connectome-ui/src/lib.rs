@@ -15,7 +15,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use tiny_http::{Header, Method, Request, Response, Server, StatusCode};
 use vyrm_core::{
     resolve_as_of, Claim, ClaimSource, ReasoningEvent, ReasoningPayload, RuntimeGraphSnapshot,
-    ScopeId,
+    RuntimeSchemaRegistry, ScopeId,
 };
 use vyrm_node::{InstanceBinding, InstanceMode};
 use vyrm_store::{Engine, Invocation, ProjectionStatus, Store};
@@ -34,6 +34,7 @@ pub struct Snapshot {
     pub files: Vec<FileView>,
     pub invocations: Vec<Invocation>,
     pub flights: Vec<Flight>,
+    pub schema: Option<RuntimeSchemaRegistry>,
     pub capabilities: CapabilitiesView,
     pub graph: GraphView,
 }
@@ -66,6 +67,7 @@ pub struct HealthView {
     pub indexed_files: usize,
     pub indexed_symbols: usize,
     pub active_run: Option<String>,
+    pub schema_revision: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -199,6 +201,7 @@ pub fn snapshot(
         &invocations,
         &flights,
     );
+    let schema = store.runtime_schema(&ScopeId::new(vyrm_node::REASONING_SCOPE)?)?;
     let health = HealthView {
         state: if quarantined {
             "blocked"
@@ -218,6 +221,7 @@ pub fn snapshot(
         indexed_files: routing.as_ref().map_or(0, |index| index.file_count()),
         indexed_symbols: routing.as_ref().map_or(0, |index| index.symbol_count()),
         active_run,
+        schema_revision: schema.as_ref().map(|schema| schema.revision),
     };
 
     Ok(Snapshot {
@@ -237,6 +241,7 @@ pub fn snapshot(
         files,
         invocations,
         flights,
+        schema,
         capabilities: CapabilitiesView {
             runners_enabled: false,
             providers: vec!["observe"],
@@ -618,6 +623,23 @@ fn respond(
                 ),
             }
         }
+        "/api/runtime/schema" => match ScopeId::new(vyrm_node::REASONING_SCOPE)
+            .map_err(|error| error.into())
+            .and_then(|scope| {
+                store
+                    .runtime_schema(&scope)
+                    .map_err(|error| -> Box<dyn std::error::Error> { error.into() })
+            }) {
+            Ok(Some(schema)) => json_response(StatusCode(200), &schema),
+            Ok(None) => json_response(
+                StatusCode(404),
+                &serde_json::json!({"error":"runtime schema is not installed for this scope"}),
+            ),
+            Err(error) => json_response(
+                StatusCode(500),
+                &serde_json::json!({"error":error.to_string()}),
+            ),
+        },
         "/api/runtime/graph" => {
             let params = query_params(query);
             let valid_at = params

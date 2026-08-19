@@ -37,7 +37,9 @@ test('prompt flights can be launched, frozen, expanded, and compared', async ({ 
   await page.locator('#flight-context').selectOption('fresh');
   await page.locator('#flight-provider').selectOption('observe');
   await page.locator('[data-reasoning-profile="high"]').click();
-  await page.getByRole('button', { name: 'Run one flight' }).click();
+  const launch = page.locator('.launch-button');
+  await launch.click();
+  await expect(launch).toBeEnabled({ timeout: 15_000 });
 
   await expect(page.locator('.flight-visual')).toBeVisible();
   await expect(page.locator('.flight-switcher')).toContainText('CONFIGURED high');
@@ -56,7 +58,9 @@ test('reasoning profiles expose exact effort and bidirectional event playback', 
   await page.locator('[data-reasoning-profile="extreme"]').click();
   await page.locator('#flight-context').selectOption('fresh');
   await page.locator('#flight-provider').selectOption('observe');
-  await page.getByRole('button', { name: 'Run one flight' }).click();
+  const launch = page.locator('.launch-button');
+  await launch.click();
+  await expect(launch).toBeEnabled({ timeout: 15_000 });
 
   await expect(page.locator('.flight-switcher')).toContainText('Extreme');
   await expect(page.locator('.flight-switcher')).toContainText('xhigh');
@@ -75,6 +79,33 @@ test('reasoning profiles expose exact effort and bidirectional event playback', 
   await expect(page.locator('.event-envelope pre')).toBeVisible();
 });
 
+test('persisted schema is readable as a developer contract', async ({ page, request }) => {
+  const response = await request.post(`${baseURL}/api/flights`, {
+    data: {
+      prompt: 'Install and inspect the governed prompt-flight types.',
+      provider: 'observe',
+      context_mode: 'fresh',
+      budget: 512,
+      acceptance_marker: '',
+      reasoning_profile: 'default',
+    },
+  });
+  expect(response.ok()).toBeTruthy();
+
+  const schemaResponse = await request.get(`${baseURL}/api/runtime/schema`);
+  expect(schemaResponse.ok()).toBeTruthy();
+  const schema = await schemaResponse.json();
+  expect(schema.revision).toBeGreaterThan(0);
+  expect(schema.records.prompt_flight.properties.status.required).toBeTruthy();
+
+  await page.goto(`${baseURL}/#schema`);
+  await expect(page.getByRole('heading', { name: 'Runtime schema' })).toBeVisible();
+  await expect(page.locator('.schema-revision')).toContainText('prompt flight');
+  await expect(page.locator('.schema-groups')).toContainText('prompt flight');
+  await expect(page.locator('.schema-groups')).toContainText('required');
+  await expect(page.locator('.schema-contract-line')).toContainText('Deny or commit');
+});
+
 test('custom prompt editing is stable while live snapshots and flight polling continue', async ({ page }) => {
   await page.goto(`${baseURL}/#flight`);
   const prompt = 'Compare the runtime graph and report verified evidence with a stop condition.';
@@ -83,4 +114,6 @@ test('custom prompt editing is stable while live snapshots and flight polling co
   await page.waitForTimeout(5500);
   await expect(page.locator('#flight-prompt')).toHaveValue(prompt);
   await expect(page.locator('.contract-signals .present')).not.toHaveCount(0);
+  await page.locator('#flight-prompt').pressSequentially(' scope');
+  await expect(page).toHaveURL(/#flight$/);
 });

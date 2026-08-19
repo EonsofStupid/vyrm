@@ -31,9 +31,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Mutex;
 use vyrm_core::reference::MemoryClaims;
 use vyrm_core::{
-    resolve_as_of, Claim, ClaimSource, Millis, Predicate, Reader, RuntimeChange,
-    RuntimeChangePage, RuntimeCommit, RuntimeCommitOutcome, RuntimeMutation, RuntimeRef, ScopeId,
-    Subject,
+    resolve_as_of, Claim, ClaimSource, Millis, Predicate, Reader, RuntimeChange, RuntimeChangePage,
+    RuntimeCommit, RuntimeCommitOutcome, RuntimeMutation, RuntimeRecord, RuntimeRef,
+    RuntimeRelation, RuntimeSchemaRegistry, ScopeId, Subject,
 };
 
 pub trait Engine: ClaimSource<Error = Error> {
@@ -65,11 +65,13 @@ pub trait Engine: ClaimSource<Error = Error> {
     fn get_projection(&self, name: &str) -> Result<Option<Vec<u8>>>;
 
     /// Stores a named projection blob with an explicit durability class.
-    fn put_projection_with(&self, name: &str, bytes: &[u8], durability: Durability)
-        -> Result<()>;
+    fn put_projection_with(&self, name: &str, bytes: &[u8], durability: Durability) -> Result<()>;
 
     /// Current global cursor of the authoritative typed runtime log.
     fn runtime_cursor(&self) -> Result<u64>;
+
+    /// Latest authoritative schema registry for one runtime scope.
+    fn runtime_schema(&self, scope: &ScopeId) -> Result<Option<RuntimeSchemaRegistry>>;
 
     /// Atomically commits typed runtime mutations with exact-cursor conflict
     /// detection. Embedded claims join the same storage transaction.
@@ -87,7 +89,8 @@ pub trait Engine: ClaimSource<Error = Error> {
 
     /// Appends a single claim. Equivalent to a batch of one.
     fn assert(&self, claim: &Claim) -> Result<AppendOutcome> {
-        let candidates = self.versions_at_or_before(&claim.subject, &claim.predicate, claim.valid_from)?;
+        let candidates =
+            self.versions_at_or_before(&claim.subject, &claim.predicate, claim.valid_from)?;
         let previous = resolve_as_of(&candidates, claim.valid_from).cloned();
         match previous {
             Some(previous) if previous.valid_from < claim.valid_from => {
@@ -185,7 +188,10 @@ pub trait Engine: ClaimSource<Error = Error> {
             &projection.to_stored_bytes()?,
             Durability::Authoritative,
         )?;
-        tracing::warn!(differences = differences.len(), "divergence — projection quarantined");
+        tracing::warn!(
+            differences = differences.len(),
+            "divergence — projection quarantined"
+        );
         Ok(GroundingReport::Divergence { differences })
     }
 
@@ -206,7 +212,11 @@ pub trait Engine: ClaimSource<Error = Error> {
             &projection.to_stored_bytes()?,
             Durability::Buffered,
         )?;
-        Ok(crate::projection::RebuildOutcome { from: 0, to, applied })
+        Ok(crate::projection::RebuildOutcome {
+            from: 0,
+            to,
+            applied,
+        })
     }
 }
 
@@ -241,6 +251,9 @@ impl Engine for Store {
     fn runtime_cursor(&self) -> Result<u64> {
         Store::runtime_cursor(self)
     }
+    fn runtime_schema(&self, scope: &ScopeId) -> Result<Option<RuntimeSchemaRegistry>> {
+        Store::runtime_schema(self, scope)
+    }
     fn commit_runtime(&self, commit: &RuntimeCommit) -> Result<RuntimeCommitOutcome> {
         Store::commit_runtime(self, commit)
     }
@@ -271,7 +284,9 @@ struct MemoryEngineInner {
     projections: BTreeMap<String, Vec<u8>>,
     observes: u64,
     runtime_changes: Vec<RuntimeChange>,
-    runtime_records: BTreeSet<(ScopeId, RuntimeRef)>,
+    runtime_records: BTreeMap<(ScopeId, RuntimeRef), RuntimeRecord>,
+    runtime_relations: BTreeMap<(ScopeId, RuntimeRef), RuntimeRelation>,
+    runtime_schemas: BTreeMap<ScopeId, RuntimeSchemaRegistry>,
 }
 
 impl MemoryEngine {
@@ -295,7 +310,11 @@ impl ClaimSource for MemoryEngine {
         as_of: Millis,
     ) -> Result<Vec<Claim>> {
         let inner = self.inner.lock().expect("engine mutex");
-        Ok(infallible(inner.claims.versions_at_or_before(subject, predicate, as_of)))
+        Ok(infallible(
+            inner
+                .claims
+                .versions_at_or_before(subject, predicate, as_of),
+        ))
     }
 
     fn all_versions(&self, subject: &Subject, predicate: &Predicate) -> Result<Vec<Claim>> {
@@ -320,7 +339,9 @@ impl Engine for MemoryEngine {
         let mut inner = self.inner.lock().expect("engine mutex");
         // Match Fjall rollback: reject the whole batch before mutating either
         // authoritative collection if any member is invalid.
-        for claim in claims { claim.validate()?; }
+        for claim in claims {
+            claim.validate()?;
+        }
         let start = inner.order.len() as u64;
         for claim in claims {
             inner.claims.insert(claim.clone())?;
@@ -364,7 +385,13 @@ impl Engine for MemoryEngine {
     }
 
     fn get_projection(&self, name: &str) -> Result<Option<Vec<u8>>> {
-        Ok(self.inner.lock().expect("engine mutex").projections.get(name).cloned())
+        Ok(self
+            .inner
+            .lock()
+            .expect("engine mutex")
+            .projections
+            .get(name)
+            .cloned())
     }
 
     fn put_projection_with(&self, name: &str, bytes: &[u8], _: Durability) -> Result<()> {
@@ -377,7 +404,22 @@ impl Engine for MemoryEngine {
     }
 
     fn runtime_cursor(&self) -> Result<u64> {
-        Ok(self.inner.lock().expect("engine mutex").runtime_changes.len() as u64)
+        Ok(self
+            .inner
+            .lock()
+            .expect("engine mutex")
+            .runtime_changes
+            .len() as u64)
+    }
+
+    fn runtime_schema(&self, scope: &ScopeId) -> Result<Option<RuntimeSchemaRegistry>> {
+        Ok(self
+            .inner
+            .lock()
+            .expect("engine mutex")
+            .runtime_schemas
+            .get(scope)
+            .cloned())
     }
 
     fn commit_runtime(&self, commit: &RuntimeCommit) -> Result<RuntimeCommitOutcome> {
@@ -390,6 +432,52 @@ impl Engine for MemoryEngine {
                 actual: start,
             });
         }
+        let previous_schema = inner.runtime_schemas.get(&commit.scope);
+        let proposed_schema = commit.mutations.iter().find_map(|mutation| match mutation {
+            RuntimeMutation::Schema { registry } => Some(registry),
+            _ => None,
+        });
+        let effective_schema = match (previous_schema, proposed_schema) {
+            (None, Some(registry)) if registry.revision == 1 => registry,
+            (None, Some(registry)) => {
+                return Err(Error::RuntimeSchemaConflict {
+                    expected: 1,
+                    actual: registry.revision,
+                });
+            }
+            (Some(previous), Some(registry))
+                if registry.revision == previous.revision.saturating_add(1) =>
+            {
+                registry
+            }
+            (Some(previous), Some(registry)) => {
+                return Err(Error::RuntimeSchemaConflict {
+                    expected: previous.revision.saturating_add(1),
+                    actual: registry.revision,
+                });
+            }
+            (Some(previous), None) => previous,
+            (None, None) => {
+                return Err(Error::RuntimeSchemaMissing(commit.scope.to_string()));
+            }
+        };
+        let existing_records = inner
+            .runtime_records
+            .iter()
+            .filter(|((scope, _), _)| scope == &commit.scope)
+            .map(|(_, record)| record)
+            .collect::<Vec<_>>();
+        let existing_relations = inner
+            .runtime_relations
+            .iter()
+            .filter(|((scope, _), _)| scope == &commit.scope)
+            .map(|(_, relation)| relation)
+            .collect::<Vec<_>>();
+        effective_schema.validate_objects(
+            &commit.mutations,
+            existing_records,
+            existing_relations,
+        )?;
         let new_records = commit
             .mutations
             .iter()
@@ -402,11 +490,15 @@ impl Engine for MemoryEngine {
             let references: Vec<&RuntimeRef> = match mutation {
                 RuntimeMutation::Relation { relation } => vec![&relation.from, &relation.to],
                 RuntimeMutation::Event { event } => event.subject.iter().collect(),
-                RuntimeMutation::Claim { .. } | RuntimeMutation::Record { .. } => Vec::new(),
+                RuntimeMutation::Claim { .. }
+                | RuntimeMutation::Schema { .. }
+                | RuntimeMutation::Record { .. } => Vec::new(),
             };
             for reference in references {
                 if !new_records.contains(reference)
-                    && !inner.runtime_records.contains(&(commit.scope.clone(), reference.clone()))
+                    && !inner
+                        .runtime_records
+                        .contains_key(&(commit.scope.clone(), reference.clone()))
                 {
                     return Err(Error::DanglingRuntimeReference(format!(
                         "{}/{} in scope {}",
@@ -434,7 +526,10 @@ impl Engine for MemoryEngine {
         }
 
         let commit_id = commit.digest();
-        let mut previous_digest = inner.runtime_changes.last().map(|change| change.digest.clone());
+        let mut previous_digest = inner
+            .runtime_changes
+            .last()
+            .map(|change| change.digest.clone());
         let mut committed = Vec::with_capacity(commit.mutations.len());
         for (ordinal, mutation) in commit.mutations.iter().cloned().enumerate() {
             let change = RuntimeChange::committed(
@@ -449,8 +544,25 @@ impl Engine for MemoryEngine {
             committed.push(change);
         }
         for mutation in &commit.mutations {
-            if let RuntimeMutation::Record { record } = mutation {
-                inner.runtime_records.insert((commit.scope.clone(), record.reference.clone()));
+            match mutation {
+                RuntimeMutation::Schema { registry } => {
+                    inner
+                        .runtime_schemas
+                        .insert(commit.scope.clone(), registry.clone());
+                }
+                RuntimeMutation::Record { record } => {
+                    inner.runtime_records.insert(
+                        (commit.scope.clone(), record.reference.clone()),
+                        record.clone(),
+                    );
+                }
+                RuntimeMutation::Relation { relation } => {
+                    inner.runtime_relations.insert(
+                        (commit.scope.clone(), relation.reference.clone()),
+                        relation.clone(),
+                    );
+                }
+                RuntimeMutation::Claim { .. } | RuntimeMutation::Event { .. } => {}
             }
         }
         inner.runtime_changes.extend(committed);
@@ -472,7 +584,9 @@ impl Engine for MemoryEngine {
         scope: Option<&ScopeId>,
     ) -> Result<RuntimeChangePage> {
         if limit == 0 {
-            return Err(Error::Substrate("runtime change page limit must be greater than zero".into()));
+            return Err(Error::Substrate(
+                "runtime change page limit must be greater than zero".into(),
+            ));
         }
         let inner = self.inner.lock().expect("engine mutex");
         let head = inner.runtime_changes.len() as u64;
@@ -484,7 +598,9 @@ impl Engine for MemoryEngine {
                 changes: Vec::new(),
             });
         }
-        let end = (after as usize).saturating_add(limit).min(inner.runtime_changes.len());
+        let end = (after as usize)
+            .saturating_add(limit)
+            .min(inner.runtime_changes.len());
         let examined = &inner.runtime_changes[after as usize..end];
         let changes = examined
             .iter()

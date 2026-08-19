@@ -35,24 +35,29 @@ pub mod digest;
 pub mod error;
 pub mod ident;
 pub mod key;
+pub mod reasoning;
 pub mod recall;
 pub mod reference;
-pub mod reasoning;
 pub mod runtime;
+pub mod schema;
 pub mod temporal;
 
 pub use claim::{supersede, Claim, Millis, Producer, PromotionState, Tier};
 pub use error::{Error, Result};
 pub use ident::{Predicate, Reader, Subject};
-pub use recall::{estimate_claim_tokens, recall, RecallQuery, RecallSet};
 pub use reasoning::{
     Check, CheckStatus, DecisionKind, Evidence, ReasoningEvent, ReasoningPayload, ReasoningRun,
     ReasoningState, RunOutcome,
 };
+pub use recall::{estimate_claim_tokens, recall, RecallQuery, RecallSet};
 pub use runtime::{
     RuntimeChange, RuntimeChangePage, RuntimeCommit, RuntimeCommitOutcome, RuntimeEvent,
     RuntimeGraphDiff, RuntimeGraphSnapshot, RuntimeId, RuntimeMutation, RuntimeProperties,
     RuntimeRecord, RuntimeRecordChange, RuntimeRef, RuntimeRelation, RuntimeRelationChange,
     RuntimeType, RuntimeValue, ScopeId,
+};
+pub use schema::{
+    RuntimeEventSchema, RuntimePropertySchema, RuntimeRecordSchema, RuntimeRelationSchema,
+    RuntimeSchemaRegistry, RuntimeValueType,
 };
 pub use temporal::{changed_since, resolve_as_of, ClaimReader, ClaimSource};

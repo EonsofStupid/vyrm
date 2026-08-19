@@ -20,7 +20,7 @@ chain-of-thought.
 - a validated `ScopeId`;
 - actor and caller-supplied time;
 - the exact runtime cursor the writer observed;
-- one or more claim, record, relation, or lifecycle-event mutations.
+- one or more schema, claim, record, relation, or lifecycle-event mutations.
 
 The compatibility store compares `expected_cursor` inside one atomic write
 transaction. A mismatch
@@ -33,6 +33,30 @@ Typed records and relations are immutable versions with half-open valid-time
 windows. The enclosing runtime change supplies transaction order and
 provenance. Relation endpoints and event subjects must exist in the same scope,
 either from an earlier commit or as records in the same commit.
+
+## Persisted schema and fail-closed writes
+
+Every scope that writes typed records, relations, or events has an authoritative
+`RuntimeSchemaRegistry`. Installing or advancing that registry is itself a
+hash-chained runtime mutation, so schema and data can migrate in one atomic
+commit. The first revision is `1`; every later migration must advance exactly
+one revision. Concurrent or skipped revisions fail without advancing either
+the runtime cursor or registry.
+
+The registry governs allowed object types, required and optional property value
+types, additional-property policy, event subject requirements, legal relation
+endpoint combinations, temporally overlapping record uniqueness, relation-pair
+uniqueness, and maximum incoming/outgoing cardinality. Governed writes deny by
+default when the registry is absent or a mutation violates it. The production
+store and `MemoryEngine` reference implementation execute the same validation
+contract.
+
+Reasoning and prompt-flight writers install or merge their strict types during
+the next write to a legacy scope. This deliberately validates the migrating
+commit and all future mutations without pretending old untyped history was
+already governed. Claims remain protected by their statically typed,
+bi-temporal claim contract rather than duplicating that contract in this
+registry.
 
 ## Replay and graph views
 
@@ -57,6 +81,7 @@ Connectome exposes read-only development endpoints:
 
 ```text
 GET /api/changes?after=0&limit=256
+GET /api/runtime/schema
 GET /api/runtime/graph?valid_at=<millis>&cursor=<cursor>
 GET /api/runtime/diff?from=<cursor>&to=<cursor>&valid_at=<millis>
 ```
@@ -73,16 +98,14 @@ typed events, the next mutation moves the complete history atomically.
 
 The following are not represented as complete:
 
-1. A persisted strict schema registry for node types, edge endpoint types,
-   property requirements, cardinality, uniqueness, and schema migrations.
-2. A content-addressed large-object store for trace bodies, file revisions,
+1. A content-addressed large-object store for trace bodies, file revisions,
    prompt packets, and verification artifacts, with backreferences and explicit
    retirement policy.
-3. Incremental grounded materialized graph lenses carrying source watermark,
+2. Incremental grounded materialized graph lenses carrying source watermark,
    digest, and quarantine state; current graph-at-cursor reconstruction replays
    the bounded authoritative feed.
-4. Umbrella-member scope propagation and capability-based remote authorization.
-5. Retention checkpoints and archival for high-volume event histories.
+3. Umbrella-member scope propagation and capability-based remote authorization.
+4. Retention checkpoints and archival for high-volume event histories.
 
 Fjall is the transitional compatibility adapter, not the destination. The
 Vyrm-native engine will replace it behind the same contracts, which are also

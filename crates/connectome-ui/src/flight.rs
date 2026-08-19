@@ -5,14 +5,15 @@
 
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::io::{BufRead, BufReader, Read};
 use std::process::{Command, Stdio};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 use vyrm_core::{
-    Reader, RuntimeCommit, RuntimeEvent, RuntimeMutation, RuntimeProperties, RuntimeRecord,
-    RuntimeRef, RuntimeType, RuntimeValue, ScopeId,
+    Reader, RuntimeCommit, RuntimeEvent, RuntimeEventSchema, RuntimeMutation, RuntimeProperties,
+    RuntimePropertySchema, RuntimeRecord, RuntimeRecordSchema, RuntimeRef, RuntimeSchemaRegistry,
+    RuntimeType, RuntimeValue, RuntimeValueType, ScopeId,
 };
 use vyrm_node::{HookContext, HookEvent, InstanceBinding};
 use vyrm_store::Store;
@@ -1037,6 +1038,80 @@ fn flight_event_mutation(
     })
 }
 
+fn flight_schema_update(
+    store: &Store,
+) -> Result<Option<RuntimeSchemaRegistry>, Box<dyn std::error::Error>> {
+    let scope = ScopeId::new(FLIGHT_SCOPE)?;
+    let current = store.runtime_schema(&scope)?;
+    let mut registry = current
+        .clone()
+        .unwrap_or_else(|| RuntimeSchemaRegistry::empty(1, "bootstrap prompt flight schema"));
+    let flight_schema = RuntimeRecordSchema {
+        properties: BTreeMap::from([
+            (
+                "flight_json".into(),
+                RuntimePropertySchema::required(RuntimeValueType::String),
+            ),
+            (
+                "cohort_id".into(),
+                RuntimePropertySchema::required(RuntimeValueType::Digest),
+            ),
+            (
+                "provider".into(),
+                RuntimePropertySchema::required(RuntimeValueType::String),
+            ),
+            (
+                "status".into(),
+                RuntimePropertySchema::required(RuntimeValueType::String),
+            ),
+            (
+                "reasoning_effort".into(),
+                RuntimePropertySchema::required(RuntimeValueType::String),
+            ),
+        ]),
+        ..RuntimeRecordSchema::default()
+    };
+    let event_schema = RuntimeEventSchema {
+        subject_required: true,
+        subject_types: BTreeSet::from([RuntimeType::new(FLIGHT_TYPE)?]),
+        properties: BTreeMap::from([
+            (
+                "event_json".into(),
+                RuntimePropertySchema::required(RuntimeValueType::String),
+            ),
+            (
+                "ordinal".into(),
+                RuntimePropertySchema::required(RuntimeValueType::Unsigned),
+            ),
+            (
+                "stage".into(),
+                RuntimePropertySchema::required(RuntimeValueType::String),
+            ),
+            (
+                "kind".into(),
+                RuntimePropertySchema::required(RuntimeValueType::String),
+            ),
+        ]),
+        ..RuntimeEventSchema::default()
+    };
+    let unchanged = registry.records.get(&RuntimeType::new(FLIGHT_TYPE)?) == Some(&flight_schema)
+        && registry.events.get(&RuntimeType::new(FLIGHT_EVENT_TYPE)?) == Some(&event_schema);
+    if unchanged {
+        return Ok(None);
+    }
+    registry
+        .records
+        .insert(RuntimeType::new(FLIGHT_TYPE)?, flight_schema);
+    registry
+        .events
+        .insert(RuntimeType::new(FLIGHT_EVENT_TYPE)?, event_schema);
+    if let Some(current) = current {
+        registry.revision = current.revision.saturating_add(1);
+        registry.migration = "register prompt flight runtime types".into();
+    }
+    Ok(Some(registry))
+}
+
 fn persist(
     store: &Store,
     before: &[Flight],
@@ -1070,6 +1145,9 @@ fn persist(
     }
     if mutations.is_empty() {
         return Ok(());
+    }
+    if let Some(registry) = flight_schema_update(store)? {
+        mutations.insert(0, RuntimeMutation::Schema { registry });
     }
     store.commit_runtime(&RuntimeCommit {
         scope: ScopeId::new(FLIGHT_SCOPE)?,
@@ -1368,7 +1446,11 @@ mod tests {
 
         let scope = ScopeId::new(FLIGHT_SCOPE).unwrap();
         let page = store.runtime_changes_since(0, 64, Some(&scope)).unwrap();
-        assert_eq!(page.changes.len(), 18, "two records plus sixteen events");
+        assert_eq!(
+            page.changes.len(),
+            19,
+            "one schema, two records, and sixteen events"
+        );
         assert_eq!(recorder.flights().unwrap().len(), 2);
 
         let cursor = store.runtime_cursor().unwrap();

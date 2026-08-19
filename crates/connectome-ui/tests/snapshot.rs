@@ -68,7 +68,20 @@ fn snapshot_exposes_runtime_objects_without_mutating_the_store() {
 
     assert_eq!(snapshot.instance.mode, "dedicated");
     assert_eq!(snapshot.health.current_claims, 1);
-    assert_eq!(snapshot.health.runtime_cursor, 8);
+    assert_eq!(snapshot.health.runtime_cursor, 9);
+    assert_eq!(snapshot.health.schema_revision, Some(1));
+    let schema = snapshot
+        .schema
+        .as_ref()
+        .expect("reasoning write installs schema");
+    assert!(schema
+        .records
+        .keys()
+        .any(|kind| kind.as_str() == "reasoning_run"));
+    assert!(schema
+        .events
+        .keys()
+        .any(|kind| kind.as_str() == "reasoning_event"));
     assert_eq!(snapshot.health.active_run.as_deref(), Some("ui-run"));
     assert_eq!(snapshot.files.len(), 1);
     assert!(snapshot.graph.nodes.iter().any(|node| node.kind == "claim"));

@@ -2,7 +2,7 @@
 
 | Field | Value |
 |-------|-------|
-| Status | Runtime completion pass landed 2026-08-18; historical execution journal retained below. |
+| Status | Runtime completion plus persisted schema pass landed 2026-08-19; historical execution journal retained below. |
 | Governs | Sequencing and acceptance of work against `SPEC.md` |
 | Does not govern | Contracts, terminology, or requirements. Those are `SPEC.md` only. |
 
@@ -32,16 +32,19 @@ disagree, `SPEC.md` is authoritative and this document is wrong.
 > prompt trials with non-trivial acceptance markers, not additional UI chrome.
 > See `docs/prompt-flight-experiments.md`.
 
-> **Temporal runtime-graph overlay (2026-08-18).** Vyrm now persists typed
+> **Temporal runtime-graph overlay (2026-08-19).** Vyrm now persists typed
 > records, relations, claims, and lifecycle events through one atomic
 > `RuntimeCommit`. Every mutation receives a monotonic global cursor and joins a
 > verified hash chain; stale expected cursors fail rather than overwrite.
 > Reasoning and prompt-flight ledgers have moved from whole-projection rewrites
 > to this append-only log. Connectome exposes cursor replay, graph-at-time, and
-> graph differential endpoints. This work deliberately excludes BM25,
-> embeddings, and semantic retrieval. Remaining work is a strict persisted
-> schema registry, content-addressed artifact bytes/backreferences, incremental
-> grounded graph lenses, and member-scoped authorization. See
+> graph differential endpoints. A strict persisted schema registry now denies
+> unknown types/properties, wrong value types, illegal endpoints, temporal
+> uniqueness collisions, and edge-cardinality violations; its migrations are
+> atomic runtime mutations and its active contract is visible in Connectome.
+> This work deliberately excludes BM25, embeddings, and semantic retrieval.
+> Remaining work is content-addressed artifact bytes/backreferences,
+> incremental grounded graph lenses, and member-scoped authorization. See
 > `docs/runtime-graph.md`.
 
 > **Native-engine decision (2026-08-18).** Fjall is transitional and will be

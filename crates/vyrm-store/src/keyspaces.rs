@@ -32,6 +32,9 @@ pub const RUNTIME_CHANGES: &str = "runtime_changes";
 pub const RUNTIME_RECORDS: &str = "runtime_records";
 /// Latest persisted version of each typed runtime relation.
 pub const RUNTIME_RELATIONS: &str = "runtime_relations";
+/// Latest authoritative schema registry for each runtime scope. Every update
+/// is also present in the hash-chained runtime change log.
+pub const RUNTIME_SCHEMAS: &str = "runtime_schemas";
 
 /// Key under which the claim sequence watermark is recorded.
 pub const SEQUENCE_WATERMARK: &[u8] = b"watermark/claims/sequence";

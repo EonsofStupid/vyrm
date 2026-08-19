@@ -1,7 +1,7 @@
 (() => {
   'use strict';
 
-  const views = new Set(['overview', 'flight', 'graph', 'runs', 'claims', 'routes', 'activity']);
+  const views = new Set(['overview', 'flight', 'graph', 'schema', 'runs', 'claims', 'routes', 'activity']);
   const initialView = location.hash.slice(1);
   const promptPresets = {
     weak: 'Make this better.',
@@ -118,6 +118,9 @@
     $('#flight-count').textContent = data.flights.length;
     $('#claim-count').textContent = data.claims.length;
     $('#file-count').textContent = data.files.length;
+    $('#schema-count').textContent = data.schema
+      ? Object.keys(data.schema.records || {}).length + Object.keys(data.schema.relations || {}).length + Object.keys(data.schema.events || {}).length
+      : 0;
     $('#snapshot-age').textContent = ago(data.generated_at);
     $$('.nav-item').forEach((button) => button.classList.toggle('active', button.dataset.view === state.view));
   }
@@ -125,7 +128,7 @@
   function render() {
     if (!state.data) return;
     updateChrome();
-    const renderers = { overview: renderOverview, flight: renderFlight, graph: renderGraph, runs: renderRuns, claims: renderClaims, routes: renderRoutes, activity: renderActivity };
+    const renderers = { overview: renderOverview, flight: renderFlight, graph: renderGraph, schema: renderSchema, runs: renderRuns, claims: renderClaims, routes: renderRoutes, activity: renderActivity };
     (renderers[state.view] || renderOverview)();
     renderInspector();
   }
@@ -516,6 +519,54 @@
     }, 850 / state.flightSpeed);
   }
 
+  function renderSchema() {
+    const schema = state.data.schema;
+    if (!schema) {
+      $('#main').innerHTML = pageHead('Runtime schema', 'The persisted contract governing records, relations, properties, and events for this instance.')
+        + empty('Schema migration pending', 'This legacy scope will install its versioned registry atomically with its next reasoning or prompt-flight write.');
+      return;
+    }
+    const records = Object.entries(schema.records || {});
+    const relations = Object.entries(schema.relations || {});
+    const events = Object.entries(schema.events || {});
+    const total = records.length + relations.length + events.length;
+    $('#main').innerHTML = pageHead(
+      'Runtime schema',
+      'The enforceable object contract behind the graph. Unknown types, wrong properties, illegal endpoints, uniqueness collisions, and cardinality violations are denied before commit.',
+      `<span class="badge ready">revision ${human(schema.revision)}</span>`
+    ) + `
+      <section class="schema-contract-line" aria-label="Schema enforcement sequence">
+        <div><span>01</span><strong>Registry</strong><small>revision ${human(schema.revision)}</small></div><i>→</i>
+        <div><span>02</span><strong>Validate</strong><small>${human(total)} governed types</small></div><i>→</i>
+        <div><span>03</span><strong>Deny or commit</strong><small>atomic with runtime data</small></div><i>→</i>
+        <div><span>04</span><strong>Hash-chain</strong><small>migration remains replayable</small></div>
+      </section>
+      <section class="schema-revision"><span class="eyebrow">CURRENT MIGRATION</span><strong>${escapeHtml(schema.migration)}</strong><small>Every later registry must advance exactly one revision.</small></section>
+      <section class="schema-groups">
+        ${schemaGroup('Record types', 'Persistent graph objects with required, optional, and unique properties.', records, 'record')}
+        ${schemaGroup('Event types', 'Immutable lifecycle facts with governed subject types and payloads.', events, 'event')}
+        ${schemaGroup('Relation types', 'Directed edges with legal endpoints and temporal cardinality.', relations, 'relation')}
+      </section>`;
+  }
+
+  function schemaGroup(title, detail, entries, category) {
+    return `<article class="schema-group"><header><div><h2>${escapeHtml(title)}</h2><p>${escapeHtml(detail)}</p></div><span>${entries.length}</span></header><div class="schema-type-list">${entries.length ? entries.map(([kind, definition]) => schemaType(kind, definition, category)).join('') : '<div class="schema-none">No types registered in this category.</div>'}</div></article>`;
+  }
+
+  function schemaType(kind, definition, category) {
+    const properties = Object.entries(definition.properties || {});
+    const unique = new Set(definition.unique_properties || []);
+    let relationship = '';
+    if (category === 'event') {
+      const subjects = definition.subject_types || [];
+      relationship = `<div class="schema-endpoints"><span>subject</span><b>${definition.subject_required ? 'required' : 'optional'}</b><em>${subjects.length ? subjects.join(' · ') : 'any registered type'}</em></div>`;
+    }
+    if (category === 'relation') {
+      relationship = `<div class="schema-relation-path"><b>${escapeHtml((definition.from || []).join(' | '))}</b><span>— ${escapeHtml(kind)} →</span><b>${escapeHtml((definition.to || []).join(' | '))}</b></div><div class="schema-limits"><span>pair ${definition.unique_pair ? 'unique' : 'repeatable'}</span><span>out ${definition.max_outgoing ?? '∞'}</span><span>in ${definition.max_incoming ?? '∞'}</span></div>`;
+    }
+    return `<details class="schema-type" ${properties.length <= 5 ? 'open' : ''}><summary><span class="schema-kind ${category}"></span><strong>${escapeHtml(kind.replaceAll('_', ' '))}</strong><small>${properties.length} properties</small></summary>${relationship}<div class="schema-properties">${properties.length ? properties.map(([name, rule]) => `<div><code>${escapeHtml(name)}</code><span>${escapeHtml(rule.value_type)}</span><b>${rule.required ? 'required' : 'optional'}${unique.has(name) ? ' · unique' : ''}</b></div>`).join('') : '<div><code>no properties</code><span>closed</span><b>additional denied</b></div>'}</div><footer>${definition.allow_additional_properties ? 'Additional properties allowed' : 'Undeclared properties denied'}</footer></details>`;
+  }
+
   function renderGraph() {
     const kinds = ['subject', 'claim', 'run', 'event', 'evidence', 'file', 'invocation', 'flight', 'flight_event'];
     $('#main').innerHTML = pageHead('Runtime graph', 'Traverse local evidence neighborhoods by default. Switch to global only when orientation matters more than detail.') + `
@@ -746,10 +797,11 @@
     if (event.key === 'Escape') { event.target.value = ''; event.target.blur(); }
   });
   document.addEventListener('keydown', (event) => {
-    if (event.target.matches('input')) return;
+    if (event.target.matches('input, textarea, select')) return;
     const key = event.key.toLowerCase();
     if (key === '/') { event.preventDefault(); $('#global-search').focus(); }
     if (key === 'g') navigate('graph');
+    if (key === 's') navigate('schema');
     if (key === 'f') navigate('flight');
     if (key === 'r') navigate('runs');
     if (key === 'c') navigate('claims');
