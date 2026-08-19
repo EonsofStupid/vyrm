@@ -83,6 +83,17 @@ not roadmap language.
   exact stamped-log executor returns deterministic bounded batches for records,
   relations, events, and claims with Memory/Fjall/direct-graph differentials.
   Connectome's Query Lab exposes this evidence and result together.
+- M3 native storage is in progress in the standalone `vyrm-kv` crate. WAL v1
+  now has frozen CRC32C file/frame formats, atomic batch sequence ranges,
+  explicit buffered/authoritative acknowledgments, idempotent recovery, and an
+  explicit torn-tail-only repair path; complete corruption fails closed.
+  Immutable manifest v1 types canonicalize segment reachability and bind it to
+  a SHA-256 identity. Checked-in byte/JSON vectors and torn/corrupt/version
+  tests protect this boundary. The native mutation codec allocates one MVCC
+  sequence per operation inside one atomic WAL frame; ordered memtables retain
+  historical values/tombstones for repeatable point/range reads across reopen.
+  Segments, manifest publication, compaction, the native `Engine` adapter, and
+  performance claims remain open.
 
 ## Verification
 

@@ -1,0 +1,96 @@
+# vyrmKV native format contract
+
+Status: M3 in progress, format version 1. The format is pre-release. Any format
+change before alpha must increment its explicit version and update the checked-in
+vectors; readers never guess.
+
+## Durability boundary
+
+One accepted atomic batch is one WAL frame. `Authoritative` acknowledgment is
+returned only after `sync_data`; `Buffered` acknowledgment states that the frame
+was written but is not yet claimed durable. A failed write or sync poisons that
+writer instance. The caller must recover and reopen rather than append behind an
+unknown partial write.
+
+The WAL admits only contiguous, non-zero sequence ranges. Recovery replays the
+longest valid prefix in order. Sequence reuse, gaps, and overflow fail before a
+write begins.
+
+## WAL v1
+
+All integers are unsigned big-endian.
+
+File header (16 bytes):
+
+| Offset | Bytes | Meaning |
+|---:|---:|---|
+| 0 | 8 | ASCII `VYRWAL01` |
+| 8 | 2 | format version (`1`) |
+| 10 | 2 | file-header length (`16`) |
+| 12 | 4 | CRC32C over bytes `0..12` |
+
+Batch frame header (32 bytes):
+
+| Offset | Bytes | Meaning |
+|---:|---:|---|
+| 0 | 4 | ASCII `VYR1` |
+| 4 | 2 | format version (`1`) |
+| 6 | 1 | record kind (`1`, atomic batch) |
+| 7 | 1 | flags (`0`; unknown flags fail closed) |
+| 8 | 4 | payload length, capped at 16 MiB |
+| 12 | 8 | first MVCC sequence |
+| 20 | 8 | last MVCC sequence |
+| 28 | 4 | CRC32C over header bytes `4..28` and the payload |
+
+The outer WAL treats the payload as bytes so recovery does not need higher-level
+schema code.
+
+## Atomic mutation batch v1
+
+The payload begins with `VYRBAT01`, a `u16` version, zero `u16` flags, and a
+`u32` operation count. Each operation contains a one-byte kind, three zero flag
+bytes, `u32` key/value lengths, then key and value bytes. Put is kind 1; delete
+is kind 2 and must carry a zero value length. Empty batches/keys, unknown flags
+or kinds, trailing bytes, and lengths outside the declared limits fail closed.
+One MVCC sequence is allocated per operation while the whole batch remains one
+atomic WAL frame.
+
+## Recovery classification
+
+- An incomplete file header is corruption: no valid WAL identity exists.
+- A partial final frame header or payload is a torn tail. Recovery returns its
+  exact start offset and never mutates the file.
+- `repair_torn_tail` is the only truncation path. It truncates to the reported
+  valid-prefix boundary and syncs the file.
+- Bad magic, version, kind, flags, length, sequence, or checksum in a complete
+  frame is corruption. It is never silently reclassified as a torn write.
+- Replaying unchanged bytes is idempotent and returns the same batch list and
+  valid boundary.
+
+## Manifest v1
+
+A manifest is immutable, has a monotonic generation, names its parent digest
+after generation 1, declares the durable/WAL sequence boundary, and lists every
+reachable immutable segment. Segment order is canonicalized by level, first
+key, and content identity before hashing. A manifest's SHA-256 digest excludes
+only its own `digest` field.
+
+Every segment descriptor carries its content identity/checksum, key range,
+sequence range, entry count, and byte count. Duplicate identities, inverted
+ranges, empty segments, and segments newer than the manifest's durable sequence
+fail closed.
+
+Manifest publication, `CURRENT` compare-and-swap, segments, snapshot pinning,
+and compaction are subsequent M3 gates. Until those pass their fault matrices,
+Fjall remains the compatibility store and no native performance claim is made.
+
+## Frozen vectors
+
+- [`wal-v1.hex`](../crates/vyrm-kv/fixtures/wal-v1.hex)
+- [`batch-v1.hex`](../crates/vyrm-kv/fixtures/batch-v1.hex)
+- [`manifest-v1.json`](../crates/vyrm-kv/fixtures/manifest-v1.json)
+
+The tests also cover CRC32C's published `123456789` check value, ordered replay,
+reopen/continuation, invalid batches, partial headers, partial payloads, complete
+checksum corruption, unknown versions, explicit repair, and repair/recovery
+idempotency.

@@ -73,6 +73,11 @@ disagree, `SPEC.md` is authoritative and this document is wrong.
 > browser-visible Query Lab. M3 native `vyrmKV` is the next gate; vector, object,
 > and cluster work remain sequenced behind it. See
 > `docs/vyrmds-architecture-research.md`.
+> M3 is now active in a standalone `vyrm-kv` crate. Its v1 WAL, atomic mutation
+> batch, and immutable-manifest formats are frozen by checked-in vectors.
+> Checksummed replay, explicit torn-tail repair, MVCC allocation, ordered
+> memtables, repeatable snapshots, and reopen are green; immutable segment and
+> manifest-publication work is the next native boundary. Fjall remains live.
 > The product handoff, canonical package-event grammar, alpha release gates,
 > deployment/update tiers, and separate SurrealDB/Qdrant proof protocols are
 > frozen in `docs/clyffy-kernel-alpha.md`.

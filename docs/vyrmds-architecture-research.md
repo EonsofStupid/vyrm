@@ -474,11 +474,10 @@ database truth; performance and recall regressions fail CI at explicit bounds.
 
 ## Immediate next implementation slice
 
-Begin M2 without weakening the now-frozen port: create `vyrm-ql` and `vyrm-mx`
-as separate crates, freeze AST/catalog/logical/physical plan contracts, and
-implement typed record/claim/relation/event reads plus bitemporal selectors in
-the reference executor. Parser corpus, fuzzing, SDK/text equivalence, explain
-diagnostics, and direct-API differentials remain the gate before native M3.
-Do not begin vectors, S3, GPU, or clustering before these semantics close; the
-stable boundary prevents native `vyrmKV` from baking current adapter limitations
-into its format.
+M2 is closed. Begin M3 beside—not underneath—the compatibility adapter. Freeze
+the checksummed WAL frame, atomic key/value mutation payload, immutable segment,
+manifest, and `CURRENT` publication formats before implementing the native
+`Engine` adapter. Prove torn/corrupt recovery and recovery idempotency first;
+then add MVCC/memtables, segments/checkpoints, manifest CAS, pinned-snapshot
+compaction, and the full three-backend differential in that order. Do not begin
+vectors, S3, GPU, or clustering before native correctness and measurement close.
