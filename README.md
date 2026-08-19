@@ -47,8 +47,9 @@ Vyrm provides:
   HNSW candidate generation with exact reranking and measured fallback;
 - provenance/CAS-bound embedding jobs, exact model-space binding, compact
   dense mmap artifacts, scalar/AVX2 parity, and a no-network edge executable;
-- canonical Multi-AZ placement/snapshot/route/transfer contracts plus a
-  deterministic quorum fault simulator (not yet a production cluster);
+- canonical Multi-AZ placement/snapshot/route/transfer contracts, a
+  deterministic quorum fault simulator, and a feature-gated real-consensus
+  adapter over native VyrmKV (not yet a production cluster);
 - identical lifecycle semantics through hooks, CLI, and MCP;
 - isolated per-platform instances with explicit store/root binding.
 
@@ -237,8 +238,9 @@ statistically significant model-performance claim.
   provenance-bound embedding jobs, model-space binding, compact mmap vectors,
   accelerator admission, and offline edge evidence
 - [`docs/vyrm-cluster-m7.md`](docs/vyrm-cluster-m7.md) — M7 placement,
-  consistency, snapshot-vector, transfer, reshard, and deterministic fault
-  simulation contracts with explicit production limits
+  consistency, snapshot-vector, transfer, reshard, deterministic fault
+  simulation, and real-consensus adapter evidence with explicit production
+  limits
 - [`docs/vyrmkv-format.md`](docs/vyrmkv-format.md) — frozen native WAL, segment,
   recovery, and manifest format contract
 - [`docs/vyrmkv-benchmark.md`](docs/vyrmkv-benchmark.md) — isolated

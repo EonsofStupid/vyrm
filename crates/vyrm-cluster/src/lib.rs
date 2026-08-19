@@ -1,13 +1,18 @@
 //! Protocol-first cluster contracts for Vyrm.
 //!
-//! This crate is deliberately not a networked cluster implementation. It
-//! freezes the placement, consistency, snapshot-vector, routing, transfer, and
-//! transaction-scope contracts and supplies a deterministic failure simulator.
-//! Production Multi-AZ capability remains denied until a consensus adapter and
-//! hardware fault evidence pass the same invariants.
+//! It freezes the placement, consistency, snapshot-vector, routing, transfer,
+//! and transaction-scope contracts and supplies a deterministic failure
+//! simulator. The optional `openraft-adapter` feature adds a real consensus
+//! engine and Vyrm-native durable store, but deliberately no production RPC.
+//! Production Multi-AZ capability remains denied until authenticated transport
+//! and independent-process hardware fault evidence pass the same invariants.
 
 mod contract;
+#[cfg(feature = "openraft-adapter")]
+mod openraft_adapter;
 mod sim;
 
 pub use contract::*;
+#[cfg(feature = "openraft-adapter")]
+pub use openraft_adapter::*;
 pub use sim::*;

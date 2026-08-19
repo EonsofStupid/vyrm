@@ -48,8 +48,13 @@ not roadmap language.
   injects partition, delay, duplication, reorder, crash/restart, clock skew,
   and disk loss. Enumerated three-voter schedules prove that acknowledged
   entries retain a durable copy across every tolerated single-disk loss and
-  that a leader minority cannot acknowledge. Production consensus, election,
-  membership change, networking, and Multi-AZ deployment remain unclaimed.
+  that a leader minority cannot acknowledge. A feature-gated OpenRaft 0.9.25
+  adapter now durably stores votes, logs, committed pointers, state, and
+  snapshots in native VyrmKV and passes the complete upstream storage suite. A
+  four-node in-process test covers election, quorum commit, snapshot catch-up,
+  majority-side failover, post-failover commit, and voter replacement.
+  Production transport, unified runtime application, independent-process chaos,
+  and Multi-AZ deployment remain unclaimed.
 - A persisted, revisioned schema registry now governs typed runtime records,
   relations, and events. Unknown types and properties fail closed; property
   value types, required fields, event subjects, legal edge endpoints, temporal
@@ -219,11 +224,12 @@ artifact even on failure.
   a tested global-serializable same/disjoint conflict policy. A deterministic
   64-write mixed-scope backend differential is green. Physical segment pins
   are implemented in native M3. M0 through M6 are complete at their local
-  executable kernel gates, and the first M7 protocol/simulation slice is
-  green. Compact HNSW/sparse/multivector layouts, payload
-  indexes, a physical GPU adapter and benchmark, real-model quality evidence,
-  external vector comparison, and Multi-AZ capabilities remain sequenced work,
-  not current product claims. See `docs/vyrmds-architecture-research.md`,
+  executable kernel gates, and the M7 protocol/simulation plus first
+  real-consensus adapter slice are green. Compact HNSW/sparse/multivector
+  layouts, payload indexes, a physical GPU adapter and benchmark, real-model
+  quality evidence, external vector comparison, and Multi-AZ capabilities
+  remain sequenced work, not current product claims. See
+  `docs/vyrmds-architecture-research.md`,
   `docs/vyrm-vector-search.md`, `docs/vyrm-embedding-edge.md`, and
   `docs/vyrm-cluster-m7.md`.
 

@@ -1,7 +1,7 @@
 # Vyrm M7 cluster contract and deterministic simulation
 
-Status: first protocol/simulation gate implemented on 2026-08-19. This is not
-a production Multi-AZ implementation.
+Status: protocol/simulation gate plus the first real-consensus adapter slice
+implemented on 2026-08-19. This is not a production Multi-AZ implementation.
 
 ## Outcome
 
@@ -26,6 +26,52 @@ preserve before Vyrm adds networking or a consensus library:
 The reserved metadata shard is shard `0`. A production control plane must put
 placement and reshard transitions through the same quorum-durable ordered log;
 an in-memory placement map is not linearizable metadata.
+
+## Real-consensus adapter slice
+
+The optional `openraft-adapter` feature pins OpenRaft `0.9.25` and keeps Tokio,
+OpenRaft, and native storage out of the default protocol/simulator build. The
+pin is deliberate: `0.9.25` is the current stable line and includes upstream
+commit-safety and membership-divergence corrections, while the `0.10` line is
+still alpha. The reviewed upstream tag resolves to commit
+`8815cdba2826f74e848acef361ad03f93bb1c3f8`.
+
+Selection matrix:
+
+| Candidate | Decision | Reason |
+|---|---|---|
+| OpenRaft 0.9.25 | Adopt behind a feature | Application-neutral log, state-machine, snapshot, and network ports; storage conformance suite; stable release line |
+| OpenRaft 0.10 alpha | Reject for this gate | Alpha API/behavior is not the right persistence-format dependency |
+| TiKV `raft-rs` | Defer, retain as a design reference | Strong production lineage, but lower-level integration and readiness driving would add more Vyrm-owned consensus plumbing before this contract is proved |
+
+The Vyrm adapter supplies:
+
+- a canonical Vyrm command/response/node `RaftTypeConfig`;
+- a store permanently bound to one shard and one versioned keyspace;
+- authoritative VyrmKV batches for votes, committed pointers, ordered logs,
+  state-machine application, and snapshot publication/installation;
+- monotonic vote persistence and append-batch hole rejection;
+- full-command idempotency, payload integrity, shard binding, placement-epoch
+  binding, and optional expected-commit-index comparison;
+- digest-chained application state and metadata-checked snapshot installation;
+- the complete upstream OpenRaft storage conformance suite; and
+- a real four-node in-process engine test that elects a leader, commits
+  commands, purges snapshotted logs, catches up a new learner through snapshot
+  transfer, isolates the leader, elects on the majority side, commits after
+  failover, and completes joint-to-uniform membership replacement.
+
+This is stronger evidence than the single-term simulator, but the two tests
+serve different purposes. The simulator gives replayable schedules for explicit
+fault events; the in-process test exercises the real consensus engine and
+durable adapter. The latter uses a controlled wall-clock lease wait and is not
+represented as deterministic virtual-time model checking.
+
+Research sources, retrieved 2026-08-19:
+
+- [OpenRaft releases](https://github.com/databendlabs/openraft/releases)
+- [OpenRaft storage implementation guide](https://docs.rs/openraft/latest/openraft/docs/getting_started/index.html)
+- [OpenRaft `RaftLogStorage` contract](https://docs.rs/openraft/latest/openraft/storage/trait.RaftLogStorage.html)
+- [TiKV raft-rs](https://github.com/tikv/raft-rs)
 
 ## Why this differs from the comparison systems
 
@@ -94,13 +140,17 @@ also enumerate leader-minority partitions and require no acknowledgement.
 
 ## What is not yet claimed
 
-This gate does not contain production RPC, authentication, encryption,
-membership discovery, leader election, term changes, joint-consensus
-reconfiguration, durable simulator storage, live snapshot transfer, admission
-control, or multi-shard atomic commit. It therefore does not establish a
-Multi-AZ product claim.
+This gate still does not contain production RPC, node identity/authentication,
+TLS, membership discovery, admission control, multi-shard atomic commit, or
+metadata-shard reshard cutover. Application state currently proves ordered
+identity/CAS/digest semantics; it does not yet dispatch the complete canonical
+`RuntimeCommit` into the unified engine. Its synchronous mutex, prefix scans,
+JSON state/snapshots, and unbounded idempotency map are correctness-first test
+implementations, not production throughput or footprint claims. Commands are
+limited to 1 MiB so worst-case JSON byte-array expansion remains below VyrmKV's
+8 MiB value ceiling until the adapter receives a compact codec.
 
-The next M7 slice must add a real consensus adapter behind this contract and
-extend the model across elections, term changes, membership transitions,
-snapshot installation, WAL catch-up, and metadata-shard reshard cutover. Only
-then can process/network chaos and independent-node disk evidence begin.
+The next M7 slice must bind committed commands to the unified runtime engine,
+define an explicit placement-epoch transition command, bound idempotency state,
+add authenticated production transport, and run process/network/disk chaos on
+independently restarted nodes. Only that evidence can advance a Multi-AZ claim.

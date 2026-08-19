@@ -134,10 +134,13 @@ measured local results, never universal superiority.
    verified accelerator/fallback policy, local FastEmbed adapter, and offline
    edge budgets. Physical-GPU and real-model quality evidence remain required
    before competitive vector claims.
-7. **First M7 protocol gate complete:** canonical placement, consistency,
-   snapshot-vector, route, transfer, and reshard contracts plus deterministic
-   single-term quorum fault simulation. Production consensus, elections,
-   membership changes, networking, and Multi-AZ evidence remain open.
+7. **M7 protocol and first real-consensus gate complete:** canonical placement,
+   consistency, snapshot-vector, route, transfer, and reshard contracts;
+   deterministic single-term fault simulation; and a feature-gated OpenRaft
+   adapter over native VyrmKV with storage conformance and real four-node
+   election/failover/snapshot/membership evidence. Production transport,
+   unified runtime application, independent-node chaos, and Multi-AZ evidence
+   remain open.
 8. Bind declared package workflows to preflight/pre-tool/post-tool policy.
 9. Extend truthful temporal visualization across storage, search, and workflow
    events and continue controlled provider evaluations.

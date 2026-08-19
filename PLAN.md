@@ -158,6 +158,16 @@ disagree, `SPEC.md` is authoritative and this document is wrong.
 > disk loss. This is not a production consensus, networking, election, or
 > Multi-AZ claim. See `docs/vyrm-cluster-m7.md`.
 
+> **M7 real-consensus overlay (2026-08-19).** OpenRaft `0.9.25` is pinned behind
+> an opt-in feature and adapted to authoritative VyrmKV storage. Votes, logs,
+> committed pointers, application state, and snapshots survive the upstream
+> conformance suite. A real four-node in-process run covers election, quorum
+> writes, log-purged snapshot catch-up, majority-side failover, post-failover
+> commit, and voter replacement. Command application binds shard, placement
+> epoch, full idempotency identity, payload digest, and optional commit-index
+> CAS. Production transport, unified `RuntimeCommit` dispatch, bounded state,
+> independent-process chaos, and Multi-AZ evidence remain open.
+
 ## 1 · Grounding result
 
 State recomputed from source on 2026-08-10 and differenced against the
