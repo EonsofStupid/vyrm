@@ -52,7 +52,9 @@ Vyrm provides:
   adapter that atomically applies canonical runtime commits over native VyrmKV
   and transfers that runtime truth to post-purge learners through authenticated
   physical snapshots, with explicit membership-bound placement epochs and
-  bounded request identity retention (production clustering remains gated);
+  bounded request identity retention; an opt-in TLS 1.3/mTLS transport binds
+  every RPC to canonical workload identity and bounded frames (production
+  clustering remains gated);
 - identical lifecycle semantics through hooks, CLI, and MCP;
 - isolated per-platform instances with explicit store/root binding.
 

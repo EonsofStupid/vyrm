@@ -201,6 +201,18 @@ disagree, `SPEC.md` is authoritative and this document is wrong.
 > Initialization, successor, skipped/stale, membership mismatch/rebinding,
 > duplicate, retention-boundary, snapshot, and reopen evidence pass.
 
+> **M7 authenticated-transport overlay (2026-08-19).** The opt-in
+> `openraft-transport` feature implements real TCP RPCs over TLS 1.3 mutual
+> authentication. Transport v1 binds one exact SPIFFE-style URI identity to the
+> CA-validated leaf, statically authorizes numeric/canonical node pairs, binds
+> cluster/shard/source/target/request digest and the inner Raft vote source, and
+> enforces bounded frames, client hard TTLs, ingress lifetime, and concurrent
+> admission. A four-node loopback run elects and replicates over this transport,
+> transfers a physical runtime snapshot to a post-purge learner, and denies
+> certificate/envelope confusion and authenticated vote-source forgery.
+> Independent-process chaos, rotation/revocation, production telemetry, and
+> Multi-AZ evidence remain open.
+
 > **M7 canonical-runtime overlay (2026-08-19).** Adapter format `v2` first added a
 > typed `runtime_commit` operation. `NativeEngine` now exposes a validated
 > no-write plan, allowing canonical mutations, audit/outbox work, the Raft
@@ -208,9 +220,9 @@ disagree, `SPEC.md` is authoritative and this document is wrong.
 > authoritative VyrmKV WAL frame. Reopen, duplicate, stale-cursor denial, and
 > same-frame differentials are green. A real three-voter run reopens identical
 > canonical runtime truth through `NativeEngine` on every voter. Runtime-bearing
-> snapshots are now transferred by adapter v4's physical ownership split;
-> production transport, independent-process chaos, and Multi-AZ evidence
-> remain open.
+> snapshots are now transferred by adapter v4's physical ownership split and
+> the opt-in authenticated transport. Independent-process chaos, credential
+> lifecycle, and Multi-AZ evidence remain open.
 
 ## 1 · Grounding result
 

@@ -146,8 +146,11 @@ measured local results, never universal superiority.
    also makes placement epochs explicit/membership-bound, invalidates stale
    bindings after Raft voter identity/zone changes, and deterministically bounds
    request retention.
-   Production transport, chunked/file-backed snapshot streaming, independent-
-   node chaos, and Multi-AZ evidence remain open.
+   An opt-in TLS 1.3/mTLS OpenRaft transport now binds canonical workload
+   identity and bounded RPC envelopes and passes real loopback replication plus
+   post-purge snapshot catch-up. Independent-process chaos, credential
+   rotation/revocation, chunked/file-backed local snapshot handling, and
+   Multi-AZ evidence remain open.
 8. Bind declared package workflows to preflight/pre-tool/post-tool policy.
 9. Extend truthful temporal visualization across storage, search, and workflow
    events and continue controlled provider evaluations.

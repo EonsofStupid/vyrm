@@ -60,8 +60,16 @@ not roadmap language.
   a four-node run snapshots a real runtime commit, purges the leader log, and
   catches up a fresh learner that reopens the same runtime truth. Local votes
   are not imported. Corrupt, forged-metadata, stale, duplicate, restart, and
-  same-frame differentials are green. Production transport, independent-
-  process chaos, and Multi-AZ deployment remain unclaimed.
+  same-frame differentials are green. An opt-in transport now carries OpenRaft
+  RPCs over real TCP and TLS 1.3 mutual authentication. CA validation, exact
+  SPIFFE-style URI identity, static Raft-id/canonical-id authorization,
+  cluster/shard/source/target and request-digest binding, Raft-vote-source
+  binding, 16 MiB pre-allocation frame limits, OpenRaft hard TTLs, 256-RPC
+  admission, and a 30-second ingress lifetime fail closed. A four-node loopback
+  run covers election, replication, post-purge snapshot catch-up, certificate
+  impersonation denial, and authenticated vote-source forgery denial.
+  Independent-process/network/disk chaos, certificate rotation/revocation,
+  production observability, and Multi-AZ deployment remain unclaimed.
   Placement epochs are now explicit replicated `placement_transition`
   operations: initialization must be epoch 1, advances must be exact successors,
   and declared voter canonical ids/zones must equal the applied OpenRaft

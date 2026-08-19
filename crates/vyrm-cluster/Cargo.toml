@@ -9,6 +9,13 @@ description = "Canonical Multi-AZ contracts and deterministic failure simulation
 [features]
 default = []
 openraft-adapter = ["dep:openraft", "dep:vyrm-kv", "dep:vyrm-store"]
+openraft-transport = [
+    "openraft-adapter",
+    "dep:rustls",
+    "dep:tokio",
+    "dep:tokio-rustls",
+    "dep:x509-parser",
+]
 
 [dependencies]
 vyrm-core = { path = "../vyrm-core" }
@@ -17,7 +24,12 @@ vyrm-store = { path = "../vyrm-store", optional = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 openraft = { version = "=0.9.25", optional = true, features = ["serde", "storage-v2"] }
+rustls = { version = "0.23", optional = true, default-features = false, features = ["ring", "std"] }
+tokio = { version = "1", optional = true, features = ["io-util", "net", "rt", "sync", "time"] }
+tokio-rustls = { version = "0.26", optional = true, default-features = false, features = ["ring"] }
+x509-parser = { version = "0.18", optional = true }
 
 [dev-dependencies]
+rcgen = "0.14"
 tempfile = "3"
 tokio = { version = "1", features = ["rt-multi-thread", "sync", "time"] }

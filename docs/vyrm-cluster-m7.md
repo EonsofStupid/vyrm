@@ -100,6 +100,34 @@ refuses any local-Raft config in the bundle. Source manifest ancestry is never
 adopted. Snapshot cache bytes live in the node-local content-addressed object
 tier; only their verified reference is stored beside local Raft history.
 
+## Authenticated transport v1
+
+The separate `openraft-transport` feature adds real TCP transport without
+putting async, TLS, or X.509 dependencies in the default contract/simulator or
+storage-only adapter. It uses rustls/Tokio-rustls and deliberately enables only
+TLS 1.3. Every connection requires a CA-validated client certificate and a
+CA-validated server certificate. The leaf must contain exactly one SPIFFE-style
+URI SAN derived from a configured trust domain plus canonical digests of the
+cluster and node ids; DNS/IP endpoint validation still runs independently.
+
+Transport envelope v1 additionally binds the protocol version, cluster, shard,
+numeric and canonical source/target identities, serialized request digest, and
+the source carried inside the OpenRaft vote. A static authorization map prevents
+a trusted certificate from relabeling itself as another numeric Raft node.
+Frames are rejected above 16 MiB before allocation, client work honors
+OpenRaft's hard TTL, ingress work has a 30-second lifetime, and the listener
+admits at most 256 concurrent RPCs. One RPC is sent per TLS connection; no
+bearer credential or TLS early-data path exists. Consensus-level duplicate and
+replay handling remains OpenRaft's responsibility rather than a second ordering
+protocol in the transport.
+
+A four-node real-TCP loopback test elects three voters, commits an explicit
+placement and probe, snapshots and purges the leader log, and catches up a fresh
+learner through OpenRaft's chunked snapshot RPC. It also proves denial when a
+trusted node certificate is paired with another node's envelope and when an
+authenticated node sends a vote naming a different Raft source. This proves the
+wire/authentication contract, not independent hosts or production operations.
+
 This is stronger evidence than the single-term simulator, but the two tests
 serve different purposes. The simulator gives replayable schedules for explicit
 fault events; the in-process test exercises the real consensus engine and
@@ -111,6 +139,9 @@ Research sources, retrieved 2026-08-19:
 - [OpenRaft releases](https://github.com/databendlabs/openraft/releases)
 - [OpenRaft storage implementation guide](https://docs.rs/openraft/latest/openraft/docs/getting_started/index.html)
 - [OpenRaft `RaftLogStorage` contract](https://docs.rs/openraft/latest/openraft/storage/trait.RaftLogStorage.html)
+- [OpenRaft network contract](https://docs.rs/openraft/0.9.25/openraft/network/index.html)
+- [rustls client-certificate verifier](https://rustls.dev/docs/server/struct.ClientVerifierBuilder.html)
+- [SPIFFE concepts and X.509 workload identity](https://spiffe.io/docs/latest/spiffe/concepts/)
 - [TiKV raft-rs](https://github.com/tikv/raft-rs)
 
 ## Why this differs from the comparison systems
@@ -180,9 +211,10 @@ also enumerate leader-minority partitions and require no acknowledgement.
 
 ## What is not yet claimed
 
-This gate still does not contain production RPC, node identity/authentication,
-TLS, membership discovery, admission control, multi-shard atomic commit, or
-metadata-shard reshard cutover. Application state currently proves ordered
+This gate still does not contain dynamic membership discovery, certificate
+issuance/rotation/revocation, per-identity rate policy, production transport
+telemetry, multi-shard atomic commit, or metadata-shard reshard cutover.
+Application state currently proves ordered
 identity/CAS/digest semantics and now atomically dispatches canonical
 `RuntimeCommit` transactions into native VyrmKV and transfers that runtime state
 in Raft snapshots. Snapshot construction and receipt currently use
@@ -193,7 +225,8 @@ implementations, not production throughput or footprint claims. Commands are
 limited to 1 MiB and physical snapshot envelopes to 1 GiB until compact and
 streaming codecs land.
 
-The next M7 slice must add authenticated production transport and run
-process/network/disk chaos on independently restarted nodes. File-backed,
-bounded-memory snapshot creation/receipt is also required before high-volume
-cluster claims. Only that evidence can advance a Multi-AZ claim.
+The next M7 slice must run process/network/disk chaos on independently restarted
+nodes and prove a credential lifecycle compatible with rotating workload
+identity. File-backed, bounded-memory snapshot creation/receipt is also required
+before high-volume cluster claims. Only that evidence can advance a Multi-AZ
+claim.
