@@ -168,6 +168,17 @@ disagree, `SPEC.md` is authoritative and this document is wrong.
 > CAS. Production transport, unified `RuntimeCommit` dispatch, bounded state,
 > independent-process chaos, and Multi-AZ evidence remain open.
 
+> **M7 physical-snapshot prerequisite (2026-08-19).** VyrmKV snapshot-bundle
+> v1 now exports a flush-bounded manifest plus every authenticated immutable
+> segment in a deterministic binary envelope. Installation validates the full
+> closure, syncs content-addressed segments and an empty continuation WAL, then
+> atomically advances a new local manifest rather than importing the source's
+> history. Round-trip, corruption/truncation/stale denial, idempotent reinstall,
+> target replacement, reopen, continued writes, and crash/storage-full tests at
+> all three install boundaries are green. Raft adapter ownership must now split
+> local vote/log history from transferable canonical state before this bundle
+> can replace the runtime snapshot denial.
+
 > **M7 canonical-runtime overlay (2026-08-19).** Adapter format `v2` adds a
 > typed `runtime_commit` operation. `NativeEngine` now exposes a validated
 > no-write plan, allowing canonical mutations, audit/outbox work, the Raft

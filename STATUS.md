@@ -60,6 +60,14 @@ not roadmap language.
   snapshots fail closed until a transferable VyrmKV bundle exists. Production
   transport, independent-process chaos, and Multi-AZ deployment remain
   unclaimed.
+- Native VyrmKV now provides the required physical snapshot-bundle primitive.
+  Bundle v1 is a deterministic SHA-256-authenticated binary closure over a
+  flush-bounded manifest and all reachable immutable segments. Installation
+  syncs segments and an empty continuation WAL before one local manifest CAS;
+  it never imports the source manifest lineage. Round-trip, reopen, stale and
+  corrupt denial, idempotency, continued-write, and crash/storage-full matrices
+  are green. The Raft adapter has not yet split local vote/log ownership from
+  transferable canonical state, so runtime snapshot transfer remains gated.
 - A persisted, revisioned schema registry now governs typed runtime records,
   relations, and events. Unknown types and properties fail closed; property
   value types, required fields, event subjects, legal edge endpoints, temporal

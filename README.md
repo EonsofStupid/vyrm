@@ -243,7 +243,7 @@ statistically significant model-performance claim.
   simulation, and real-consensus adapter evidence with explicit production
   limits
 - [`docs/vyrmkv-format.md`](docs/vyrmkv-format.md) — frozen native WAL, segment,
-  recovery, and manifest format contract
+  recovery, manifest, and authenticated physical snapshot-bundle contracts
 - [`docs/vyrmkv-benchmark.md`](docs/vyrmkv-benchmark.md) — isolated
   Fjall/native methodology, baseline, and promotion verdict
 - [`eval/results/2026-08-18-summary.json`](eval/results/2026-08-18-summary.json)

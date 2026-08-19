@@ -11,12 +11,13 @@ mod error;
 mod manifest;
 mod memtable;
 mod segment;
+mod snapshot_bundle;
 mod wal;
 
 pub use batch::{Mutation, WriteBatch, BATCH_FORMAT_VERSION};
 pub use database::{
     CompactionBoundary, CompactionOutcome, Database, FailureMode, FlushBoundary,
-    GarbageCollectionReport, Snapshot,
+    GarbageCollectionReport, Snapshot, SnapshotInstallBoundary,
 };
 pub use error::{Error, Result};
 pub use manifest::{
@@ -24,6 +25,9 @@ pub use manifest::{
 };
 pub use memtable::{Memtable, VersionedValue};
 pub use segment::{Segment, SEGMENT_FORMAT_VERSION};
+pub use snapshot_bundle::{
+    SnapshotBundle, SnapshotSegment, SNAPSHOT_BUNDLE_FORMAT_VERSION,
+};
 pub use wal::{
     recover, recover_from, repair_torn_tail, AppendReceipt, Durability, RecoveredBatch, Recovery,
     WalBatch, WalWriter, WAL_FORMAT_VERSION, WAL_MAX_PAYLOAD_BYTES,

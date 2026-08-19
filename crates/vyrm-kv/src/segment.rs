@@ -90,6 +90,64 @@ impl Segment {
         decode(std::fs::read(path)?)
     }
 
+    pub(crate) fn validate_snapshot_bytes(
+        expected: &SegmentDescriptor,
+        bytes: &[u8],
+    ) -> Result<Self> {
+        if bytes.len() as u64 > MAX_SEGMENT_BYTES {
+            return invalid("snapshot segment exceeds the 1 GiB physical safety limit");
+        }
+        let mut segment = decode(bytes.to_vec())?;
+        segment.descriptor.level = expected.level;
+        if &segment.descriptor != expected {
+            return Err(Error::InvalidSegment(format!(
+                "snapshot segment {} differs from its descriptor",
+                expected.id
+            )));
+        }
+        Ok(segment)
+    }
+
+    pub(crate) fn install_snapshot_bytes(
+        directory: &Path,
+        expected: &SegmentDescriptor,
+        bytes: &[u8],
+    ) -> Result<Self> {
+        let segment = Self::validate_snapshot_bytes(expected, bytes)?;
+        std::fs::create_dir_all(directory)?;
+        let path = directory.join(format!("{}.seg", expected.id));
+        if path.exists() {
+            let existing = Self::open(&path)?;
+            if existing.descriptor.id != expected.id || std::fs::read(&path)? != bytes {
+                return Err(Error::InvalidSegment(format!(
+                    "existing snapshot segment {} has different bytes",
+                    expected.id
+                )));
+            }
+            return Ok(segment);
+        }
+        let temporary = directory.join(format!(
+            ".{}.{}.{}.snapshot.tmp",
+            expected.id,
+            std::process::id(),
+            TEMPORARY_ID.fetch_add(1, Ordering::Relaxed)
+        ));
+        let mut file = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temporary)?;
+        if let Err(error) = (|| -> std::io::Result<()> {
+            file.write_all(bytes)?;
+            file.sync_all()?;
+            std::fs::rename(&temporary, &path)?;
+            File::open(directory)?.sync_all()
+        })() {
+            let _ = std::fs::remove_file(&temporary);
+            return Err(Error::Io(error));
+        }
+        Ok(segment)
+    }
+
     pub fn get(&self, key: &[u8], read_sequence: u64) -> Option<&[u8]> {
         self.get_version(key, read_sequence)?.value
     }

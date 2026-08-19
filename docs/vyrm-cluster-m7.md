@@ -79,6 +79,13 @@ install a state-only snapshot. This prevents a new learner from receiving an
 apparently current Raft cursor while silently missing runtime truth. Transferable
 VyrmKV manifest/segment/WAL bundles are the next storage prerequisite.
 
+That VyrmKV prerequisite now exists as physical snapshot-bundle v1, with
+authenticated binary encoding, flush-bounded export, atomic local-manifest
+installation, stale/corrupt denial, and crash/storage-full recovery evidence.
+It is not wired into OpenRaft yet: adapter format v2 still co-locates local
+vote/log history with canonical state. The next adapter format must separate
+those physical ownership domains before installing a runtime bundle.
+
 This is stronger evidence than the single-term simulator, but the two tests
 serve different purposes. The simulator gives replayable schedules for explicit
 fault events; the in-process test exercises the real consensus engine and
@@ -169,8 +176,9 @@ protocol state, and unbounded request-id map are correctness-first test
 implementations, not production throughput or footprint claims. Commands are
 limited to 1 MiB until the adapter receives a compact codec.
 
-The next M7 slice must implement authenticated transferable VyrmKV snapshot
-bundles, define an explicit placement-epoch transition command, bound
-idempotency state, add authenticated production transport, and run
+The next M7 slice must split local Raft log/vote storage from transferable
+canonical state and connect the existing VyrmKV bundle to OpenRaft snapshot
+streaming. It must then define an explicit placement-epoch transition command,
+bound idempotency state, add authenticated production transport, and run
 process/network/disk chaos on independently restarted nodes. Only that evidence
 can advance a Multi-AZ claim.

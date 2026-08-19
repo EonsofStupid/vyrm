@@ -1,10 +1,10 @@
 # vyrmKV native format contract
 
-Status: M3 local promotion baseline passes. WAL, atomic-batch, manifest, and
-checkpoint formats are version 1; new immutable segments are version 2 and the
-reader retains explicit version-1 compatibility. The format is pre-release.
-Any format change before alpha must increment its explicit version and update
-the checked-in vectors; readers never guess.
+Status: M3 local promotion baseline passes. WAL, atomic-batch, manifest,
+checkpoint, and physical snapshot-bundle formats are version 1; new immutable
+segments are version 2 and the reader retains explicit version-1 compatibility.
+The format is pre-release. Any format change before alpha must increment its
+explicit version and update the checked-in vectors; readers never guess.
 
 Runtime entry points use `PersistentEngine`: a missing path creates this native
 format, and an authenticated `CURRENT` pointer selects it on reopen. An existing
@@ -117,6 +117,47 @@ repeating identical bytes is idempotent, rebinding a name fails closed, and
 release is explicit and directory-synced. Retention and GC consume this
 inventory rather than inferring reachability from filenames.
 
+## Physical snapshot bundle v1
+
+`SnapshotBundle` is the transferable physical closure of one flush-bounded
+manifest. Export first completes the normal WAL → segment → successor-WAL →
+manifest publication sequence. Consequently the captured manifest requires
+`wal_start_sequence == durable_sequence + 1`: its successor WAL is empty, and
+all state needed at the snapshot boundary is carried by immutable segments.
+
+The binary envelope uses unsigned big-endian lengths:
+
+| Field | Bytes | Meaning |
+|---|---:|---|
+| magic | 8 | ASCII `VYRSNP01` |
+| version | 2 | snapshot-bundle format `1` |
+| flags | 2 | zero; unknown flags fail closed |
+| manifest length | 4 | canonical JSON manifest bytes |
+| segment count | 4 | number of following segment records |
+| manifest | variable | authenticated source manifest |
+| each segment | `4 + 8 + n + m` | descriptor length, byte length, descriptor JSON, exact `.seg` bytes |
+| bundle digest | 64 | lowercase ASCII SHA-256 over every preceding byte |
+
+The envelope is capped at 1 GiB and one million segments. Validation checks the
+outer digest, manifest digest and invariants, exact descriptor order, and every
+segment's authenticated physical bytes before installation can publish
+anything.
+
+Installation does not adopt the source manifest's history. It materializes
+content-addressed segment files, creates and syncs the empty continuation WAL,
+then creates a new local manifest whose parent is the target's prior `CURRENT`.
+One pointer publication makes the imported state visible. A bundle must advance
+the local physical sequence; reinstalling the already-current segment closure
+is idempotent, while stale bundles fail closed. Writes continue at exactly
+`source durable_sequence + 1`.
+
+Deterministic crash and storage-full injection covers synchronized segments,
+the successor WAL, and manifest publication. Failures before publication reopen
+the old state and can retry over authenticated orphan files. A failure after
+publication reopens the imported state. Corruption, truncation, stale install,
+round-trip, reopen, idempotency, target-state replacement, and post-install
+continuation are executable tests in `tests/snapshot_bundle.rs`.
+
 The native `Engine` adapter passes Memory/Fjall/native semantic and exact query
 differentials, including flush/reopen. Compaction retains the newest version
 visible at every explicitly protected physical sequence plus the durable head;
@@ -154,6 +195,7 @@ reachable through historical manifests/checkpoints until GC proves otherwise.
 - [`wal-v1.hex`](../crates/vyrm-kv/fixtures/wal-v1.hex)
 - [`batch-v1.hex`](../crates/vyrm-kv/fixtures/batch-v1.hex)
 - [`manifest-v1.json`](../crates/vyrm-kv/fixtures/manifest-v1.json)
+- [`snapshot-bundle-v1.hex`](../crates/vyrm-kv/fixtures/snapshot-bundle-v1.hex)
 
 CRC32C calculation uses the platform-dispatched implementation while retaining
 the exact v1 bytes and published `123456789` check value. The tests also cover
