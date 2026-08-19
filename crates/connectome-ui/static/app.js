@@ -145,6 +145,7 @@
       [health.routing_generation ? 'amber' : 'red', 'Source routing', health.routing_generation ? `generation ${health.routing_generation}` : 'projection absent', `${health.indexed_symbols} symbols`],
       [active ? 'violet' : 'mint', 'Reasoning contract', active ? `${active.id} · ${active.state}` : 'no active run', `${runs.length} total run(s)`],
       [health.last_grounded_at ? 'mint' : 'amber', 'Last grounding', health.last_grounded_at ? ago(health.last_grounded_at) : 'not yet grounded', 'differential evidence'],
+      [health.retention_pins ? 'violet' : 'mint', 'Snapshot retention', `${health.snapshot_leases} live lease(s)`, health.oldest_retained_cursor == null ? 'no pinned cursor' : `cursor ≥ ${health.oldest_retained_cursor}`],
     ];
     $('#main').innerHTML = pageHead('Runtime overview', 'A live, read-only view of the instance’s memory, reasoning contract, source projection, and operational evidence.', `<span class="badge ${health.state}"><span class="status-dot ${health.state === 'ready' ? '' : health.state}"></span>${health.state}</span>`) + `
       <section class="metrics">

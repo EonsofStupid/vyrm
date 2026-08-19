@@ -9,7 +9,7 @@ use serde::de::DeserializeOwned;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use vyrm_core::{
-    key, Claim, ClaimSource, Millis, Predicate, ReadStamp, Reader, RuntimeChange,
+    key, Claim, ClaimSource, Millis, Predicate, ReadStamp, Reader, RetentionPin, RuntimeChange,
     RuntimeChangePage, RuntimeCommit, RuntimeCommitOutcome, RuntimeMutation, RuntimeRecord,
     RuntimeRef, RuntimeRelation, RuntimeSchemaRegistry, ScopeId, SnapshotHandle, SnapshotId,
     Subject,
@@ -245,6 +245,37 @@ impl Store {
         }
         handles.sort_by(|left, right| left.id.cmp(&right.id));
         Ok(handles)
+    }
+
+    /// Logical GC roots derived from the authoritative snapshot catalog.
+    /// The compatibility adapter never reclaims runtime changes; native
+    /// `vyrmKV` binds these identities to its physical object graph.
+    pub fn runtime_retention_pins(&self, now: Millis) -> Result<Vec<RetentionPin>> {
+        self.runtime_snapshots(now)?
+            .iter()
+            .map(RetentionPin::from_snapshot)
+            .collect::<vyrm_core::Result<Vec<_>>>()
+            .map_err(Error::from)
+    }
+
+    /// Reads the append-only log at an exact transaction stamp without
+    /// persisting a long-lived lease.
+    pub fn runtime_read_changes(
+        &self,
+        read: &ReadStamp,
+        after: u64,
+        limit: usize,
+    ) -> Result<RuntimeChangePage> {
+        let snapshot = self.db.read_tx();
+        validate_read_stamp_with(&snapshot, &self.meta, &self.runtime_changes, read)?;
+        runtime_change_page(
+            &snapshot,
+            &self.runtime_changes,
+            read.commit_cursor,
+            after,
+            limit,
+            Some(&read.scope),
+        )
     }
 
     /// Atomically appends a complete causal runtime transaction.
@@ -902,6 +933,57 @@ fn runtime_read_stamp_with<R: Readable>(
         head_digest,
     )
     .map_err(Error::from)
+}
+
+fn validate_read_stamp_with<R: Readable>(
+    reader: &R,
+    meta: &SingleWriterTxKeyspace,
+    changes_keyspace: &SingleWriterTxKeyspace,
+    read: &ReadStamp,
+) -> Result<()> {
+    read.validate()?;
+    let current = decode_optional_sequence(reader.get(meta, keyspaces::RUNTIME_CURSOR)?)?;
+    if read.commit_cursor > current {
+        return Err(Error::ReadStampUnavailable(read.manifest_id.clone()));
+    }
+    let retained_head = if read.commit_cursor == 0 {
+        None
+    } else {
+        let bytes = reader
+            .get(changes_keyspace, runtime_cursor_key(read.commit_cursor))?
+            .ok_or_else(|| Error::ReadStampUnavailable(read.manifest_id.clone()))?;
+        let change: RuntimeChange = serde_json::from_slice(&bytes)?;
+        if !change.verify_digest() {
+            return Err(Error::Substrate(format!(
+                "runtime change {} failed digest verification",
+                read.commit_cursor
+            )));
+        }
+        Some(change.digest)
+    };
+    let stamped = runtime_change_page(
+        reader,
+        changes_keyspace,
+        read.commit_cursor,
+        0,
+        usize::MAX,
+        Some(&read.scope),
+    )?;
+    let schema_revision = stamped
+        .changes
+        .iter()
+        .filter_map(|change| match &change.mutation {
+            RuntimeMutation::Schema { registry } => Some(registry.revision),
+            _ => None,
+        })
+        .next_back();
+    if read.catalog_revision != 0
+        || read.head_digest != retained_head
+        || read.schema_revision != schema_revision
+    {
+        return Err(Error::ReadStampMismatch(read.manifest_id.clone()));
+    }
+    Ok(())
 }
 
 fn runtime_change_page<R: Readable>(

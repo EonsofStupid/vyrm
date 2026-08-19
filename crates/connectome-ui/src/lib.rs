@@ -14,8 +14,8 @@ use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tiny_http::{Header, Method, Request, Response, Server, StatusCode};
 use vyrm_core::{
-    resolve_as_of, Claim, ClaimSource, ReasoningEvent, ReasoningPayload, RuntimeGraphSnapshot,
-    RuntimeSchemaRegistry, ScopeId,
+    resolve_as_of, Claim, ClaimSource, ReasoningEvent, ReasoningPayload, RetentionPin,
+    RuntimeGraphSnapshot, RuntimeSchemaRegistry, ScopeId, SnapshotHandle,
 };
 use vyrm_node::{InstanceBinding, InstanceMode};
 use vyrm_store::{Engine, Invocation, ProjectionStatus, Store};
@@ -68,6 +68,16 @@ pub struct HealthView {
     pub indexed_symbols: usize,
     pub active_run: Option<String>,
     pub schema_revision: Option<u64>,
+    pub snapshot_leases: usize,
+    pub retention_pins: usize,
+    pub oldest_retained_cursor: Option<u64>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct RuntimeRetentionView {
+    pub observed_at: u64,
+    pub snapshots: Vec<SnapshotHandle>,
+    pub pins: Vec<RetentionPin>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -202,6 +212,7 @@ pub fn snapshot(
         &flights,
     );
     let schema = store.runtime_schema(&ScopeId::new(vyrm_node::REASONING_SCOPE)?)?;
+    let retention = runtime_retention(store, at)?;
     let health = HealthView {
         state: if quarantined {
             "blocked"
@@ -222,6 +233,9 @@ pub fn snapshot(
         indexed_symbols: routing.as_ref().map_or(0, |index| index.symbol_count()),
         active_run,
         schema_revision: schema.as_ref().map(|schema| schema.revision),
+        snapshot_leases: retention.snapshots.len(),
+        retention_pins: retention.pins.len(),
+        oldest_retained_cursor: retention.pins.iter().map(|pin| pin.minimum_cursor).min(),
     };
 
     Ok(Snapshot {
@@ -247,6 +261,22 @@ pub fn snapshot(
             providers: vec!["observe"],
         },
         graph,
+    })
+}
+
+pub fn runtime_retention(
+    store: &Store,
+    at: u64,
+) -> Result<RuntimeRetentionView, Box<dyn std::error::Error>> {
+    let snapshots = store.runtime_snapshots(at)?;
+    let pins = snapshots
+        .iter()
+        .map(RetentionPin::from_snapshot)
+        .collect::<vyrm_core::Result<Vec<_>>>()?;
+    Ok(RuntimeRetentionView {
+        observed_at: at,
+        snapshots,
+        pins,
     })
 }
 
@@ -635,6 +665,13 @@ fn respond(
                 StatusCode(404),
                 &serde_json::json!({"error":"runtime schema is not installed for this scope"}),
             ),
+            Err(error) => json_response(
+                StatusCode(500),
+                &serde_json::json!({"error":error.to_string()}),
+            ),
+        },
+        "/api/runtime/retention" => match runtime_retention(store, now()) {
+            Ok(retention) => json_response(StatusCode(200), &retention),
             Err(error) => json_response(
                 StatusCode(500),
                 &serde_json::json!({"error":error.to_string()}),

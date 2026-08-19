@@ -32,6 +32,8 @@ Vyrm provides:
 - optimistic concurrency that rejects stale writers instead of losing updates;
 - content-addressed read stamps, persisted snapshot leases, and replay that is
   bounded to the exact captured cursor/hash/schema state;
+- prospective transaction views that read pending typed mutations without
+  presenting them as committed evidence;
 - hash-chained, typed reasoning runs;
 - one-attempt/one-observation mutation authorization;
 - freshness barriers and deny-by-default policy differentials;
@@ -74,6 +76,7 @@ The local API also exposes the authoritative persistence layer:
 |---|---|
 | `GET /api/changes?after=N&limit=N` | Resume the verified runtime changefeed |
 | `GET /api/runtime/schema` | Read the active persisted schema revision for this instance scope |
+| `GET /api/runtime/retention` | Inspect live snapshot leases and their logical GC retention pins |
 | `GET /api/runtime/graph?valid_at=T&cursor=N` | Freeze the typed graph at valid time and transaction cursor |
 | `GET /api/runtime/diff?from=A&to=B&valid_at=T` | Inspect exact structural change between cursors |
 | `POST /api/demos/prompt-strength` | Persist a deterministic weak/strong trace pair for temporal playback |
@@ -82,8 +85,9 @@ At the Rust port today, `MemoryEngine` and the transitional Fjall adapter expose
 the same versioned read-stamp, snapshot, and data-transaction semantics. The
 portable JSON shapes are frozen in
 [`golden-vectors.json`](crates/vyrm-core/fixtures/golden-vectors.json). This is
-the logical snapshot boundary; native `vyrmKV` still needs physical manifest
-pinning before compaction or garbage collection may reclaim old objects.
+the logical snapshot boundary: every live lease has a stable retention pin.
+Native `vyrmKV` must attach its physical manifests, segments, and objects to
+those pins before compaction or garbage collection may reclaim old bytes.
 
 Prompt flights accept three controlled context arms:
 

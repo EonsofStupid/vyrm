@@ -31,10 +31,10 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Mutex;
 use vyrm_core::reference::MemoryClaims;
 use vyrm_core::{
-    resolve_as_of, Claim, ClaimSource, DataTransaction, Millis, Predicate, ReadStamp, Reader,
-    RuntimeChange, RuntimeChangePage, RuntimeCommit, RuntimeCommitOutcome, RuntimeMutation,
-    RuntimeRecord, RuntimeRef, RuntimeRelation, RuntimeSchemaRegistry, ScopeId, SnapshotHandle,
-    SnapshotId, Subject,
+    resolve_as_of, Claim, ClaimSource, DataTransaction, DataTransactionView, Millis, Predicate,
+    ReadStamp, Reader, RetentionPin, RuntimeChange, RuntimeChangePage, RuntimeCommit,
+    RuntimeCommitOutcome, RuntimeGraphSnapshot, RuntimeMutation, RuntimeRecord, RuntimeRef,
+    RuntimeRelation, RuntimeSchemaRegistry, ScopeId, SnapshotHandle, SnapshotId, Subject,
 };
 
 pub trait Engine: ClaimSource<Error = Error> {
@@ -102,6 +102,19 @@ pub trait Engine: ClaimSource<Error = Error> {
     /// Lists non-expired persisted leases in stable identity order.
     fn runtime_snapshots(&self, now: Millis) -> Result<Vec<SnapshotHandle>>;
 
+    /// Lists the logical retention roots implied by every live snapshot.
+    fn runtime_retention_pins(&self, now: Millis) -> Result<Vec<RetentionPin>>;
+
+    /// Reads against an exact stamped state without creating a durable lease.
+    /// This is reserved for the short lifetime of a data transaction; scans
+    /// that outlive a transaction must use a persisted snapshot handle.
+    fn runtime_read_changes(
+        &self,
+        read: &ReadStamp,
+        after: u64,
+        limit: usize,
+    ) -> Result<RuntimeChangePage>;
+
     /// Atomically commits typed runtime mutations with exact-cursor conflict
     /// detection. Embedded claims join the same storage transaction.
     fn commit_runtime(&self, commit: &RuntimeCommit) -> Result<RuntimeCommitOutcome>;
@@ -122,6 +135,30 @@ pub trait Engine: ClaimSource<Error = Error> {
     ) -> Result<RuntimeCommitOutcome> {
         transaction.validate()?;
         self.commit_runtime(&transaction.commit)
+    }
+
+    /// Reconstructs the stamped base graph and overlays pending writes. The
+    /// result is prospective and cannot be confused with committed evidence.
+    fn preview_data_transaction(
+        &self,
+        transaction: &DataTransaction,
+        valid_at: Millis,
+    ) -> Result<DataTransactionView> {
+        transaction.validate()?;
+        let page = self.runtime_read_changes(&transaction.read, 0, usize::MAX)?;
+        if page.through_cursor != transaction.read.commit_cursor {
+            return Err(Error::Substrate(format!(
+                "stamped runtime replay ended at {}, expected {}",
+                page.through_cursor, transaction.read.commit_cursor
+            )));
+        }
+        let base = RuntimeGraphSnapshot::from_changes(
+            &page.changes,
+            transaction.read.scope.clone(),
+            valid_at,
+            transaction.read.commit_cursor,
+        );
+        transaction.preview(&base).map_err(Error::from)
     }
 
     // ---- provided: the semantic layer every engine inherits ----
@@ -319,6 +356,17 @@ impl Engine for Store {
     }
     fn runtime_snapshots(&self, now: Millis) -> Result<Vec<SnapshotHandle>> {
         Store::runtime_snapshots(self, now)
+    }
+    fn runtime_retention_pins(&self, now: Millis) -> Result<Vec<RetentionPin>> {
+        Store::runtime_retention_pins(self, now)
+    }
+    fn runtime_read_changes(
+        &self,
+        read: &ReadStamp,
+        after: u64,
+        limit: usize,
+    ) -> Result<RuntimeChangePage> {
+        Store::runtime_read_changes(self, read, after, limit)
     }
     fn commit_runtime(&self, commit: &RuntimeCommit) -> Result<RuntimeCommitOutcome> {
         Store::commit_runtime(self, commit)
@@ -566,6 +614,36 @@ impl Engine for MemoryEngine {
             .collect())
     }
 
+    fn runtime_retention_pins(&self, now: Millis) -> Result<Vec<RetentionPin>> {
+        self.runtime_snapshots(now)?
+            .iter()
+            .map(RetentionPin::from_snapshot)
+            .collect::<vyrm_core::Result<Vec<_>>>()
+            .map_err(Error::from)
+    }
+
+    fn runtime_read_changes(
+        &self,
+        read: &ReadStamp,
+        after: u64,
+        limit: usize,
+    ) -> Result<RuntimeChangePage> {
+        if limit == 0 {
+            return Err(Error::Substrate(
+                "runtime change page limit must be greater than zero".into(),
+            ));
+        }
+        let inner = self.inner.lock().expect("engine mutex");
+        memory_validate_read_stamp(&inner, read)?;
+        Ok(memory_change_page(
+            &inner.runtime_changes,
+            read.commit_cursor,
+            after,
+            limit,
+            Some(&read.scope),
+        ))
+    }
+
     fn commit_runtime(&self, commit: &RuntimeCommit) -> Result<RuntimeCommitOutcome> {
         commit.validate()?;
         let mut inner = self.inner.lock().expect("engine mutex");
@@ -758,6 +836,39 @@ fn memory_read_stamp(inner: &MemoryEngineInner, scope: &ScopeId) -> Result<ReadS
             .map(|change| change.digest.clone()),
     )
     .map_err(Error::from)
+}
+
+fn memory_validate_read_stamp(inner: &MemoryEngineInner, read: &ReadStamp) -> Result<()> {
+    read.validate()?;
+    if read.commit_cursor > inner.runtime_changes.len() as u64 {
+        return Err(Error::ReadStampUnavailable(read.manifest_id.clone()));
+    }
+    let head_digest = if read.commit_cursor == 0 {
+        None
+    } else {
+        Some(
+            inner.runtime_changes[read.commit_cursor as usize - 1]
+                .digest
+                .clone(),
+        )
+    };
+    let schema_revision = inner
+        .runtime_changes
+        .iter()
+        .take(read.commit_cursor as usize)
+        .filter(|change| change.scope == read.scope)
+        .filter_map(|change| match &change.mutation {
+            RuntimeMutation::Schema { registry } => Some(registry.revision),
+            _ => None,
+        })
+        .next_back();
+    if read.catalog_revision != 0
+        || read.head_digest != head_digest
+        || read.schema_revision != schema_revision
+    {
+        return Err(Error::ReadStampMismatch(read.manifest_id.clone()));
+    }
+    Ok(())
 }
 
 fn memory_change_page(

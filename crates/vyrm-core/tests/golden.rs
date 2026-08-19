@@ -17,9 +17,9 @@ use vyrm_core::reference::MemoryClaims;
 use vyrm_core::{
     key, recall, AuditDecision, AuditEnvelope, Check, CheckStatus, Claim, DataTransaction,
     DecisionKind, Evidence, Predicate, Producer, ProjectionId, ProjectionStamp, ProjectionState,
-    ReadStamp, Reader, RecallQuery, ReasoningPayload, ReasoningRun, RunOutcome, RuntimeCommit,
-    RuntimeEvent, RuntimeMutation, RuntimeProperties, RuntimeType, ScopeId, SnapshotHandle, Subject,
-    DATA_RUNTIME_CONTRACT_VERSION,
+    ReadStamp, Reader, ReasoningPayload, ReasoningRun, RecallQuery, RetentionPin, RunOutcome,
+    RuntimeCommit, RuntimeEvent, RuntimeGraphSnapshot, RuntimeMutation, RuntimeProperties,
+    RuntimeType, ScopeId, SnapshotHandle, Subject, DATA_RUNTIME_CONTRACT_VERSION,
 };
 
 fn hex(bytes: &[u8]) -> String {
@@ -104,6 +104,16 @@ fn vectors() -> serde_json::Value {
     )
     .unwrap();
     let data_transaction_digest = data_transaction.digest();
+    let retention_pin = RetentionPin::from_snapshot(&snapshot).unwrap();
+    let transaction_view = data_transaction
+        .preview(&RuntimeGraphSnapshot {
+            scope: runtime_scope.clone(),
+            valid_at: 1_200,
+            known_at_cursor: 7,
+            records: Vec::new(),
+            relations: Vec::new(),
+        })
+        .unwrap();
     let projection = ProjectionStamp {
         contract_version: DATA_RUNTIME_CONTRACT_VERSION,
         id: ProjectionId::new("vector:documents").unwrap(),
@@ -247,9 +257,11 @@ fn vectors() -> serde_json::Value {
         "data_runtime_v1": {
             "read_stamp": read_stamp,
             "snapshot_handle": snapshot,
+            "retention_pin": retention_pin,
             "data_transaction": {
                 "envelope": data_transaction,
                 "digest": data_transaction_digest,
+                "read_your_writes_view": transaction_view,
             },
             "projection_stamp": projection,
             "audit_envelope": audit,

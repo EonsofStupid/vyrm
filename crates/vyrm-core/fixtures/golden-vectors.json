@@ -73,6 +73,40 @@
           "schema_revision": 3,
           "scope": "instance:golden"
         }
+      },
+      "read_your_writes_view": {
+        "contract_version": 1,
+        "pending": [
+          {
+            "event": {
+              "kind": "golden_event",
+              "properties": {}
+            },
+            "mutation": "event"
+          }
+        ],
+        "pending_mutations": 1,
+        "prospective_cursor": 8,
+        "read": {
+          "catalog_revision": 2,
+          "commit_cursor": 7,
+          "contract_version": 1,
+          "head_digest": "1111111111111111111111111111111111111111111111111111111111111111",
+          "manifest_id": "fcd3140542c9e3ad71a38e34501cd2bec4d2123a4599ca29a09c08cca150bfe3",
+          "schema_revision": 3,
+          "scope": "instance:golden"
+        },
+        "records": [
+          {
+            "id": "cursor:8",
+            "kind": "golden_event",
+            "properties": {},
+            "valid_from": 1100
+          }
+        ],
+        "relations": [],
+        "transaction_digest": "e9a3455ac29f8b5cd43b265f9178fbbf650cc7be36e323cba5edfdb878805ba1",
+        "valid_at": 1200
       }
     },
     "projection_stamp": {
@@ -92,6 +126,15 @@
       "manifest_id": "fcd3140542c9e3ad71a38e34501cd2bec4d2123a4599ca29a09c08cca150bfe3",
       "schema_revision": 3,
       "scope": "instance:golden"
+    },
+    "retention_pin": {
+      "contract_version": 1,
+      "expires_at": 6000,
+      "id": "2bb0291c093738c13e8d2b1205cb3a3c77c0e33f8496c1f8ae252d31dddd1b09",
+      "manifest_id": "fcd3140542c9e3ad71a38e34501cd2bec4d2123a4599ca29a09c08cca150bfe3",
+      "minimum_cursor": 7,
+      "scope": "instance:golden",
+      "snapshot_id": "5b43ad378886f30569cf79d5ddf800627c6454e7e7a780f94cd394535ab0e2a6"
     },
     "snapshot_handle": {
       "contract_version": 1,

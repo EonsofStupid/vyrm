@@ -82,6 +82,7 @@ Connectome exposes read-only development endpoints:
 ```text
 GET /api/changes?after=0&limit=256
 GET /api/runtime/schema
+GET /api/runtime/retention
 GET /api/runtime/graph?valid_at=<millis>&cursor=<cursor>
 GET /api/runtime/diff?from=<cursor>&to=<cursor>&valid_at=<millis>
 ```

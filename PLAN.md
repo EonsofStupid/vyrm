@@ -64,9 +64,12 @@ disagree, `SPEC.md` is authoritative and this document is wrong.
 > `SnapshotHandle`, `DataTransaction`, `ProjectionStamp`, and hash-chained
 > `AuditEnvelope`), checked-in golden JSON, and matching MemoryEngine/Fjall
 > behavior for frozen replay, expiry, restart persistence, and concurrent CAS.
-> Physical retention pins and the broader randomized transaction matrix remain
-> before M1 closes. Query, vector, object, and cluster work remain gated behind
-> that closure. See `docs/vyrmds-architecture-research.md`.
+> M1 is now closed with stamped transaction reads, prospective read-your-writes,
+> same/disjoint global-CAS coverage, repeatable paged replay, and logical
+> retention-pin inventory exposed to Connectome. Physical segment attachment
+> belongs to native M3. M2 `vyrmQL`/`vyrmMX` is the next gate; vector, object,
+> and cluster work remain sequenced behind it. See
+> `docs/vyrmds-architecture-research.md`.
 > The product handoff, canonical package-event grammar, alpha release gates,
 > deployment/update tiers, and separate SurrealDB/Qdrant proof protocols are
 > frozen in `docs/clyffy-kernel-alpha.md`.

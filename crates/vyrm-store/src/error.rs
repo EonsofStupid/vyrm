@@ -35,6 +35,10 @@ pub enum Error {
     /// A caller supplied fields that do not match the persisted snapshot with
     /// the same identity.
     SnapshotMismatch(String),
+    /// A stamped transaction read names a cursor that is not retained.
+    ReadStampUnavailable(String),
+    /// A stamped transaction read does not match the retained hash/schema state.
+    ReadStampMismatch(String),
 }
 
 impl fmt::Display for Error {
@@ -69,6 +73,12 @@ impl fmt::Display for Error {
                     f,
                     "runtime snapshot {id} does not match the persisted lease"
                 )
+            }
+            Error::ReadStampUnavailable(id) => {
+                write!(f, "runtime read stamp is not retained: {id}")
+            }
+            Error::ReadStampMismatch(id) => {
+                write!(f, "runtime read stamp does not match retained state: {id}")
             }
         }
     }

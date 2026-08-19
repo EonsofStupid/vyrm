@@ -60,6 +60,7 @@ runtime_ident!(ScopeId, "runtime scope");
 runtime_ident!(RuntimeType, "runtime type");
 runtime_ident!(RuntimeId, "runtime id");
 runtime_ident!(SnapshotId, "snapshot id");
+runtime_ident!(RetentionPinId, "retention pin id");
 runtime_ident!(ProjectionId, "projection id");
 
 /// Wire version for the data-runtime transaction, snapshot, projection, and
@@ -495,6 +496,92 @@ impl SnapshotHandle {
     }
 }
 
+/// Logical retention root derived from a live snapshot lease.
+///
+/// Compatibility engines retain the append-only log, so this pin names the
+/// semantic manifest and minimum cursor. Native `vyrmKV` must map the same pin
+/// to every physical manifest, segment, and object required to serve it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RetentionPin {
+    pub contract_version: u16,
+    pub id: RetentionPinId,
+    pub snapshot_id: SnapshotId,
+    pub scope: ScopeId,
+    pub manifest_id: String,
+    pub minimum_cursor: u64,
+    pub expires_at: Millis,
+}
+
+impl RetentionPin {
+    pub fn from_snapshot(snapshot: &SnapshotHandle) -> Result<Self> {
+        snapshot.validate()?;
+        let id = RetentionPinId::new(Self::identity(
+            &snapshot.id,
+            &snapshot.read.scope,
+            &snapshot.read.manifest_id,
+            snapshot.read.commit_cursor,
+            snapshot.expires_at,
+        ))?;
+        let pin = Self {
+            contract_version: DATA_RUNTIME_CONTRACT_VERSION,
+            id,
+            snapshot_id: snapshot.id.clone(),
+            scope: snapshot.read.scope.clone(),
+            manifest_id: snapshot.read.manifest_id.clone(),
+            minimum_cursor: snapshot.read.commit_cursor,
+            expires_at: snapshot.expires_at,
+        };
+        pin.validate()?;
+        Ok(pin)
+    }
+
+    pub fn validate(&self) -> Result<()> {
+        if self.contract_version != DATA_RUNTIME_CONTRACT_VERSION {
+            return Err(Error::InvalidRuntime {
+                reason: format!(
+                    "unsupported retention-pin contract version {}",
+                    self.contract_version
+                ),
+            });
+        }
+        validate_digest("retention-pin manifest", &self.manifest_id)?;
+        validate_digest("retention pin identity", self.id.as_str())?;
+        let expected = Self::identity(
+            &self.snapshot_id,
+            &self.scope,
+            &self.manifest_id,
+            self.minimum_cursor,
+            self.expires_at,
+        );
+        if self.id.as_str() != expected {
+            return Err(Error::InvalidRuntime {
+                reason: "retention pin identity does not match its snapshot".into(),
+            });
+        }
+        Ok(())
+    }
+
+    pub fn is_expired(&self, now: Millis) -> bool {
+        now >= self.expires_at
+    }
+
+    fn identity(
+        snapshot_id: &SnapshotId,
+        scope: &ScopeId,
+        manifest_id: &str,
+        minimum_cursor: u64,
+        expires_at: Millis,
+    ) -> String {
+        let mut bytes = b"vyrm-retention-pin-v1\0".to_vec();
+        text(&mut bytes, snapshot_id.as_str());
+        text(&mut bytes, scope.as_str());
+        text(&mut bytes, manifest_id);
+        bytes.extend_from_slice(&minimum_cursor.to_be_bytes());
+        bytes.extend_from_slice(&expires_at.to_be_bytes());
+        digest::sha256_hex(&bytes)
+    }
+}
+
 /// A runtime commit bound to the exact state from which it was constructed.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct DataTransaction {
@@ -546,6 +633,196 @@ impl DataTransaction {
         bytes.extend_from_slice(&(commit.len() as u64).to_be_bytes());
         bytes.extend_from_slice(&commit);
         digest::sha256_hex(&bytes)
+    }
+
+    /// Applies pending structural mutations over the exact graph state named
+    /// by this transaction's read stamp. The returned view is explicitly
+    /// prospective: it is never accepted as committed evidence.
+    pub fn preview(&self, base: &RuntimeGraphSnapshot) -> Result<DataTransactionView> {
+        self.validate()?;
+        if base.scope != self.read.scope {
+            return Err(Error::InvalidRuntime {
+                reason: "transaction preview scope differs from its read stamp".into(),
+            });
+        }
+        if base.known_at_cursor != self.read.commit_cursor {
+            return Err(Error::InvalidRuntime {
+                reason: "transaction preview cursor differs from its read stamp".into(),
+            });
+        }
+
+        let prospective_cursor = self
+            .read
+            .commit_cursor
+            .checked_add(self.commit.mutations.len() as u64)
+            .ok_or_else(|| Error::InvalidRuntime {
+                reason: "transaction preview cursor overflowed".into(),
+            })?;
+        let mut records = base
+            .records
+            .iter()
+            .cloned()
+            .map(|record| (record.reference.clone(), record))
+            .collect::<BTreeMap<_, _>>();
+        let mut relations = base
+            .relations
+            .iter()
+            .cloned()
+            .map(|relation| (relation.reference.clone(), relation))
+            .collect::<BTreeMap<_, _>>();
+        for (ordinal, mutation) in self.commit.mutations.iter().enumerate() {
+            match mutation {
+                RuntimeMutation::Record { record } if record.valid_from <= base.valid_at => {
+                    records.insert(record.reference.clone(), record.clone());
+                }
+                RuntimeMutation::Relation { relation } if relation.valid_from <= base.valid_at => {
+                    relations.insert(relation.reference.clone(), relation.clone());
+                }
+                RuntimeMutation::Event { event } => {
+                    let cursor = self.read.commit_cursor + ordinal as u64 + 1;
+                    let event_ref = RuntimeRef {
+                        kind: event.kind.clone(),
+                        id: RuntimeId::new(format!("cursor:{cursor}"))
+                            .expect("cursor event id is valid"),
+                    };
+                    records.insert(
+                        event_ref.clone(),
+                        RuntimeRecord {
+                            reference: event_ref.clone(),
+                            valid_from: self.commit.at,
+                            valid_to: None,
+                            properties: event.properties.clone(),
+                        },
+                    );
+                    if let Some(subject) = &event.subject {
+                        let relation_ref = RuntimeRef {
+                            kind: RuntimeType::new("emitted")
+                                .expect("static runtime type is valid"),
+                            id: RuntimeId::new(format!("cursor:{cursor}"))
+                                .expect("cursor relation id is valid"),
+                        };
+                        relations.insert(
+                            relation_ref.clone(),
+                            RuntimeRelation {
+                                reference: relation_ref,
+                                from: subject.clone(),
+                                to: event_ref,
+                                valid_from: self.commit.at,
+                                valid_to: None,
+                                properties: RuntimeProperties::new(),
+                            },
+                        );
+                    }
+                }
+                RuntimeMutation::Claim { .. }
+                | RuntimeMutation::Schema { .. }
+                | RuntimeMutation::Record { .. }
+                | RuntimeMutation::Relation { .. } => {}
+            }
+        }
+        let records = records
+            .into_values()
+            .filter(|record| valid_at_window(record.valid_from, record.valid_to, base.valid_at))
+            .collect();
+        let relations = relations
+            .into_values()
+            .filter(|relation| {
+                valid_at_window(relation.valid_from, relation.valid_to, base.valid_at)
+            })
+            .collect();
+        let view = DataTransactionView {
+            contract_version: DATA_RUNTIME_CONTRACT_VERSION,
+            transaction_digest: self.digest(),
+            read: self.read.clone(),
+            valid_at: base.valid_at,
+            prospective_cursor,
+            pending_mutations: self.commit.mutations.len(),
+            pending: self.commit.mutations.clone(),
+            records,
+            relations,
+        };
+        view.validate()?;
+        Ok(view)
+    }
+}
+
+/// Read-your-writes graph view for one uncommitted data transaction.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct DataTransactionView {
+    pub contract_version: u16,
+    pub transaction_digest: String,
+    pub read: ReadStamp,
+    pub valid_at: Millis,
+    pub prospective_cursor: u64,
+    pub pending_mutations: usize,
+    pub pending: Vec<RuntimeMutation>,
+    pub records: Vec<RuntimeRecord>,
+    pub relations: Vec<RuntimeRelation>,
+}
+
+impl DataTransactionView {
+    pub fn validate(&self) -> Result<()> {
+        if self.contract_version != DATA_RUNTIME_CONTRACT_VERSION {
+            return Err(Error::InvalidRuntime {
+                reason: format!(
+                    "unsupported transaction-view contract version {}",
+                    self.contract_version
+                ),
+            });
+        }
+        self.read.validate()?;
+        validate_digest("transaction view", &self.transaction_digest)?;
+        let expected = self
+            .read
+            .commit_cursor
+            .checked_add(self.pending_mutations as u64)
+            .ok_or_else(|| Error::InvalidRuntime {
+                reason: "transaction view cursor overflowed".into(),
+            })?;
+        if self.prospective_cursor != expected {
+            return Err(Error::InvalidRuntime {
+                reason: "transaction view cursor does not cover its pending mutations".into(),
+            });
+        }
+        if self.pending.len() != self.pending_mutations {
+            return Err(Error::InvalidRuntime {
+                reason: "transaction view pending count does not match its mutations".into(),
+            });
+        }
+        Ok(())
+    }
+
+    pub fn record(&self, reference: &RuntimeRef) -> Option<&RuntimeRecord> {
+        self.records
+            .iter()
+            .find(|record| &record.reference == reference)
+    }
+
+    pub fn relation(&self, reference: &RuntimeRef) -> Option<&RuntimeRelation> {
+        self.relations
+            .iter()
+            .find(|relation| &relation.reference == reference)
+    }
+
+    pub fn claim_writes(&self) -> impl Iterator<Item = &Claim> {
+        self.pending.iter().filter_map(|mutation| match mutation {
+            RuntimeMutation::Claim { claim } => Some(claim),
+            _ => None,
+        })
+    }
+
+    pub fn schema_write(&self) -> Option<&RuntimeSchemaRegistry> {
+        self.pending.iter().find_map(|mutation| match mutation {
+            RuntimeMutation::Schema { registry } => Some(registry),
+            _ => None,
+        })
+    }
+
+    pub fn events(&self) -> impl Iterator<Item = &RuntimeEvent> {
+        self.pending.iter().filter_map(|mutation| match mutation {
+            RuntimeMutation::Event { event } => Some(event),
+            _ => None,
+        })
     }
 }
 
@@ -1265,6 +1542,9 @@ mod tests {
         )
         .unwrap();
         let snapshot = SnapshotHandle::new(read.clone(), "agent:test", 100, 50).unwrap();
+        let mut pin = RetentionPin::from_snapshot(&snapshot).unwrap();
+        pin.minimum_cursor += 1;
+        assert!(pin.validate().is_err());
         assert!(!snapshot.is_expired(149));
         assert!(snapshot.is_expired(150));
 
@@ -1323,5 +1603,54 @@ mod tests {
         let mut tampered = audit;
         tampered.duration_ms = 4;
         assert!(tampered.validate().is_err());
+    }
+
+    #[test]
+    fn transaction_preview_reads_its_writes_without_mutating_the_base() {
+        let scope = ScopeId::new("instance:preview").unwrap();
+        let reference = RuntimeRef::new("item", "one").unwrap();
+        let mut before = record("item", "one", 1);
+        before
+            .properties
+            .insert("state".into(), RuntimeValue::String("before".into()));
+        let base = RuntimeGraphSnapshot {
+            scope: scope.clone(),
+            valid_at: 20,
+            known_at_cursor: 3,
+            records: vec![before.clone()],
+            relations: Vec::new(),
+        };
+        let read = ReadStamp::new(scope.clone(), Some(1), 0, 3, Some("11".repeat(32))).unwrap();
+        let mut after = record("item", "one", 10);
+        after
+            .properties
+            .insert("state".into(), RuntimeValue::String("after".into()));
+        let transaction = DataTransaction::new(
+            read,
+            RuntimeCommit {
+                scope,
+                at: 10,
+                actor: "agent:preview".into(),
+                expected_cursor: 3,
+                mutations: vec![RuntimeMutation::Record {
+                    record: after.clone(),
+                }],
+            },
+        )
+        .unwrap();
+
+        let view = transaction.preview(&base).unwrap();
+        assert_eq!(view.prospective_cursor, 4);
+        assert_eq!(view.pending_mutations, 1);
+        assert_eq!(view.record(&reference), Some(&after));
+        assert_eq!(
+            base.records,
+            vec![before],
+            "the committed base is immutable"
+        );
+
+        let mut wrong_base = base;
+        wrong_base.known_at_cursor = 2;
+        assert!(transaction.preview(&wrong_base).is_err());
     }
 }

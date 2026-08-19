@@ -98,6 +98,12 @@ test('persisted schema is readable as a developer contract', async ({ page, requ
   expect(schema.revision).toBeGreaterThan(0);
   expect(schema.records.prompt_flight.properties.status.required).toBeTruthy();
 
+  const retentionResponse = await request.get(`${baseURL}/api/runtime/retention`);
+  expect(retentionResponse.ok()).toBeTruthy();
+  const retention = await retentionResponse.json();
+  expect(Array.isArray(retention.snapshots)).toBeTruthy();
+  expect(Array.isArray(retention.pins)).toBeTruthy();
+
   await page.goto(`${baseURL}/#schema`);
   await expect(page.getByRole('heading', { name: 'Runtime schema' })).toBeVisible();
   await expect(page.locator('.schema-revision')).toContainText('prompt flight');

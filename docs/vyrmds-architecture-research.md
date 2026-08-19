@@ -373,15 +373,18 @@ Acceptance: randomized backend differential; concurrent same/different-key
 writes; read-your-writes; repeatable scans across pages; lease expiry; and no
 cursor/hash/schema regression.
 
-Status (2026-08-19): **in progress.** MemoryEngine and Fjall now share the
+Status (2026-08-19): **complete.** MemoryEngine and Fjall share the
 snapshot/transaction port. Tests prove a snapshot never reads beyond its
 captured hash-chain head, leases expire and release deterministically, Fjall's
 lease catalog survives restart, and two writers from one read stamp yield one
-commit plus one explicit CAS conflict. Native physical manifest/segment pins,
-a deterministic 64-write mixed-scope differential also produces identical
-stamps and replay pages. The complete same/different-key conflict matrix,
-physical pins, and transaction-local read-your-writes are not implemented yet;
-therefore M1 is not marked complete.
+commit plus one explicit CAS conflict. A deterministic 64-write mixed-scope
+differential produces identical stamps and replay pages. Stamped transaction
+reads reject forged schema state and expose prospective record, relation,
+event, claim, and schema mutations without changing committed evidence. The
+conflict matrix proves the declared global-serializable policy for both same
+and disjoint identities, repeatable scans agree across page sizes, and every
+live lease produces a stable logical retention pin. Native physical
+manifest/segment attachment remains correctly assigned to M3.
 
 ### M2 — `vyrmQL` algebra and `vyrmMX` reference executor
 
@@ -458,9 +461,11 @@ database truth; performance and recall regressions fail CI at explicit bounds.
 
 ## Immediate next implementation slice
 
-Finish M1 without skipping the contract gate: add the complete same/different-
-key conflict matrix, transaction-local read-your-writes, and an explicit
-retention-pin inventory contract. Then begin M2 parser/algebra work.
+Begin M2 without weakening the now-frozen port: create `vyrm-ql` and `vyrm-mx`
+as separate crates, freeze AST/catalog/logical/physical plan contracts, and
+implement typed record/claim/relation/event reads plus bitemporal selectors in
+the reference executor. Parser corpus, fuzzing, SDK/text equivalence, explain
+diagnostics, and direct-API differentials remain the gate before native M3.
 Do not begin vectors, S3, GPU, or clustering before these semantics close; the
 stable boundary prevents native `vyrmKV` from baking current adapter limitations
 into its format.

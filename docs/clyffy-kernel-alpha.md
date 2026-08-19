@@ -113,8 +113,9 @@ measured local results, never universal superiority.
 
 ## Immediate execution order
 
-1. Close M1 and expose snapshot/audit inspection in Connectome (M0 is frozen).
-2. Implement `vyrmQL`/`vyrmMX` over the frozen port.
+1. Implement `vyrmQL`/`vyrmMX` over the frozen M0/M1 port; Connectome already
+   exposes live snapshot and retention-pin inspection.
+2. Persist the audit lane atomically with accepted transactions and denied reads.
 3. Build native `vyrmKV` behind the same differential and crash harness.
 4. Add unified object/vector mutations, then exact and ANN search.
 5. Bind declared package workflows to preflight/pre-tool/post-tool policy.

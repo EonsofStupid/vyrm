@@ -42,6 +42,7 @@ pub use projection::{
 };
 pub use store::{AppendOutcome, Store};
 pub use vyrm_core::{
-    DataTransaction, ReadStamp, RuntimeChangePage, RuntimeCommitOutcome, SnapshotHandle, SnapshotId,
+    DataTransaction, DataTransactionView, ReadStamp, RetentionPin, RetentionPinId,
+    RuntimeChangePage, RuntimeCommitOutcome, SnapshotHandle, SnapshotId,
 };
 pub use writer::{Writer, WriterConfig, WriterStats};

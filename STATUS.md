@@ -106,13 +106,14 @@ tests cover operator commands, hooks, explicit recovery, and both MCP eras.
 - `vyrmQL`, `vyrmMX`, `vyrmDS`, and native `vyrmKV` have a researched target
   architecture but are not implemented subsystems. The shared data-runtime v1
   contract now includes content-addressed read stamps, leased snapshot handles,
-  read-bound transactions, projection stamps, and hash-chained audit envelopes.
-  MemoryEngine and Fjall implement frozen snapshot replay, inventory, expiry,
-  release, restart persistence, and exact-cursor conflict behavior. Physical
-  retention pins, the full same/different-key conflict matrix, and transaction-
-  local read-your-writes still gate M1; a deterministic 64-write mixed-scope
-  backend differential is green. Vector, object-store, embedding, GPU, edge,
-  and Multi-AZ capabilities remain sequenced work, not current product claims. See
+  read-bound transactions and prospective read-your-writes views, projection
+  stamps, logical retention pins, and hash-chained audit envelopes. M1 is
+  complete: MemoryEngine and Fjall implement frozen/repeatable snapshot replay,
+  lease/pin inventory, expiry, release, restart persistence, stamped reads, and
+  a tested global-serializable same/disjoint conflict policy. A deterministic
+  64-write mixed-scope backend differential is green. Physical segment pins
+  belong to native M3. Vector, object-store, embedding, GPU, edge, and Multi-AZ
+  capabilities remain sequenced work, not current product claims. See
   `docs/vyrmds-architecture-research.md`.
 
 - JavaScript application-run claims now use script-sensitive canonical event

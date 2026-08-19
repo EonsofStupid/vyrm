@@ -3,8 +3,9 @@ use std::sync::{Arc, Barrier};
 use std::thread;
 
 use vyrm_core::{
-    DataTransaction, RuntimeCommit, RuntimeEvent, RuntimeEventSchema, RuntimeMutation,
-    RuntimeProperties, RuntimeSchemaRegistry, RuntimeType, ScopeId,
+    DataTransaction, ReadStamp, RuntimeCommit, RuntimeEvent, RuntimeEventSchema,
+    RuntimeGraphSnapshot, RuntimeMutation, RuntimeProperties, RuntimeRecord, RuntimeRecordSchema,
+    RuntimeRef, RuntimeSchemaRegistry, RuntimeType, ScopeId,
 };
 use vyrm_store::{Engine, Error, MemoryEngine, Store};
 
@@ -18,6 +19,10 @@ fn schema() -> RuntimeSchemaRegistry {
             properties: BTreeMap::new(),
             allow_additional_properties: false,
         },
+    );
+    registry.records.insert(
+        RuntimeType::new("item").unwrap(),
+        RuntimeRecordSchema::default(),
     );
     registry
 }
@@ -42,6 +47,23 @@ fn pulse(scope: &ScopeId, expected_cursor: u64) -> RuntimeCommit {
             event: RuntimeEvent {
                 kind: RuntimeType::new("pulse").unwrap(),
                 subject: None,
+                properties: RuntimeProperties::new(),
+            },
+        }],
+    }
+}
+
+fn item(scope: &ScopeId, expected_cursor: u64, id: &str) -> RuntimeCommit {
+    RuntimeCommit {
+        scope: scope.clone(),
+        at: 102,
+        actor: "agent:snapshot-test".into(),
+        expected_cursor,
+        mutations: vec![RuntimeMutation::Record {
+            record: RuntimeRecord {
+                reference: RuntimeRef::new("item", id).unwrap(),
+                valid_from: 102,
+                valid_to: None,
                 properties: RuntimeProperties::new(),
             },
         }],
@@ -79,7 +101,13 @@ fn assert_snapshot_contract(engine: &dyn Engine) {
         engine.runtime_snapshots(1_050).unwrap(),
         vec![snapshot.clone()]
     );
+    let pins = engine.runtime_retention_pins(1_050).unwrap();
+    assert_eq!(pins.len(), 1);
+    assert_eq!(pins[0].snapshot_id, snapshot.id);
+    assert_eq!(pins[0].manifest_id, snapshot.read.manifest_id);
+    assert_eq!(pins[0].minimum_cursor, snapshot.read.commit_cursor);
     assert!(engine.runtime_snapshots(1_100).unwrap().is_empty());
+    assert!(engine.runtime_retention_pins(1_100).unwrap().is_empty());
     assert!(matches!(
         engine.runtime_snapshot_changes(&snapshot, 0, 10, 1_100),
         Err(Error::SnapshotExpired {
@@ -121,6 +149,9 @@ fn fjall_snapshot_catalog_survives_restart() {
         reopened.runtime_snapshots(20).unwrap(),
         vec![handle.clone()]
     );
+    let pins = reopened.runtime_retention_pins(20).unwrap();
+    assert_eq!(pins.len(), 1);
+    assert_eq!(pins[0].snapshot_id, handle.id);
     let page = reopened
         .runtime_snapshot_changes(&handle, 0, 10, 20)
         .unwrap();
@@ -145,6 +176,42 @@ fn assert_data_transaction_contract(engine: &dyn Engine) {
             actual: 1
         })
     ));
+
+    let read = engine.runtime_read_stamp(&scope).unwrap();
+    let pending = DataTransaction::new(read.clone(), pulse(&scope, 1)).unwrap();
+    let view = engine.preview_data_transaction(&pending, 101).unwrap();
+    assert_eq!(view.read, read);
+    assert_eq!(view.prospective_cursor, 2);
+    assert_eq!(view.records.len(), 1);
+    assert_eq!(view.records[0].reference.kind.as_str(), "pulse");
+    assert_eq!(view.events().count(), 1);
+    assert_eq!(engine.runtime_cursor().unwrap(), 1);
+
+    engine.commit_data_transaction(&pending).unwrap();
+    let committed = engine
+        .runtime_read_changes(&engine.runtime_read_stamp(&scope).unwrap(), 0, 10)
+        .unwrap();
+    let graph = RuntimeGraphSnapshot::from_changes(&committed.changes, scope.clone(), 101, 2);
+    assert_eq!(view.records, graph.records);
+    assert_eq!(view.relations, graph.relations);
+
+    let wrong_schema = ReadStamp::new(
+        scope.clone(),
+        None,
+        0,
+        2,
+        engine.runtime_read_stamp(&scope).unwrap().head_digest,
+    )
+    .unwrap();
+    assert!(matches!(
+        engine.runtime_read_changes(&wrong_schema, 0, 10),
+        Err(Error::ReadStampMismatch(_))
+    ));
+    let unavailable = ReadStamp::new(scope, Some(1), 0, 99, Some("66".repeat(32))).unwrap();
+    assert!(matches!(
+        engine.runtime_read_changes(&unavailable, 0, 10),
+        Err(Error::ReadStampUnavailable(_))
+    ));
 }
 
 #[test]
@@ -159,33 +226,54 @@ where
     E: Engine + Send + Sync + 'static,
 {
     let scope = ScopeId::new("instance:race").unwrap();
-    let read = engine.runtime_read_stamp(&scope).unwrap();
-    let barrier = Arc::new(Barrier::new(3));
-    let mut workers = Vec::new();
-    for _ in 0..2 {
-        let engine = Arc::clone(&engine);
-        let barrier = Arc::clone(&barrier);
-        let transaction = DataTransaction::new(read.clone(), bootstrap(&scope, 0)).unwrap();
-        workers.push(thread::spawn(move || {
-            barrier.wait();
-            engine.commit_data_transaction(&transaction)
-        }));
-    }
-    barrier.wait();
+    engine.commit_runtime(&bootstrap(&scope, 0)).unwrap();
 
-    let results: Vec<_> = workers
-        .into_iter()
-        .map(|worker| worker.join().unwrap())
-        .collect();
-    assert_eq!(results.iter().filter(|result| result.is_ok()).count(), 1);
+    let run_pair = |left: DataTransaction, right: DataTransaction| {
+        let barrier = Arc::new(Barrier::new(3));
+        let mut workers = Vec::new();
+        for transaction in [left, right] {
+            let engine = Arc::clone(&engine);
+            let barrier = Arc::clone(&barrier);
+            workers.push(thread::spawn(move || {
+                barrier.wait();
+                engine.commit_data_transaction(&transaction)
+            }));
+        }
+        barrier.wait();
+        workers
+            .into_iter()
+            .map(|worker| worker.join().unwrap())
+            .collect::<Vec<_>>()
+    };
+
+    let read = engine.runtime_read_stamp(&scope).unwrap();
+    let same = run_pair(
+        DataTransaction::new(read.clone(), item(&scope, 1, "shared")).unwrap(),
+        DataTransaction::new(read, item(&scope, 1, "shared")).unwrap(),
+    );
+    assert_eq!(same.iter().filter(|result| result.is_ok()).count(), 1);
     assert_eq!(
-        results
-            .iter()
+        same.iter()
             .filter(|result| matches!(result, Err(Error::RuntimeConflict { .. })))
             .count(),
         1
     );
-    assert_eq!(engine.runtime_cursor().unwrap(), 1);
+
+    let read = engine.runtime_read_stamp(&scope).unwrap();
+    let disjoint = run_pair(
+        DataTransaction::new(read.clone(), item(&scope, 2, "left")).unwrap(),
+        DataTransaction::new(read, item(&scope, 2, "right")).unwrap(),
+    );
+    assert_eq!(disjoint.iter().filter(|result| result.is_ok()).count(), 1);
+    assert_eq!(
+        disjoint
+            .iter()
+            .filter(|result| matches!(result, Err(Error::RuntimeConflict { .. })))
+            .count(),
+        1,
+        "M1 deliberately uses global serializable CAS even for disjoint identities"
+    );
+    assert_eq!(engine.runtime_cursor().unwrap(), 3);
 }
 
 #[test]
@@ -242,9 +330,7 @@ fn deterministic_mixed_scope_trace_is_identical_across_backends() {
             let after = cursor.saturating_sub(3);
             assert_eq!(
                 fjall.runtime_changes_since(after, 4, Some(scope)).unwrap(),
-                memory
-                    .runtime_changes_since(after, 4, Some(scope))
-                    .unwrap()
+                memory.runtime_changes_since(after, 4, Some(scope)).unwrap()
             );
             assert_eq!(
                 fjall.runtime_read_stamp(scope).unwrap(),
@@ -262,4 +348,28 @@ fn deterministic_mixed_scope_trace_is_identical_across_backends() {
             .runtime_snapshot_changes(&frozen, 0, 128, 10_500)
             .unwrap()
     );
+    let mut after = 0;
+    let mut replayed = Vec::new();
+    loop {
+        let left = fjall
+            .runtime_snapshot_changes(&frozen, after, 3, 10_500)
+            .unwrap();
+        let right = memory
+            .runtime_snapshot_changes(&frozen, after, 3, 10_500)
+            .unwrap();
+        assert_eq!(left, right);
+        let has_more = left.has_more();
+        let through = left.through_cursor;
+        replayed.extend(left.changes);
+        if !has_more {
+            assert_eq!(through, frozen.read.commit_cursor);
+            break;
+        }
+        assert!(through > after);
+        after = through;
+    }
+    let one_page = fjall
+        .runtime_snapshot_changes(&frozen, 0, 128, 10_500)
+        .unwrap();
+    assert_eq!(replayed, one_page.changes);
 }

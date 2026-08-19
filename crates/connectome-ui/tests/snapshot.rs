@@ -63,6 +63,14 @@ fn snapshot_exposes_runtime_objects_without_mutating_the_store() {
     }
     vyrm_node::ensure_routing_fresh(&store, root.path()).unwrap();
     let binding = vyrm_node::InstanceBinding::discover(root.path()).unwrap();
+    let lease = store
+        .open_runtime_snapshot(
+            &vyrm_core::ScopeId::new("instance:default").unwrap(),
+            "workbench:test",
+            10,
+            100,
+        )
+        .unwrap();
     let before = store.sequence().unwrap();
     let snapshot = connectome_ui::snapshot(&store, &binding, 10).unwrap();
 
@@ -70,6 +78,12 @@ fn snapshot_exposes_runtime_objects_without_mutating_the_store() {
     assert_eq!(snapshot.health.current_claims, 1);
     assert_eq!(snapshot.health.runtime_cursor, 9);
     assert_eq!(snapshot.health.schema_revision, Some(1));
+    assert_eq!(snapshot.health.snapshot_leases, 1);
+    assert_eq!(snapshot.health.retention_pins, 1);
+    assert_eq!(snapshot.health.oldest_retained_cursor, Some(9));
+    let retention = connectome_ui::runtime_retention(&store, 10).unwrap();
+    assert_eq!(retention.snapshots, vec![lease.clone()]);
+    assert_eq!(retention.pins[0].snapshot_id, lease.id);
     let schema = snapshot
         .schema
         .as_ref()

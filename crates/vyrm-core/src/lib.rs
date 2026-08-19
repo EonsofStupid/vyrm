@@ -51,11 +51,12 @@ pub use reasoning::{
 };
 pub use recall::{estimate_claim_tokens, recall, RecallQuery, RecallSet};
 pub use runtime::{
-    AuditDecision, AuditEnvelope, DataTransaction, ProjectionId, ProjectionStamp, ProjectionState,
-    ReadStamp, RuntimeChange, RuntimeChangePage, RuntimeCommit, RuntimeCommitOutcome, RuntimeEvent,
-    RuntimeGraphDiff, RuntimeGraphSnapshot, RuntimeId, RuntimeMutation, RuntimeProperties,
-    RuntimeRecord, RuntimeRecordChange, RuntimeRef, RuntimeRelation, RuntimeRelationChange,
-    RuntimeType, RuntimeValue, ScopeId, SnapshotHandle, SnapshotId, DATA_RUNTIME_CONTRACT_VERSION,
+    AuditDecision, AuditEnvelope, DataTransaction, DataTransactionView, ProjectionId,
+    ProjectionStamp, ProjectionState, ReadStamp, RetentionPin, RetentionPinId, RuntimeChange,
+    RuntimeChangePage, RuntimeCommit, RuntimeCommitOutcome, RuntimeEvent, RuntimeGraphDiff,
+    RuntimeGraphSnapshot, RuntimeId, RuntimeMutation, RuntimeProperties, RuntimeRecord,
+    RuntimeRecordChange, RuntimeRef, RuntimeRelation, RuntimeRelationChange, RuntimeType,
+    RuntimeValue, ScopeId, SnapshotHandle, SnapshotId, DATA_RUNTIME_CONTRACT_VERSION,
 };
 pub use schema::{
     RuntimeEventSchema, RuntimePropertySchema, RuntimeRecordSchema, RuntimeRelationSchema,
