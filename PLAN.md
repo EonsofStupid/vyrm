@@ -79,9 +79,12 @@ disagree, `SPEC.md` is authoritative and this document is wrong.
 > memtables, repeatable snapshots, and reopen are green. Content-addressed
 > immutable segments now retain MVCC history, and locked manifest publication
 > uses expected-parent CAS plus sync-before-`CURRENT` ordering. Checkpoints and
-> segment/WAL lifecycle integration are the next native boundary. Named,
-> checksummed checkpoints now pin historical manifests and release explicitly;
-> database-level segment/WAL rotation remains open. Fjall remains live.
+> segment/WAL lifecycle integration followed. Named, checksummed checkpoints
+> pin historical manifests and release explicitly. Database flush now orders
+> WAL sync, content-addressed segment sync, successor-WAL creation, and manifest
+> CAS publication; reopen validates reachable segments and replays only the
+> manifest-declared WAL range. The native `Engine` adapter, compaction/GC,
+> fault matrices, and performance proof remain open. Fjall remains live.
 > The product handoff, canonical package-event grammar, alpha release gates,
 > deployment/update tiers, and separate SurrealDB/Qdrant proof protocols are
 > frozen in `docs/clyffy-kernel-alpha.md`.

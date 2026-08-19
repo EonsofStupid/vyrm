@@ -474,10 +474,11 @@ database truth; performance and recall regressions fail CI at explicit bounds.
 
 ## Immediate next implementation slice
 
-M2 is closed. Begin M3 beside—not underneath—the compatibility adapter. Freeze
-the checksummed WAL frame, atomic key/value mutation payload, immutable segment,
-manifest, and `CURRENT` publication formats before implementing the native
-`Engine` adapter. Prove torn/corrupt recovery and recovery idempotency first;
-then add MVCC/memtables, segments/checkpoints, manifest CAS, pinned-snapshot
-compaction, and the full three-backend differential in that order. Do not begin
-vectors, S3, GPU, or clustering before native correctness and measurement close.
+M2 is closed and the first M3 storage lifecycle is implemented beside—not
+underneath—the compatibility adapter. WAL, atomic mutation, immutable segment,
+manifest, and `CURRENT` formats are frozen; torn/corrupt recovery, MVCC,
+checkpoints, manifest CAS, segment flush, WAL rotation, and reopen at the
+manifest replay boundary are covered. Next implement the native `Engine`
+adapter and the Memory/Fjall/native differential, then pinned-snapshot
+compaction/GC and the crash/disk-full/recovery matrix. Do not begin vectors, S3,
+GPU, or clustering before native correctness and measurement close.

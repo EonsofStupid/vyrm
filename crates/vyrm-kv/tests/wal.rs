@@ -1,7 +1,8 @@
 use std::fs::OpenOptions;
 use std::io::{Read, Seek, SeekFrom, Write};
 use vyrm_kv::{
-    recover, repair_torn_tail, Durability, Error, WalBatch, WalWriter, WAL_FORMAT_VERSION,
+    recover, recover_from, repair_torn_tail, Durability, Error, WalBatch, WalWriter,
+    WAL_FORMAT_VERSION,
 };
 
 #[test]
@@ -55,6 +56,31 @@ fn atomic_frames_round_trip_and_continue_after_reopen() {
         )
         .unwrap();
     assert_eq!(recover(&path).unwrap().recovered_through, 7);
+}
+
+#[test]
+fn rotated_wal_recovery_starts_at_the_manifest_sequence() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("rotated.wal");
+    let mut writer = WalWriter::create_at(&path, 41).unwrap();
+    writer
+        .append(
+            &WalBatch {
+                first_sequence: 41,
+                last_sequence: 43,
+                payload: b"rotated",
+            },
+            Durability::Authoritative,
+        )
+        .unwrap();
+    drop(writer);
+    let recovery = recover_from(&path, 41).unwrap();
+    assert_eq!(recovery.recovered_through, 43);
+    assert_eq!(WalWriter::open_at(&path, 41).unwrap().next_sequence(), 44);
+    assert!(
+        recover(&path).is_err(),
+        "the wrong manifest boundary must fail"
+    );
 }
 
 #[test]

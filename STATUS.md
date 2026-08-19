@@ -96,9 +96,13 @@ not roadmap language.
   on corruption. Locked manifest publication syncs immutable bytes before an
   atomic, separately checksummed `CURRENT` update and rejects stale parent CAS.
   Named checkpoints now pin historical manifest generations with canonical
-  names, idempotent creation, and explicit directory-synced release.
-  Segment/WAL lifecycle integration, compaction, the native `Engine` adapter,
-  and performance claims remain open.
+  names, idempotent creation, and explicit directory-synced release. Database
+  flush synchronizes the active WAL, writes and synchronizes a
+  content-addressed segment, creates its successor WAL, then publishes the new
+  manifest by expected-parent CAS. Reopen validates every reachable segment and
+  replays at the manifest WAL boundary, preserving historical snapshots across
+  repeated flushes. Compaction/GC, the native `Engine` adapter, systematic
+  fault matrices, and performance claims remain open.
 
 ## Verification
 

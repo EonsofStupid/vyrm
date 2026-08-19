@@ -19,11 +19,22 @@ pub struct Memtable {
 
 impl Memtable {
     pub fn recover(batches: &[RecoveredBatch]) -> Result<Self> {
-        let mut table = Self::default();
+        Self::recover_from(batches, 0)
+    }
+
+    pub fn recover_from(batches: &[RecoveredBatch], previous_sequence: u64) -> Result<Self> {
+        let mut table = Self::at_sequence(previous_sequence);
         for batch in batches {
             table.apply(batch)?;
         }
         Ok(table)
+    }
+
+    pub(crate) fn at_sequence(sequence: u64) -> Self {
+        Self {
+            maximum_sequence: sequence,
+            ..Self::default()
+        }
     }
 
     pub fn apply(&mut self, recovered: &RecoveredBatch) -> Result<()> {
@@ -66,13 +77,15 @@ impl Memtable {
     }
 
     pub fn get(&self, key: &[u8], read_sequence: u64) -> Option<&[u8]> {
+        self.get_version(key, read_sequence)?.value.as_deref()
+    }
+
+    pub fn get_version(&self, key: &[u8], read_sequence: u64) -> Option<&VersionedValue> {
         self.versions
             .get(key)?
             .iter()
             .rev()
-            .find(|version| version.sequence <= read_sequence)?
-            .value
-            .as_deref()
+            .find(|version| version.sequence <= read_sequence)
     }
 
     pub fn scan(
@@ -117,5 +130,19 @@ impl Memtable {
         self.versions
             .iter()
             .map(|(key, versions)| (key.as_slice(), versions.as_slice()))
+    }
+
+    pub fn visible_versions(&self, read_sequence: u64) -> Vec<(Vec<u8>, VersionedValue)> {
+        self.versions
+            .iter()
+            .filter_map(|(key, versions)| {
+                versions
+                    .iter()
+                    .rev()
+                    .find(|version| version.sequence <= read_sequence)
+                    .cloned()
+                    .map(|version| (key.clone(), version))
+            })
+            .collect()
     }
 }

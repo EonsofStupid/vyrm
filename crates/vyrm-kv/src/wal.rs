@@ -85,6 +85,15 @@ pub struct WalWriter {
 
 impl WalWriter {
     pub fn create(path: &Path) -> Result<Self> {
+        Self::create_at(path, 1)
+    }
+
+    pub fn create_at(path: &Path, next_sequence: u64) -> Result<Self> {
+        if next_sequence == 0 {
+            return Err(Error::InvalidBatch(
+                "WAL starting sequence must be non-zero".into(),
+            ));
+        }
         let mut file = OpenOptions::new()
             .read(true)
             .write(true)
@@ -95,13 +104,17 @@ impl WalWriter {
         Ok(Self {
             path: path.to_owned(),
             file,
-            next_sequence: 1,
+            next_sequence,
             poisoned: false,
         })
     }
 
     pub fn open(path: &Path) -> Result<Self> {
-        let recovery = recover(path)?;
+        Self::open_at(path, 1)
+    }
+
+    pub fn open_at(path: &Path, starting_sequence: u64) -> Result<Self> {
+        let recovery = recover_from(path, starting_sequence)?;
         if let Some(offset) = recovery.torn_tail {
             return Err(Error::TornTail { offset });
         }
@@ -202,6 +215,15 @@ impl WalWriter {
 }
 
 pub fn recover(path: &Path) -> Result<Recovery> {
+    recover_from(path, 1)
+}
+
+pub fn recover_from(path: &Path, starting_sequence: u64) -> Result<Recovery> {
+    if starting_sequence == 0 {
+        return Err(Error::InvalidBatch(
+            "WAL recovery sequence must be non-zero".into(),
+        ));
+    }
     let mut file = File::open(path)?;
     let length = file.metadata()?.len();
     if length < FILE_HEADER_BYTES as u64 {
@@ -216,7 +238,7 @@ pub fn recover(path: &Path) -> Result<Recovery> {
 
     let mut batches = Vec::new();
     let mut offset = FILE_HEADER_BYTES as u64;
-    let mut expected_sequence = 1u64;
+    let mut expected_sequence = starting_sequence;
     let mut torn_tail = None;
     while offset < length {
         let remaining = length - offset;
@@ -287,14 +309,18 @@ pub fn recover(path: &Path) -> Result<Recovery> {
 /// Truncates only an incomplete final frame previously classified by recovery.
 /// Complete corrupt frames are never converted into apparent data loss.
 pub fn repair_torn_tail(path: &Path) -> Result<Recovery> {
-    let recovery = recover(path)?;
+    repair_torn_tail_from(path, 1)
+}
+
+pub(crate) fn repair_torn_tail_from(path: &Path, starting_sequence: u64) -> Result<Recovery> {
+    let recovery = recover_from(path, starting_sequence)?;
     let Some(_) = recovery.torn_tail else {
         return Ok(recovery);
     };
     let file = OpenOptions::new().write(true).open(path)?;
     file.set_len(recovery.valid_bytes)?;
     file.sync_all()?;
-    recover(path)
+    recover_from(path, starting_sequence)
 }
 
 struct DecodedHeader {

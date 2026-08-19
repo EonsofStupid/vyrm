@@ -55,6 +55,11 @@ or kinds, trailing bytes, and lengths outside the declared limits fail closed.
 One MVCC sequence is allocated per operation while the whole batch remains one
 atomic WAL frame.
 
+After a memtable flush, the successor WAL starts at the manifest's declared
+`wal_start_sequence`; recovery takes that boundary explicitly, so an empty
+rotated WAL still has an unambiguous next sequence and replay under the wrong
+manifest fails.
+
 ## Recovery classification
 
 - An incomplete file header is corruption: no valid WAL identity exists.
@@ -102,6 +107,13 @@ session. It validates expected `CURRENT`, generation, and parent; syncs immutabl
 manifest bytes; atomically renames a separately checksummed `CURRENT` pointer;
 then syncs the containing directory. Stale compare-and-swap expectations fail
 without changing reachability. Compaction remains open.
+
+Database flush follows the crash-safe publication order directly: sync the
+active WAL, write/sync/rename the content-addressed segment, create and sync the
+successor WAL, persist the next manifest, then advance `CURRENT`. Crashing
+before `CURRENT` leaves only unreachable artifacts and recovers the old WAL;
+crashing after it finds both the new segment and successor WAL. Old WALs remain
+reachable through historical manifests/checkpoints until GC proves otherwise.
 
 ## Frozen vectors
 

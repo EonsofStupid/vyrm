@@ -175,3 +175,65 @@ fn database_snapshots_are_repeatable_across_writes_and_reopen() {
     assert_eq!(reopened.get(b"key", old), Some(b"old".as_slice()));
     assert_eq!(reopened.get(b"key", current), Some(b"new".as_slice()));
 }
+
+#[test]
+fn flush_rotates_wal_publishes_manifest_and_preserves_old_snapshots() {
+    let parent = tempfile::tempdir().unwrap();
+    let root = parent.path().join("native");
+    let mut database = Database::create(&root).unwrap();
+    database
+        .write(
+            &WriteBatch::new(vec![Mutation::Put {
+                key: b"key".to_vec(),
+                value: b"v1".to_vec(),
+            }])
+            .unwrap(),
+            Durability::Authoritative,
+        )
+        .unwrap();
+    let first_snapshot = database.snapshot();
+    let first_manifest = database.flush_memtable(10).unwrap().unwrap();
+    assert_eq!(first_manifest.generation, 2);
+    assert_eq!(first_manifest.durable_sequence, 1);
+    assert_eq!(first_manifest.wal_start_sequence, 2);
+    assert_eq!(first_manifest.segments.len(), 1);
+    assert_eq!(database.memtable().version_count(), 0);
+    database.checkpoint("after-first-flush", 10).unwrap();
+
+    database
+        .write(
+            &WriteBatch::new(vec![Mutation::Put {
+                key: b"key".to_vec(),
+                value: b"v2".to_vec(),
+            }])
+            .unwrap(),
+            Durability::Authoritative,
+        )
+        .unwrap();
+    let second_snapshot = database.snapshot();
+    assert_eq!(database.get(b"key", first_snapshot), Some(b"v1".as_slice()));
+    assert_eq!(
+        database.get(b"key", second_snapshot),
+        Some(b"v2".as_slice())
+    );
+    let second_manifest = database.flush_memtable(11).unwrap().unwrap();
+    assert_eq!(second_manifest.generation, 3);
+    assert_eq!(second_manifest.durable_sequence, 2);
+    assert_eq!(second_manifest.wal_start_sequence, 3);
+    assert_eq!(second_manifest.segments.len(), 2);
+    assert!(database.flush_memtable(12).unwrap().is_none());
+    drop(database);
+
+    let reopened = Database::open(&root).unwrap();
+    assert_eq!(reopened.manifest(), &second_manifest);
+    assert_eq!(reopened.snapshot(), second_snapshot);
+    assert_eq!(reopened.get(b"key", first_snapshot), Some(b"v1".as_slice()));
+    assert_eq!(
+        reopened.get(b"key", second_snapshot),
+        Some(b"v2".as_slice())
+    );
+    assert_eq!(reopened.checkpoints().unwrap().len(), 1);
+    assert!(root.join("wal/00000000000000000001.wal").exists());
+    assert!(root.join("wal/00000000000000000002.wal").exists());
+    assert!(root.join("wal/00000000000000000003.wal").exists());
+}

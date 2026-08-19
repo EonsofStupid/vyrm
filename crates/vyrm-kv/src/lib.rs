@@ -22,6 +22,6 @@ pub use manifest::{
 pub use memtable::{Memtable, VersionedValue};
 pub use segment::{Segment, SEGMENT_FORMAT_VERSION};
 pub use wal::{
-    recover, repair_torn_tail, AppendReceipt, Durability, RecoveredBatch, Recovery, WalBatch,
-    WalWriter, WAL_FORMAT_VERSION, WAL_MAX_PAYLOAD_BYTES,
+    recover, recover_from, repair_torn_tail, AppendReceipt, Durability, RecoveredBatch, Recovery,
+    WalBatch, WalWriter, WAL_FORMAT_VERSION, WAL_MAX_PAYLOAD_BYTES,
 };

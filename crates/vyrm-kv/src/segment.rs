@@ -66,13 +66,15 @@ impl Segment {
     }
 
     pub fn get(&self, key: &[u8], read_sequence: u64) -> Option<&[u8]> {
+        self.get_version(key, read_sequence)?.value.as_deref()
+    }
+
+    pub fn get_version(&self, key: &[u8], read_sequence: u64) -> Option<&VersionedValue> {
         self.versions
             .get(key)?
             .iter()
             .rev()
-            .find(|version| version.sequence <= read_sequence)?
-            .value
-            .as_deref()
+            .find(|version| version.sequence <= read_sequence)
     }
 
     pub fn scan(
@@ -93,6 +95,20 @@ impl Segment {
                     .find(|version| version.sequence <= read_sequence)
                     .and_then(|version| version.value.as_ref())
                     .map(|value| (key.clone(), value.clone()))
+            })
+            .collect()
+    }
+
+    pub fn visible_versions(&self, read_sequence: u64) -> Vec<(Vec<u8>, VersionedValue)> {
+        self.versions
+            .iter()
+            .filter_map(|(key, versions)| {
+                versions
+                    .iter()
+                    .rev()
+                    .find(|version| version.sequence <= read_sequence)
+                    .cloned()
+                    .map(|version| (key.clone(), version))
             })
             .collect()
     }
