@@ -175,18 +175,28 @@ disagree, `SPEC.md` is authoritative and this document is wrong.
 > atomically advances a new local manifest rather than importing the source's
 > history. Round-trip, corruption/truncation/stale denial, idempotent reinstall,
 > target replacement, reopen, continued writes, and crash/storage-full tests at
-> all three install boundaries are green. Raft adapter ownership must now split
-> local vote/log history from transferable canonical state before this bundle
-> can replace the runtime snapshot denial.
+> all three install boundaries are green. This froze the physical prerequisite
+> consumed by adapter v3 in the following overlay.
 
-> **M7 canonical-runtime overlay (2026-08-19).** Adapter format `v2` adds a
+> **M7 transferable-runtime overlay (2026-08-19).** Adapter format `v3` now
+> gives canonical state and node-local Raft history separate VyrmKV ownership
+> domains. Votes, logs, committed/purged cursors, and the content-addressed
+> current-snapshot cache remain local; the applied cursor and canonical runtime
+> mutations remain atomic in the transferable state database. OpenRaft builds
+> and installs authenticated snapshot-bundle v1 bytes, binds metadata and
+> snapshot id before manifest publication, and preserves the target vote.
+> Upstream storage conformance plus corrupt/forged/stale/duplicate/reopen tests
+> pass. A real four-node run snapshots a `RuntimeCommit`, purges the leader log,
+> catches up a new learner, and reopens the runtime truth on all four nodes.
+
+> **M7 canonical-runtime overlay (2026-08-19).** Adapter format `v2` first added a
 > typed `runtime_commit` operation. `NativeEngine` now exposes a validated
 > no-write plan, allowing canonical mutations, audit/outbox work, the Raft
 > applied cursor, response, and idempotency record to publish in one
 > authoritative VyrmKV WAL frame. Reopen, duplicate, stale-cursor denial, and
 > same-frame differentials are green. A real three-voter run reopens identical
 > canonical runtime truth through `NativeEngine` on every voter. Runtime-bearing
-> snapshots fail closed until transferable manifest/segment/WAL bundles exist;
+> snapshots are now transferred by adapter v3's physical ownership split;
 > production transport, explicit epoch transition, bounded request state,
 > independent-process chaos, and Multi-AZ evidence remain open.
 

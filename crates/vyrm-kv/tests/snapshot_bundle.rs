@@ -48,6 +48,10 @@ fn physical_snapshot_bundle_round_trips_installs_atomically_and_continues_writes
     let decoded = SnapshotBundle::decode(&encoded).unwrap();
     assert_eq!(decoded, bundle);
     assert_eq!(decoded.encode().unwrap(), encoded);
+    assert_eq!(decoded.get(b"alpha").unwrap(), Some(b"one".to_vec()));
+    assert_eq!(decoded.get(b"beta").unwrap(), None);
+    assert_eq!(decoded.get(b"gamma").unwrap(), Some(b"three".to_vec()));
+    assert_eq!(decoded.get(b"absent").unwrap(), None);
 
     let target_directory = tempfile::tempdir().unwrap();
     let mut target = Database::create(target_directory.path()).unwrap();
@@ -120,8 +124,7 @@ fn corruption_and_truncation_are_denied_before_manifest_publication() {
     assert!(SnapshotBundle::decode(&encoded[..encoded.len() - 1]).is_err());
     assert_eq!(target.manifest(), &original_manifest);
 
-    let manifest_len =
-        u32::from_be_bytes(encoded[12..16].try_into().unwrap()) as usize;
+    let manifest_len = u32::from_be_bytes(encoded[12..16].try_into().unwrap()) as usize;
     let manifest_end = 20 + manifest_len;
     let mut noncanonical = Vec::with_capacity(encoded.len() + 1);
     noncanonical.extend_from_slice(&encoded[..12]);

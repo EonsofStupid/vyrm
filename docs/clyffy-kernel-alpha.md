@@ -140,10 +140,11 @@ measured local results, never universal superiority.
    adapter over native VyrmKV with storage conformance and real four-node
    election/failover/snapshot/membership evidence. Typed canonical
    `RuntimeCommit` application now shares one WAL frame with Raft state and is
-   reopened identically across three voters. Physical VyrmKV snapshot-bundle v1
-   now passes its local format/recovery gate; separation and OpenRaft streaming
-   integration, production transport, independent-node chaos, and Multi-AZ
-   evidence remain open.
+   reopened identically across three voters. Adapter v3 separates local Raft
+   history from canonical state and uses physical VyrmKV snapshot-bundle v1 to
+   catch up a fresh learner after log purge with the runtime truth intact.
+   Production transport, chunked/file-backed snapshot streaming, independent-
+   node chaos, and Multi-AZ evidence remain open.
 8. Bind declared package workflows to preflight/pre-tool/post-tool policy.
 9. Extend truthful temporal visualization across storage, search, and workflow
    events and continue controlled provider evaluations.

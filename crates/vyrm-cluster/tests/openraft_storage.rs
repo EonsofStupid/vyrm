@@ -1,12 +1,12 @@
 #![cfg(feature = "openraft-adapter")]
 
-use openraft::storage::RaftStateMachine;
+use openraft::storage::{RaftLogStorage, RaftStateMachine};
 use openraft::testing::{StoreBuilder, Suite};
 use openraft::{
     CommittedLeaderId, Entry, EntryPayload, ErrorSubject, ErrorVerb, LogId, RaftSnapshotBuilder,
-    StorageError,
+    StorageError, Vote,
 };
-use std::io;
+use std::io::{self, Cursor};
 use tempfile::TempDir;
 use vyrm_cluster::{
     ClusterError, ShardId, VyrmRaftCommand, VyrmRaftLogStore, VyrmRaftStateMachine, VyrmRaftStore,
@@ -16,7 +16,7 @@ use vyrm_core::{
     RuntimeCommit, RuntimeMutation, RuntimeRecordSchema, RuntimeSchemaRegistry, RuntimeType,
     ScopeId,
 };
-use vyrm_kv::{recover, WriteBatch};
+use vyrm_kv::{recover, Database, Durability, Mutation, SnapshotBundle, WriteBatch};
 use vyrm_store::{Engine, NativeEngine};
 
 struct VyrmStoreBuilder;
@@ -146,12 +146,12 @@ fn placement_epoch_and_full_request_identity_fail_closed() {
 }
 
 #[test]
-fn canonical_runtime_commit_is_atomic_idempotent_durable_and_snapshot_safe() {
+fn canonical_runtime_commit_is_atomic_idempotent_durable_and_transferable() {
     tokio::runtime::Runtime::new()
         .unwrap()
         .block_on(async {
             let directory = tempfile::tempdir().map_err(test_storage_error)?;
-            let (log_store, mut state_machine) =
+            let (mut log_store, mut state_machine) =
                 VyrmRaftStore::open(directory.path(), ShardId(12)).map_err(test_storage_error)?;
             let commit = bootstrap_runtime_commit("cluster:atomic", 0);
             let command = VyrmRaftCommand::runtime_commit(
@@ -200,9 +200,27 @@ fn canonical_runtime_commit_is_atomic_idempotent_durable_and_snapshot_safe() {
             assert!(retried[0].reason.contains("already committed"));
             assert_eq!(retried[0].runtime_outcome.as_ref(), Some(&outcome));
 
+            let source_vote = Vote::new(7, 1);
+            log_store.save_vote(&source_vote).await?;
             let mut builder = state_machine.get_snapshot_builder().await;
-            let snapshot_error = builder.build_snapshot().await.unwrap_err();
-            assert!(snapshot_error.to_string().contains("transferable VyrmKV"));
+            let snapshot = builder.build_snapshot().await?;
+            assert_eq!(snapshot.meta.last_log_id, Some(retry_log));
+            assert!(snapshot.meta.snapshot_id.starts_with("v3-3-"));
+            let snapshot_meta = snapshot.meta;
+            let snapshot_data = snapshot.snapshot.into_inner();
+            let physical = SnapshotBundle::decode(&snapshot_data).map_err(test_storage_error)?;
+            assert!(physical
+                .get(b"vyrm/raft/v3/state/current")
+                .map_err(test_storage_error)?
+                .is_some());
+            assert!(physical
+                .get(b"vyrm/raft/v3/local/config")
+                .map_err(test_storage_error)?
+                .is_none());
+            assert!(physical
+                .get(b"vyrm/raft/v3/local/vote")
+                .map_err(test_storage_error)?
+                .is_none());
             drop(builder);
             drop(state_machine);
             drop(log_store);
@@ -214,7 +232,7 @@ fn canonical_runtime_commit_is_atomic_idempotent_durable_and_snapshot_safe() {
                 let has_raft_state = decoded
                     .operations
                     .iter()
-                    .any(|operation| operation.key() == b"vyrm/raft/v2/state/current");
+                    .any(|operation| operation.key() == b"vyrm/raft/v3/state/current");
                 let has_runtime_change = decoded
                     .operations
                     .iter()
@@ -232,9 +250,96 @@ fn canonical_runtime_commit_is_atomic_idempotent_durable_and_snapshot_safe() {
                 native
                     .runtime_commit_outcome(&outcome.commit_id)
                     .map_err(test_storage_error)?,
-                Some(outcome)
+                Some(outcome.clone())
             );
             drop(native);
+
+            let target_directory = tempfile::tempdir().map_err(test_storage_error)?;
+            let (mut target_log, mut target_state) =
+                VyrmRaftStore::open(target_directory.path(), ShardId(12))
+                    .map_err(test_storage_error)?;
+            let target_vote = Vote::new(2, 99);
+            target_log.save_vote(&target_vote).await?;
+
+            let mut corrupt_data = snapshot_data.clone();
+            let middle = corrupt_data.len() / 2;
+            corrupt_data[middle] ^= 0x40;
+            assert!(target_state
+                .install_snapshot(&snapshot_meta, Box::new(Cursor::new(corrupt_data)),)
+                .await
+                .is_err());
+            assert_eq!(target_state.applied_state().await?.0, None);
+            assert_eq!(target_log.read_vote().await?, Some(target_vote));
+
+            let mut forged_meta = snapshot_meta.clone();
+            forged_meta.snapshot_id.push_str("-forged");
+            assert!(target_state
+                .install_snapshot(&forged_meta, Box::new(Cursor::new(snapshot_data.clone())),)
+                .await
+                .is_err());
+            assert_eq!(target_state.applied_state().await?.0, None);
+            target_state
+                .install_snapshot(&snapshot_meta, Box::new(Cursor::new(snapshot_data.clone())))
+                .await?;
+            target_state
+                .install_snapshot(&snapshot_meta, Box::new(Cursor::new(snapshot_data.clone())))
+                .await?;
+            assert_eq!(target_log.read_vote().await?, Some(target_vote));
+            assert_eq!(target_state.applied_state().await?.0, Some(retry_log));
+            assert_eq!(
+                target_state
+                    .get_current_snapshot()
+                    .await?
+                    .expect("installed snapshot must be durable")
+                    .meta,
+                snapshot_meta
+            );
+            let after_snapshot_log = LogId::new(CommittedLeaderId::new(4, 1), 4);
+            target_state
+                .apply([Entry::<VyrmRaftTypeConfig> {
+                    log_id: after_snapshot_log,
+                    payload: EntryPayload::Blank,
+                }])
+                .await?;
+            assert!(target_state
+                .install_snapshot(&snapshot_meta, Box::new(Cursor::new(snapshot_data)),)
+                .await
+                .is_err());
+            assert_eq!(
+                target_state.applied_state().await?.0,
+                Some(after_snapshot_log)
+            );
+            drop(target_state);
+            drop(target_log);
+            let target_native =
+                NativeEngine::open(target_directory.path()).map_err(test_storage_error)?;
+            assert_eq!(
+                target_native.runtime_cursor().map_err(test_storage_error)?,
+                1
+            );
+            assert_eq!(
+                target_native
+                    .runtime_commit_outcome(&outcome.commit_id)
+                    .map_err(test_storage_error)?,
+                Some(outcome.clone())
+            );
+            drop(target_native);
+            let (mut target_log, mut target_state) =
+                VyrmRaftStore::open(target_directory.path(), ShardId(12))
+                    .map_err(test_storage_error)?;
+            assert_eq!(target_log.read_vote().await?, Some(target_vote));
+            assert_eq!(
+                target_state.applied_state().await?.0,
+                Some(after_snapshot_log)
+            );
+            assert_eq!(
+                target_state
+                    .get_current_snapshot()
+                    .await?
+                    .expect("snapshot cache must survive reopen")
+                    .meta,
+                snapshot_meta
+            );
 
             let (_, mut reopened) =
                 VyrmRaftStore::open(directory.path(), ShardId(12)).map_err(test_storage_error)?;
@@ -307,6 +412,28 @@ fn store_is_permanently_bound_to_one_shard() {
     VyrmRaftStore::open(directory.path(), ShardId(2)).unwrap();
     let error = match VyrmRaftStore::open(directory.path(), ShardId(3)) {
         Ok(_) => panic!("foreign shard binding unexpectedly opened"),
+        Err(error) => error,
+    };
+    assert!(matches!(error, ClusterError::Denied(_)));
+}
+
+#[test]
+fn legacy_or_ambiguous_adapter_domains_fail_closed() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut database = Database::create(directory.path()).unwrap();
+    database
+        .write_owned(
+            WriteBatch::new(vec![Mutation::Put {
+                key: b"vyrm/raft/v2/meta/config".to_vec(),
+                value: br#"{"format_version":2,"shard":2}"#.to_vec(),
+            }])
+            .unwrap(),
+            Durability::Authoritative,
+        )
+        .unwrap();
+    drop(database);
+    let error = match VyrmRaftStore::open(directory.path(), ShardId(2)) {
+        Ok(_) => panic!("legacy single-domain adapter unexpectedly opened as v3"),
         Err(error) => error,
     };
     assert!(matches!(error, ClusterError::Denied(_)));

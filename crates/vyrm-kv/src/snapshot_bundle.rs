@@ -37,6 +37,10 @@ impl SnapshotBundle {
     }
 
     pub fn validate(&self) -> Result<()> {
+        self.validated_segments().map(|_| ())
+    }
+
+    fn validated_segments(&self) -> Result<Vec<Segment>> {
         if self.format_version != SNAPSHOT_BUNDLE_FORMAT_VERSION {
             return Err(Error::UnsupportedVersion {
                 object: "snapshot bundle",
@@ -58,13 +62,14 @@ impl SnapshotBundle {
                 "snapshot bundle segment inventory does not match its manifest".into(),
             ));
         }
+        let mut segments = Vec::with_capacity(self.segments.len());
         for (bundled, expected) in self.segments.iter().zip(&self.source_manifest.segments) {
             if &bundled.descriptor != expected {
                 return Err(Error::InvalidManifest(
                     "snapshot segment order or descriptor differs from its manifest".into(),
                 ));
             }
-            Segment::validate_snapshot_bytes(expected, &bundled.bytes)?;
+            segments.push(Segment::validate_snapshot_bytes(expected, &bundled.bytes)?);
         }
         let content = self.content_bytes()?;
         if content.len().saturating_add(FOOTER_BYTES) > MAX_BUNDLE_BYTES {
@@ -78,7 +83,42 @@ impl SnapshotBundle {
                 "snapshot bundle digest does not match its content".into(),
             ));
         }
-        Ok(())
+        Ok(segments)
+    }
+
+    /// Reads one key from the authenticated physical closure without
+    /// installing it. Snapshot consumers use this to bind transfer metadata to
+    /// the exact state-machine bytes before the target manifest can advance.
+    pub fn get(&self, key: &[u8]) -> Result<Option<Vec<u8>>> {
+        Ok(self
+            .get_many(&[key])?
+            .pop()
+            .expect("one requested key produces one result"))
+    }
+
+    /// Reads several keys with one bundle-validation and segment-decode pass.
+    pub fn get_many(&self, keys: &[&[u8]]) -> Result<Vec<Option<Vec<u8>>>> {
+        let segments = self.validated_segments()?;
+        let mut selected = vec![None; keys.len()];
+        for segment in &segments {
+            for (index, key) in keys.iter().enumerate() {
+                if let Some(version) =
+                    segment.get_version(key, self.source_manifest.durable_sequence)
+                {
+                    if selected[index]
+                        .as_ref()
+                        .is_none_or(|(sequence, _)| version.sequence > *sequence)
+                    {
+                        selected[index] =
+                            Some((version.sequence, version.value.map(<[u8]>::to_vec)));
+                    }
+                }
+            }
+        }
+        Ok(selected
+            .into_iter()
+            .map(|version| version.and_then(|(_, value)| value))
+            .collect())
     }
 
     pub fn encode(&self) -> Result<Vec<u8>> {

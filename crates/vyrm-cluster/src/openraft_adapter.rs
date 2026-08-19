@@ -1,8 +1,9 @@
 //! OpenRaft adapter over the Vyrm-native durable key/value substrate.
 //!
-//! The adapter owns its on-disk keyspace and persists every vote, log append,
-//! committed pointer, state-machine application, and snapshot publication with
-//! `vyrm-kv` authoritative durability before returning success.
+//! Adapter v3 physically separates node-local Raft history from transferable
+//! canonical state. Votes, logs, purge/commit cursors, and snapshot cache
+//! references stay local; state-machine application and canonical runtime data
+//! share one authoritative VyrmKV WAL frame.
 
 // OpenRaft fixes `StorageError` as the error type in its storage traits. The
 // enum deliberately carries rich Raft context and is larger than Clippy's
@@ -23,20 +24,25 @@ use std::io::Cursor;
 use std::ops::{Bound, RangeBounds};
 use std::path::Path;
 use std::sync::{Arc, Mutex, MutexGuard};
-use vyrm_core::{digest::sha256_hex, RuntimeCommit, RuntimeCommitOutcome};
-use vyrm_kv::{Database, Durability, Mutation, WriteBatch};
+use vyrm_core::{digest::sha256_hex, ObjectReference, RuntimeCommit, RuntimeCommitOutcome};
+use vyrm_kv::{Database, Durability, Mutation, SnapshotBundle, WriteBatch};
 use vyrm_store::{
     native_runtime_commit_outcome, prepare_native_runtime_commit, Error as StoreError,
+    LocalObjectStore,
 };
 
-const ADAPTER_FORMAT_VERSION: u16 = 2;
-const KEY_CONFIG: &[u8] = b"vyrm/raft/v2/meta/config";
-const KEY_VOTE: &[u8] = b"vyrm/raft/v2/meta/vote";
-const KEY_COMMITTED: &[u8] = b"vyrm/raft/v2/meta/committed";
-const KEY_PURGED: &[u8] = b"vyrm/raft/v2/meta/purged";
-const KEY_STATE: &[u8] = b"vyrm/raft/v2/state/current";
-const KEY_SNAPSHOT: &[u8] = b"vyrm/raft/v2/state/snapshot";
-const LOG_PREFIX: &[u8] = b"vyrm/raft/v2/log/";
+const ADAPTER_FORMAT_VERSION: u16 = 3;
+const LOCAL_DATABASE_DIRECTORY: &str = "raft-local-v3";
+const SNAPSHOT_OBJECT_DIRECTORY: &str = "snapshot-objects";
+const KEY_STATE_CONFIG: &[u8] = b"vyrm/raft/v3/state/config";
+const KEY_LOCAL_CONFIG: &[u8] = b"vyrm/raft/v3/local/config";
+const KEY_VOTE: &[u8] = b"vyrm/raft/v3/local/vote";
+const KEY_COMMITTED: &[u8] = b"vyrm/raft/v3/local/committed";
+const KEY_PURGED: &[u8] = b"vyrm/raft/v3/local/purged";
+const KEY_STATE: &[u8] = b"vyrm/raft/v3/state/current";
+const KEY_SNAPSHOT: &[u8] = b"vyrm/raft/v3/local/snapshot";
+const LOG_PREFIX: &[u8] = b"vyrm/raft/v3/local/log/";
+const SNAPSHOT_MEDIA_TYPE: &str = "application/vnd.vyrm.raft-state-snapshot.v3";
 // JSON is only the correctness-gate codec. Keep worst-case byte-array expansion
 // comfortably below VyrmKV's 8 MiB value ceiling until a compact codec lands.
 const MAX_COMMAND_BYTES: usize = 1024 * 1024;
@@ -203,18 +209,29 @@ openraft::declare_raft_types!(
 pub type VyrmRaftEntry = Entry<VyrmRaftTypeConfig>;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct AdapterConfig {
     format_version: u16,
     shard: ShardId,
+    domain: AdapterDomain,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum AdapterDomain {
+    CanonicalState,
+    LocalRaft,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct AppliedRequest {
     command_digest: String,
     response: VyrmRaftResponse,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct StateMachineData {
     last_applied: Option<LogId<u64>>,
     last_membership: StoredMembership<u64, VyrmRaftNode>,
@@ -240,21 +257,24 @@ impl Default for StateMachineData {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct StoredSnapshot {
     meta: SnapshotMeta<u64, VyrmRaftNode>,
-    data: Vec<u8>,
+    object: ObjectReference,
 }
 
 type SharedDatabase = Arc<Mutex<Database>>;
 
 #[derive(Clone)]
 pub struct VyrmRaftLogStore {
-    database: SharedDatabase,
+    local_database: SharedDatabase,
 }
 
 #[derive(Clone)]
 pub struct VyrmRaftStateMachine {
-    database: SharedDatabase,
+    state_database: SharedDatabase,
+    local_database: SharedDatabase,
+    snapshot_objects: LocalObjectStore,
     shard: ShardId,
 }
 
@@ -265,64 +285,106 @@ impl VyrmRaftStore {
         root: &Path,
         shard: ShardId,
     ) -> ClusterResult<(VyrmRaftLogStore, VyrmRaftStateMachine)> {
-        let fresh = if root.exists() {
-            std::fs::read_dir(root)
-                .map_err(|error| ClusterError::Unavailable(error.to_string()))?
-                .next()
-                .is_none()
-        } else {
-            true
-        };
-        let mut database = if fresh {
-            Database::create(root)
-        } else {
-            Database::open(root)
-        }
-        .map_err(|error| ClusterError::Unavailable(error.to_string()))?;
+        let mut state_database = open_adapter_database(root)?;
+        ensure_adapter_database(
+            &mut state_database,
+            KEY_STATE_CONFIG,
+            AdapterConfig {
+                format_version: ADAPTER_FORMAT_VERSION,
+                shard,
+                domain: AdapterDomain::CanonicalState,
+            },
+            Some(put_json(KEY_STATE, &StateMachineData::default())?),
+        )?;
 
-        if fresh {
-            let operations = vec![
-                put_json(
-                    KEY_CONFIG,
-                    &AdapterConfig {
-                        format_version: ADAPTER_FORMAT_VERSION,
-                        shard,
-                    },
-                )?,
-                put_json(KEY_STATE, &StateMachineData::default())?,
-            ];
-            database
-                .write_owned(
-                    WriteBatch::new(operations)
-                        .map_err(|error| ClusterError::Unavailable(error.to_string()))?,
-                    Durability::Authoritative,
-                )
-                .map_err(|error| ClusterError::Unavailable(error.to_string()))?;
-        } else {
-            let bytes = database
-                .get(KEY_CONFIG, database.snapshot())
-                .ok_or_else(|| {
-                    ClusterError::Denied(
-                        "existing database is not a Vyrm OpenRaft adapter store".into(),
-                    )
-                })?;
-            let config: AdapterConfig = serde_json::from_slice(bytes)
-                .map_err(|error| ClusterError::Denied(error.to_string()))?;
-            if config.format_version != ADAPTER_FORMAT_VERSION || config.shard != shard {
-                return Err(ClusterError::Denied(
-                    "raft adapter format or shard binding does not match".into(),
-                ));
-            }
-        }
+        let local_root = root.join(LOCAL_DATABASE_DIRECTORY);
+        let mut local_database = open_adapter_database(&local_root)?;
+        ensure_adapter_database(
+            &mut local_database,
+            KEY_LOCAL_CONFIG,
+            AdapterConfig {
+                format_version: ADAPTER_FORMAT_VERSION,
+                shard,
+                domain: AdapterDomain::LocalRaft,
+            },
+            None,
+        )?;
+        let snapshot_objects = LocalObjectStore::open(local_root.join(SNAPSHOT_OBJECT_DIRECTORY))
+            .map_err(|error| ClusterError::Unavailable(error.to_string()))?;
 
-        let database = Arc::new(Mutex::new(database));
+        let database = Arc::new(Mutex::new(state_database));
+        let local_database = Arc::new(Mutex::new(local_database));
         Ok((
             VyrmRaftLogStore {
-                database: database.clone(),
+                local_database: local_database.clone(),
             },
-            VyrmRaftStateMachine { database, shard },
+            VyrmRaftStateMachine {
+                state_database: database,
+                local_database,
+                snapshot_objects,
+                shard,
+            },
         ))
     }
+}
+
+fn open_adapter_database(root: &Path) -> ClusterResult<Database> {
+    if root.join("CURRENT").is_file() {
+        return Database::open(root).map_err(|error| ClusterError::Unavailable(error.to_string()));
+    }
+    if root.exists()
+        && std::fs::read_dir(root)
+            .map_err(|error| ClusterError::Unavailable(error.to_string()))?
+            .next()
+            .is_some()
+    {
+        return Err(ClusterError::Denied(format!(
+            "adapter database {} has content but no authenticated VyrmKV CURRENT pointer",
+            root.display()
+        )));
+    }
+    Database::create(root).map_err(|error| ClusterError::Unavailable(error.to_string()))
+}
+
+fn ensure_adapter_database(
+    database: &mut Database,
+    config_key: &[u8],
+    expected: AdapterConfig,
+    initial: Option<Mutation>,
+) -> ClusterResult<()> {
+    let snapshot = database.snapshot();
+    if let Some(bytes) = database.get(config_key, snapshot) {
+        let actual: AdapterConfig = serde_json::from_slice(bytes)
+            .map_err(|error| ClusterError::Denied(error.to_string()))?;
+        if actual != expected {
+            return Err(ClusterError::Denied(
+                "raft adapter format, shard binding, or storage domain does not match".into(),
+            ));
+        }
+        if expected.domain == AdapterDomain::CanonicalState
+            && database.get(KEY_STATE, snapshot).is_none()
+        {
+            return Err(ClusterError::Denied(
+                "canonical Raft state database has no state-machine record".into(),
+            ));
+        }
+        return Ok(());
+    }
+    if snapshot.sequence != 0 {
+        return Err(ClusterError::Denied(
+            "existing database is not a Vyrm OpenRaft v3 storage domain".into(),
+        ));
+    }
+    let mut operations = vec![put_json(config_key, &expected)?];
+    operations.extend(initial);
+    database
+        .write_owned(
+            WriteBatch::new(operations)
+                .map_err(|error| ClusterError::Unavailable(error.to_string()))?,
+            Durability::Authoritative,
+        )
+        .map_err(|error| ClusterError::Unavailable(error.to_string()))?;
+    Ok(())
 }
 
 impl RaftLogReader<VyrmRaftTypeConfig> for VyrmRaftLogStore {
@@ -330,7 +392,7 @@ impl RaftLogReader<VyrmRaftTypeConfig> for VyrmRaftLogStore {
         &mut self,
         range: RB,
     ) -> std::result::Result<Vec<VyrmRaftEntry>, StorageError<u64>> {
-        let database = lock_database(&self.database, ErrorSubject::Logs, ErrorVerb::Read)?;
+        let database = lock_database(&self.local_database, ErrorSubject::Logs, ErrorVerb::Read)?;
         let rows = database.scan(
             LOG_PREFIX,
             prefix_end(LOG_PREFIX).as_deref(),
@@ -357,7 +419,7 @@ impl RaftLogStorage<VyrmRaftTypeConfig> for VyrmRaftLogStore {
     async fn get_log_state(
         &mut self,
     ) -> std::result::Result<LogState<VyrmRaftTypeConfig>, StorageError<u64>> {
-        let last_purged_log_id = read_json(&self.database, KEY_PURGED, ErrorSubject::Logs)?;
+        let last_purged_log_id = read_json(&self.local_database, KEY_PURGED, ErrorSubject::Logs)?;
         let mut reader = self.clone();
         let last_present = reader
             .try_get_log_entries(..)
@@ -376,7 +438,8 @@ impl RaftLogStorage<VyrmRaftTypeConfig> for VyrmRaftLogStore {
     }
 
     async fn save_vote(&mut self, vote: &Vote<u64>) -> std::result::Result<(), StorageError<u64>> {
-        let mut database = lock_database(&self.database, ErrorSubject::Vote, ErrorVerb::Write)?;
+        let mut database =
+            lock_database(&self.local_database, ErrorSubject::Vote, ErrorVerb::Write)?;
         let current: Option<Vote<u64>> = database
             .get(KEY_VOTE, database.snapshot())
             .map(|bytes| decode_json(bytes, ErrorSubject::Vote, ErrorVerb::Read))
@@ -404,7 +467,7 @@ impl RaftLogStorage<VyrmRaftTypeConfig> for VyrmRaftLogStore {
     }
 
     async fn read_vote(&mut self) -> std::result::Result<Option<Vote<u64>>, StorageError<u64>> {
-        read_json(&self.database, KEY_VOTE, ErrorSubject::Vote)
+        read_json(&self.local_database, KEY_VOTE, ErrorSubject::Vote)
     }
 
     async fn save_committed(
@@ -412,7 +475,7 @@ impl RaftLogStorage<VyrmRaftTypeConfig> for VyrmRaftLogStore {
         committed: Option<LogId<u64>>,
     ) -> std::result::Result<(), StorageError<u64>> {
         write_json(
-            &self.database,
+            &self.local_database,
             KEY_COMMITTED,
             &committed,
             ErrorSubject::Logs,
@@ -422,10 +485,12 @@ impl RaftLogStorage<VyrmRaftTypeConfig> for VyrmRaftLogStore {
     async fn read_committed(
         &mut self,
     ) -> std::result::Result<Option<LogId<u64>>, StorageError<u64>> {
-        Ok(
-            read_json::<Option<LogId<u64>>>(&self.database, KEY_COMMITTED, ErrorSubject::Logs)?
-                .flatten(),
-        )
+        Ok(read_json::<Option<LogId<u64>>>(
+            &self.local_database,
+            KEY_COMMITTED,
+            ErrorSubject::Logs,
+        )?
+        .flatten())
     }
 
     async fn append<I>(
@@ -438,7 +503,7 @@ impl RaftLogStorage<VyrmRaftTypeConfig> for VyrmRaftLogStore {
         I::IntoIter: Send,
     {
         let entries: Vec<_> = entries.into_iter().collect();
-        let result = persist_entries(&self.database, &entries);
+        let result = persist_entries(&self.local_database, &entries);
         match result {
             Ok(()) => {
                 callback.log_io_completed(Ok(()));
@@ -452,13 +517,13 @@ impl RaftLogStorage<VyrmRaftTypeConfig> for VyrmRaftLogStore {
     }
 
     async fn truncate(&mut self, log_id: LogId<u64>) -> std::result::Result<(), StorageError<u64>> {
-        delete_log_range(&self.database, log_id.index..)
+        delete_log_range(&self.local_database, log_id.index..)
     }
 
     async fn purge(&mut self, log_id: LogId<u64>) -> std::result::Result<(), StorageError<u64>> {
-        let mut operations = log_delete_operations(&self.database, ..=log_id.index)?;
+        let mut operations = log_delete_operations(&self.local_database, ..=log_id.index)?;
         operations.push(put_json_storage(KEY_PURGED, &log_id, ErrorSubject::Logs)?);
-        write_operations(&self.database, operations, ErrorSubject::Logs)
+        write_operations(&self.local_database, operations, ErrorSubject::Logs)
     }
 }
 
@@ -466,35 +531,37 @@ impl RaftSnapshotBuilder<VyrmRaftTypeConfig> for VyrmRaftStateMachine {
     async fn build_snapshot(
         &mut self,
     ) -> std::result::Result<Snapshot<VyrmRaftTypeConfig>, StorageError<u64>> {
-        let state = self.read_state()?;
-        if state.runtime_commit_count > 0 {
-            return Err(storage_error(
+        let (state, bundle) = {
+            let mut database = lock_database(
+                &self.state_database,
                 ErrorSubject::Snapshot(None),
                 ErrorVerb::Read,
-                "canonical runtime state has no transferable VyrmKV snapshot bundle",
-            ));
-        }
-        let data = encode_json(&state, ErrorSubject::StateMachine, ErrorVerb::Read)?;
-        let snapshot_id = format!(
-            "{}-{}",
-            state.last_applied.map_or(0, |log_id| log_id.index),
-            sha256_hex(&data)
-        );
+            )?;
+            let state = read_state_from_database(&database)?;
+            let at = state.last_applied.map_or(0, |log_id| log_id.index);
+            let bundle = database.export_snapshot_bundle(at).map_err(|error| {
+                storage_error(
+                    ErrorSubject::Snapshot(None),
+                    ErrorVerb::Read,
+                    error.to_string(),
+                )
+            })?;
+            (state, bundle)
+        };
+        let data = bundle.encode().map_err(|error| {
+            storage_error(
+                ErrorSubject::Snapshot(None),
+                ErrorVerb::Read,
+                error.to_string(),
+            )
+        })?;
+        let snapshot_id = expected_snapshot_id(&state, &bundle);
         let meta = SnapshotMeta {
             last_log_id: state.last_applied,
             last_membership: state.last_membership,
             snapshot_id,
         };
-        let stored = StoredSnapshot {
-            meta: meta.clone(),
-            data: data.clone(),
-        };
-        write_json(
-            &self.database,
-            KEY_SNAPSHOT,
-            &stored,
-            ErrorSubject::Snapshot(None),
-        )?;
+        publish_snapshot(&self.local_database, &self.snapshot_objects, &meta, &data)?;
         Ok(Snapshot {
             meta,
             snapshot: Box::new(Cursor::new(data)),
@@ -523,8 +590,11 @@ impl RaftStateMachine<VyrmRaftTypeConfig> for VyrmRaftStateMachine {
         I: IntoIterator<Item = VyrmRaftEntry> + Send,
         I::IntoIter: Send,
     {
-        let mut database =
-            lock_database(&self.database, ErrorSubject::StateMachine, ErrorVerb::Write)?;
+        let mut database = lock_database(
+            &self.state_database,
+            ErrorSubject::StateMachine,
+            ErrorVerb::Write,
+        )?;
         let mut state = read_state_from_database(&database)?;
         let mut responses = Vec::new();
         for entry in entries {
@@ -588,60 +658,184 @@ impl RaftStateMachine<VyrmRaftTypeConfig> for VyrmRaftStateMachine {
         snapshot: Box<<VyrmRaftTypeConfig as RaftTypeConfig>::SnapshotData>,
     ) -> std::result::Result<(), StorageError<u64>> {
         let data = snapshot.into_inner();
-        let state: StateMachineData = decode_json(
-            &data,
-            ErrorSubject::Snapshot(Some(meta.signature())),
-            ErrorVerb::Read,
-        )?;
+        let subject = ErrorSubject::Snapshot(Some(meta.signature()));
+        let bundle = SnapshotBundle::decode(&data)
+            .map_err(|error| storage_error(subject.clone(), ErrorVerb::Read, error.to_string()))?;
+        let state = state_from_snapshot_bundle(&bundle, self.shard, subject.clone())?;
         if state.last_applied != meta.last_log_id || state.last_membership != meta.last_membership {
             return Err(storage_error(
-                ErrorSubject::Snapshot(Some(meta.signature())),
+                subject,
                 ErrorVerb::Write,
                 "snapshot metadata does not match its state bytes",
             ));
         }
-        if state.runtime_commit_count > 0 {
+        if meta.snapshot_id != expected_snapshot_id(&state, &bundle) {
             return Err(storage_error(
                 ErrorSubject::Snapshot(Some(meta.signature())),
                 ErrorVerb::Write,
-                "refusing a snapshot that declares runtime commits without a VyrmKV bundle",
+                "snapshot id does not bind the exact VyrmKV bundle",
             ));
         }
-        let operations = vec![
-            put_json_storage(KEY_STATE, &state, ErrorSubject::StateMachine)?,
-            put_json_storage(
-                KEY_SNAPSHOT,
-                &StoredSnapshot {
-                    meta: meta.clone(),
-                    data,
-                },
-                ErrorSubject::Snapshot(Some(meta.signature())),
-            )?,
-        ];
-        write_operations(
-            &self.database,
-            operations,
+        let at = meta.last_log_id.map_or(0, |log_id| log_id.index);
+        lock_database(
+            &self.state_database,
             ErrorSubject::Snapshot(Some(meta.signature())),
-        )
+            ErrorVerb::Write,
+        )?
+        .install_snapshot_bundle(&bundle, at)
+        .map_err(|error| {
+            storage_error(
+                ErrorSubject::Snapshot(Some(meta.signature())),
+                ErrorVerb::Write,
+                error.to_string(),
+            )
+        })?;
+        publish_snapshot(&self.local_database, &self.snapshot_objects, meta, &data)
     }
 
     async fn get_current_snapshot(
         &mut self,
     ) -> std::result::Result<Option<Snapshot<VyrmRaftTypeConfig>>, StorageError<u64>> {
-        let stored: Option<StoredSnapshot> =
-            read_json(&self.database, KEY_SNAPSHOT, ErrorSubject::Snapshot(None))?;
-        Ok(stored.map(|snapshot| Snapshot {
-            meta: snapshot.meta,
-            snapshot: Box::new(Cursor::new(snapshot.data)),
-        }))
+        let stored: Option<StoredSnapshot> = read_json(
+            &self.local_database,
+            KEY_SNAPSHOT,
+            ErrorSubject::Snapshot(None),
+        )?;
+        stored
+            .map(|snapshot| {
+                let data = self
+                    .snapshot_objects
+                    .get(&snapshot.object)
+                    .map_err(|error| {
+                        storage_error(
+                            ErrorSubject::Snapshot(Some(snapshot.meta.signature())),
+                            ErrorVerb::Read,
+                            error.to_string(),
+                        )
+                    })?;
+                let bundle = SnapshotBundle::decode(&data).map_err(|error| {
+                    storage_error(
+                        ErrorSubject::Snapshot(Some(snapshot.meta.signature())),
+                        ErrorVerb::Read,
+                        error.to_string(),
+                    )
+                })?;
+                let state = state_from_snapshot_bundle(
+                    &bundle,
+                    self.shard,
+                    ErrorSubject::Snapshot(Some(snapshot.meta.signature())),
+                )?;
+                if state.last_applied != snapshot.meta.last_log_id
+                    || state.last_membership != snapshot.meta.last_membership
+                    || snapshot.meta.snapshot_id != expected_snapshot_id(&state, &bundle)
+                {
+                    return Err(storage_error(
+                        ErrorSubject::Snapshot(Some(snapshot.meta.signature())),
+                        ErrorVerb::Read,
+                        "cached snapshot metadata does not match its authenticated bundle",
+                    ));
+                }
+                Ok(Snapshot {
+                    meta: snapshot.meta,
+                    snapshot: Box::new(Cursor::new(data)),
+                })
+            })
+            .transpose()
     }
 }
 
 impl VyrmRaftStateMachine {
     fn read_state(&self) -> std::result::Result<StateMachineData, StorageError<u64>> {
-        let database = lock_database(&self.database, ErrorSubject::StateMachine, ErrorVerb::Read)?;
+        let database = lock_database(
+            &self.state_database,
+            ErrorSubject::StateMachine,
+            ErrorVerb::Read,
+        )?;
         read_state_from_database(&database)
     }
+}
+
+fn state_from_snapshot_bundle(
+    bundle: &SnapshotBundle,
+    shard: ShardId,
+    subject: ErrorSubject<u64>,
+) -> std::result::Result<StateMachineData, StorageError<u64>> {
+    let mut values = bundle
+        .get_many(&[KEY_STATE_CONFIG, KEY_LOCAL_CONFIG, KEY_STATE])
+        .map_err(|error| storage_error(subject.clone(), ErrorVerb::Read, error.to_string()))?
+        .into_iter();
+    let config_bytes = values.next().flatten().ok_or_else(|| {
+        storage_error(
+            subject.clone(),
+            ErrorVerb::Read,
+            "snapshot bundle has no canonical-state adapter config",
+        )
+    })?;
+    let config: AdapterConfig = decode_json(&config_bytes, subject.clone(), ErrorVerb::Read)?;
+    let expected = AdapterConfig {
+        format_version: ADAPTER_FORMAT_VERSION,
+        shard,
+        domain: AdapterDomain::CanonicalState,
+    };
+    if config != expected {
+        return Err(storage_error(
+            subject.clone(),
+            ErrorVerb::Read,
+            "snapshot bundle adapter format, shard, or storage domain does not match",
+        ));
+    }
+    if values.next().flatten().is_some() {
+        return Err(storage_error(
+            subject.clone(),
+            ErrorVerb::Read,
+            "snapshot bundle illegally contains node-local Raft configuration",
+        ));
+    }
+    let state_bytes = values.next().flatten().ok_or_else(|| {
+        storage_error(
+            subject.clone(),
+            ErrorVerb::Read,
+            "snapshot bundle has no state-machine record",
+        )
+    })?;
+    decode_json(&state_bytes, subject, ErrorVerb::Read)
+}
+
+fn expected_snapshot_id(state: &StateMachineData, bundle: &SnapshotBundle) -> String {
+    format!(
+        "v3-{}-{}",
+        state.last_applied.map_or(0, |log_id| log_id.index),
+        bundle.digest
+    )
+}
+
+fn publish_snapshot(
+    local_database: &SharedDatabase,
+    objects: &LocalObjectStore,
+    meta: &SnapshotMeta<u64, VyrmRaftNode>,
+    data: &[u8],
+) -> std::result::Result<(), StorageError<u64>> {
+    let subject = ErrorSubject::Snapshot(Some(meta.signature()));
+    let verified = objects
+        .put(data)
+        .map_err(|error| storage_error(subject.clone(), ErrorVerb::Write, error.to_string()))?;
+    let object = ObjectReference::for_bytes(
+        format!("raft-snapshot-{}", meta.snapshot_id),
+        None,
+        SNAPSHOT_MEDIA_TYPE,
+        data,
+        verified.receipt,
+    )
+    .map_err(|error| storage_error(subject.clone(), ErrorVerb::Write, error.to_string()))?;
+    write_json(
+        local_database,
+        KEY_SNAPSHOT,
+        &StoredSnapshot {
+            meta: meta.clone(),
+            object,
+        },
+        subject,
+    )
 }
 
 fn read_state_from_database(

@@ -310,7 +310,7 @@ fn real_consensus_elects_fails_over_installs_snapshot_and_changes_membership() {
 #[test]
 fn real_consensus_replicates_canonical_runtime_truth_to_every_voter() {
     tokio::runtime::Runtime::new().unwrap().block_on(async {
-        let cluster = TestCluster::start(&[1, 2, 3]).await;
+        let cluster = TestCluster::start(&[1, 2, 3, 4]).await;
         cluster
             .node(1)
             .initialize(BTreeMap::from([(1, node(1))]))
@@ -362,9 +362,43 @@ fn real_consensus_replicates_canonical_runtime_truth_to_every_voter() {
                 .await
                 .unwrap();
         }
+
+        cluster.node(1).trigger().snapshot().await.unwrap();
+        let snapshot_metrics = cluster
+            .node(1)
+            .wait(Some(Duration::from_secs(5)))
+            .ge(
+                Metric::Snapshot(Some(response.log_id)),
+                "runtime-bearing snapshot publication",
+            )
+            .await
+            .unwrap();
+        let snapshot_log = snapshot_metrics.snapshot.unwrap();
+        cluster
+            .node(1)
+            .trigger()
+            .purge_log(snapshot_log.index)
+            .await
+            .unwrap();
+        cluster
+            .node(1)
+            .wait(Some(Duration::from_secs(5)))
+            .purged(Some(snapshot_log), "runtime-bearing log purge")
+            .await
+            .unwrap();
+        cluster.node(1).add_learner(4, node(4), true).await.unwrap();
+        cluster
+            .node(4)
+            .wait(Some(Duration::from_secs(5)))
+            .ge(
+                Metric::AppliedIndex(Some(response.log_id.index)),
+                "new learner receives runtime truth from snapshot after purge",
+            )
+            .await
+            .unwrap();
         cluster.shutdown().await;
 
-        for id in [1, 2, 3] {
+        for id in [1, 2, 3, 4] {
             let engine = NativeEngine::open(cluster.directory(id)).unwrap();
             assert_eq!(engine.runtime_cursor().unwrap(), 1);
             assert!(engine

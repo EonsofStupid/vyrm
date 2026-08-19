@@ -44,47 +44,51 @@ Selection matrix:
 | OpenRaft 0.10 alpha | Reject for this gate | Alpha API/behavior is not the right persistence-format dependency |
 | TiKV `raft-rs` | Defer, retain as a design reference | Strong production lineage, but lower-level integration and readiness driving would add more Vyrm-owned consensus plumbing before this contract is proved |
 
-The Vyrm adapter format is now `v2`. It supplies:
+The Vyrm adapter format is now `v3`. It supplies:
 
 - a canonical command/response/node `RaftTypeConfig` with typed `probe` and
   `runtime_commit` operations;
-- a store permanently bound to one shard and one versioned keyspace;
-- authoritative VyrmKV batches for votes, committed pointers, ordered logs,
-  state-machine application, and protocol-only snapshot
-  publication/installation;
+- a store permanently bound to one shard and two explicit physical domains:
+  canonical state at the instance root and node-local Raft state under
+  `raft-local-v3`;
+- authoritative VyrmKV batches for node-local votes, committed/purged pointers,
+  and ordered logs, without placing those records in transferable state;
 - monotonic vote persistence and append-batch hole rejection;
 - full-command idempotency, payload integrity, shard binding, placement-epoch
   binding, and optional expected-commit-index comparison;
 - native `RuntimeCommit` planning without publication, allowing canonical
   runtime mutations, audit/outbox work, the Raft applied cursor, response, and
   idempotency state to share one authoritative VyrmKV WAL frame;
-- digest-chained application state and metadata-checked snapshot installation;
+- digest-chained application state and metadata-checked physical snapshot
+  installation;
+- snapshot-bundle v1 export/install carrying the applied cursor, membership,
+  request identities, schema, audit/outbox, and every canonical runtime record;
+- a content-addressed local snapshot object plus a small local VyrmKV reference,
+  preventing recursive bundles and avoiding the 8 MiB value ceiling;
 - the complete upstream OpenRaft storage conformance suite; and
 - a real four-node in-process engine test that elects a leader, commits
   commands, purges snapshotted logs, catches up a new learner through snapshot
   transfer, isolates the leader, elects on the majority side, commits after
   failover, and completes joint-to-uniform membership replacement.
 
-A separate three-voter run commits a real canonical `RuntimeCommit`, waits for
-every voter to apply it, shuts all Raft tasks down, and reopens each directory
-through `NativeEngine`. Every voter exposes the same runtime commit identity and
-cursor. Storage differentials additionally prove same-frame Raft/runtime
-publication, duplicate replay without a second runtime mutation, durable
-expected-cursor denial, restart recovery, and snapshot refusal.
+A real canonical `RuntimeCommit` run waits for three voters to apply the same
+truth, builds an authenticated physical snapshot, purges the leader through
+that snapshot, and adds a fourth node. The fresh learner receives the snapshot,
+reopens through `NativeEngine`, and exposes the same commit identity and cursor
+as all voters. Storage differentials additionally prove same-frame
+Raft/runtime publication, duplicate replay without a second runtime mutation,
+durable expected-cursor denial, corrupt-byte and forged-metadata refusal before
+state publication, idempotent reinstallation, stale refusal, restart recovery,
+and preservation of the target node's local vote.
 
-Runtime-bearing snapshots deliberately fail closed. The existing OpenRaft
-snapshot/catch-up test remains valid for protocol/probe state, but once a
-canonical runtime transaction is present the adapter refuses to publish or
-install a state-only snapshot. This prevents a new learner from receiving an
-apparently current Raft cursor while silently missing runtime truth. Transferable
-VyrmKV manifest/segment/WAL bundles are the next storage prerequisite.
-
-That VyrmKV prerequisite now exists as physical snapshot-bundle v1, with
-authenticated binary encoding, flush-bounded export, atomic local-manifest
-installation, stale/corrupt denial, and crash/storage-full recovery evidence.
-It is not wired into OpenRaft yet: adapter format v2 still co-locates local
-vote/log history with canonical state. The next adapter format must separate
-those physical ownership domains before installing a runtime bundle.
+Snapshot data is exactly VyrmKV physical snapshot-bundle v1: a flush-bounded,
+SHA-256-authenticated manifest and immutable-segment closure installed through
+one new local manifest publication. Before installation the adapter reads the
+state config and state-machine record directly from the validated closure,
+checks shard/domain ownership, binds OpenRaft metadata and snapshot id, and
+refuses any local-Raft config in the bundle. Source manifest ancestry is never
+adopted. Snapshot cache bytes live in the node-local content-addressed object
+tier; only their verified reference is stored beside local Raft history.
 
 This is stronger evidence than the single-term simulator, but the two tests
 serve different purposes. The simulator gives replayable schedules for explicit
@@ -170,15 +174,17 @@ This gate still does not contain production RPC, node identity/authentication,
 TLS, membership discovery, admission control, multi-shard atomic commit, or
 metadata-shard reshard cutover. Application state currently proves ordered
 identity/CAS/digest semantics and now atomically dispatches canonical
-`RuntimeCommit` transactions into native VyrmKV. It does not yet transfer that
-runtime state in a Raft snapshot. Its synchronous mutex, prefix scans, JSON
-protocol state, and unbounded request-id map are correctness-first test
-implementations, not production throughput or footprint claims. Commands are
-limited to 1 MiB until the adapter receives a compact codec.
+`RuntimeCommit` transactions into native VyrmKV and transfers that runtime state
+in Raft snapshots. Snapshot construction and receipt currently use
+`Cursor<Vec<u8>>`; OpenRaft can chunk those bytes on the wire, but Vyrm does not
+yet claim file-backed or bounded-memory snapshot streaming. Its synchronous
+mutex, prefix scans, JSON protocol state, and unbounded request-id map are
+correctness-first test implementations, not production throughput or footprint
+claims. Commands are limited to 1 MiB and physical snapshot envelopes to 1 GiB
+until compact and streaming codecs land.
 
-The next M7 slice must split local Raft log/vote storage from transferable
-canonical state and connect the existing VyrmKV bundle to OpenRaft snapshot
-streaming. It must then define an explicit placement-epoch transition command,
+The next M7 slice must define an explicit placement-epoch transition command,
 bound idempotency state, add authenticated production transport, and run
-process/network/disk chaos on independently restarted nodes. Only that evidence
-can advance a Multi-AZ claim.
+process/network/disk chaos on independently restarted nodes. File-backed,
+bounded-memory snapshot creation/receipt is also required before high-volume
+cluster claims. Only that evidence can advance a Multi-AZ claim.

@@ -50,7 +50,8 @@ Vyrm provides:
 - canonical Multi-AZ placement/snapshot/route/transfer contracts, a
   deterministic quorum fault simulator, and a feature-gated real-consensus
   adapter that atomically applies canonical runtime commits over native VyrmKV
-  (runtime-bearing snapshot transfer and production clustering remain gated);
+  and transfers that runtime truth to post-purge learners through authenticated
+  physical snapshots (production clustering remains gated);
 - identical lifecycle semantics through hooks, CLI, and MCP;
 - isolated per-platform instances with explicit store/root binding.
 

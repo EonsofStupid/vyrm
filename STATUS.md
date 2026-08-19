@@ -53,21 +53,23 @@ not roadmap language.
   snapshots in native VyrmKV and passes the complete upstream storage suite. A
   four-node in-process test covers election, quorum commit, snapshot catch-up,
   majority-side failover, post-failover commit, and voter replacement.
-  Adapter format v2 also atomically publishes a typed canonical `RuntimeCommit`
-  and Raft application state in one VyrmKV WAL frame. A three-voter test reopens
-  identical runtime truth through `NativeEngine` on every voter; duplicate,
-  stale-cursor, restart, and same-frame differentials are green. Runtime-bearing
-  snapshots fail closed until a transferable VyrmKV bundle exists. Production
-  transport, independent-process chaos, and Multi-AZ deployment remain
-  unclaimed.
+  Adapter format v3 physically separates node-local vote/log/commit/purge and
+  snapshot-cache state from transferable canonical application state. A typed
+  `RuntimeCommit` and Raft applied state still publish in one state-domain WAL
+  frame. Authenticated VyrmKV bundles now carry that complete canonical state;
+  a four-node run snapshots a real runtime commit, purges the leader log, and
+  catches up a fresh learner that reopens the same runtime truth. Local votes
+  are not imported. Corrupt, forged-metadata, stale, duplicate, restart, and
+  same-frame differentials are green. Production transport, independent-
+  process chaos, and Multi-AZ deployment remain unclaimed.
 - Native VyrmKV now provides the required physical snapshot-bundle primitive.
   Bundle v1 is a deterministic SHA-256-authenticated binary closure over a
   flush-bounded manifest and all reachable immutable segments. Installation
   syncs segments and an empty continuation WAL before one local manifest CAS;
   it never imports the source manifest lineage. Round-trip, reopen, stale and
   corrupt denial, idempotency, continued-write, and crash/storage-full matrices
-  are green. The Raft adapter has not yet split local vote/log ownership from
-  transferable canonical state, so runtime snapshot transfer remains gated.
+  are green. Adapter v3 consumes this closure for OpenRaft snapshot build and
+  installation while retaining source and target node-local Raft history.
 - A persisted, revisioned schema registry now governs typed runtime records,
   relations, and events. Unknown types and properties fail closed; property
   value types, required fields, event subjects, legal edge endpoints, temporal
