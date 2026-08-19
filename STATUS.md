@@ -103,6 +103,12 @@ tests cover operator commands, hooks, explicit recovery, and both MCP eras.
 - Prompt-flight acceptance without a marker proves process completion only.
   Model-quality conclusions require non-trivial evaluators and repeated trials;
   the flight UI deliberately does not turn one attractive trace into a claim.
+- `vyrmQL`, `vyrmMX`, `vyrmDS`, and native `vyrmKV` now have a researched
+  target architecture but are not implemented subsystems. The first gated
+  implementation step is an explicit typed transaction/read-stamp/snapshot
+  port. Vector, object-store, embedding, GPU, edge, and Multi-AZ capabilities
+  remain sequenced work, not current product claims. See
+  `docs/vyrmds-architecture-research.md`.
 
 ## Product and instance boundary
 

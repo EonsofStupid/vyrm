@@ -178,6 +178,9 @@ statistically significant model-performance claim.
 - [`STATUS.md`](STATUS.md) — executable current state and deliberate limits
 - [`SPEC.md`](SPEC.md) — authoritative contract and vocabulary
 - [`PLAN.md`](PLAN.md) — historical execution journal and measured decisions
+- [`docs/vyrmds-architecture-research.md`](docs/vyrmds-architecture-research.md)
+  — pinned upstream research, target data-runtime boundaries, and gated build
+  sequence for `vyrmQL`/`vyrmMX`/`vyrmDS`/native `vyrmKV`
 - [`eval/results/2026-08-18-summary.json`](eval/results/2026-08-18-summary.json)
   — retained evaluation evidence
 

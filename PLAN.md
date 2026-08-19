@@ -55,6 +55,15 @@ disagree, `SPEC.md` is authoritative and this document is wrong.
 > compatibility adapter on latency, throughput, durability, recovery, and
 > memory. Licensing is not the optimization boundary; measured behavior is.
 
+> **Data-runtime research overlay (2026-08-19).** The proposed `vyrmQL`,
+> `vyrmMX`, `vyrmDS`, and native `vyrmKV` names are now assigned explicit
+> boundaries; they are not represented as implemented. A pinned primary-source
+> review of Qdrant, SurrealDB, HelixDB, SlateDB, Lance, DataFusion, OpenDAL,
+> cuVS, and TiKV produced an adopt/adapt/reject matrix and milestones M0–M8.
+> The next implementation slice is the typed transaction/read-stamp/snapshot
+> port, proven against `MemoryEngine` and Fjall before query, vector, object, or
+> cluster work. See `docs/vyrmds-architecture-research.md`.
+
 ## 1 · Grounding result
 
 State recomputed from source on 2026-08-10 and differenced against the
