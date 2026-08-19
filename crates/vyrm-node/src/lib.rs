@@ -40,4 +40,4 @@ pub use reasoning::{
 };
 pub use registry::{Harness, Registry, Verification, VERIFICATION_TTL_MS};
 pub use routing::{ensure_routing_fresh, load_routing, reset_routing, RoutingReady};
-pub use stack::{detect, StackProfile};
+pub use stack::{detect, package_run_event, PackageManager, PackageRunEvent, StackProfile};

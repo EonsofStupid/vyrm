@@ -1,0 +1,265 @@
+use std::collections::BTreeMap;
+use std::sync::{Arc, Barrier};
+use std::thread;
+
+use vyrm_core::{
+    DataTransaction, RuntimeCommit, RuntimeEvent, RuntimeEventSchema, RuntimeMutation,
+    RuntimeProperties, RuntimeSchemaRegistry, RuntimeType, ScopeId,
+};
+use vyrm_store::{Engine, Error, MemoryEngine, Store};
+
+fn schema() -> RuntimeSchemaRegistry {
+    let mut registry = RuntimeSchemaRegistry::empty(1, "snapshot test schema");
+    registry.events.insert(
+        RuntimeType::new("pulse").unwrap(),
+        RuntimeEventSchema {
+            subject_required: false,
+            subject_types: Default::default(),
+            properties: BTreeMap::new(),
+            allow_additional_properties: false,
+        },
+    );
+    registry
+}
+
+fn bootstrap(scope: &ScopeId, expected_cursor: u64) -> RuntimeCommit {
+    RuntimeCommit {
+        scope: scope.clone(),
+        at: 100,
+        actor: "agent:snapshot-test".into(),
+        expected_cursor,
+        mutations: vec![RuntimeMutation::Schema { registry: schema() }],
+    }
+}
+
+fn pulse(scope: &ScopeId, expected_cursor: u64) -> RuntimeCommit {
+    RuntimeCommit {
+        scope: scope.clone(),
+        at: 101,
+        actor: "agent:snapshot-test".into(),
+        expected_cursor,
+        mutations: vec![RuntimeMutation::Event {
+            event: RuntimeEvent {
+                kind: RuntimeType::new("pulse").unwrap(),
+                subject: None,
+                properties: RuntimeProperties::new(),
+            },
+        }],
+    }
+}
+
+fn assert_snapshot_contract(engine: &dyn Engine) {
+    let scope = ScopeId::new("instance:snapshot").unwrap();
+    engine.commit_runtime(&bootstrap(&scope, 0)).unwrap();
+
+    let read = engine.runtime_read_stamp(&scope).unwrap();
+    assert_eq!(read.schema_revision, Some(1));
+    assert_eq!(read.commit_cursor, 1);
+    assert!(read.head_digest.is_some());
+    read.validate().unwrap();
+
+    let snapshot = engine
+        .open_runtime_snapshot(&scope, "agent:reader", 1_000, 100)
+        .unwrap();
+    assert_eq!(snapshot.read, read);
+    engine.commit_runtime(&pulse(&scope, 1)).unwrap();
+
+    let frozen = engine
+        .runtime_snapshot_changes(&snapshot, 0, 10, 1_050)
+        .unwrap();
+    assert_eq!(frozen.head_cursor, 1);
+    assert_eq!(frozen.through_cursor, 1);
+    assert_eq!(frozen.changes.len(), 1);
+    assert!(!frozen.has_more());
+
+    let live = engine.runtime_changes_since(0, 10, Some(&scope)).unwrap();
+    assert_eq!(live.head_cursor, 2);
+    assert_eq!(live.changes.len(), 2);
+    assert_eq!(
+        engine.runtime_snapshots(1_050).unwrap(),
+        vec![snapshot.clone()]
+    );
+    assert!(engine.runtime_snapshots(1_100).unwrap().is_empty());
+    assert!(matches!(
+        engine.runtime_snapshot_changes(&snapshot, 0, 10, 1_100),
+        Err(Error::SnapshotExpired {
+            expired_at: 1_100,
+            ..
+        })
+    ));
+    assert!(engine.release_runtime_snapshot(&snapshot.id).unwrap());
+    assert!(!engine.release_runtime_snapshot(&snapshot.id).unwrap());
+    assert!(matches!(
+        engine.runtime_snapshot_changes(&snapshot, 0, 10, 1_050),
+        Err(Error::SnapshotNotFound(_))
+    ));
+}
+
+#[test]
+fn memory_and_fjall_enforce_identical_snapshot_semantics() {
+    let dir = tempfile::tempdir().unwrap();
+    let fjall = Store::open(dir.path()).unwrap();
+    let memory = MemoryEngine::new();
+    assert_snapshot_contract(&fjall);
+    assert_snapshot_contract(&memory);
+}
+
+#[test]
+fn fjall_snapshot_catalog_survives_restart() {
+    let dir = tempfile::tempdir().unwrap();
+    let scope = ScopeId::new("instance:restart").unwrap();
+    let handle = {
+        let store = Store::open(dir.path()).unwrap();
+        store.commit_runtime(&bootstrap(&scope, 0)).unwrap();
+        store
+            .open_runtime_snapshot(&scope, "agent:restart", 10, 100)
+            .unwrap()
+    };
+
+    let reopened = Store::open(dir.path()).unwrap();
+    assert_eq!(
+        reopened.runtime_snapshots(20).unwrap(),
+        vec![handle.clone()]
+    );
+    let page = reopened
+        .runtime_snapshot_changes(&handle, 0, 10, 20)
+        .unwrap();
+    assert_eq!(page.head_cursor, 1);
+    assert_eq!(page.changes.len(), 1);
+}
+
+fn assert_data_transaction_contract(engine: &dyn Engine) {
+    let scope = ScopeId::new("instance:transaction").unwrap();
+    let read = engine.runtime_read_stamp(&scope).unwrap();
+    let transaction = DataTransaction::new(read.clone(), bootstrap(&scope, 0)).unwrap();
+    let digest = transaction.digest();
+    assert_eq!(digest.len(), 64);
+    let outcome = engine.commit_data_transaction(&transaction).unwrap();
+    assert_eq!(outcome.last_cursor, 1);
+
+    let stale = DataTransaction::new(read, bootstrap(&scope, 0)).unwrap();
+    assert!(matches!(
+        engine.commit_data_transaction(&stale),
+        Err(Error::RuntimeConflict {
+            expected: 0,
+            actual: 1
+        })
+    ));
+}
+
+#[test]
+fn data_transactions_bind_writes_to_their_read_state_on_both_engines() {
+    let dir = tempfile::tempdir().unwrap();
+    assert_data_transaction_contract(&Store::open(dir.path()).unwrap());
+    assert_data_transaction_contract(&MemoryEngine::new());
+}
+
+fn assert_concurrent_compare_and_swap<E>(engine: Arc<E>)
+where
+    E: Engine + Send + Sync + 'static,
+{
+    let scope = ScopeId::new("instance:race").unwrap();
+    let read = engine.runtime_read_stamp(&scope).unwrap();
+    let barrier = Arc::new(Barrier::new(3));
+    let mut workers = Vec::new();
+    for _ in 0..2 {
+        let engine = Arc::clone(&engine);
+        let barrier = Arc::clone(&barrier);
+        let transaction = DataTransaction::new(read.clone(), bootstrap(&scope, 0)).unwrap();
+        workers.push(thread::spawn(move || {
+            barrier.wait();
+            engine.commit_data_transaction(&transaction)
+        }));
+    }
+    barrier.wait();
+
+    let results: Vec<_> = workers
+        .into_iter()
+        .map(|worker| worker.join().unwrap())
+        .collect();
+    assert_eq!(results.iter().filter(|result| result.is_ok()).count(), 1);
+    assert_eq!(
+        results
+            .iter()
+            .filter(|result| matches!(result, Err(Error::RuntimeConflict { .. })))
+            .count(),
+        1
+    );
+    assert_eq!(engine.runtime_cursor().unwrap(), 1);
+}
+
+#[test]
+fn concurrent_transactions_never_lose_an_update() {
+    let dir = tempfile::tempdir().unwrap();
+    assert_concurrent_compare_and_swap(Arc::new(Store::open(dir.path()).unwrap()));
+    assert_concurrent_compare_and_swap(Arc::new(MemoryEngine::new()));
+}
+
+#[test]
+fn deterministic_mixed_scope_trace_is_identical_across_backends() {
+    let dir = tempfile::tempdir().unwrap();
+    let fjall = Store::open(dir.path()).unwrap();
+    let memory = MemoryEngine::new();
+    let scopes = [
+        ScopeId::new("instance:trace-a").unwrap(),
+        ScopeId::new("instance:trace-b").unwrap(),
+    ];
+
+    for scope in &scopes {
+        let cursor = fjall.runtime_cursor().unwrap();
+        let commit = bootstrap(scope, cursor);
+        assert_eq!(
+            fjall.commit_runtime(&commit).unwrap().commit_id,
+            memory.commit_runtime(&commit).unwrap().commit_id
+        );
+    }
+
+    let mut state = 0x5eed_u64;
+    let mut frozen = None;
+    for step in 0..64 {
+        state = state
+            .wrapping_mul(6_364_136_223_846_793_005)
+            .wrapping_add(1);
+        let scope = &scopes[(state >> 63) as usize];
+        let cursor = fjall.runtime_cursor().unwrap();
+        let commit = pulse(scope, cursor);
+        let left = fjall.commit_runtime(&commit).unwrap();
+        let right = memory.commit_runtime(&commit).unwrap();
+        assert_eq!(left.commit_id, right.commit_id);
+        assert_eq!(left.last_cursor, right.last_cursor);
+
+        if step == 15 {
+            let left = fjall
+                .open_runtime_snapshot(&scopes[0], "agent:trace", 10_000, 1_000)
+                .unwrap();
+            let right = memory
+                .open_runtime_snapshot(&scopes[0], "agent:trace", 10_000, 1_000)
+                .unwrap();
+            assert_eq!(left, right);
+            frozen = Some(left);
+        }
+        if step % 7 == 0 {
+            let after = cursor.saturating_sub(3);
+            assert_eq!(
+                fjall.runtime_changes_since(after, 4, Some(scope)).unwrap(),
+                memory
+                    .runtime_changes_since(after, 4, Some(scope))
+                    .unwrap()
+            );
+            assert_eq!(
+                fjall.runtime_read_stamp(scope).unwrap(),
+                memory.runtime_read_stamp(scope).unwrap()
+            );
+        }
+    }
+
+    let frozen = frozen.unwrap();
+    assert_eq!(
+        fjall
+            .runtime_snapshot_changes(&frozen, 0, 128, 10_500)
+            .unwrap(),
+        memory
+            .runtime_snapshot_changes(&frozen, 0, 128, 10_500)
+            .unwrap()
+    );
+}

@@ -59,6 +59,12 @@ macro_rules! runtime_ident {
 runtime_ident!(ScopeId, "runtime scope");
 runtime_ident!(RuntimeType, "runtime type");
 runtime_ident!(RuntimeId, "runtime id");
+runtime_ident!(SnapshotId, "snapshot id");
+runtime_ident!(ProjectionId, "projection id");
+
+/// Wire version for the data-runtime transaction, snapshot, projection, and
+/// audit contracts. Unknown versions are rejected rather than guessed.
+pub const DATA_RUNTIME_CONTRACT_VERSION: u16 = 1;
 
 fn validate_identifier(kind: &'static str, value: &str) -> Result<()> {
     if value.is_empty() {
@@ -304,6 +310,386 @@ pub struct RuntimeCommitOutcome {
     pub count: usize,
     pub first_claim_sequence: Option<u64>,
     pub last_claim_sequence: Option<u64>,
+}
+
+/// Exact logical state observed by a reader or transaction author.
+///
+/// `manifest_id` is a content digest over the other fields. The compatibility
+/// engines do not pretend to expose a physical LSM manifest; this semantic
+/// manifest identity is stable across backends and becomes the parent identity
+/// of a native `vyrmKV` physical manifest later.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReadStamp {
+    pub contract_version: u16,
+    pub scope: ScopeId,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub schema_revision: Option<u64>,
+    pub catalog_revision: u64,
+    pub commit_cursor: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub head_digest: Option<String>,
+    pub manifest_id: String,
+}
+
+impl ReadStamp {
+    pub fn new(
+        scope: ScopeId,
+        schema_revision: Option<u64>,
+        catalog_revision: u64,
+        commit_cursor: u64,
+        head_digest: Option<String>,
+    ) -> Result<Self> {
+        let mut stamp = Self {
+            contract_version: DATA_RUNTIME_CONTRACT_VERSION,
+            scope,
+            schema_revision,
+            catalog_revision,
+            commit_cursor,
+            head_digest,
+            manifest_id: String::new(),
+        };
+        stamp.validate_components()?;
+        stamp.manifest_id = digest::sha256_hex(&stamp.manifest_bytes());
+        Ok(stamp)
+    }
+
+    pub fn validate(&self) -> Result<()> {
+        self.validate_components()?;
+        validate_digest("read stamp manifest", &self.manifest_id)?;
+        let expected = digest::sha256_hex(&self.manifest_bytes());
+        if self.manifest_id != expected {
+            return Err(Error::InvalidRuntime {
+                reason: "read stamp manifest digest does not match its fields".into(),
+            });
+        }
+        Ok(())
+    }
+
+    pub fn canonical_bytes(&self) -> Vec<u8> {
+        let mut out = self.manifest_bytes();
+        text(&mut out, &self.manifest_id);
+        out
+    }
+
+    fn validate_components(&self) -> Result<()> {
+        if self.contract_version != DATA_RUNTIME_CONTRACT_VERSION {
+            return Err(Error::InvalidRuntime {
+                reason: format!(
+                    "unsupported data-runtime contract version {}",
+                    self.contract_version
+                ),
+            });
+        }
+        if self.schema_revision == Some(0) {
+            return Err(Error::InvalidRuntime {
+                reason: "schema revision zero is not a valid installed revision".into(),
+            });
+        }
+        match (self.commit_cursor, self.head_digest.as_deref()) {
+            (0, None) => {}
+            (0, Some(_)) => {
+                return Err(Error::InvalidRuntime {
+                    reason: "an empty runtime cannot have a hash-chain head".into(),
+                });
+            }
+            (_, Some(value)) => validate_digest("read stamp hash-chain head", value)?,
+            (_, None) => {
+                return Err(Error::InvalidRuntime {
+                    reason: "a non-empty runtime must carry its hash-chain head".into(),
+                });
+            }
+        }
+        Ok(())
+    }
+
+    fn manifest_bytes(&self) -> Vec<u8> {
+        let mut out = b"vyrm-read-stamp-v1\0".to_vec();
+        out.extend_from_slice(&self.contract_version.to_be_bytes());
+        text(&mut out, self.scope.as_str());
+        encode_optional_u64(&mut out, self.schema_revision);
+        out.extend_from_slice(&self.catalog_revision.to_be_bytes());
+        out.extend_from_slice(&self.commit_cursor.to_be_bytes());
+        optional_text(&mut out, self.head_digest.as_deref());
+        out
+    }
+}
+
+/// Persisted lease over one transaction-consistent read stamp.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SnapshotHandle {
+    pub contract_version: u16,
+    pub id: SnapshotId,
+    pub read: ReadStamp,
+    pub owner: String,
+    pub created_at: Millis,
+    pub expires_at: Millis,
+}
+
+impl SnapshotHandle {
+    pub fn new(
+        read: ReadStamp,
+        owner: impl Into<String>,
+        created_at: Millis,
+        ttl: Millis,
+    ) -> Result<Self> {
+        read.validate()?;
+        let owner = owner.into();
+        validate_text("snapshot owner", &owner)?;
+        if ttl == 0 {
+            return Err(Error::InvalidRuntime {
+                reason: "snapshot lease duration must be greater than zero".into(),
+            });
+        }
+        let expires_at = created_at
+            .checked_add(ttl)
+            .ok_or_else(|| Error::InvalidRuntime {
+                reason: "snapshot lease expiration overflowed".into(),
+            })?;
+        let id = SnapshotId::new(Self::identity(&read, &owner, created_at, expires_at))?;
+        Ok(Self {
+            contract_version: DATA_RUNTIME_CONTRACT_VERSION,
+            id,
+            read,
+            owner,
+            created_at,
+            expires_at,
+        })
+    }
+
+    pub fn validate(&self) -> Result<()> {
+        if self.contract_version != DATA_RUNTIME_CONTRACT_VERSION {
+            return Err(Error::InvalidRuntime {
+                reason: format!(
+                    "unsupported snapshot contract version {}",
+                    self.contract_version
+                ),
+            });
+        }
+        self.read.validate()?;
+        validate_text("snapshot owner", &self.owner)?;
+        if self.expires_at <= self.created_at {
+            return Err(Error::InvalidRuntime {
+                reason: "snapshot lease must expire after creation".into(),
+            });
+        }
+        let expected = Self::identity(&self.read, &self.owner, self.created_at, self.expires_at);
+        if self.id.as_str() != expected {
+            return Err(Error::InvalidRuntime {
+                reason: "snapshot identity does not match its lease and read stamp".into(),
+            });
+        }
+        Ok(())
+    }
+
+    pub fn is_expired(&self, now: Millis) -> bool {
+        now >= self.expires_at
+    }
+
+    fn identity(read: &ReadStamp, owner: &str, created_at: Millis, expires_at: Millis) -> String {
+        let mut bytes = b"vyrm-snapshot-handle-v1\0".to_vec();
+        bytes.extend_from_slice(&read.canonical_bytes());
+        text(&mut bytes, owner);
+        bytes.extend_from_slice(&created_at.to_be_bytes());
+        bytes.extend_from_slice(&expires_at.to_be_bytes());
+        digest::sha256_hex(&bytes)
+    }
+}
+
+/// A runtime commit bound to the exact state from which it was constructed.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct DataTransaction {
+    pub contract_version: u16,
+    pub read: ReadStamp,
+    pub commit: RuntimeCommit,
+}
+
+impl DataTransaction {
+    pub fn new(read: ReadStamp, commit: RuntimeCommit) -> Result<Self> {
+        let transaction = Self {
+            contract_version: DATA_RUNTIME_CONTRACT_VERSION,
+            read,
+            commit,
+        };
+        transaction.validate()?;
+        Ok(transaction)
+    }
+
+    pub fn validate(&self) -> Result<()> {
+        if self.contract_version != DATA_RUNTIME_CONTRACT_VERSION {
+            return Err(Error::InvalidRuntime {
+                reason: format!(
+                    "unsupported transaction contract version {}",
+                    self.contract_version
+                ),
+            });
+        }
+        self.read.validate()?;
+        self.commit.validate()?;
+        if self.read.scope != self.commit.scope {
+            return Err(Error::InvalidRuntime {
+                reason: "transaction read scope differs from commit scope".into(),
+            });
+        }
+        if self.read.commit_cursor != self.commit.expected_cursor {
+            return Err(Error::InvalidRuntime {
+                reason: "transaction expected cursor differs from its read stamp".into(),
+            });
+        }
+        Ok(())
+    }
+
+    pub fn digest(&self) -> String {
+        let mut bytes = b"vyrm-data-transaction-v1\0".to_vec();
+        bytes.extend_from_slice(&self.contract_version.to_be_bytes());
+        bytes.extend_from_slice(&self.read.canonical_bytes());
+        let commit = self.commit.canonical_bytes();
+        bytes.extend_from_slice(&(commit.len() as u64).to_be_bytes());
+        bytes.extend_from_slice(&commit);
+        digest::sha256_hex(&bytes)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProjectionState {
+    Building,
+    Ready,
+    Quarantined,
+    Retiring,
+}
+
+/// Common freshness and provenance identity for every derived index family.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProjectionStamp {
+    pub contract_version: u16,
+    pub id: ProjectionId,
+    pub generation: u64,
+    pub source_cursor: u64,
+    pub config_digest: String,
+    pub artifact_digest: String,
+    pub state: ProjectionState,
+}
+
+impl ProjectionStamp {
+    pub fn validate(&self) -> Result<()> {
+        if self.contract_version != DATA_RUNTIME_CONTRACT_VERSION || self.generation == 0 {
+            return Err(Error::InvalidRuntime {
+                reason: "projection contract version and generation must be valid".into(),
+            });
+        }
+        validate_digest("projection configuration", &self.config_digest)?;
+        validate_digest("projection artifact", &self.artifact_digest)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AuditDecision {
+    Allow,
+    Deny,
+}
+
+/// Portable JSON audit envelope. Persistence and archival policy belong to
+/// `vyrmDS`; this type freezes the information every adapter must preserve.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AuditEnvelope {
+    pub contract_version: u16,
+    pub request_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent_request_id: Option<String>,
+    pub at: Millis,
+    pub actor: String,
+    pub scope: ScopeId,
+    pub operation: String,
+    pub resource: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub read: Option<ReadStamp>,
+    pub decision: AuditDecision,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub outcome_cursor: Option<u64>,
+    pub duration_ms: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub previous_digest: Option<String>,
+    pub digest: String,
+}
+
+impl AuditEnvelope {
+    pub fn seal(mut self) -> Result<Self> {
+        self.validate_components()?;
+        self.digest = digest::sha256_hex(&self.bytes_without_digest());
+        Ok(self)
+    }
+
+    pub fn validate(&self) -> Result<()> {
+        self.validate_components()?;
+        validate_digest("audit envelope", &self.digest)?;
+        if self.digest != digest::sha256_hex(&self.bytes_without_digest()) {
+            return Err(Error::InvalidRuntime {
+                reason: "audit envelope digest does not match its fields".into(),
+            });
+        }
+        Ok(())
+    }
+
+    fn validate_components(&self) -> Result<()> {
+        if self.contract_version != DATA_RUNTIME_CONTRACT_VERSION {
+            return Err(Error::InvalidRuntime {
+                reason: format!(
+                    "unsupported audit contract version {}",
+                    self.contract_version
+                ),
+            });
+        }
+        for (kind, value) in [
+            ("audit request id", self.request_id.as_str()),
+            ("audit actor", self.actor.as_str()),
+            ("audit operation", self.operation.as_str()),
+            ("audit resource", self.resource.as_str()),
+        ] {
+            validate_text(kind, value)?;
+        }
+        if let Some(parent) = &self.parent_request_id {
+            validate_text("audit parent request id", parent)?;
+        }
+        if let Some(read) = &self.read {
+            read.validate()?;
+            if read.scope != self.scope {
+                return Err(Error::InvalidRuntime {
+                    reason: "audit read stamp scope differs from audit scope".into(),
+                });
+            }
+        }
+        if let Some(previous) = &self.previous_digest {
+            validate_digest("previous audit envelope", previous)?;
+        }
+        Ok(())
+    }
+
+    fn bytes_without_digest(&self) -> Vec<u8> {
+        let mut out = b"vyrm-audit-envelope-v1\0".to_vec();
+        out.extend_from_slice(&self.contract_version.to_be_bytes());
+        text(&mut out, &self.request_id);
+        optional_text(&mut out, self.parent_request_id.as_deref());
+        out.extend_from_slice(&self.at.to_be_bytes());
+        text(&mut out, &self.actor);
+        text(&mut out, self.scope.as_str());
+        text(&mut out, &self.operation);
+        text(&mut out, &self.resource);
+        out.push(u8::from(self.read.is_some()));
+        if let Some(read) = &self.read {
+            let bytes = read.canonical_bytes();
+            out.extend_from_slice(&(bytes.len() as u64).to_be_bytes());
+            out.extend_from_slice(&bytes);
+        }
+        out.push(match self.decision {
+            AuditDecision::Allow => 1,
+            AuditDecision::Deny => 2,
+        });
+        encode_optional_u64(&mut out, self.outcome_cursor);
+        out.extend_from_slice(&self.duration_ms.to_be_bytes());
+        optional_text(&mut out, self.previous_digest.as_deref());
+        out
+    }
 }
 
 /// One bounded replay page. Consumers advance to `through_cursor`, even if a
@@ -563,6 +949,15 @@ fn duplicate_identity<T>(kind: &str, reference: &RuntimeRef) -> Result<T> {
 
 fn validate_text(kind: &'static str, value: &str) -> Result<()> {
     validate_identifier(kind, value)
+}
+
+fn validate_digest(kind: &'static str, value: &str) -> Result<()> {
+    if value.len() != 64 || !value.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return Err(Error::InvalidRuntime {
+            reason: format!("{kind} must be a 64-character hexadecimal SHA-256 digest"),
+        });
+    }
+    Ok(())
 }
 
 fn validate_window(valid_from: Millis, valid_to: Option<Millis>) -> Result<()> {
@@ -857,5 +1252,76 @@ mod tests {
             graph.traverse(&prompt.reference, 1, &BTreeSet::new()).len(),
             2
         );
+    }
+
+    #[test]
+    fn read_stamps_and_snapshot_handles_fail_closed_on_tampering() {
+        let read = ReadStamp::new(
+            ScopeId::new("instance:test").unwrap(),
+            Some(1),
+            0,
+            2,
+            Some("11".repeat(32)),
+        )
+        .unwrap();
+        let snapshot = SnapshotHandle::new(read.clone(), "agent:test", 100, 50).unwrap();
+        assert!(!snapshot.is_expired(149));
+        assert!(snapshot.is_expired(150));
+
+        let mut changed_read = read;
+        changed_read.commit_cursor = 3;
+        assert!(changed_read.validate().is_err());
+
+        let mut future_snapshot = snapshot.clone();
+        future_snapshot.contract_version = DATA_RUNTIME_CONTRACT_VERSION + 1;
+        assert!(future_snapshot.validate().is_err());
+
+        let mut changed_snapshot = snapshot;
+        changed_snapshot.owner = "agent:other".into();
+        assert!(changed_snapshot.validate().is_err());
+    }
+
+    #[test]
+    fn transaction_and_audit_envelopes_bind_every_causal_field() {
+        let scope = ScopeId::new("instance:test").unwrap();
+        let read = ReadStamp::new(scope.clone(), None, 0, 0, None).unwrap();
+        let commit = RuntimeCommit {
+            scope: scope.clone(),
+            at: 10,
+            actor: "agent:test".into(),
+            expected_cursor: 0,
+            mutations: vec![RuntimeMutation::Event {
+                event: RuntimeEvent {
+                    kind: RuntimeType::new("pulse").unwrap(),
+                    subject: None,
+                    properties: RuntimeProperties::new(),
+                },
+            }],
+        };
+        let transaction = DataTransaction::new(read.clone(), commit).unwrap();
+        assert_eq!(transaction.digest(), transaction.clone().digest());
+
+        let audit = AuditEnvelope {
+            contract_version: DATA_RUNTIME_CONTRACT_VERSION,
+            request_id: "request:test".into(),
+            parent_request_id: None,
+            at: 10,
+            actor: "agent:test".into(),
+            scope,
+            operation: "runtime.commit".into(),
+            resource: transaction.digest(),
+            read: Some(read),
+            decision: AuditDecision::Allow,
+            outcome_cursor: Some(1),
+            duration_ms: 3,
+            previous_digest: None,
+            digest: String::new(),
+        }
+        .seal()
+        .unwrap();
+        audit.validate().unwrap();
+        let mut tampered = audit;
+        tampered.duration_ms = 4;
+        assert!(tampered.validate().is_err());
     }
 }

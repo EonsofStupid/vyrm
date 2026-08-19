@@ -28,6 +28,13 @@ pub enum Error {
     RuntimeSchemaMissing(String),
     /// A schema update skipped or repeated a persisted revision.
     RuntimeSchemaConflict { expected: u64, actual: u64 },
+    /// A leased snapshot is not present in the authoritative snapshot catalog.
+    SnapshotNotFound(String),
+    /// A leased snapshot was presented after its expiration instant.
+    SnapshotExpired { id: String, expired_at: u64 },
+    /// A caller supplied fields that do not match the persisted snapshot with
+    /// the same identity.
+    SnapshotMismatch(String),
 }
 
 impl fmt::Display for Error {
@@ -53,6 +60,16 @@ impl fmt::Display for Error {
                 f,
                 "runtime schema conflict: expected revision {expected}, actual revision {actual}"
             ),
+            Error::SnapshotNotFound(id) => write!(f, "runtime snapshot not found: {id}"),
+            Error::SnapshotExpired { id, expired_at } => {
+                write!(f, "runtime snapshot {id} expired at {expired_at}")
+            }
+            Error::SnapshotMismatch(id) => {
+                write!(
+                    f,
+                    "runtime snapshot {id} does not match the persisted lease"
+                )
+            }
         }
     }
 }

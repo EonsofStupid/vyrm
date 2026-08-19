@@ -30,6 +30,8 @@ Vyrm provides:
   lifecycle events;
 - one hash-chained global runtime cursor with resumable, scope-filtered replay;
 - optimistic concurrency that rejects stale writers instead of losing updates;
+- content-addressed read stamps, persisted snapshot leases, and replay that is
+  bounded to the exact captured cursor/hash/schema state;
 - hash-chained, typed reasoning runs;
 - one-attempt/one-observation mutation authorization;
 - freshness barriers and deny-by-default policy differentials;
@@ -75,6 +77,13 @@ The local API also exposes the authoritative persistence layer:
 | `GET /api/runtime/graph?valid_at=T&cursor=N` | Freeze the typed graph at valid time and transaction cursor |
 | `GET /api/runtime/diff?from=A&to=B&valid_at=T` | Inspect exact structural change between cursors |
 | `POST /api/demos/prompt-strength` | Persist a deterministic weak/strong trace pair for temporal playback |
+
+At the Rust port today, `MemoryEngine` and the transitional Fjall adapter expose
+the same versioned read-stamp, snapshot, and data-transaction semantics. The
+portable JSON shapes are frozen in
+[`golden-vectors.json`](crates/vyrm-core/fixtures/golden-vectors.json). This is
+the logical snapshot boundary; native `vyrmKV` still needs physical manifest
+pinning before compaction or garbage collection may reclaim old objects.
 
 Prompt flights accept three controlled context arms:
 
@@ -146,6 +155,13 @@ measurement contract.
 | `vyrm-eval` | Paired frontier-runtime evaluation evidence |
 | `connectome-ui` | Prompt-flight recorder and runtime workbench |
 
+For JS/TanStack workflows, successful and failed tool runs are journaled under
+canonical, manager-specific subjects—`package:bun:*`, `package:pnpm:*`,
+`package:npm:*`, and `package:yarn:*`. Script names remain part of the identity,
+so `pnpm run typecheck` and `pnpm run test` do not overwrite each other. These
+events are evidence for later workflow policy; they do not yet constitute a
+package-script allowlist or a pre-execution gate.
+
 Vyrm owns the storage contract and is moving toward a Vyrm-native engine. Fjall
 is the current transitional compatibility adapter behind
 `vyrm_store::Engine`, not the permanent architecture. The port and in-memory
@@ -178,6 +194,8 @@ statistically significant model-performance claim.
 - [`STATUS.md`](STATUS.md) — executable current state and deliberate limits
 - [`SPEC.md`](SPEC.md) — authoritative contract and vocabulary
 - [`PLAN.md`](PLAN.md) — historical execution journal and measured decisions
+- [`docs/clyffy-kernel-alpha.md`](docs/clyffy-kernel-alpha.md) — release gates,
+  lifecycle naming, deployment tiers, competitive proof, and clean Clyffy handoff
 - [`docs/vyrmds-architecture-research.md`](docs/vyrmds-architecture-research.md)
   — pinned upstream research, target data-runtime boundaries, and gated build
   sequence for `vyrmQL`/`vyrmMX`/`vyrmDS`/native `vyrmKV`

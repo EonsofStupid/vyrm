@@ -31,9 +31,10 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Mutex;
 use vyrm_core::reference::MemoryClaims;
 use vyrm_core::{
-    resolve_as_of, Claim, ClaimSource, Millis, Predicate, Reader, RuntimeChange, RuntimeChangePage,
-    RuntimeCommit, RuntimeCommitOutcome, RuntimeMutation, RuntimeRecord, RuntimeRef,
-    RuntimeRelation, RuntimeSchemaRegistry, ScopeId, Subject,
+    resolve_as_of, Claim, ClaimSource, DataTransaction, Millis, Predicate, ReadStamp, Reader,
+    RuntimeChange, RuntimeChangePage, RuntimeCommit, RuntimeCommitOutcome, RuntimeMutation,
+    RuntimeRecord, RuntimeRef, RuntimeRelation, RuntimeSchemaRegistry, ScopeId, SnapshotHandle,
+    SnapshotId, Subject,
 };
 
 pub trait Engine: ClaimSource<Error = Error> {
@@ -73,6 +74,34 @@ pub trait Engine: ClaimSource<Error = Error> {
     /// Latest authoritative schema registry for one runtime scope.
     fn runtime_schema(&self, scope: &ScopeId) -> Result<Option<RuntimeSchemaRegistry>>;
 
+    /// Atomically captures the cursor, schema revision, and hash-chain head
+    /// that make one logical read state reproducible across adapters.
+    fn runtime_read_stamp(&self, scope: &ScopeId) -> Result<ReadStamp>;
+
+    /// Persists a leased snapshot handle over one atomic read stamp.
+    fn open_runtime_snapshot(
+        &self,
+        scope: &ScopeId,
+        owner: &str,
+        now: Millis,
+        ttl: Millis,
+    ) -> Result<SnapshotHandle>;
+
+    /// Reads a bounded page that can never advance beyond the captured stamp.
+    fn runtime_snapshot_changes(
+        &self,
+        snapshot: &SnapshotHandle,
+        after: u64,
+        limit: usize,
+        now: Millis,
+    ) -> Result<RuntimeChangePage>;
+
+    /// Releases one persisted lease. Releasing an absent lease is idempotent.
+    fn release_runtime_snapshot(&self, id: &SnapshotId) -> Result<bool>;
+
+    /// Lists non-expired persisted leases in stable identity order.
+    fn runtime_snapshots(&self, now: Millis) -> Result<Vec<SnapshotHandle>>;
+
     /// Atomically commits typed runtime mutations with exact-cursor conflict
     /// detection. Embedded claims join the same storage transaction.
     fn commit_runtime(&self, commit: &RuntimeCommit) -> Result<RuntimeCommitOutcome>;
@@ -84,6 +113,16 @@ pub trait Engine: ClaimSource<Error = Error> {
         limit: usize,
         scope: Option<&ScopeId>,
     ) -> Result<RuntimeChangePage>;
+
+    /// Commits a mutation envelope bound to its exact read stamp. The existing
+    /// runtime CAS remains the final race-proof authority.
+    fn commit_data_transaction(
+        &self,
+        transaction: &DataTransaction,
+    ) -> Result<RuntimeCommitOutcome> {
+        transaction.validate()?;
+        self.commit_runtime(&transaction.commit)
+    }
 
     // ---- provided: the semantic layer every engine inherits ----
 
@@ -254,6 +293,33 @@ impl Engine for Store {
     fn runtime_schema(&self, scope: &ScopeId) -> Result<Option<RuntimeSchemaRegistry>> {
         Store::runtime_schema(self, scope)
     }
+    fn runtime_read_stamp(&self, scope: &ScopeId) -> Result<ReadStamp> {
+        Store::runtime_read_stamp(self, scope)
+    }
+    fn open_runtime_snapshot(
+        &self,
+        scope: &ScopeId,
+        owner: &str,
+        now: Millis,
+        ttl: Millis,
+    ) -> Result<SnapshotHandle> {
+        Store::open_runtime_snapshot(self, scope, owner, now, ttl)
+    }
+    fn runtime_snapshot_changes(
+        &self,
+        snapshot: &SnapshotHandle,
+        after: u64,
+        limit: usize,
+        now: Millis,
+    ) -> Result<RuntimeChangePage> {
+        Store::runtime_snapshot_changes(self, snapshot, after, limit, now)
+    }
+    fn release_runtime_snapshot(&self, id: &SnapshotId) -> Result<bool> {
+        Store::release_runtime_snapshot(self, id)
+    }
+    fn runtime_snapshots(&self, now: Millis) -> Result<Vec<SnapshotHandle>> {
+        Store::runtime_snapshots(self, now)
+    }
     fn commit_runtime(&self, commit: &RuntimeCommit) -> Result<RuntimeCommitOutcome> {
         Store::commit_runtime(self, commit)
     }
@@ -287,6 +353,7 @@ struct MemoryEngineInner {
     runtime_records: BTreeMap<(ScopeId, RuntimeRef), RuntimeRecord>,
     runtime_relations: BTreeMap<(ScopeId, RuntimeRef), RuntimeRelation>,
     runtime_schemas: BTreeMap<ScopeId, RuntimeSchemaRegistry>,
+    runtime_snapshots: BTreeMap<SnapshotId, SnapshotHandle>,
 }
 
 impl MemoryEngine {
@@ -420,6 +487,83 @@ impl Engine for MemoryEngine {
             .runtime_schemas
             .get(scope)
             .cloned())
+    }
+
+    fn runtime_read_stamp(&self, scope: &ScopeId) -> Result<ReadStamp> {
+        let inner = self.inner.lock().expect("engine mutex");
+        memory_read_stamp(&inner, scope)
+    }
+
+    fn open_runtime_snapshot(
+        &self,
+        scope: &ScopeId,
+        owner: &str,
+        now: Millis,
+        ttl: Millis,
+    ) -> Result<SnapshotHandle> {
+        let mut inner = self.inner.lock().expect("engine mutex");
+        let handle = SnapshotHandle::new(memory_read_stamp(&inner, scope)?, owner, now, ttl)?;
+        inner
+            .runtime_snapshots
+            .insert(handle.id.clone(), handle.clone());
+        Ok(handle)
+    }
+
+    fn runtime_snapshot_changes(
+        &self,
+        snapshot: &SnapshotHandle,
+        after: u64,
+        limit: usize,
+        now: Millis,
+    ) -> Result<RuntimeChangePage> {
+        snapshot.validate()?;
+        if limit == 0 {
+            return Err(Error::Substrate(
+                "runtime change page limit must be greater than zero".into(),
+            ));
+        }
+        let inner = self.inner.lock().expect("engine mutex");
+        let Some(persisted) = inner.runtime_snapshots.get(&snapshot.id) else {
+            return Err(Error::SnapshotNotFound(snapshot.id.to_string()));
+        };
+        if persisted != snapshot {
+            return Err(Error::SnapshotMismatch(snapshot.id.to_string()));
+        }
+        if snapshot.is_expired(now) {
+            return Err(Error::SnapshotExpired {
+                id: snapshot.id.to_string(),
+                expired_at: snapshot.expires_at,
+            });
+        }
+        Ok(memory_change_page(
+            &inner.runtime_changes,
+            snapshot.read.commit_cursor,
+            after,
+            limit,
+            Some(&snapshot.read.scope),
+        ))
+    }
+
+    fn release_runtime_snapshot(&self, id: &SnapshotId) -> Result<bool> {
+        Ok(self
+            .inner
+            .lock()
+            .expect("engine mutex")
+            .runtime_snapshots
+            .remove(id)
+            .is_some())
+    }
+
+    fn runtime_snapshots(&self, now: Millis) -> Result<Vec<SnapshotHandle>> {
+        Ok(self
+            .inner
+            .lock()
+            .expect("engine mutex")
+            .runtime_snapshots
+            .values()
+            .filter(|snapshot| !snapshot.is_expired(now))
+            .cloned()
+            .collect())
     }
 
     fn commit_runtime(&self, commit: &RuntimeCommit) -> Result<RuntimeCommitOutcome> {
@@ -589,29 +733,61 @@ impl Engine for MemoryEngine {
             ));
         }
         let inner = self.inner.lock().expect("engine mutex");
-        let head = inner.runtime_changes.len() as u64;
-        if after == u64::MAX || after >= head {
-            return Ok(RuntimeChangePage {
-                requested_after: after,
-                through_cursor: after,
-                head_cursor: head,
-                changes: Vec::new(),
-            });
-        }
-        let end = (after as usize)
-            .saturating_add(limit)
-            .min(inner.runtime_changes.len());
-        let examined = &inner.runtime_changes[after as usize..end];
-        let changes = examined
-            .iter()
-            .filter(|change| scope.is_none_or(|scope| scope == &change.scope))
-            .cloned()
-            .collect();
-        Ok(RuntimeChangePage {
+        Ok(memory_change_page(
+            &inner.runtime_changes,
+            inner.runtime_changes.len() as u64,
+            after,
+            limit,
+            scope,
+        ))
+    }
+}
+
+fn memory_read_stamp(inner: &MemoryEngineInner, scope: &ScopeId) -> Result<ReadStamp> {
+    ReadStamp::new(
+        scope.clone(),
+        inner
+            .runtime_schemas
+            .get(scope)
+            .map(|schema| schema.revision),
+        0,
+        inner.runtime_changes.len() as u64,
+        inner
+            .runtime_changes
+            .last()
+            .map(|change| change.digest.clone()),
+    )
+    .map_err(Error::from)
+}
+
+fn memory_change_page(
+    changes: &[RuntimeChange],
+    head: u64,
+    after: u64,
+    limit: usize,
+    scope: Option<&ScopeId>,
+) -> RuntimeChangePage {
+    if after == u64::MAX || after >= head {
+        return RuntimeChangePage {
             requested_after: after,
-            through_cursor: end as u64,
+            through_cursor: after,
             head_cursor: head,
-            changes,
-        })
+            changes: Vec::new(),
+        };
+    }
+    let end = (after as usize)
+        .saturating_add(limit)
+        .min(head as usize)
+        .min(changes.len());
+    let selected = changes[after as usize..end]
+        .iter()
+        .filter(|change| scope.is_none_or(|scope| scope == &change.scope))
+        .cloned()
+        .collect();
+    RuntimeChangePage {
+        requested_after: after,
+        through_cursor: end as u64,
+        head_cursor: head,
+        changes: selected,
     }
 }

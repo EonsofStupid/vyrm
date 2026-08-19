@@ -354,6 +354,13 @@ retention locks.
 Acceptance: fixtures round-trip, unknown enum versions fail explicitly, and
 the existing 118-test runtime suite remains unchanged.
 
+Status (2026-08-19): **complete.** Data-runtime contract version 1 now
+freezes read stamps, snapshot handles, read-bound transactions, projection
+stamps, audit envelopes, and the complete typed reasoning lifecycle in
+checked-in golden JSON. Digest/lease tampering and unknown contract versions
+fail closed. Query-plan serialization remains correctly gated to M2 because no
+query planner contract exists yet.
+
 ### M1 — transaction and snapshot port
 
 - Introduce `ReadStamp`, `SnapshotHandle`, `DsTransaction`, typed conflicts,
@@ -365,6 +372,16 @@ the existing 118-test runtime suite remains unchanged.
 Acceptance: randomized backend differential; concurrent same/different-key
 writes; read-your-writes; repeatable scans across pages; lease expiry; and no
 cursor/hash/schema regression.
+
+Status (2026-08-19): **in progress.** MemoryEngine and Fjall now share the
+snapshot/transaction port. Tests prove a snapshot never reads beyond its
+captured hash-chain head, leases expire and release deterministically, Fjall's
+lease catalog survives restart, and two writers from one read stamp yield one
+commit plus one explicit CAS conflict. Native physical manifest/segment pins,
+a deterministic 64-write mixed-scope differential also produces identical
+stamps and replay pages. The complete same/different-key conflict matrix,
+physical pins, and transaction-local read-your-writes are not implemented yet;
+therefore M1 is not marked complete.
 
 ### M2 — `vyrmQL` algebra and `vyrmMX` reference executor
 
@@ -441,10 +458,9 @@ database truth; performance and recall regressions fail CI at explicit bounds.
 
 ## Immediate next implementation slice
 
-Execute M0 into M1 without skipping the contract gate: freeze serialized golden
-fixtures for the typed read stamp, snapshot handle, and transaction envelope,
-then implement that port in `MemoryEngine` and the Fjall adapter and prove
-backend parity. It must not yet add a query language, vectors, S3, or a new
-physical engine. That slice creates the stable boundary all later work depends
-on and prevents the native KV effort from baking current per-call snapshot
-limitations into its format.
+Finish M1 without skipping the contract gate: add the complete same/different-
+key conflict matrix, transaction-local read-your-writes, and an explicit
+retention-pin inventory contract. Then begin M2 parser/algebra work.
+Do not begin vectors, S3, GPU, or clustering before these semantics close; the
+stable boundary prevents native `vyrmKV` from baking current adapter limitations
+into its format.

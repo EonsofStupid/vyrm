@@ -103,12 +103,23 @@ tests cover operator commands, hooks, explicit recovery, and both MCP eras.
 - Prompt-flight acceptance without a marker proves process completion only.
   Model-quality conclusions require non-trivial evaluators and repeated trials;
   the flight UI deliberately does not turn one attractive trace into a claim.
-- `vyrmQL`, `vyrmMX`, `vyrmDS`, and native `vyrmKV` now have a researched
-  target architecture but are not implemented subsystems. The first gated
-  implementation step is an explicit typed transaction/read-stamp/snapshot
-  port. Vector, object-store, embedding, GPU, edge, and Multi-AZ capabilities
-  remain sequenced work, not current product claims. See
+- `vyrmQL`, `vyrmMX`, `vyrmDS`, and native `vyrmKV` have a researched target
+  architecture but are not implemented subsystems. The shared data-runtime v1
+  contract now includes content-addressed read stamps, leased snapshot handles,
+  read-bound transactions, projection stamps, and hash-chained audit envelopes.
+  MemoryEngine and Fjall implement frozen snapshot replay, inventory, expiry,
+  release, restart persistence, and exact-cursor conflict behavior. Physical
+  retention pins, the full same/different-key conflict matrix, and transaction-
+  local read-your-writes still gate M1; a deterministic 64-write mixed-scope
+  backend differential is green. Vector, object-store, embedding, GPU, edge,
+  and Multi-AZ capabilities remain sequenced work, not current product claims. See
   `docs/vyrmds-architecture-research.md`.
+
+- JavaScript application-run claims now use script-sensitive canonical event
+  subjects such as `package:bun:test`, `package:pnpm:run:typecheck`, and
+  `package:npm:run:test-unit`. They are observed through the existing post-tool
+  lifecycle; workflow declarations and pre-tool enforcement against these
+  identities are the next trigger layer, not silently implied by naming alone.
 
 ## Product and instance boundary
 

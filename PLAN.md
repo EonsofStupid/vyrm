@@ -55,14 +55,21 @@ disagree, `SPEC.md` is authoritative and this document is wrong.
 > compatibility adapter on latency, throughput, durability, recovery, and
 > memory. Licensing is not the optimization boundary; measured behavior is.
 
-> **Data-runtime research overlay (2026-08-19).** The proposed `vyrmQL`,
-> `vyrmMX`, `vyrmDS`, and native `vyrmKV` names are now assigned explicit
-> boundaries; they are not represented as implemented. A pinned primary-source
+> **Data-runtime implementation overlay (2026-08-19).** The proposed `vyrmQL`,
+> `vyrmMX`, `vyrmDS`, and native `vyrmKV` names have explicit boundaries; they
+> are not represented as complete subsystems. A pinned primary-source
 > review of Qdrant, SurrealDB, HelixDB, SlateDB, Lance, DataFusion, OpenDAL,
 > cuVS, and TiKV produced an adopt/adapt/reject matrix and milestones M0–M8.
-> The next implementation slice is the typed transaction/read-stamp/snapshot
-> port, proven against `MemoryEngine` and Fjall before query, vector, object, or
-> cluster work. See `docs/vyrmds-architecture-research.md`.
+> M0/M1 now have a versioned portable contract (`ReadStamp`, leased
+> `SnapshotHandle`, `DataTransaction`, `ProjectionStamp`, and hash-chained
+> `AuditEnvelope`), checked-in golden JSON, and matching MemoryEngine/Fjall
+> behavior for frozen replay, expiry, restart persistence, and concurrent CAS.
+> Physical retention pins and the broader randomized transaction matrix remain
+> before M1 closes. Query, vector, object, and cluster work remain gated behind
+> that closure. See `docs/vyrmds-architecture-research.md`.
+> The product handoff, canonical package-event grammar, alpha release gates,
+> deployment/update tiers, and separate SurrealDB/Qdrant proof protocols are
+> frozen in `docs/clyffy-kernel-alpha.md`.
 
 ## 1 · Grounding result
 

@@ -35,6 +35,10 @@ pub const RUNTIME_RELATIONS: &str = "runtime_relations";
 /// Latest authoritative schema registry for each runtime scope. Every update
 /// is also present in the hash-chained runtime change log.
 pub const RUNTIME_SCHEMAS: &str = "runtime_schemas";
+/// Persisted leased read stamps. Native `vyrmKV` uses the same catalog to pin
+/// physical manifests; the append-only compatibility engine needs no further
+/// retention machinery yet.
+pub const RUNTIME_SNAPSHOTS: &str = "runtime_snapshots";
 
 /// Key under which the claim sequence watermark is recorded.
 pub const SEQUENCE_WATERMARK: &[u8] = b"watermark/claims/sequence";

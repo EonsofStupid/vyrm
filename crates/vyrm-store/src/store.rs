@@ -9,9 +9,10 @@ use serde::de::DeserializeOwned;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use vyrm_core::{
-    key, Claim, ClaimSource, Millis, Predicate, Reader, RuntimeChange, RuntimeChangePage,
-    RuntimeCommit, RuntimeCommitOutcome, RuntimeMutation, RuntimeRecord, RuntimeRef,
-    RuntimeRelation, RuntimeSchemaRegistry, ScopeId, Subject,
+    key, Claim, ClaimSource, Millis, Predicate, ReadStamp, Reader, RuntimeChange,
+    RuntimeChangePage, RuntimeCommit, RuntimeCommitOutcome, RuntimeMutation, RuntimeRecord,
+    RuntimeRef, RuntimeRelation, RuntimeSchemaRegistry, ScopeId, SnapshotHandle, SnapshotId,
+    Subject,
 };
 
 /// Sequences assigned by an append.
@@ -41,6 +42,7 @@ pub struct Store {
     runtime_records: SingleWriterTxKeyspace,
     runtime_relations: SingleWriterTxKeyspace,
     runtime_schemas: SingleWriterTxKeyspace,
+    runtime_snapshots: SingleWriterTxKeyspace,
 }
 
 impl Store {
@@ -65,6 +67,8 @@ impl Store {
             db.keyspace(keyspaces::RUNTIME_RELATIONS, KeyspaceCreateOptions::default)?;
         let runtime_schemas =
             db.keyspace(keyspaces::RUNTIME_SCHEMAS, KeyspaceCreateOptions::default)?;
+        let runtime_snapshots =
+            db.keyspace(keyspaces::RUNTIME_SNAPSHOTS, KeyspaceCreateOptions::default)?;
         Ok(Self {
             path,
             db,
@@ -78,6 +82,7 @@ impl Store {
             runtime_records,
             runtime_relations,
             runtime_schemas,
+            runtime_snapshots,
         })
     }
 
@@ -143,6 +148,103 @@ impl Store {
             .get(&self.runtime_schemas, scope.as_str().as_bytes())?
             .map(|bytes| serde_json::from_slice(&bytes).map_err(Error::from))
             .transpose()
+    }
+
+    /// Captures one semantic manifest identity from a single substrate read
+    /// transaction. Cursor, schema revision, and hash head cannot be torn
+    /// across concurrent commits.
+    pub fn runtime_read_stamp(&self, scope: &ScopeId) -> Result<ReadStamp> {
+        let snapshot = self.db.read_tx();
+        runtime_read_stamp_with(&snapshot, &self.meta, &self.runtime_schemas, scope)
+    }
+
+    /// Persists a leased read stamp in the same transaction that observes its
+    /// cursor and schema. The current log is append-only; native `vyrmKV` will
+    /// additionally use this catalog to pin physical manifest objects.
+    pub fn open_runtime_snapshot(
+        &self,
+        scope: &ScopeId,
+        owner: &str,
+        now: Millis,
+        ttl: Millis,
+    ) -> Result<SnapshotHandle> {
+        let mut tx = self
+            .db
+            .write_tx()
+            .durability(Durability::Authoritative.persist_mode());
+        let read = runtime_read_stamp_with(&tx, &self.meta, &self.runtime_schemas, scope)?;
+        let handle = SnapshotHandle::new(read, owner, now, ttl)?;
+        tx.insert(
+            &self.runtime_snapshots,
+            handle.id.as_str().as_bytes(),
+            serde_json::to_vec(&handle)?,
+        );
+        tx.commit()?;
+        Ok(handle)
+    }
+
+    /// Replays through a persisted, unexpired lease and never beyond the head
+    /// it captured, even if newer commits exist when this call begins.
+    pub fn runtime_snapshot_changes(
+        &self,
+        handle: &SnapshotHandle,
+        after: u64,
+        limit: usize,
+        now: Millis,
+    ) -> Result<RuntimeChangePage> {
+        handle.validate()?;
+        let snapshot = self.db.read_tx();
+        let bytes = snapshot
+            .get(&self.runtime_snapshots, handle.id.as_str().as_bytes())?
+            .ok_or_else(|| Error::SnapshotNotFound(handle.id.to_string()))?;
+        let persisted: SnapshotHandle = serde_json::from_slice(&bytes)?;
+        if &persisted != handle {
+            return Err(Error::SnapshotMismatch(handle.id.to_string()));
+        }
+        if handle.is_expired(now) {
+            return Err(Error::SnapshotExpired {
+                id: handle.id.to_string(),
+                expired_at: handle.expires_at,
+            });
+        }
+        runtime_change_page(
+            &snapshot,
+            &self.runtime_changes,
+            handle.read.commit_cursor,
+            after,
+            limit,
+            Some(&handle.read.scope),
+        )
+    }
+
+    pub fn release_runtime_snapshot(&self, id: &SnapshotId) -> Result<bool> {
+        let mut tx = self
+            .db
+            .write_tx()
+            .durability(Durability::Authoritative.persist_mode());
+        let exists = tx
+            .get(&self.runtime_snapshots, id.as_str().as_bytes())?
+            .is_some();
+        if exists {
+            tx.remove(&self.runtime_snapshots, id.as_str().as_bytes());
+            tx.commit()?;
+        }
+        Ok(exists)
+    }
+
+    pub fn runtime_snapshots(&self, now: Millis) -> Result<Vec<SnapshotHandle>> {
+        let snapshot = self.db.read_tx();
+        let mut handles = Vec::new();
+        for guard in snapshot.range(&self.runtime_snapshots, Vec::new()..) {
+            let (_, bytes) = guard.into_inner()?;
+            let handle: SnapshotHandle = serde_json::from_slice(&bytes)?;
+            handle.validate()?;
+            if !handle.is_expired(now) {
+                handles.push(handle);
+            }
+        }
+        handles.sort_by(|left, right| left.id.cmp(&right.id));
+        Ok(handles)
     }
 
     /// Atomically appends a complete causal runtime transaction.
@@ -371,72 +473,9 @@ impl Store {
         limit: usize,
         scope: Option<&ScopeId>,
     ) -> Result<RuntimeChangePage> {
-        if limit == 0 {
-            return Err(Error::Substrate(
-                "runtime change page limit must be greater than zero".into(),
-            ));
-        }
         let snapshot = self.db.read_tx();
         let head = decode_optional_sequence(snapshot.get(&self.meta, keyspaces::RUNTIME_CURSOR)?)?;
-        if after == u64::MAX || after >= head {
-            return Ok(RuntimeChangePage {
-                requested_after: after,
-                through_cursor: after,
-                head_cursor: head,
-                changes: Vec::new(),
-            });
-        }
-
-        let mut previous_digest = if after == 0 {
-            None
-        } else {
-            let bytes = snapshot
-                .get(&self.runtime_changes, runtime_cursor_key(after))?
-                .ok_or_else(|| {
-                    Error::Substrate(format!("runtime log is missing cursor {after}"))
-                })?;
-            let prior: RuntimeChange = serde_json::from_slice(&bytes)?;
-            if !prior.verify_digest() {
-                return Err(Error::Substrate(format!(
-                    "runtime change {after} failed digest verification"
-                )));
-            }
-            Some(prior.digest)
-        };
-        let mut through = after;
-        let mut changes = Vec::new();
-        for (expected_cursor, guard) in (after + 1..)
-            .zip(snapshot.range(&self.runtime_changes, runtime_cursor_key(after + 1)..))
-        {
-            if through.saturating_sub(after) as usize >= limit {
-                break;
-            }
-            let (_, bytes) = guard.into_inner()?;
-            let change: RuntimeChange = serde_json::from_slice(&bytes)?;
-            if change.cursor != expected_cursor {
-                return Err(Error::Substrate(format!(
-                    "runtime log cursor gap: expected {expected_cursor}, found {}",
-                    change.cursor
-                )));
-            }
-            if change.previous_digest != previous_digest || !change.verify_digest() {
-                return Err(Error::Substrate(format!(
-                    "runtime change {} failed hash-chain verification",
-                    change.cursor
-                )));
-            }
-            through = change.cursor;
-            previous_digest = Some(change.digest.clone());
-            if scope.is_none_or(|scope| scope == &change.scope) {
-                changes.push(change);
-            }
-        }
-        Ok(RuntimeChangePage {
-            requested_after: after,
-            through_cursor: through,
-            head_cursor: head,
-            changes,
-        })
+        runtime_change_page(&snapshot, &self.runtime_changes, head, after, limit, scope)
     }
 
     /// Appends claims in one transaction with one fsync.
@@ -833,6 +872,108 @@ fn decode_optional_sequence(value: Option<fjall::Slice>) -> Result<u64> {
         .map(decode_sequence)
         .transpose()
         .map(Option::unwrap_or_default)
+}
+
+fn runtime_read_stamp_with<R: Readable>(
+    reader: &R,
+    meta: &SingleWriterTxKeyspace,
+    schemas: &SingleWriterTxKeyspace,
+    scope: &ScopeId,
+) -> Result<ReadStamp> {
+    let commit_cursor = decode_optional_sequence(reader.get(meta, keyspaces::RUNTIME_CURSOR)?)?;
+    let schema_revision = reader
+        .get(schemas, scope.as_str().as_bytes())?
+        .map(|bytes| {
+            serde_json::from_slice::<RuntimeSchemaRegistry>(&bytes).map(|schema| schema.revision)
+        })
+        .transpose()?;
+    let head_digest = reader
+        .get(meta, keyspaces::RUNTIME_LAST_DIGEST)?
+        .map(|bytes| String::from_utf8(bytes.to_vec()))
+        .transpose()
+        .map_err(|error| Error::CorruptWatermark(error.to_string()))?
+        .filter(|digest| !digest.is_empty());
+
+    ReadStamp::new(
+        scope.clone(),
+        schema_revision,
+        0,
+        commit_cursor,
+        head_digest,
+    )
+    .map_err(Error::from)
+}
+
+fn runtime_change_page<R: Readable>(
+    reader: &R,
+    changes_keyspace: &SingleWriterTxKeyspace,
+    head: u64,
+    after: u64,
+    limit: usize,
+    scope: Option<&ScopeId>,
+) -> Result<RuntimeChangePage> {
+    if limit == 0 {
+        return Err(Error::Substrate(
+            "runtime change page limit must be greater than zero".into(),
+        ));
+    }
+    if after == u64::MAX || after >= head {
+        return Ok(RuntimeChangePage {
+            requested_after: after,
+            through_cursor: after,
+            head_cursor: head,
+            changes: Vec::new(),
+        });
+    }
+
+    let mut previous_digest = if after == 0 {
+        None
+    } else {
+        let bytes = reader
+            .get(changes_keyspace, runtime_cursor_key(after))?
+            .ok_or_else(|| Error::Substrate(format!("runtime log is missing cursor {after}")))?;
+        let prior: RuntimeChange = serde_json::from_slice(&bytes)?;
+        if !prior.verify_digest() {
+            return Err(Error::Substrate(format!(
+                "runtime change {after} failed digest verification"
+            )));
+        }
+        Some(prior.digest)
+    };
+    let mut through = after;
+    let mut selected = Vec::new();
+    for (expected_cursor, guard) in
+        (after + 1..).zip(reader.range(changes_keyspace, runtime_cursor_key(after + 1)..))
+    {
+        if expected_cursor > head || through.saturating_sub(after) as usize >= limit {
+            break;
+        }
+        let (_, bytes) = guard.into_inner()?;
+        let change: RuntimeChange = serde_json::from_slice(&bytes)?;
+        if change.cursor != expected_cursor {
+            return Err(Error::Substrate(format!(
+                "runtime log cursor gap: expected {expected_cursor}, found {}",
+                change.cursor
+            )));
+        }
+        if change.previous_digest != previous_digest || !change.verify_digest() {
+            return Err(Error::Substrate(format!(
+                "runtime change {} failed hash-chain verification",
+                change.cursor
+            )));
+        }
+        through = change.cursor;
+        previous_digest = Some(change.digest.clone());
+        if scope.is_none_or(|scope| scope == &change.scope) {
+            selected.push(change);
+        }
+    }
+    Ok(RuntimeChangePage {
+        requested_after: after,
+        through_cursor: through,
+        head_cursor: head,
+        changes: selected,
+    })
 }
 
 fn runtime_cursor_key(cursor: u64) -> [u8; 8] {
