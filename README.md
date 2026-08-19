@@ -58,8 +58,9 @@ Vyrm provides:
   crash/restart, leader replacement during a live transport partition,
   reconciliation, post-purge learner snapshot catch-up, identity confusion
   denial, hot leaf and trust-root rotation, CRL revocation, stale restart denial,
-  and corrupt-pointer refusal (automatic workload issuance and production
-  clustering remain gated);
+  corrupt-pointer refusal, and bounded file-backed snapshot transfer with
+  crash-orphan cleanup (automatic workload issuance, disk-resident immutable
+  segments, and production clustering remain gated);
 - identical lifecycle semantics through hooks, CLI, and MCP;
 - isolated per-platform instances with explicit store/root binding.
 

@@ -158,6 +158,16 @@ publication reopens the imported state. Corruption, truncation, stale install,
 round-trip, reopen, idempotency, target-state replacement, and post-install
 continuation are executable tests in `tests/snapshot_bundle.rs`.
 
+`SnapshotBundleFile` preserves these exact v1 bytes while exporting through a
+64 KiB copy/hash buffer and validating one segment at a time. File creation is
+`create_new`, synchronized before use, and removes partial output on ordinary
+failure. Deterministic crash/storage-full injection covers header-written,
+segment-written, and file-synced boundaries. The Linux memory regression uses
+a bundle larger than 16 MiB and caps incremental export RSS at 16 MiB. The
+native engine still decodes installed immutable segments into resident memory;
+the bound applies to snapshot-envelope overhead, not the full query-engine
+footprint.
+
 OpenRaft adapter v4 consumes this exact contract for canonical-state transfer.
 It inspects the authenticated state/domain records before installation, then
 publishes the imported closure through the same local manifest CAS. Vote, log,

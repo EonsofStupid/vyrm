@@ -1,7 +1,76 @@
 use vyrm_kv::{
-    Database, Durability, Error, FailureMode, Mutation, SnapshotBundle, SnapshotInstallBoundary,
-    WriteBatch, SNAPSHOT_BUNDLE_FORMAT_VERSION,
+    Database, Durability, Error, FailureMode, Mutation, SnapshotBundle, SnapshotBundleFile,
+    SnapshotExportBoundary, SnapshotInstallBoundary, WriteBatch, SNAPSHOT_BUNDLE_FORMAT_VERSION,
 };
+
+#[test]
+fn file_backed_bundle_preserves_wire_bytes_and_installs() {
+    let source_directory = tempfile::tempdir().unwrap();
+    let mut source = Database::create(source_directory.path()).unwrap();
+    source
+        .write_owned(
+            WriteBatch::new(vec![put("alpha", "one"), put("omega", "last")]).unwrap(),
+            Durability::Authoritative,
+        )
+        .unwrap();
+    let expected = source.export_snapshot_bundle(4).unwrap().encode().unwrap();
+    let spool = source_directory.path().join("snapshot.spool");
+    let file = source.export_snapshot_file(4, &spool).unwrap();
+    assert_eq!(std::fs::read(&spool).unwrap(), expected);
+    assert_eq!(file.length, expected.len() as u64);
+    assert_eq!(
+        file.get_many(&[b"alpha", b"missing"]).unwrap(),
+        vec![Some(b"one".to_vec()), None]
+    );
+
+    let reopened = SnapshotBundleFile::open(&spool).unwrap();
+    assert_eq!(reopened.digest, file.digest);
+    let target_directory = tempfile::tempdir().unwrap();
+    let mut target = Database::create(target_directory.path()).unwrap();
+    target.install_snapshot_file(&reopened, 5).unwrap();
+    let snapshot = target.snapshot();
+    assert_eq!(target.get(b"alpha", snapshot), Some(b"one".as_slice()));
+    assert_eq!(target.get(b"omega", snapshot), Some(b"last".as_slice()));
+
+    let mut corrupt = expected;
+    let middle = corrupt.len() / 2;
+    corrupt[middle] ^= 1;
+    let corrupt_path = source_directory.path().join("corrupt.spool");
+    std::fs::write(&corrupt_path, corrupt).unwrap();
+    assert!(SnapshotBundleFile::open(corrupt_path).is_err());
+}
+
+#[test]
+fn partial_file_exports_are_removed_at_every_durable_boundary() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut database = Database::create(directory.path()).unwrap();
+    database
+        .write_owned(
+            WriteBatch::new(vec![put("truth", "survives export failure")]).unwrap(),
+            Durability::Authoritative,
+        )
+        .unwrap();
+    for mode in [FailureMode::Crash, FailureMode::StorageFull] {
+        for boundary in [
+            SnapshotExportBoundary::HeaderWritten,
+            SnapshotExportBoundary::SegmentWritten,
+            SnapshotExportBoundary::FileSynced,
+        ] {
+            let path = directory
+                .path()
+                .join(format!("failed-{mode:?}-{boundary:?}.snapshot"));
+            let error = database
+                .export_snapshot_file_with_failure(9, &path, boundary, mode)
+                .unwrap_err();
+            assert!(matches!(error, Error::InjectedFailure { .. }));
+            assert!(!path.exists(), "failed export must not retain a spool");
+            assert_eq!(
+                database.get(b"truth", database.snapshot()),
+                Some(b"survives export failure".as_slice())
+            );
+        }
+    }
+}
 
 #[test]
 fn physical_snapshot_bundle_round_trips_installs_atomically_and_continues_writes() {
@@ -146,7 +215,7 @@ fn corruption_and_truncation_are_denied_before_manifest_publication() {
 }
 
 #[test]
-fn every_install_boundary_recovers_after_crash_and_storage_full() {
+fn every_memory_and_file_install_boundary_recovers_after_crash_and_storage_full() {
     let source_directory = tempfile::tempdir().unwrap();
     let mut source = Database::create(source_directory.path()).unwrap();
     source
@@ -156,36 +225,47 @@ fn every_install_boundary_recovers_after_crash_and_storage_full() {
         )
         .unwrap();
     let bundle = source.export_snapshot_bundle(1).unwrap();
+    let spool = source_directory.path().join("install-boundaries.snapshot");
+    let file_bundle = source.export_snapshot_file(1, spool).unwrap();
 
-    for boundary in [
-        SnapshotInstallBoundary::SegmentsSynced,
-        SnapshotInstallBoundary::SuccessorWalSynced,
-        SnapshotInstallBoundary::ManifestPublished,
-    ] {
-        for mode in [FailureMode::Crash, FailureMode::StorageFull] {
-            let target_directory = tempfile::tempdir().unwrap();
-            let mut target = Database::create(target_directory.path()).unwrap();
-            let original = target.manifest().digest.clone();
-            let error = target
-                .install_snapshot_bundle_with_failure(&bundle, 2, boundary, mode)
+    for file_backed in [false, true] {
+        for boundary in [
+            SnapshotInstallBoundary::SegmentsSynced,
+            SnapshotInstallBoundary::SuccessorWalSynced,
+            SnapshotInstallBoundary::ManifestPublished,
+        ] {
+            for mode in [FailureMode::Crash, FailureMode::StorageFull] {
+                let target_directory = tempfile::tempdir().unwrap();
+                let mut target = Database::create(target_directory.path()).unwrap();
+                let original = target.manifest().digest.clone();
+                let error = if file_backed {
+                    target.install_snapshot_file_with_failure(&file_bundle, 2, boundary, mode)
+                } else {
+                    target.install_snapshot_bundle_with_failure(&bundle, 2, boundary, mode)
+                }
                 .unwrap_err();
-            assert!(matches!(error, Error::InjectedFailure { .. }));
-            if boundary == SnapshotInstallBoundary::ManifestPublished {
-                assert_ne!(target.manifest().digest, original);
-            } else {
-                assert_eq!(target.manifest().digest, original);
-            }
-            drop(target);
+                assert!(matches!(error, Error::InjectedFailure { .. }));
+                if boundary == SnapshotInstallBoundary::ManifestPublished {
+                    assert_ne!(target.manifest().digest, original);
+                } else {
+                    assert_eq!(target.manifest().digest, original);
+                }
+                drop(target);
 
-            let mut recovered = Database::open(target_directory.path()).unwrap();
-            if boundary != SnapshotInstallBoundary::ManifestPublished {
-                assert_eq!(recovered.snapshot().sequence, 0);
-                recovered.install_snapshot_bundle(&bundle, 3).unwrap();
+                let mut recovered = Database::open(target_directory.path()).unwrap();
+                if boundary != SnapshotInstallBoundary::ManifestPublished {
+                    assert_eq!(recovered.snapshot().sequence, 0);
+                    if file_backed {
+                        recovered.install_snapshot_file(&file_bundle, 3).unwrap();
+                    } else {
+                        recovered.install_snapshot_bundle(&bundle, 3).unwrap();
+                    }
+                }
+                let snapshot = recovered.snapshot();
+                assert_eq!(snapshot.sequence, 2);
+                assert_eq!(recovered.get(b"truth", snapshot), Some(b"one".as_slice()));
+                assert_eq!(recovered.get(b"more", snapshot), Some(b"two".as_slice()));
             }
-            let snapshot = recovered.snapshot();
-            assert_eq!(snapshot.sequence, 2);
-            assert_eq!(recovered.get(b"truth", snapshot), Some(b"one".as_slice()));
-            assert_eq!(recovered.get(b"more", snapshot), Some(b"two".as_slice()));
         }
     }
 }

@@ -20,12 +20,18 @@ use openraft::{
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Debug;
-use std::io::Cursor;
+use std::io;
 use std::ops::{Bound, RangeBounds};
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::pin::Pin;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
+use std::task::{Context, Poll};
+use tokio::io::{AsyncRead, AsyncSeek, AsyncWrite, ReadBuf};
 use vyrm_core::{digest::sha256_hex, ObjectReference, RuntimeCommit, RuntimeCommitOutcome};
-use vyrm_kv::{Database, Durability, Mutation, SnapshotBundle, WriteBatch};
+use vyrm_kv::{
+    Database, Durability, Mutation, SnapshotBundleFile, WriteBatch, SNAPSHOT_BUNDLE_MAX_BYTES,
+};
 use vyrm_store::{
     native_runtime_commit_outcome, prepare_native_runtime_commit, Error as StoreError,
     LocalObjectStore,
@@ -34,6 +40,7 @@ use vyrm_store::{
 const ADAPTER_FORMAT_VERSION: u16 = 4;
 const LOCAL_DATABASE_DIRECTORY: &str = "raft-local-v4";
 const SNAPSHOT_OBJECT_DIRECTORY: &str = "snapshot-objects";
+const SNAPSHOT_SPOOL_DIRECTORY: &str = "snapshot-spool";
 const KEY_STATE_CONFIG: &[u8] = b"vyrm/raft/v4/state/config";
 const KEY_LOCAL_CONFIG: &[u8] = b"vyrm/raft/v4/local/config";
 const KEY_VOTE: &[u8] = b"vyrm/raft/v4/local/vote";
@@ -47,6 +54,144 @@ pub const VYRM_RAFT_REQUEST_RETENTION_LOGS: u64 = 4096;
 // JSON is only the correctness-gate codec. Keep worst-case byte-array expansion
 // comfortably below VyrmKV's 8 MiB value ceiling until a compact codec lands.
 const MAX_COMMAND_BYTES: usize = 1024 * 1024;
+static SNAPSHOT_SPOOL_ORDINAL: AtomicU64 = AtomicU64::new(1);
+
+/// File-backed OpenRaft snapshot handle with bounded writes and explicit
+/// ephemeral cleanup. Durable object handles opt out of deletion.
+#[derive(Debug)]
+pub struct VyrmSnapshotData {
+    // Declaration order is intentional: close the handle before cleanup tries
+    // to unlink the ephemeral path, including on Windows.
+    file: tokio::fs::File,
+    path: PathBuf,
+    position: u64,
+    _cleanup: SnapshotCleanup,
+}
+
+#[derive(Debug)]
+struct SnapshotCleanup(Option<PathBuf>);
+
+impl Drop for SnapshotCleanup {
+    fn drop(&mut self) {
+        if let Some(path) = &self.0 {
+            let _ = std::fs::remove_file(path);
+        }
+    }
+}
+
+impl VyrmSnapshotData {
+    pub async fn create_ephemeral(path: impl AsRef<Path>) -> io::Result<Self> {
+        let path = path.as_ref().to_path_buf();
+        let file = tokio::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create_new(true)
+            .open(&path)
+            .await?;
+        Ok(Self {
+            file,
+            _cleanup: SnapshotCleanup(Some(path.clone())),
+            path,
+            position: 0,
+        })
+    }
+
+    async fn open(path: impl AsRef<Path>, delete_on_drop: bool) -> io::Result<Self> {
+        let path = path.as_ref().to_path_buf();
+        let file = tokio::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(&path)
+            .await?;
+        Ok(Self {
+            file,
+            _cleanup: SnapshotCleanup(delete_on_drop.then(|| path.clone())),
+            path,
+            position: 0,
+        })
+    }
+
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
+    async fn sync_all(&self) -> io::Result<()> {
+        self.file.sync_all().await
+    }
+}
+
+impl AsyncRead for VyrmSnapshotData {
+    fn poll_read(
+        mut self: Pin<&mut Self>,
+        context: &mut Context<'_>,
+        buffer: &mut ReadBuf<'_>,
+    ) -> Poll<io::Result<()>> {
+        let before = buffer.filled().len();
+        let result = Pin::new(&mut self.file).poll_read(context, buffer);
+        if let Poll::Ready(Ok(())) = &result {
+            self.position = self
+                .position
+                .saturating_add((buffer.filled().len() - before) as u64);
+        }
+        result
+    }
+}
+
+impl AsyncWrite for VyrmSnapshotData {
+    fn poll_write(
+        mut self: Pin<&mut Self>,
+        context: &mut Context<'_>,
+        buffer: &[u8],
+    ) -> Poll<Result<usize, io::Error>> {
+        if self
+            .position
+            .checked_add(buffer.len() as u64)
+            .is_none_or(|end| end > SNAPSHOT_BUNDLE_MAX_BYTES)
+        {
+            return Poll::Ready(Err(io::Error::new(
+                io::ErrorKind::FileTooLarge,
+                format!("snapshot exceeds {SNAPSHOT_BUNDLE_MAX_BYTES} bytes"),
+            )));
+        }
+        let result = Pin::new(&mut self.file).poll_write(context, buffer);
+        if let Poll::Ready(Ok(written)) = result {
+            self.position += written as u64;
+            Poll::Ready(Ok(written))
+        } else {
+            result
+        }
+    }
+
+    fn poll_flush(
+        mut self: Pin<&mut Self>,
+        context: &mut Context<'_>,
+    ) -> Poll<Result<(), io::Error>> {
+        Pin::new(&mut self.file).poll_flush(context)
+    }
+
+    fn poll_shutdown(
+        mut self: Pin<&mut Self>,
+        context: &mut Context<'_>,
+    ) -> Poll<Result<(), io::Error>> {
+        Pin::new(&mut self.file).poll_shutdown(context)
+    }
+}
+
+impl AsyncSeek for VyrmSnapshotData {
+    fn start_seek(mut self: Pin<&mut Self>, position: std::io::SeekFrom) -> io::Result<()> {
+        Pin::new(&mut self.file).start_seek(position)
+    }
+
+    fn poll_complete(mut self: Pin<&mut Self>, context: &mut Context<'_>) -> Poll<io::Result<u64>> {
+        let result = Pin::new(&mut self.file).poll_complete(context);
+        if let Poll::Ready(Ok(position)) = result {
+            self.position = position;
+            Poll::Ready(Ok(position))
+        } else {
+            result
+        }
+    }
+}
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct VyrmRaftNode {
@@ -241,6 +386,7 @@ openraft::declare_raft_types!(
         R = VyrmRaftResponse,
         NodeId = u64,
         Node = VyrmRaftNode,
+        SnapshotData = VyrmSnapshotData,
 );
 
 pub type VyrmRaftEntry = Entry<VyrmRaftTypeConfig>;
@@ -325,6 +471,7 @@ pub struct VyrmRaftStateMachine {
     state_database: SharedDatabase,
     local_database: SharedDatabase,
     snapshot_objects: LocalObjectStore,
+    snapshot_spool: PathBuf,
     shard: ShardId,
 }
 
@@ -361,6 +508,8 @@ impl VyrmRaftStore {
         )?;
         let snapshot_objects = LocalObjectStore::open(local_root.join(SNAPSHOT_OBJECT_DIRECTORY))
             .map_err(|error| ClusterError::Unavailable(error.to_string()))?;
+        let snapshot_spool = local_root.join(SNAPSHOT_SPOOL_DIRECTORY);
+        clean_snapshot_spool(&snapshot_spool)?;
 
         let database = Arc::new(Mutex::new(state_database));
         let local_database = Arc::new(Mutex::new(local_database));
@@ -372,6 +521,7 @@ impl VyrmRaftStore {
                 state_database: database,
                 local_database,
                 snapshot_objects,
+                snapshot_spool,
                 shard,
             },
         ))
@@ -394,6 +544,37 @@ fn open_adapter_database(root: &Path) -> ClusterResult<Database> {
         )));
     }
     Database::create(root).map_err(|error| ClusterError::Unavailable(error.to_string()))
+}
+
+fn clean_snapshot_spool(path: &Path) -> ClusterResult<()> {
+    std::fs::create_dir_all(path).map_err(|error| ClusterError::Unavailable(error.to_string()))?;
+    for entry in
+        std::fs::read_dir(path).map_err(|error| ClusterError::Unavailable(error.to_string()))?
+    {
+        let entry = entry.map_err(|error| ClusterError::Unavailable(error.to_string()))?;
+        let file_type = entry
+            .file_type()
+            .map_err(|error| ClusterError::Unavailable(error.to_string()))?;
+        if !file_type.is_file() {
+            return Err(ClusterError::Denied(format!(
+                "snapshot spool contains unexpected non-file entry {}",
+                entry.path().display()
+            )));
+        }
+        std::fs::remove_file(entry.path())
+            .map_err(|error| ClusterError::Unavailable(error.to_string()))?;
+    }
+    std::fs::File::open(path)
+        .and_then(|directory| directory.sync_all())
+        .map_err(|error| ClusterError::Unavailable(error.to_string()))
+}
+
+fn snapshot_spool_path(root: &Path, purpose: &str) -> PathBuf {
+    root.join(format!(
+        "{purpose}-{}-{}.spool",
+        std::process::id(),
+        SNAPSHOT_SPOOL_ORDINAL.fetch_add(1, Ordering::Relaxed)
+    ))
 }
 
 fn ensure_adapter_database(
@@ -581,6 +762,8 @@ impl RaftSnapshotBuilder<VyrmRaftTypeConfig> for VyrmRaftStateMachine {
     async fn build_snapshot(
         &mut self,
     ) -> std::result::Result<Snapshot<VyrmRaftTypeConfig>, StorageError<u64>> {
+        let spool = snapshot_spool_path(&self.snapshot_spool, "build");
+        let mut spool_cleanup = SnapshotCleanup(Some(spool.clone()));
         let (state, bundle) = {
             let mut database = lock_database(
                 &self.state_database,
@@ -589,7 +772,7 @@ impl RaftSnapshotBuilder<VyrmRaftTypeConfig> for VyrmRaftStateMachine {
             )?;
             let state = read_state_from_database(&database)?;
             let at = state.last_applied.map_or(0, |log_id| log_id.index);
-            let bundle = database.export_snapshot_bundle(at).map_err(|error| {
+            let bundle = database.export_snapshot_file(at, &spool).map_err(|error| {
                 storage_error(
                     ErrorSubject::Snapshot(None),
                     ErrorVerb::Read,
@@ -598,23 +781,26 @@ impl RaftSnapshotBuilder<VyrmRaftTypeConfig> for VyrmRaftStateMachine {
             })?;
             (state, bundle)
         };
-        let data = bundle.encode().map_err(|error| {
-            storage_error(
-                ErrorSubject::Snapshot(None),
-                ErrorVerb::Read,
-                error.to_string(),
-            )
-        })?;
-        let snapshot_id = expected_snapshot_id(&state, &bundle);
+        let snapshot_id = expected_snapshot_file_id(&state, &bundle);
         let meta = SnapshotMeta {
             last_log_id: state.last_applied,
             last_membership: state.last_membership,
             snapshot_id,
         };
-        publish_snapshot(&self.local_database, &self.snapshot_objects, &meta, &data)?;
+        publish_snapshot_file(&self.local_database, &self.snapshot_objects, &meta, &bundle)?;
+        let snapshot = VyrmSnapshotData::open(bundle.path(), true)
+            .await
+            .map_err(|error| {
+                storage_error(
+                    ErrorSubject::Snapshot(Some(meta.signature())),
+                    ErrorVerb::Read,
+                    error.to_string(),
+                )
+            })?;
+        spool_cleanup.0.take();
         Ok(Snapshot {
             meta,
-            snapshot: Box::new(Cursor::new(data)),
+            snapshot: Box::new(snapshot),
         })
     }
 }
@@ -716,7 +902,17 @@ impl RaftStateMachine<VyrmRaftTypeConfig> for VyrmRaftStateMachine {
         Box<<VyrmRaftTypeConfig as RaftTypeConfig>::SnapshotData>,
         StorageError<u64>,
     > {
-        Ok(Box::new(Cursor::new(Vec::new())))
+        let path = snapshot_spool_path(&self.snapshot_spool, "receive");
+        VyrmSnapshotData::create_ephemeral(path)
+            .await
+            .map(Box::new)
+            .map_err(|error| {
+                storage_error(
+                    ErrorSubject::Snapshot(None),
+                    ErrorVerb::Write,
+                    error.to_string(),
+                )
+            })
     }
 
     async fn install_snapshot(
@@ -724,11 +920,14 @@ impl RaftStateMachine<VyrmRaftTypeConfig> for VyrmRaftStateMachine {
         meta: &SnapshotMeta<u64, VyrmRaftNode>,
         snapshot: Box<<VyrmRaftTypeConfig as RaftTypeConfig>::SnapshotData>,
     ) -> std::result::Result<(), StorageError<u64>> {
-        let data = snapshot.into_inner();
         let subject = ErrorSubject::Snapshot(Some(meta.signature()));
-        let bundle = SnapshotBundle::decode(&data)
+        snapshot
+            .sync_all()
+            .await
+            .map_err(|error| storage_error(subject.clone(), ErrorVerb::Write, error.to_string()))?;
+        let bundle = SnapshotBundleFile::open(snapshot.path())
             .map_err(|error| storage_error(subject.clone(), ErrorVerb::Read, error.to_string()))?;
-        let state = state_from_snapshot_bundle(&bundle, self.shard, subject.clone())?;
+        let state = state_from_snapshot_file(&bundle, self.shard, subject.clone())?;
         if state.last_applied != meta.last_log_id || state.last_membership != meta.last_membership {
             return Err(storage_error(
                 subject,
@@ -736,7 +935,7 @@ impl RaftStateMachine<VyrmRaftTypeConfig> for VyrmRaftStateMachine {
                 "snapshot metadata does not match its state bytes",
             ));
         }
-        if meta.snapshot_id != expected_snapshot_id(&state, &bundle) {
+        if meta.snapshot_id != expected_snapshot_file_id(&state, &bundle) {
             return Err(storage_error(
                 ErrorSubject::Snapshot(Some(meta.signature())),
                 ErrorVerb::Write,
@@ -749,7 +948,7 @@ impl RaftStateMachine<VyrmRaftTypeConfig> for VyrmRaftStateMachine {
             ErrorSubject::Snapshot(Some(meta.signature())),
             ErrorVerb::Write,
         )?
-        .install_snapshot_bundle(&bundle, at)
+        .install_snapshot_file(&bundle, at)
         .map_err(|error| {
             storage_error(
                 ErrorSubject::Snapshot(Some(meta.signature())),
@@ -757,7 +956,7 @@ impl RaftStateMachine<VyrmRaftTypeConfig> for VyrmRaftStateMachine {
                 error.to_string(),
             )
         })?;
-        publish_snapshot(&self.local_database, &self.snapshot_objects, meta, &data)
+        publish_snapshot_file(&self.local_database, &self.snapshot_objects, meta, &bundle)
     }
 
     async fn get_current_snapshot(
@@ -768,46 +967,34 @@ impl RaftStateMachine<VyrmRaftTypeConfig> for VyrmRaftStateMachine {
             KEY_SNAPSHOT,
             ErrorSubject::Snapshot(None),
         )?;
-        stored
-            .map(|snapshot| {
-                let data = self
-                    .snapshot_objects
-                    .get(&snapshot.object)
-                    .map_err(|error| {
-                        storage_error(
-                            ErrorSubject::Snapshot(Some(snapshot.meta.signature())),
-                            ErrorVerb::Read,
-                            error.to_string(),
-                        )
-                    })?;
-                let bundle = SnapshotBundle::decode(&data).map_err(|error| {
-                    storage_error(
-                        ErrorSubject::Snapshot(Some(snapshot.meta.signature())),
-                        ErrorVerb::Read,
-                        error.to_string(),
-                    )
-                })?;
-                let state = state_from_snapshot_bundle(
-                    &bundle,
-                    self.shard,
-                    ErrorSubject::Snapshot(Some(snapshot.meta.signature())),
-                )?;
-                if state.last_applied != snapshot.meta.last_log_id
-                    || state.last_membership != snapshot.meta.last_membership
-                    || snapshot.meta.snapshot_id != expected_snapshot_id(&state, &bundle)
-                {
-                    return Err(storage_error(
-                        ErrorSubject::Snapshot(Some(snapshot.meta.signature())),
-                        ErrorVerb::Read,
-                        "cached snapshot metadata does not match its authenticated bundle",
-                    ));
-                }
-                Ok(Snapshot {
-                    meta: snapshot.meta,
-                    snapshot: Box::new(Cursor::new(data)),
-                })
-            })
-            .transpose()
+        let Some(snapshot) = stored else {
+            return Ok(None);
+        };
+        let subject = ErrorSubject::Snapshot(Some(snapshot.meta.signature()));
+        let path = self
+            .snapshot_objects
+            .verified_path(&snapshot.object)
+            .map_err(|error| storage_error(subject.clone(), ErrorVerb::Read, error.to_string()))?;
+        let bundle = SnapshotBundleFile::open(&path)
+            .map_err(|error| storage_error(subject.clone(), ErrorVerb::Read, error.to_string()))?;
+        let state = state_from_snapshot_file(&bundle, self.shard, subject.clone())?;
+        if state.last_applied != snapshot.meta.last_log_id
+            || state.last_membership != snapshot.meta.last_membership
+            || snapshot.meta.snapshot_id != expected_snapshot_file_id(&state, &bundle)
+        {
+            return Err(storage_error(
+                subject.clone(),
+                ErrorVerb::Read,
+                "cached snapshot metadata does not match its authenticated bundle",
+            ));
+        }
+        let data = VyrmSnapshotData::open(path, false)
+            .await
+            .map_err(|error| storage_error(subject, ErrorVerb::Read, error.to_string()))?;
+        Ok(Some(Snapshot {
+            meta: snapshot.meta,
+            snapshot: Box::new(data),
+        }))
     }
 }
 
@@ -822,8 +1009,8 @@ impl VyrmRaftStateMachine {
     }
 }
 
-fn state_from_snapshot_bundle(
-    bundle: &SnapshotBundle,
+fn state_from_snapshot_file(
+    bundle: &SnapshotBundleFile,
     shard: ShardId,
     subject: ErrorSubject<u64>,
 ) -> std::result::Result<StateMachineData, StorageError<u64>> {
@@ -868,7 +1055,7 @@ fn state_from_snapshot_bundle(
     decode_json(&state_bytes, subject, ErrorVerb::Read)
 }
 
-fn expected_snapshot_id(state: &StateMachineData, bundle: &SnapshotBundle) -> String {
+fn expected_snapshot_file_id(state: &StateMachineData, bundle: &SnapshotBundleFile) -> String {
     format!(
         "v4-{}-{}",
         state.last_applied.map_or(0, |log_id| log_id.index),
@@ -876,21 +1063,29 @@ fn expected_snapshot_id(state: &StateMachineData, bundle: &SnapshotBundle) -> St
     )
 }
 
-fn publish_snapshot(
+fn publish_snapshot_file(
     local_database: &SharedDatabase,
     objects: &LocalObjectStore,
     meta: &SnapshotMeta<u64, VyrmRaftNode>,
-    data: &[u8],
+    bundle: &SnapshotBundleFile,
 ) -> std::result::Result<(), StorageError<u64>> {
     let subject = ErrorSubject::Snapshot(Some(meta.signature()));
     let verified = objects
-        .put(data)
+        .put_file(bundle.path())
         .map_err(|error| storage_error(subject.clone(), ErrorVerb::Write, error.to_string()))?;
-    let object = ObjectReference::for_bytes(
+    if verified.length != bundle.length {
+        return Err(storage_error(
+            subject,
+            ErrorVerb::Write,
+            "published snapshot object length differs from its authenticated bundle",
+        ));
+    }
+    let object = ObjectReference::for_verified(
         format!("raft-snapshot-{}", meta.snapshot_id),
         None,
         SNAPSHOT_MEDIA_TYPE,
-        data,
+        verified.sha256,
+        verified.length,
         verified.receipt,
     )
     .map_err(|error| storage_error(subject.clone(), ErrorVerb::Write, error.to_string()))?;

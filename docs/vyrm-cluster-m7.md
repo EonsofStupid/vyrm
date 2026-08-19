@@ -72,6 +72,9 @@ The Vyrm adapter format is now `v4`. It supplies:
   installation;
 - snapshot-bundle v1 export/install carrying the applied cursor, membership,
   request identities, schema, audit/outbox, and every canonical runtime record;
+- a file-backed OpenRaft `SnapshotData` path with a hard 1 GiB write bound,
+  64 KiB export/object buffers, one-segment-at-a-time deep validation, and
+  ephemeral build/receive spool cleanup;
 - a content-addressed local snapshot object plus a small local VyrmKV reference,
   preventing recursive bundles and avoiding the 8 MiB value ceiling;
 - the complete upstream OpenRaft storage conformance suite; and
@@ -100,6 +103,36 @@ checks shard/domain ownership, binds OpenRaft metadata and snapshot id, and
 refuses any local-Raft config in the bundle. Source manifest ancestry is never
 adopted. Snapshot cache bytes live in the node-local content-addressed object
 tier; only their verified reference is stored beside local Raft history.
+
+### File-backed snapshot lifecycle
+
+Snapshot construction, receipt, installation, cache publication, and cache
+reopen no longer materialize the complete bundle as `Cursor<Vec<u8>>`.
+`VyrmSnapshotData` wraps a seekable Tokio file, rejects a write that would cross
+the shared 1 GiB physical limit, and removes ephemeral build/receive files on
+drop. `VyrmRaftStore::open` also removes abandoned regular spool files left by a
+crashed process and refuses ambiguous non-file entries. Durable cached snapshot
+objects opt out of deletion and are reopened only after streaming object digest
+and length verification.
+
+`SnapshotBundleFile` writes the unchanged bundle-v1 wire format directly from
+immutable segment files with a 64 KiB copy/hash buffer. Open validates the outer
+digest, bounded manifest/descriptors, exact segment inventory, and each physical
+segment one at a time. Installation similarly admits only one transferred
+segment at a time before native VyrmKV opens the installed image.
+OpenRaft's default chunk transport then reads the seekable file in bounded
+chunks; Vyrm's JSON/TLS envelope retains its independent 16 MiB frame bound.
+
+Executable evidence includes byte identity with the checked-in bundle-v1
+fixture, corrupt/truncated denial, idempotent install and durable-cache reopen,
+post-purge learner catch-up in both in-process and four-process runs, 1 GiB
+write refusal before I/O, abandoned-spool restart cleanup, and crash/storage-full
+injection after header write, segment write, and file sync. A Linux regression
+fixture exports a bundle larger than 16 MiB while requiring incremental RSS
+growth to remain at or below 16 MiB. This proves snapshot overhead is not
+proportional to the whole bundle for that fixture. It does **not** make VyrmKV's
+current decoded immutable segments disk-resident; the installed database image
+still has its separately measured resident-engine cost.
 
 ## Authenticated transport v1
 
@@ -223,6 +256,7 @@ Research sources, retrieved 2026-08-19:
 - [OpenRaft storage implementation guide](https://docs.rs/openraft/latest/openraft/docs/getting_started/index.html)
 - [OpenRaft `RaftLogStorage` contract](https://docs.rs/openraft/latest/openraft/storage/trait.RaftLogStorage.html)
 - [OpenRaft network contract](https://docs.rs/openraft/0.9.25/openraft/network/index.html)
+- [OpenRaft chunked snapshot transport source](https://github.com/databendlabs/openraft/blob/v0.9.25/openraft/src/network/snapshot_transport.rs)
 - [rustls client-certificate verifier](https://rustls.dev/docs/server/struct.ClientVerifierBuilder.html)
 - [SPIFFE concepts and X.509 workload identity](https://spiffe.io/docs/latest/spiffe/concepts/)
 - [TiKV raft-rs](https://github.com/tikv/raft-rs)
@@ -258,6 +292,7 @@ Research sources, retrieved 2026-08-19:
 - [SurrealDB multi-node boundary](https://surrealdb.com/docs/running/multi-node)
 - [Qdrant horizontal scaling](https://qdrant.tech/documentation/scaling/horizontal-scaling/)
 - [Qdrant consistency guarantees](https://qdrant.tech/documentation/scaling/consistency-guarantees/)
+- [Qdrant distributed snapshot, record-stream, and WAL-delta transfer tradeoffs](https://qdrant.tech/documentation/scaling/distributed_deployment/)
 
 These are design inputs, not copied implementations or proof that Vyrm is
 faster or more available.
@@ -298,20 +333,21 @@ This gate still does not contain dynamic membership discovery, automatic
 certificate issuance or Workload API streaming, durable supervisor generation,
 per-identity rate policy, production transport telemetry, multi-shard atomic
 commit, or metadata-shard reshard cutover.
-Application state currently proves ordered
-identity/CAS/digest semantics and now atomically dispatches canonical
-`RuntimeCommit` transactions into native VyrmKV and transfers that runtime state
-in Raft snapshots. Snapshot construction and receipt currently use
-`Cursor<Vec<u8>>`; OpenRaft can chunk those bytes on the wire, but Vyrm does not
-yet claim file-backed or bounded-memory snapshot streaming. Its synchronous
-mutex, prefix scans, and JSON protocol state are correctness-first test
-implementations, not production throughput or footprint claims. Commands are
-limited to 1 MiB and physical snapshot envelopes to 1 GiB until compact and
-streaming codecs land.
+Application state currently proves ordered identity/CAS/digest semantics and
+now atomically dispatches canonical `RuntimeCommit` transactions into native
+VyrmKV and transfers that runtime state in file-backed Raft snapshots. The
+native engine still retains decoded immutable segments in memory; snapshot
+streaming removes whole-bundle transfer copies, not that resident-engine limit.
+Its synchronous mutex, prefix scans, and JSON protocol state are
+correctness-first test implementations, not production throughput or footprint
+claims. Commands are
+limited to 1 MiB and physical snapshot envelopes to 1 GiB until a compact RPC
+codec and disk-resident segment path land.
 
 The next M7 slice must extend the passing one-host process matrix to independent
 hosts and real network/disk fault mechanisms, connect the passing credential
 state machine to an attested Workload API source, and retain production
-telemetry. File-backed, bounded-memory snapshot creation/receipt is also
-required before high-volume cluster claims. Only that evidence can advance a
-Multi-AZ claim.
+telemetry. File-backed, bounded-memory snapshot creation/receipt is now closed
+for the scoped fixture, but disk-resident segment/query execution and larger
+retained soak evidence are still required before high-volume cluster claims.
+Only that evidence can advance a Multi-AZ claim.

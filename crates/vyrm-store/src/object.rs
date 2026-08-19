@@ -83,6 +83,73 @@ impl LocalObjectStore {
         self.put_with_hook(bytes, |_| Ok(()))
     }
 
+    /// Publishes one immutable file without materializing it as a `Vec`.
+    pub fn put_file(&self, source: impl AsRef<Path>) -> Result<VerifiedObject> {
+        self.put_file_with_hook(source, |_| Ok(()))
+    }
+
+    pub fn put_file_with_hook(
+        &self,
+        source: impl AsRef<Path>,
+        mut hook: impl FnMut(ObjectStep) -> Result<()>,
+    ) -> Result<VerifiedObject> {
+        hook(ObjectStep::BeforeStageWrite)?;
+        let mut source = File::open(source)?;
+        let stage_name = format!(
+            "{}-{}-stream",
+            std::process::id(),
+            STAGE_ORDINAL.fetch_add(1, Ordering::Relaxed)
+        );
+        let stage_path = self.root.join("staging").join(stage_name);
+        let mut stage = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&stage_path)?;
+        let mut digest = digest::Sha256::new();
+        let mut length = 0u64;
+        let mut buffer = [0u8; 64 * 1024];
+        let staged = (|| -> Result<(String, u64)> {
+            loop {
+                let read = source.read(&mut buffer)?;
+                if read == 0 {
+                    break;
+                }
+                length = length
+                    .checked_add(read as u64)
+                    .ok_or_else(|| Error::Object("object length overflowed u64".into()))?;
+                digest.update(&buffer[..read]);
+                stage.write_all(&buffer[..read])?;
+            }
+            stage.sync_all()?;
+            sync_directory(self.root.join("staging"))?;
+            Ok((digest.finalize_hex(), length))
+        })();
+        let (sha256, length) = match staged {
+            Ok(value) => value,
+            Err(error) => {
+                drop(stage);
+                let _ = fs::remove_file(&stage_path);
+                return Err(error);
+            }
+        };
+        drop(stage);
+        hook(ObjectStep::AfterStageSync)?;
+        let key = ObjectReference::canonical_key(&sha256).map_err(Error::from)?;
+        let final_path = self.root.join(&key);
+        self.publish_stage(&stage_path, &final_path, &sha256)?;
+        hook(ObjectStep::AfterPublish)?;
+        hook(ObjectStep::BeforeVerify)?;
+        let verified = self.verify(&sha256)?;
+        if verified.length != length {
+            return Err(Error::ObjectLengthMismatch {
+                expected: length,
+                actual: verified.length,
+            });
+        }
+        hook(ObjectStep::AfterVerify)?;
+        Ok(verified)
+    }
+
     /// Stages, syncs, atomically publishes, and verifies one immutable object.
     /// The hook exists so crash/failure tests can stop at every boundary.
     pub fn put_with_hook(
@@ -111,27 +178,7 @@ impl LocalObjectStore {
         sync_directory(self.root.join("staging"))?;
         hook(ObjectStep::AfterStageSync)?;
 
-        if let Some(parent) = final_path.parent() {
-            fs::create_dir_all(parent)?;
-        }
-        if final_path.exists() {
-            match self.verify(&sha256) {
-                Ok(_) => {
-                    // Content addressing makes an existing verified value equivalent.
-                    fs::remove_file(&stage_path)?;
-                }
-                Err(Error::ObjectCorrupt { .. }) => {
-                    self.quarantine(&sha256)?;
-                    fs::rename(&stage_path, &final_path)?;
-                }
-                Err(error) => return Err(error),
-            }
-        } else {
-            fs::rename(&stage_path, &final_path)?;
-            if let Some(parent) = final_path.parent() {
-                sync_directory(parent)?;
-            }
-        }
+        self.publish_stage(&stage_path, &final_path, &sha256)?;
         hook(ObjectStep::AfterPublish)?;
         hook(ObjectStep::BeforeVerify)?;
         let verified = self.verify(&sha256)?;
@@ -149,9 +196,7 @@ impl LocalObjectStore {
                 Error::from(error)
             }
         })?;
-        let mut bytes = Vec::new();
-        file.read_to_end(&mut bytes)?;
-        let actual = digest::sha256_hex(&bytes);
+        let (actual, length) = digest_reader(&mut file)?;
         if actual != sha256 {
             return Err(Error::ObjectCorrupt {
                 expected: sha256.to_owned(),
@@ -160,7 +205,7 @@ impl LocalObjectStore {
         }
         Ok(VerifiedObject {
             sha256: sha256.to_owned(),
-            length: bytes.len() as u64,
+            length,
             receipt: ObjectReceipt {
                 backend: "local".into(),
                 key,
@@ -182,6 +227,19 @@ impl LocalObjectStore {
         fs::read(self.root.join(&reference.receipt.key)).map_err(Error::from)
     }
 
+    /// Returns a verified canonical path suitable for bounded file I/O.
+    pub fn verified_path(&self, reference: &ObjectReference) -> Result<PathBuf> {
+        reference.validate().map_err(Error::from)?;
+        let verified = self.verify(&reference.sha256)?;
+        if verified.length != reference.length {
+            return Err(Error::ObjectLengthMismatch {
+                expected: reference.length,
+                actual: verified.length,
+            });
+        }
+        Ok(self.root.join(&reference.receipt.key))
+    }
+
     pub fn inventory(&self, reachable: &BTreeSet<String>) -> Result<ObjectInventory> {
         let mut entries = Vec::new();
         let sha_root = self.root.join("objects/sha256");
@@ -196,8 +254,8 @@ impl LocalObjectStore {
                 let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
                     continue;
                 };
-                let bytes = fs::read(&path)?;
-                let actual = digest::sha256_hex(&bytes);
+                let mut file = File::open(&path)?;
+                let (actual, length) = digest_reader(&mut file)?;
                 let state = if actual != name {
                     ObjectInventoryState::Corrupt {
                         actual_sha256: actual,
@@ -209,7 +267,7 @@ impl LocalObjectStore {
                 };
                 entries.push(ObjectInventoryEntry {
                     sha256: name.to_owned(),
-                    length: bytes.len() as u64,
+                    length,
                     state,
                 });
             }
@@ -254,6 +312,51 @@ impl LocalObjectStore {
         removed.sort();
         Ok(removed)
     }
+
+    fn publish_stage(&self, stage_path: &Path, final_path: &Path, sha256: &str) -> Result<()> {
+        if let Some(parent) = final_path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        if final_path.exists() {
+            match self.verify(sha256) {
+                Ok(_) => {
+                    // Content addressing makes an existing verified value equivalent.
+                    fs::remove_file(stage_path)?;
+                }
+                Err(Error::ObjectCorrupt { .. }) => {
+                    self.quarantine(sha256)?;
+                    fs::rename(stage_path, final_path)?;
+                    if let Some(parent) = final_path.parent() {
+                        sync_directory(parent)?;
+                    }
+                }
+                Err(error) => return Err(error),
+            }
+        } else {
+            fs::rename(stage_path, final_path)?;
+            if let Some(parent) = final_path.parent() {
+                sync_directory(parent)?;
+            }
+        }
+        Ok(())
+    }
+}
+
+fn digest_reader(reader: &mut impl Read) -> Result<(String, u64)> {
+    let mut digest = digest::Sha256::new();
+    let mut length = 0u64;
+    let mut buffer = [0u8; 64 * 1024];
+    loop {
+        let read = reader.read(&mut buffer)?;
+        if read == 0 {
+            break;
+        }
+        length = length
+            .checked_add(read as u64)
+            .ok_or_else(|| Error::Object("object length overflowed u64".into()))?;
+        digest.update(&buffer[..read]);
+    }
+    Ok((digest.finalize_hex(), length))
 }
 
 impl ImmutableObjectStore for LocalObjectStore {
@@ -310,6 +413,32 @@ mod tests {
         assert!(
             store.inventory(&BTreeSet::new()).unwrap().entries[0].state
                 == ObjectInventoryState::Orphan
+        );
+    }
+
+    #[test]
+    fn local_file_put_streams_to_the_same_content_address() {
+        let directory = tempdir().unwrap();
+        let source = directory.path().join("source.bin");
+        let bytes = vec![0x5a; 256 * 1024 + 17];
+        fs::write(&source, &bytes).unwrap();
+        let store = LocalObjectStore::open(directory.path().join("objects")).unwrap();
+        let streamed = store.put_file(&source).unwrap();
+        let in_memory = store.put(&bytes).unwrap();
+        assert_eq!(streamed, in_memory);
+
+        let reference = ObjectReference::for_verified(
+            "streamed",
+            None,
+            "application/octet-stream",
+            streamed.sha256.clone(),
+            streamed.length,
+            streamed.receipt.clone(),
+        )
+        .unwrap();
+        assert_eq!(
+            store.verified_path(&reference).unwrap(),
+            store.root().join(&streamed.receipt.key)
         );
     }
 

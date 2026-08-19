@@ -26,7 +26,8 @@ pub use manifest::{
 pub use memtable::{Memtable, VersionedValue};
 pub use segment::{Segment, SEGMENT_FORMAT_VERSION};
 pub use snapshot_bundle::{
-    SnapshotBundle, SnapshotSegment, SNAPSHOT_BUNDLE_FORMAT_VERSION,
+    SnapshotBundle, SnapshotBundleFile, SnapshotExportBoundary, SnapshotSegment,
+    SNAPSHOT_BUNDLE_FORMAT_VERSION, SNAPSHOT_BUNDLE_MAX_BYTES,
 };
 pub use wal::{
     recover, recover_from, repair_torn_tail, AppendReceipt, Durability, RecoveredBatch, Recovery,

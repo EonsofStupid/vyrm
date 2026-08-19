@@ -87,6 +87,15 @@ not roadmap language.
   file-fed supervisor contract; SPIFFE Workload API streaming, automatic
   issuance, durable supervisor generation, independent hosts/hardware faults,
   production observability, and Multi-AZ deployment remain unclaimed.
+  OpenRaft snapshots are now seekable files rather than `Cursor<Vec<u8>>`:
+  bundle export, receive, install, local object publication, verification, and
+  durable reopen avoid whole-bundle allocation; writes are hard-capped at 1 GiB;
+  ephemeral files clean up on drop/restart; and ambiguous spool entries fail
+  closed. Crash/storage-full export boundaries, corruption/truncation, durable
+  cache reopen, post-purge catch-up, and a >16 MiB bundle/≤16 MiB incremental
+  RSS Linux regression are green. VyrmKV's decoded immutable segments remain
+  resident, so this is bounded transfer overhead rather than a high-volume
+  disk-resident engine claim.
   Placement epochs are now explicit replicated `placement_transition`
   operations: initialization must be epoch 1, advances must be exact successors,
   and declared voter canonical ids/zones must equal the applied OpenRaft

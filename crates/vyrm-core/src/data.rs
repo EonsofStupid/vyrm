@@ -321,6 +321,35 @@ impl ObjectReference {
         Ok(value)
     }
 
+    /// Builds a reference from independently verified streaming evidence.
+    ///
+    /// File/object adapters use this when the payload is intentionally too
+    /// large to materialize as one byte slice. The digest and length remain
+    /// subject to the same canonical-reference validation as `for_bytes`.
+    pub fn for_verified(
+        id: impl Into<String>,
+        subject: Option<RuntimeRef>,
+        media_type: impl Into<String>,
+        sha256: impl Into<String>,
+        length: u64,
+        receipt: ObjectReceipt,
+    ) -> Result<Self> {
+        let value = Self {
+            reference: RuntimeRef {
+                kind: RuntimeType::new("object")?,
+                id: RuntimeId::new(id)?,
+            },
+            subject,
+            sha256: sha256.into(),
+            length,
+            media_type: media_type.into(),
+            receipt,
+            properties: RuntimeProperties::new(),
+        };
+        value.validate()?;
+        Ok(value)
+    }
+
     pub fn canonical_key(sha256: &str) -> Result<String> {
         validate_digest("object", sha256)?;
         Ok(format!("objects/sha256/{}/{sha256}", &sha256[..2]))

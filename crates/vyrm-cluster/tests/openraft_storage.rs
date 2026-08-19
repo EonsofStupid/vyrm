@@ -7,12 +7,14 @@ use openraft::{
     RaftSnapshotBuilder, StorageError, Vote,
 };
 use std::collections::{BTreeMap, BTreeSet};
-use std::io::{self, Cursor};
+use std::io;
+use std::sync::atomic::{AtomicU64, Ordering};
 use tempfile::TempDir;
+use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
 use vyrm_cluster::{
     ClusterError, ClusterId, NodeId, PlacementPolicy, ReplicaPlacement, ReplicaRole, ShardId,
     ShardPlacement, VyrmRaftCommand, VyrmRaftLogStore, VyrmRaftNode, VyrmRaftStateMachine,
-    VyrmRaftStore, VyrmRaftTypeConfig, ZoneId, CLUSTER_CONTRACT_VERSION,
+    VyrmRaftStore, VyrmRaftTypeConfig, VyrmSnapshotData, ZoneId, CLUSTER_CONTRACT_VERSION,
 };
 use vyrm_core::{
     RuntimeCommit, RuntimeMutation, RuntimeRecordSchema, RuntimeSchemaRegistry, RuntimeType,
@@ -22,6 +24,39 @@ use vyrm_kv::{recover, Database, Durability, Mutation, SnapshotBundle, WriteBatc
 use vyrm_store::{Engine, NativeEngine};
 
 struct VyrmStoreBuilder;
+
+static TEST_SNAPSHOT_ORDINAL: AtomicU64 = AtomicU64::new(1);
+
+async fn snapshot_bytes(mut snapshot: Box<VyrmSnapshotData>) -> Result<Vec<u8>, StorageError<u64>> {
+    snapshot
+        .seek(std::io::SeekFrom::Start(0))
+        .await
+        .map_err(test_storage_error)?;
+    let mut bytes = Vec::new();
+    snapshot
+        .read_to_end(&mut bytes)
+        .await
+        .map_err(test_storage_error)?;
+    Ok(bytes)
+}
+
+async fn snapshot_handle(
+    root: &std::path::Path,
+    bytes: &[u8],
+) -> Result<Box<VyrmSnapshotData>, StorageError<u64>> {
+    let path = root.join(format!(
+        "test-snapshot-{}.spool",
+        TEST_SNAPSHOT_ORDINAL.fetch_add(1, Ordering::Relaxed)
+    ));
+    let mut snapshot = VyrmSnapshotData::create_ephemeral(path)
+        .await
+        .map_err(test_storage_error)?;
+    snapshot
+        .write_all(bytes)
+        .await
+        .map_err(test_storage_error)?;
+    Ok(Box::new(snapshot))
+}
 
 impl StoreBuilder<VyrmRaftTypeConfig, VyrmRaftLogStore, VyrmRaftStateMachine, TempDir>
     for VyrmStoreBuilder
@@ -358,7 +393,7 @@ fn canonical_runtime_commit_is_atomic_idempotent_durable_and_transferable() {
             assert_eq!(snapshot.meta.last_log_id, Some(retry_log));
             assert!(snapshot.meta.snapshot_id.starts_with("v4-5-"));
             let snapshot_meta = snapshot.meta;
-            let snapshot_data = snapshot.snapshot.into_inner();
+            let snapshot_data = snapshot_bytes(snapshot.snapshot).await?;
             let physical = SnapshotBundle::decode(&snapshot_data).map_err(test_storage_error)?;
             assert!(physical
                 .get(b"vyrm/raft/v4/state/current")
@@ -415,8 +450,9 @@ fn canonical_runtime_commit_is_atomic_idempotent_durable_and_transferable() {
             let mut corrupt_data = snapshot_data.clone();
             let middle = corrupt_data.len() / 2;
             corrupt_data[middle] ^= 0x40;
+            let corrupt_snapshot = snapshot_handle(target_directory.path(), &corrupt_data).await?;
             assert!(target_state
-                .install_snapshot(&snapshot_meta, Box::new(Cursor::new(corrupt_data)),)
+                .install_snapshot(&snapshot_meta, corrupt_snapshot)
                 .await
                 .is_err());
             assert_eq!(target_state.applied_state().await?.0, None);
@@ -424,16 +460,20 @@ fn canonical_runtime_commit_is_atomic_idempotent_durable_and_transferable() {
 
             let mut forged_meta = snapshot_meta.clone();
             forged_meta.snapshot_id.push_str("-forged");
+            let forged_snapshot = snapshot_handle(target_directory.path(), &snapshot_data).await?;
             assert!(target_state
-                .install_snapshot(&forged_meta, Box::new(Cursor::new(snapshot_data.clone())),)
+                .install_snapshot(&forged_meta, forged_snapshot)
                 .await
                 .is_err());
             assert_eq!(target_state.applied_state().await?.0, None);
+            let first_install = snapshot_handle(target_directory.path(), &snapshot_data).await?;
             target_state
-                .install_snapshot(&snapshot_meta, Box::new(Cursor::new(snapshot_data.clone())))
+                .install_snapshot(&snapshot_meta, first_install)
                 .await?;
+            let idempotent_install =
+                snapshot_handle(target_directory.path(), &snapshot_data).await?;
             target_state
-                .install_snapshot(&snapshot_meta, Box::new(Cursor::new(snapshot_data.clone())))
+                .install_snapshot(&snapshot_meta, idempotent_install)
                 .await?;
             assert_eq!(target_log.read_vote().await?, Some(target_vote));
             assert_eq!(target_state.applied_state().await?.0, Some(retry_log));
@@ -452,8 +492,9 @@ fn canonical_runtime_commit_is_atomic_idempotent_durable_and_transferable() {
                     payload: EntryPayload::Blank,
                 }])
                 .await?;
+            let stale_install = snapshot_handle(target_directory.path(), &snapshot_data).await?;
             assert!(target_state
-                .install_snapshot(&snapshot_meta, Box::new(Cursor::new(snapshot_data)),)
+                .install_snapshot(&snapshot_meta, stale_install)
                 .await
                 .is_err());
             assert_eq!(
