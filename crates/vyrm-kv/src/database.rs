@@ -99,10 +99,18 @@ pub struct Database {
 
 impl Database {
     pub fn create(root: &Path) -> Result<Self> {
-        std::fs::create_dir(root)?;
+        if root.exists() {
+            if !root.is_dir() || std::fs::read_dir(root)?.next().is_some() {
+                return Err(Error::InvalidManifest(
+                    "new database path exists and is not an empty directory".into(),
+                ));
+            }
+        } else {
+            std::fs::create_dir(root)?;
+        }
+        let manifests = ManifestStore::open(root)?;
         std::fs::create_dir(root.join(WAL_DIRECTORY))?;
         std::fs::create_dir(root.join(SEGMENT_DIRECTORY))?;
-        let manifests = ManifestStore::open(root)?;
         let manifest = Manifest::new(1, None, 0, 0, 1, Vec::new())?;
         let wal = WalWriter::create_at(&wal_path(root, 1), 1)?;
         manifests.publish(&manifest, None)?;

@@ -119,17 +119,24 @@ not roadmap language.
   correctness and now passes every equal-or-better cell: native is 10.4% ahead
   on write throughput, 1.3% ahead on bounded replay throughput, has lower
   write/read p95 and maintained recovery, uses 9.4% less steady RSS, and 86.0%
-  less disk for this workload. This is scoped evidence awaiting CI and broader
-  workload reproduction, not a universal database claim.
+  less disk for this workload. A follow-on nine-trial matrix also passes all
+  cells for small-batch, standard, read-heavy, and sustained profiles after the
+  sparse index stopped cloning keys. This is still scoped append/replay evidence
+  awaiting remote reproduction, mixed update/delete soak, and migration
+  rehearsal—not a universal database claim.
+  Native now also persists access/removal evidence and the invocation/
+  effectiveness ledger with Fjall-equality and reopen tests, closing the
+  operator-data gap that previously prevented runtime entry points from using
+  the native default safely.
 
 ## Verification
 
 CI runs the locked full workspace tests, warning-free clippy, evaluation-evidence
 validation, and the `vyrm-core` serde-only dependency boundary. Compiled-binary
 tests cover operator commands, hooks, explicit recovery, and both MCP eras. A
-separate scheduled/manual workflow executes the isolated five-trial native/Fjall
-matrix with `--require-promotion` and retains its raw JSON artifact even on
-failure.
+separate scheduled/manual workflow executes four isolated nine-trial
+native/Fjall profiles with `--require-promotion` and retains each raw JSON
+artifact even on failure.
 
 ## Deliberate limits
 
@@ -142,11 +149,12 @@ failure.
   and flight composition uses the physically isolated store's
   `instance:default` scope; umbrella member routing and capability-based remote
   authorization remain deliberately non-executable.
-- Fjall remains wired only as the current compatibility substrate. The target
-  is a Vyrm-native engine behind the existing `Engine` conformance contract;
-  removal is gated by parity plus measured equal-or-better write/read latency,
-  throughput, durability, crash recovery, and memory use—not by preserving
-  Fjall as an architectural dependency.
+- Native `vyrmKV` is the default for missing store paths through
+  `PersistentEngine`; CLI, `vyrmd`, and Connectome expose the selected backend.
+  Existing non-native directories reopen as `fjall_compatibility` and are never
+  reinterpreted. Fjall source removal remains gated by explicit migration,
+  mixed update/delete soak, and remote matrix reproduction—not by preserving it
+  as an architectural dependency.
 - Evidence carries content digests, but general large artifact bytes and their
   revision/backreference lifecycle do not yet have a dedicated object store.
 - Prompt-flight acceptance without a marker proves process completion only.

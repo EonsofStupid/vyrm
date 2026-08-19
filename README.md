@@ -176,7 +176,16 @@ differential. Fjall remains live until broader benchmark regression runs
 reproduce the native engine's first strict local equal-or-better pass. That
 checked-in five-trial workload has native ahead in write/read throughput,
 write/read p95, maintained recovery, steady RSS, and disk while preserving
-correctness; it is a scoped M3 result, not a general database-superiority claim.
+correctness. A nine-trial small-batch/standard/read-heavy/sustained matrix also
+passes every cell. These are scoped append/replay M3 results, not a general
+database-superiority claim; mixed-mutation soak and safe migration remain.
+The canonical `PersistentEngine` now creates native stores for missing paths and
+reopens them by their authenticated `CURRENT` marker. CLI, `vyrmd`, and
+Connectome use that selector. Existing non-native directories remain on the
+explicit `fjall_compatibility` path until migration; no bytes are guessed or
+silently converted. Native access/removal evidence and the invocation/
+effectiveness ledger now match Fjall and survive reopen, so the default does not
+drop trigger-optimization evidence.
 
 ## Instance boundary
 

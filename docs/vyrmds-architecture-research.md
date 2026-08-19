@@ -485,6 +485,11 @@ also green. The isolated five-trial comparative baseline and strict
 equal-or-better policy are frozen in `docs/vyrmkv-benchmark.md`. Segment-v2
 compression, sparse immutable reads, platform CRC32C, and fresh steady-state
 probes moved every measured cell green while preserving correctness. The local
-M3 gap is closed; next reproduce it under CI and broader mixed/sustained
-workloads, then make the explicit backend-default/removal decision. Do not infer
-SurrealDB or Qdrant superiority from this Fjall-scoped result.
+M3 gap is closed; a nine-trial small-batch/standard/read-heavy/sustained matrix
+also passes after eliminating duplicate sparse-index keys. Next reproduce it
+under CI, add mixed update/delete soak, and rehearse existing-store migration.
+The runtime default decision is implemented through `PersistentEngine`: missing
+paths become native, native `CURRENT` paths reopen native, and existing
+non-native paths remain compatibility-bound. Fjall source removal waits for the
+remaining gates. Do not infer SurrealDB or Qdrant superiority from this
+Fjall-scoped result.

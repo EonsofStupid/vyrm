@@ -7,7 +7,7 @@ fn snapshot_exposes_runtime_objects_without_mutating_the_store() {
     std::fs::write(root.path().join("lib.rs"), "pub fn connectome() {}\n").unwrap();
     vyrm_node::InstanceManifest::ensure_dedicated(root.path()).unwrap();
     let db = root.path().join(vyrm_node::STORE_DIR);
-    let store = vyrm_store::Store::open(&db).unwrap();
+    let store = vyrm_store::PersistentEngine::open(&db).unwrap();
     Engine::assert(
         &store,
         &Claim::new(
@@ -75,6 +75,7 @@ fn snapshot_exposes_runtime_objects_without_mutating_the_store() {
     let snapshot = connectome_ui::snapshot(&store, &binding, 10).unwrap();
 
     assert_eq!(snapshot.instance.mode, "dedicated");
+    assert_eq!(snapshot.health.storage_backend, "vyrmkv_native");
     assert_eq!(snapshot.health.current_claims, 1);
     assert_eq!(snapshot.health.runtime_cursor, 9);
     assert_eq!(snapshot.health.schema_revision, Some(1));

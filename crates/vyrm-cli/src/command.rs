@@ -6,7 +6,9 @@
 
 use clap::{Parser, Subcommand};
 use vyrm_core::{Claim, ClaimReader, Millis, Predicate, Producer, Reader, RecallQuery, Subject};
-use vyrm_store::{Effectiveness, Engine, GroundingReport, Outcome, RecallOutcome, Store, Trigger};
+use vyrm_store::{
+    Effectiveness, Engine, GroundingReport, Outcome, PersistentEngine, RecallOutcome, Trigger,
+};
 
 /// What a command produced: the operator-facing text, the `SPEC.md` §13.1
 /// effectiveness fields for recall-carrying commands, and a detail line for
@@ -357,7 +359,7 @@ impl Command {
 ///
 /// `now` is supplied rather than read here, so that tests are deterministic and
 /// the clock enters at exactly one place (`main`).
-pub fn execute(store: &Store, command: &Command, reader: &Reader, now: Millis, json: bool)
+pub fn execute(store: &PersistentEngine, command: &Command, reader: &Reader, now: Millis, json: bool)
     -> Result<Execution, Box<dyn std::error::Error>>
 {
     match command {
@@ -826,18 +828,21 @@ pub fn execute(store: &Store, command: &Command, reader: &Reader, now: Millis, j
         Command::Status => {
             let sequence = store.sequence()?;
             let invocations = store.invocation_count()?;
-            let access = store.access_count();
+            let access = store.access_count()?;
             Ok(if json {
                 serde_json::to_string_pretty(&serde_json::json!({
+                    "storage_backend": store.backend().as_str(),
                     "claim_sequence": sequence,
                     "invocations": invocations,
                     "access_records_approximate": access,
                 }))?
             } else {
                 format!(
-                    "claim sequence      {sequence}\n\
+                    "storage backend     {}\n\
+                     claim sequence      {sequence}\n\
                      invocations         {invocations}\n\
-                     access records      {access} (approximate)"
+                     access records      {access} (approximate)",
+                    store.backend().as_str()
                 )
             })
         }
@@ -890,7 +895,7 @@ pub fn execute(store: &Store, command: &Command, reader: &Reader, now: Millis, j
 }
 
 fn verify_instance_store(
-    store: &Store,
+    store: &PersistentEngine,
     root: &std::path::Path,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let binding = vyrm_node::InstanceBinding::discover(root)?;

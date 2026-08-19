@@ -98,7 +98,15 @@ disagree, `SPEC.md` is authoritative and this document is wrong.
 > probe processes, native passes correctness and every strict equal-or-better
 > cell: write/read throughput, write/read p95, maintained recovery, steady RSS,
 > and disk. This closes the local M3 gap; Fjall remains live as an oracle until
-> CI and broader workload matrices reproduce the result.
+> CI and broader workload matrices reproduce the result. A second nine-trial
+> small-batch/standard/read-heavy/sustained matrix now passes every strict cell;
+> the sparse index holds byte ranges into canonical segment storage rather than
+> duplicate heap keys. Remote repetition, mixed mutation soak, and migration
+> rehearsal gate Fjall source removal—not another append/replay microbenchmark.
+> The default switch itself is now safe and explicit: `PersistentEngine` creates
+> native stores for missing paths, reopens native by authenticated `CURRENT`,
+> and keeps existing non-native directories on `fjall_compatibility`. CLI,
+> `vyrmd`, and Connectome share that selector and expose its decision.
 > The product handoff, canonical package-event grammar, alpha release gates,
 > deployment/update tiers, and separate SurrealDB/Qdrant proof protocols are
 > frozen in `docs/clyffy-kernel-alpha.md`.

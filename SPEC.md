@@ -3,7 +3,7 @@
 | Field | Value |
 |-------|-------|
 | Status | Draft. Pre-release. Subject to revision without migration guarantees. |
-| Current compatibility substrate | Fjall 3.1.8; transitional until the Vyrm-native engine reaches conformance and performance parity |
+| Default substrate | Native `vyrmKV`; pre-existing non-native directories reopen through the Fjall 3.1.8 compatibility adapter until explicitly migrated |
 | Scope | Tier 0 only: development-time persistence and recall for a single operator |
 | Supersedes | Nothing. Extends `docs/architecture-journal.md` and `automaton/docs/00-abstract-layer.md`. |
 
@@ -40,7 +40,7 @@ under "Not" MUST NOT appear in vyrm source, documentation, or API surface.
 | **promotion** | A claim crossing a tier boundary by satisfying a gate. | publish, sync, escalation |
 | **recall** | Retrieval of claims for supply to a model context. | retrieval, lookup, fetch, search |
 | **recall set** | The result of a recall: claims plus provenance and a content digest. | context block, payload |
-| **substrate** | The persistence implementation behind the Vyrm storage port; currently the transitional Fjall adapter, ultimately Vyrm-native. | engine, backend, database, wrapper, store |
+| **substrate** | The persistence implementation behind the Vyrm storage port; native `vyrmKV` is the default and Fjall is the existing-store compatibility adapter/oracle. | engine, backend, database, wrapper, store |
 | **keyspace** | A logical isolated ordered key-value space. The compatibility adapter maps it to a Fjall 3.x keyspace. | table, column family, bucket |
 | **durability class** | The persistence policy assigned to a keyspace. | sync mode, flush policy |
 | **port** | A trait the kernel defines for an external implementation. | interface, hook |
@@ -58,10 +58,12 @@ MUST cite the date and host on which they were obtained.
 
 ## 2 · Position
 
-vyrm owns both its semantic contract and the target persistence architecture.
-The current release runs over a commodity compatibility substrate while a
-Vyrm-native substrate is built behind the same port. Fjall MUST NOT be described
-as the permanent architecture.
+vyrm owns both its semantic contract and persistence architecture. New runtime
+stores use native `vyrmKV` behind the canonical `PersistentEngine` selector.
+Directories carrying native's authenticated `CURRENT` pointer reopen as native;
+other existing directories remain on the Fjall compatibility adapter until an
+explicit migration. Selection MUST fail closed and MUST NOT reinterpret bytes.
+Fjall MUST NOT be described as the permanent architecture.
 
 Measured on `warden-devstation-01`, 2026-08-09:
 

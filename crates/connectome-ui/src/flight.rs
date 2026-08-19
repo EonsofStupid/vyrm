@@ -16,7 +16,7 @@ use vyrm_core::{
     RuntimeType, RuntimeValue, RuntimeValueType, ScopeId,
 };
 use vyrm_node::{HookContext, HookEvent, InstanceBinding};
-use vyrm_store::Store;
+use vyrm_store::{Engine, PersistentEngine};
 
 const FLIGHT_LEDGER: &str = "connectome-flight-ledger-v1";
 const FLIGHT_SCOPE: &str = "instance:default";
@@ -192,14 +192,14 @@ struct Ledger {
 }
 
 pub struct FlightRecorder {
-    store: Arc<Store>,
+    store: Arc<PersistentEngine>,
     binding: InstanceBinding,
     runners_enabled: bool,
     mutation: Mutex<()>,
 }
 
 impl FlightRecorder {
-    pub fn new(store: Arc<Store>, binding: InstanceBinding, runners_enabled: bool) -> Self {
+    pub fn new(store: Arc<PersistentEngine>, binding: InstanceBinding, runners_enabled: bool) -> Self {
         Self {
             store,
             binding,
@@ -901,7 +901,7 @@ fn validate_launch(
     Ok(())
 }
 
-fn load_legacy(store: &Store) -> Result<Ledger, Box<dyn std::error::Error>> {
+fn load_legacy(store: &PersistentEngine) -> Result<Ledger, Box<dyn std::error::Error>> {
     let Some(bytes) = store.get_projection(FLIGHT_LEDGER)? else {
         return Ok(Ledger {
             format: FORMAT,
@@ -916,7 +916,7 @@ fn load_legacy(store: &Store) -> Result<Ledger, Box<dyn std::error::Error>> {
     Ok(ledger)
 }
 
-fn load_runtime(store: &Store) -> Result<(Option<Ledger>, u64), Box<dyn std::error::Error>> {
+fn load_runtime(store: &PersistentEngine) -> Result<(Option<Ledger>, u64), Box<dyn std::error::Error>> {
     let scope = ScopeId::new(FLIGHT_SCOPE)?;
     let observed_head = store.runtime_cursor()?;
     let mut cursor = 0;
@@ -969,7 +969,7 @@ fn load_runtime(store: &Store) -> Result<(Option<Ledger>, u64), Box<dyn std::err
     ))
 }
 
-fn load(store: &Store) -> Result<(Ledger, bool, u64), Box<dyn std::error::Error>> {
+fn load(store: &PersistentEngine) -> Result<(Ledger, bool, u64), Box<dyn std::error::Error>> {
     let (runtime, observed_head) = load_runtime(store)?;
     match runtime {
         Some(ledger) => Ok((ledger, false, observed_head)),
@@ -981,7 +981,7 @@ fn load(store: &Store) -> Result<(Ledger, bool, u64), Box<dyn std::error::Error>
     }
 }
 
-pub(crate) fn stored_flights(store: &Store) -> Result<Vec<Flight>, Box<dyn std::error::Error>> {
+pub(crate) fn stored_flights(store: &PersistentEngine) -> Result<Vec<Flight>, Box<dyn std::error::Error>> {
     Ok(load(store)?.0.flights)
 }
 
@@ -1039,7 +1039,7 @@ fn flight_event_mutation(
 }
 
 fn flight_schema_update(
-    store: &Store,
+    store: &PersistentEngine,
 ) -> Result<Option<RuntimeSchemaRegistry>, Box<dyn std::error::Error>> {
     let scope = ScopeId::new(FLIGHT_SCOPE)?;
     let current = store.runtime_schema(&scope)?;
@@ -1113,7 +1113,7 @@ fn flight_schema_update(
 }
 
 fn persist(
-    store: &Store,
+    store: &PersistentEngine,
     before: &[Flight],
     ledger: &Ledger,
     migrate_legacy: bool,
@@ -1354,7 +1354,7 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         std::fs::write(root.path().join("lib.rs"), "pub fn runtime() {}\n").unwrap();
         vyrm_node::InstanceManifest::ensure_dedicated(root.path()).unwrap();
-        let store = Arc::new(Store::open(&root.path().join(vyrm_node::STORE_DIR)).unwrap());
+        let store = Arc::new(PersistentEngine::open(&root.path().join(vyrm_node::STORE_DIR)).unwrap());
         Engine::assert(
             store.as_ref(),
             &Claim::new(
@@ -1423,7 +1423,7 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         std::fs::write(root.path().join("lib.rs"), "pub fn runtime() {}\n").unwrap();
         vyrm_node::InstanceManifest::ensure_dedicated(root.path()).unwrap();
-        let store = Arc::new(Store::open(&root.path().join(vyrm_node::STORE_DIR)).unwrap());
+        let store = Arc::new(PersistentEngine::open(&root.path().join(vyrm_node::STORE_DIR)).unwrap());
         let binding = InstanceBinding::discover(root.path()).unwrap();
         let recorder = FlightRecorder::new(Arc::clone(&store), binding, false);
 

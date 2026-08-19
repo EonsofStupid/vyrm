@@ -20,7 +20,7 @@ use vyrm_core::{
 use vyrm_mx::{BoundQuery, Catalog, ExecutionBudget, Parameters, PhysicalPlan, QueryExecution};
 use vyrm_node::{InstanceBinding, InstanceMode};
 use vyrm_ql::Query;
-use vyrm_store::{Engine, Invocation, ProjectionStatus, Store};
+use vyrm_store::{Engine, Invocation, PersistentEngine, ProjectionStatus};
 
 const INDEX: &str = include_str!("../static/index.html");
 const CSS: &str = include_str!("../static/app.css");
@@ -58,6 +58,7 @@ pub struct InstanceView {
 #[derive(Debug, Serialize)]
 pub struct HealthView {
     pub state: &'static str,
+    pub storage_backend: &'static str,
     pub claim_sequence: u64,
     pub runtime_cursor: u64,
     pub current_claims: usize,
@@ -139,7 +140,7 @@ pub struct GraphEdge {
 }
 
 pub fn snapshot(
-    store: &Store,
+    store: &PersistentEngine,
     binding: &InstanceBinding,
     at: u64,
 ) -> Result<Snapshot, Box<dyn std::error::Error>> {
@@ -232,6 +233,7 @@ pub fn snapshot(
         } else {
             "ready"
         },
+        storage_backend: store.backend().as_str(),
         claim_sequence: store.sequence()?,
         runtime_cursor: store.runtime_cursor()?,
         current_claims: claims.len(),
@@ -276,7 +278,7 @@ pub fn snapshot(
 }
 
 pub fn runtime_retention(
-    store: &Store,
+    store: &PersistentEngine,
     at: u64,
 ) -> Result<RuntimeRetentionView, Box<dyn std::error::Error>> {
     let snapshots = store.runtime_snapshots(at)?;
@@ -295,7 +297,7 @@ pub fn runtime_retention(
 /// captured runtime stamp. The returned plan is the inspectable proof of the
 /// selected path, not server-side commentary added after execution.
 pub fn runtime_query(
-    store: &Store,
+    store: &PersistentEngine,
     scope: ScopeId,
     source: &str,
     budget: &ExecutionBudget,
@@ -319,7 +321,7 @@ pub fn runtime_query(
 /// transaction cursor. The bounded feed is the authority; this helper is a
 /// read-only lens used by the workbench freeze/scrub API.
 pub fn runtime_graph(
-    store: &Store,
+    store: &PersistentEngine,
     scope: ScopeId,
     valid_at: u64,
     known_at_cursor: Option<u64>,
@@ -555,7 +557,7 @@ fn build_graph(
 }
 
 pub fn serve(
-    store: Store,
+    store: PersistentEngine,
     binding: InstanceBinding,
     bind: &str,
     runners_enabled: bool,
@@ -584,7 +586,7 @@ pub fn serve(
 
 fn respond(
     mut request: Request,
-    store: &Store,
+    store: &PersistentEngine,
     binding: &InstanceBinding,
     recorder: &Arc<flight::FlightRecorder>,
 ) {

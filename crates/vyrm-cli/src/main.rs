@@ -16,7 +16,7 @@ use clap::Parser;
 use command::Cli;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use vyrm_core::Reader;
-use vyrm_store::{InvocationInput, Store};
+use vyrm_store::{InvocationInput, PersistentEngine};
 
 fn now_millis() -> u64 {
     SystemTime::now()
@@ -49,7 +49,7 @@ fn main() -> std::process::ExitCode {
     install_tracing();
     let cli = Cli::parse();
 
-    let store = match Store::open(&cli.db) {
+    let store = match PersistentEngine::open(&cli.db) {
         Ok(store) => store,
         Err(error) => {
             eprintln!("cannot open database at {}: {error}", cli.db.display());

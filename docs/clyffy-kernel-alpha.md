@@ -119,7 +119,9 @@ measured local results, never universal superiority.
    reasoning/lifecycle differentials.
 3. **Local gate passed:** native `vyrmKV` behind the same semantic, query,
    crash, storage-full, compaction, and benchmark harness. Reproduce its strict
-   Fjall baseline in CI and broader workloads before removing the oracle.
+   Fjall matrix remotely and add mixed mutation/migration soak before removing
+   the oracle. New CLI/MCP/workbench stores already select native; existing
+   non-native directories remain explicitly compatibility-bound.
 4. Add unified object/vector mutations, then exact and ANN search.
 5. Bind declared package workflows to preflight/pre-tool/post-tool policy.
 6. Extend truthful temporal visualization across storage, search, and workflow

@@ -7,6 +7,7 @@
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use vyrm_store::{Engine, PersistentEngine};
 
 fn vyrm(db: &Path, args: &[&str]) -> (bool, String, String) {
     let output = Command::new(env!("CARGO_BIN_EXE_vyrm"))
@@ -47,6 +48,11 @@ fn a_claim_can_be_asserted_and_resolved() {
     let (ok, out, err) = vyrm(&db, &["as-of", "--subject", "wp3", "--predicate", "status", "--at", "2000"]);
     assert!(ok, "as-of failed: {err}");
     assert!(out.contains("in_progress"), "unexpected output: {out}");
+
+    let (ok, out, err) = vyrm(&db, &["status", "--json"]);
+    assert!(ok, "status failed: {err}");
+    let status: serde_json::Value = serde_json::from_str(&out).unwrap();
+    assert_eq!(status["storage_backend"], "vyrmkv_native");
 }
 
 #[test]
@@ -274,7 +280,7 @@ fn grounding_is_operable_and_divergence_halts_until_reset() {
     // Induce §8.3's divergence by corrupting the stored blob between binary
     // invocations, bypassing the projection's own write path.
     {
-        let store = vyrm_store::Store::open(&db).expect("open store");
+        let store = PersistentEngine::open(&db).expect("open store");
         let bytes = store
             .get_projection(vyrm_store::CURRENT_PROJECTION)
             .unwrap()

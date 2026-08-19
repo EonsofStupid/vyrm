@@ -5,7 +5,7 @@ use std::io::{BufRead, Write};
 use std::path::{Path, PathBuf};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use vyrm_core::{Millis, Reader, RecallQuery, ReasoningPayload, Subject};
-use vyrm_store::{Effectiveness, InvocationInput, Outcome, Store, Trigger};
+use vyrm_store::{Effectiveness, Engine, InvocationInput, Outcome, PersistentEngine, Trigger};
 
 struct Config {
     db: PathBuf,
@@ -31,7 +31,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     binding.require_runtime_ready()?;
     config.db = binding.verify_store_path(&config.db)?;
     config.root = binding.project_root;
-    let store = Store::open(&config.db)?;
+    let store = PersistentEngine::open(&config.db)?;
     let stdin = std::io::stdin();
     let mut stdout = std::io::stdout().lock();
     for line in stdin.lock().lines() {
@@ -61,7 +61,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-fn dispatch(store: &Store, root: &Path, id: Value, request: &Value) -> Value {
+fn dispatch(store: &PersistentEngine, root: &Path, id: Value, request: &Value) -> Value {
     let method = request.get("method").and_then(Value::as_str).unwrap_or("");
     match method {
         "server/discover" => json!({
@@ -138,7 +138,7 @@ fn dispatch(store: &Store, root: &Path, id: Value, request: &Value) -> Value {
 }
 
 fn call_tool(
-    store: &Store,
+    store: &PersistentEngine,
     root: &Path,
     name: &str,
     args: &Value,

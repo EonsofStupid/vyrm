@@ -6,6 +6,11 @@ reader retains explicit version-1 compatibility. The format is pre-release.
 Any format change before alpha must increment its explicit version and update
 the checked-in vectors; readers never guess.
 
+Runtime entry points use `PersistentEngine`: a missing path creates this native
+format, and an authenticated `CURRENT` pointer selects it on reopen. An existing
+directory without that marker remains on the Fjall compatibility adapter. The
+selector never probes partial native internals or rewrites an existing store.
+
 ## Durability boundary
 
 One accepted atomic batch is one WAL frame. `Authoritative` acknowledgment is
@@ -97,9 +102,10 @@ Unknown flags, corrupt compressed bodies, invalid ordering, and trailing bytes
 fail closed. Version-1 `VYRSEG01` uncompressed segments remain readable through
 an explicit decoder branch; writers emit only version 2.
 
-After validation, the reader retains canonical record bytes plus a sparse key
-index rather than materializing every immutable key/version in another ordered
-map. Point, range, snapshot, and compaction iteration stream exact MVCC records.
+After validation, the reader retains canonical record bytes plus a sparse index
+of byte ranges into that same buffer rather than cloning index keys or
+materializing every immutable key/version in another ordered map. Point, range,
+snapshot, and compaction iteration stream exact MVCC records.
 Put/tombstone records retain every version needed for an older snapshot. Files
 are named by their physical-content digest, written to a unique temporary,
 synced, atomically renamed, and followed by a directory sync. Reusing an

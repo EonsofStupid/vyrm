@@ -1,6 +1,6 @@
 use std::net::SocketAddr;
 use std::path::PathBuf;
-use vyrm_store::Store;
+use vyrm_store::PersistentEngine;
 
 fn main() {
     if let Err(error) = run() {
@@ -46,6 +46,6 @@ fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     }
     let (binding, db) =
         connectome_ui::resolve_paths(&root, db.as_deref()).map_err(|error| error.to_string())?;
-    let store = Store::open(&db)?;
+    let store = PersistentEngine::open(&db)?;
     connectome_ui::serve(store, binding, &bind, enable_runners)
 }

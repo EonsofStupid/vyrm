@@ -27,8 +27,9 @@ pub struct Segment {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct SparseEntry {
-    key: Vec<u8>,
     offset: usize,
+    key_start: usize,
+    key_end: usize,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -224,7 +225,7 @@ impl Segment {
     fn seek_offset(&self, key: &[u8]) -> usize {
         let position = self
             .sparse_index
-            .partition_point(|entry| entry.key.as_slice() <= key);
+            .partition_point(|entry| &self.bytes[entry.key_start..entry.key_end] <= key);
         self.sparse_index[position.saturating_sub(1)].offset
     }
 
@@ -396,8 +397,9 @@ fn decode(bytes: Vec<u8>) -> Result<Segment> {
             last_key = Some(key.clone());
             if keys_since_index >= SPARSE_INDEX_STRIDE {
                 sparse_index.push(SparseEntry {
-                    key: key.clone(),
                     offset,
+                    key_start: offset + RECORD_HEADER_BYTES,
+                    key_end: offset + RECORD_HEADER_BYTES + record.key.len(),
                 });
                 keys_since_index = 0;
             }

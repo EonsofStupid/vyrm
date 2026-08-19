@@ -1,0 +1,633 @@
+{
+  "format_version": 1,
+  "measured_at_unix_ms": 1787159284149,
+  "architecture": "x86_64",
+  "operating_system": "linux",
+  "logical_cpus": 8,
+  "aggregation": "median of per-trial metrics; latency percentiles are medians of each isolated trial's percentile",
+  "config": {
+    "trials": 9,
+    "operations": 4096,
+    "batch_size": 64,
+    "reads": 4096,
+    "read_width": 64
+  },
+  "fjall_trials": [
+    {
+      "backend": "fjall",
+      "correctness_verified": true,
+      "write_operations_per_second": 66622.82073963856,
+      "write_batch_latency": {
+        "samples": 64,
+        "minimum_ns": 798158,
+        "p50_ns": 949540,
+        "p95_ns": 1156426,
+        "p99_ns": 1244207,
+        "maximum_ns": 1244207
+      },
+      "read_operations_per_second": 6415.088990957089,
+      "read_latency": {
+        "samples": 4096,
+        "minimum_ns": 143450,
+        "p50_ns": 153404,
+        "p95_ns": 166742,
+        "p99_ns": 183747,
+        "maximum_ns": 1111030
+      },
+      "recovery_ns": 26096046,
+      "uncompacted_recovery_ns": null,
+      "maintenance_ns": null,
+      "write_peak_rss_kib": 9312,
+      "peak_rss_kib": 9560,
+      "maintenance_peak_rss_kib": null,
+      "disk_bytes": 1952956,
+      "semantic_sequence": 4096
+    },
+    {
+      "backend": "fjall",
+      "correctness_verified": true,
+      "write_operations_per_second": 68781.2224307321,
+      "write_batch_latency": {
+        "samples": 64,
+        "minimum_ns": 794653,
+        "p50_ns": 931305,
+        "p95_ns": 1035898,
+        "p99_ns": 1114953,
+        "maximum_ns": 1114953
+      },
+      "read_operations_per_second": 6421.997982128586,
+      "read_latency": {
+        "samples": 4096,
+        "minimum_ns": 144627,
+        "p50_ns": 153757,
+        "p95_ns": 167133,
+        "p99_ns": 174550,
+        "maximum_ns": 271500
+      },
+      "recovery_ns": 27324983,
+      "uncompacted_recovery_ns": null,
+      "maintenance_ns": null,
+      "write_peak_rss_kib": 9100,
+      "peak_rss_kib": 9532,
+      "maintenance_peak_rss_kib": null,
+      "disk_bytes": 1952956,
+      "semantic_sequence": 4096
+    },
+    {
+      "backend": "fjall",
+      "correctness_verified": true,
+      "write_operations_per_second": 60380.233315943544,
+      "write_batch_latency": {
+        "samples": 64,
+        "minimum_ns": 853144,
+        "p50_ns": 1016138,
+        "p95_ns": 1275207,
+        "p99_ns": 1394532,
+        "maximum_ns": 1394532
+      },
+      "read_operations_per_second": 6552.242721266569,
+      "read_latency": {
+        "samples": 4096,
+        "minimum_ns": 141963,
+        "p50_ns": 150634,
+        "p95_ns": 164143,
+        "p99_ns": 179215,
+        "maximum_ns": 231763
+      },
+      "recovery_ns": 26766044,
+      "uncompacted_recovery_ns": null,
+      "maintenance_ns": null,
+      "write_peak_rss_kib": 9292,
+      "peak_rss_kib": 9504,
+      "maintenance_peak_rss_kib": null,
+      "disk_bytes": 1952956,
+      "semantic_sequence": 4096
+    },
+    {
+      "backend": "fjall",
+      "correctness_verified": true,
+      "write_operations_per_second": 68340.33755054616,
+      "write_batch_latency": {
+        "samples": 64,
+        "minimum_ns": 803250,
+        "p50_ns": 924079,
+        "p95_ns": 1087831,
+        "p99_ns": 1261306,
+        "maximum_ns": 1261306
+      },
+      "read_operations_per_second": 6284.01828020304,
+      "read_latency": {
+        "samples": 4096,
+        "minimum_ns": 146564,
+        "p50_ns": 156040,
+        "p95_ns": 170099,
+        "p99_ns": 199840,
+        "maximum_ns": 2373032
+      },
+      "recovery_ns": 26041067,
+      "uncompacted_recovery_ns": null,
+      "maintenance_ns": null,
+      "write_peak_rss_kib": 9448,
+      "peak_rss_kib": 9540,
+      "maintenance_peak_rss_kib": null,
+      "disk_bytes": 1952956,
+      "semantic_sequence": 4096
+    },
+    {
+      "backend": "fjall",
+      "correctness_verified": true,
+      "write_operations_per_second": 67869.11315598848,
+      "write_batch_latency": {
+        "samples": 64,
+        "minimum_ns": 831875,
+        "p50_ns": 939160,
+        "p95_ns": 1052590,
+        "p99_ns": 1067549,
+        "maximum_ns": 1067549
+      },
+      "read_operations_per_second": 6469.850385057347,
+      "read_latency": {
+        "samples": 4096,
+        "minimum_ns": 142340,
+        "p50_ns": 151736,
+        "p95_ns": 165858,
+        "p99_ns": 172774,
+        "maximum_ns": 2420544
+      },
+      "recovery_ns": 26617696,
+      "uncompacted_recovery_ns": null,
+      "maintenance_ns": null,
+      "write_peak_rss_kib": 9312,
+      "peak_rss_kib": 9488,
+      "maintenance_peak_rss_kib": null,
+      "disk_bytes": 1952956,
+      "semantic_sequence": 4096
+    },
+    {
+      "backend": "fjall",
+      "correctness_verified": true,
+      "write_operations_per_second": 72823.60366607107,
+      "write_batch_latency": {
+        "samples": 64,
+        "minimum_ns": 781827,
+        "p50_ns": 883101,
+        "p95_ns": 971932,
+        "p99_ns": 1008100,
+        "maximum_ns": 1008100
+      },
+      "read_operations_per_second": 6502.551186103278,
+      "read_latency": {
+        "samples": 4096,
+        "minimum_ns": 142662,
+        "p50_ns": 151786,
+        "p95_ns": 165621,
+        "p99_ns": 172089,
+        "maximum_ns": 383708
+      },
+      "recovery_ns": 26155896,
+      "uncompacted_recovery_ns": null,
+      "maintenance_ns": null,
+      "write_peak_rss_kib": 9156,
+      "peak_rss_kib": 9480,
+      "maintenance_peak_rss_kib": null,
+      "disk_bytes": 1952956,
+      "semantic_sequence": 4096
+    },
+    {
+      "backend": "fjall",
+      "correctness_verified": true,
+      "write_operations_per_second": 65692.78502846032,
+      "write_batch_latency": {
+        "samples": 64,
+        "minimum_ns": 839557,
+        "p50_ns": 953343,
+        "p95_ns": 1048669,
+        "p99_ns": 2328657,
+        "maximum_ns": 2328657
+      },
+      "read_operations_per_second": 6475.899443776522,
+      "read_latency": {
+        "samples": 4096,
+        "minimum_ns": 143369,
+        "p50_ns": 152649,
+        "p95_ns": 164463,
+        "p99_ns": 169735,
+        "maximum_ns": 1187580
+      },
+      "recovery_ns": 26602494,
+      "uncompacted_recovery_ns": null,
+      "maintenance_ns": null,
+      "write_peak_rss_kib": 9352,
+      "peak_rss_kib": 9412,
+      "maintenance_peak_rss_kib": null,
+      "disk_bytes": 1952956,
+      "semantic_sequence": 4096
+    },
+    {
+      "backend": "fjall",
+      "correctness_verified": true,
+      "write_operations_per_second": 68522.60086498408,
+      "write_batch_latency": {
+        "samples": 64,
+        "minimum_ns": 783930,
+        "p50_ns": 890402,
+        "p95_ns": 1025563,
+        "p99_ns": 2561133,
+        "maximum_ns": 2561133
+      },
+      "read_operations_per_second": 6517.083996318548,
+      "read_latency": {
+        "samples": 4096,
+        "minimum_ns": 142062,
+        "p50_ns": 151917,
+        "p95_ns": 163900,
+        "p99_ns": 168027,
+        "maximum_ns": 263018
+      },
+      "recovery_ns": 25975371,
+      "uncompacted_recovery_ns": null,
+      "maintenance_ns": null,
+      "write_peak_rss_kib": 9096,
+      "peak_rss_kib": 9548,
+      "maintenance_peak_rss_kib": null,
+      "disk_bytes": 1952956,
+      "semantic_sequence": 4096
+    },
+    {
+      "backend": "fjall",
+      "correctness_verified": true,
+      "write_operations_per_second": 69043.49109512585,
+      "write_batch_latency": {
+        "samples": 64,
+        "minimum_ns": 811136,
+        "p50_ns": 904649,
+        "p95_ns": 1030156,
+        "p99_ns": 1613476,
+        "maximum_ns": 1613476
+      },
+      "read_operations_per_second": 6018.707409260253,
+      "read_latency": {
+        "samples": 4096,
+        "minimum_ns": 142886,
+        "p50_ns": 154904,
+        "p95_ns": 225241,
+        "p99_ns": 292047,
+        "maximum_ns": 1385438
+      },
+      "recovery_ns": 26858341,
+      "uncompacted_recovery_ns": null,
+      "maintenance_ns": null,
+      "write_peak_rss_kib": 9392,
+      "peak_rss_kib": 9472,
+      "maintenance_peak_rss_kib": null,
+      "disk_bytes": 1952956,
+      "semantic_sequence": 4096
+    }
+  ],
+  "native_trials": [
+    {
+      "backend": "native",
+      "correctness_verified": true,
+      "write_operations_per_second": 77500.35472116702,
+      "write_batch_latency": {
+        "samples": 64,
+        "minimum_ns": 689441,
+        "p50_ns": 817578,
+        "p95_ns": 955837,
+        "p99_ns": 1002554,
+        "maximum_ns": 1002554
+      },
+      "read_operations_per_second": 6718.6797458365445,
+      "read_latency": {
+        "samples": 4096,
+        "minimum_ns": 143656,
+        "p50_ns": 146022,
+        "p95_ns": 157858,
+        "p99_ns": 165298,
+        "maximum_ns": 228398
+      },
+      "recovery_ns": 8605364,
+      "uncompacted_recovery_ns": 8091782,
+      "maintenance_ns": 43734029,
+      "write_peak_rss_kib": 10688,
+      "peak_rss_kib": 8800,
+      "maintenance_peak_rss_kib": 16308,
+      "disk_bytes": 274872,
+      "semantic_sequence": 4096
+    },
+    {
+      "backend": "native",
+      "correctness_verified": true,
+      "write_operations_per_second": 79531.99151058125,
+      "write_batch_latency": {
+        "samples": 64,
+        "minimum_ns": 706082,
+        "p50_ns": 802385,
+        "p95_ns": 914556,
+        "p99_ns": 946298,
+        "maximum_ns": 946298
+      },
+      "read_operations_per_second": 6505.328433361983,
+      "read_latency": {
+        "samples": 4096,
+        "minimum_ns": 143545,
+        "p50_ns": 146277,
+        "p95_ns": 184649,
+        "p99_ns": 202212,
+        "maximum_ns": 235482
+      },
+      "recovery_ns": 8553419,
+      "uncompacted_recovery_ns": 8144905,
+      "maintenance_ns": 44627954,
+      "write_peak_rss_kib": 10916,
+      "peak_rss_kib": 8712,
+      "maintenance_peak_rss_kib": 16508,
+      "disk_bytes": 274872,
+      "semantic_sequence": 4096
+    },
+    {
+      "backend": "native",
+      "correctness_verified": true,
+      "write_operations_per_second": 82528.63880777065,
+      "write_batch_latency": {
+        "samples": 64,
+        "minimum_ns": 662752,
+        "p50_ns": 770243,
+        "p95_ns": 865699,
+        "p99_ns": 937528,
+        "maximum_ns": 937528
+      },
+      "read_operations_per_second": 6626.2663616425,
+      "read_latency": {
+        "samples": 4096,
+        "minimum_ns": 145231,
+        "p50_ns": 147323,
+        "p95_ns": 159042,
+        "p99_ns": 165509,
+        "maximum_ns": 2165382
+      },
+      "recovery_ns": 8504878,
+      "uncompacted_recovery_ns": 8487590,
+      "maintenance_ns": 44868453,
+      "write_peak_rss_kib": 10688,
+      "peak_rss_kib": 8756,
+      "maintenance_peak_rss_kib": 16308,
+      "disk_bytes": 274872,
+      "semantic_sequence": 4096
+    },
+    {
+      "backend": "native",
+      "correctness_verified": true,
+      "write_operations_per_second": 80439.77461702096,
+      "write_batch_latency": {
+        "samples": 64,
+        "minimum_ns": 660495,
+        "p50_ns": 791266,
+        "p95_ns": 896909,
+        "p99_ns": 1004271,
+        "maximum_ns": 1004271
+      },
+      "read_operations_per_second": 6633.035245495914,
+      "read_latency": {
+        "samples": 4096,
+        "minimum_ns": 144544,
+        "p50_ns": 149636,
+        "p95_ns": 159921,
+        "p99_ns": 164647,
+        "maximum_ns": 224348
+      },
+      "recovery_ns": 8466439,
+      "uncompacted_recovery_ns": 8187318,
+      "maintenance_ns": 43583408,
+      "write_peak_rss_kib": 10548,
+      "peak_rss_kib": 8692,
+      "maintenance_peak_rss_kib": 16268,
+      "disk_bytes": 274872,
+      "semantic_sequence": 4096
+    },
+    {
+      "backend": "native",
+      "correctness_verified": true,
+      "write_operations_per_second": 81720.93923296001,
+      "write_batch_latency": {
+        "samples": 64,
+        "minimum_ns": 660723,
+        "p50_ns": 766228,
+        "p95_ns": 913699,
+        "p99_ns": 1481272,
+        "maximum_ns": 1481272
+      },
+      "read_operations_per_second": 6763.618972416877,
+      "read_latency": {
+        "samples": 4096,
+        "minimum_ns": 142631,
+        "p50_ns": 145242,
+        "p95_ns": 156266,
+        "p99_ns": 162217,
+        "maximum_ns": 247555
+      },
+      "recovery_ns": 8666225,
+      "uncompacted_recovery_ns": 8460945,
+      "maintenance_ns": 45383079,
+      "write_peak_rss_kib": 10612,
+      "peak_rss_kib": 8752,
+      "maintenance_peak_rss_kib": 16404,
+      "disk_bytes": 274872,
+      "semantic_sequence": 4096
+    },
+    {
+      "backend": "native",
+      "correctness_verified": true,
+      "write_operations_per_second": 82811.18750029821,
+      "write_batch_latency": {
+        "samples": 64,
+        "minimum_ns": 645621,
+        "p50_ns": 776771,
+        "p95_ns": 908891,
+        "p99_ns": 938330,
+        "maximum_ns": 938330
+      },
+      "read_operations_per_second": 6688.763405916497,
+      "read_latency": {
+        "samples": 4096,
+        "minimum_ns": 143626,
+        "p50_ns": 145966,
+        "p95_ns": 158934,
+        "p99_ns": 184913,
+        "maximum_ns": 403049
+      },
+      "recovery_ns": 8679112,
+      "uncompacted_recovery_ns": 8191508,
+      "maintenance_ns": 43211920,
+      "write_peak_rss_kib": 10652,
+      "peak_rss_kib": 8780,
+      "maintenance_peak_rss_kib": 16412,
+      "disk_bytes": 274872,
+      "semantic_sequence": 4096
+    },
+    {
+      "backend": "native",
+      "correctness_verified": true,
+      "write_operations_per_second": 80005.45818487187,
+      "write_batch_latency": {
+        "samples": 64,
+        "minimum_ns": 662028,
+        "p50_ns": 787538,
+        "p95_ns": 935856,
+        "p99_ns": 1080995,
+        "maximum_ns": 1080995
+      },
+      "read_operations_per_second": 6582.117101326904,
+      "read_latency": {
+        "samples": 4096,
+        "minimum_ns": 145352,
+        "p50_ns": 150915,
+        "p95_ns": 160617,
+        "p99_ns": 164759,
+        "maximum_ns": 446915
+      },
+      "recovery_ns": 8492428,
+      "uncompacted_recovery_ns": 8700006,
+      "maintenance_ns": 46826276,
+      "write_peak_rss_kib": 10724,
+      "peak_rss_kib": 8696,
+      "maintenance_peak_rss_kib": 16340,
+      "disk_bytes": 274872,
+      "semantic_sequence": 4096
+    },
+    {
+      "backend": "native",
+      "correctness_verified": true,
+      "write_operations_per_second": 82980.12251277668,
+      "write_batch_latency": {
+        "samples": 64,
+        "minimum_ns": 660661,
+        "p50_ns": 753905,
+        "p95_ns": 943118,
+        "p99_ns": 1055449,
+        "maximum_ns": 1055449
+      },
+      "read_operations_per_second": 6759.087875414671,
+      "read_latency": {
+        "samples": 4096,
+        "minimum_ns": 142853,
+        "p50_ns": 145252,
+        "p95_ns": 157053,
+        "p99_ns": 159905,
+        "maximum_ns": 246053
+      },
+      "recovery_ns": 8005291,
+      "uncompacted_recovery_ns": 8074951,
+      "maintenance_ns": 46173664,
+      "write_peak_rss_kib": 10788,
+      "peak_rss_kib": 8752,
+      "maintenance_peak_rss_kib": 16416,
+      "disk_bytes": 274872,
+      "semantic_sequence": 4096
+    },
+    {
+      "backend": "native",
+      "correctness_verified": true,
+      "write_operations_per_second": 79744.2561211066,
+      "write_batch_latency": {
+        "samples": 64,
+        "minimum_ns": 666060,
+        "p50_ns": 791212,
+        "p95_ns": 935409,
+        "p99_ns": 1037891,
+        "maximum_ns": 1037891
+      },
+      "read_operations_per_second": 6776.806426331705,
+      "read_latency": {
+        "samples": 4096,
+        "minimum_ns": 142233,
+        "p50_ns": 144924,
+        "p95_ns": 156253,
+        "p99_ns": 159808,
+        "maximum_ns": 211515
+      },
+      "recovery_ns": 8450053,
+      "uncompacted_recovery_ns": 8637209,
+      "maintenance_ns": 45090021,
+      "write_peak_rss_kib": 10808,
+      "peak_rss_kib": 8768,
+      "maintenance_peak_rss_kib": 16388,
+      "disk_bytes": 274872,
+      "semantic_sequence": 4096
+    }
+  ],
+  "fjall": {
+    "backend": "fjall",
+    "correctness_verified": true,
+    "write_operations_per_second": 68340.33755054616,
+    "write_batch_latency": {
+      "samples": 576,
+      "minimum_ns": 803250,
+      "p50_ns": 931305,
+      "p95_ns": 1048669,
+      "p99_ns": 1261306,
+      "maximum_ns": 1261306
+    },
+    "read_operations_per_second": 6469.850385057347,
+    "read_latency": {
+      "samples": 36864,
+      "minimum_ns": 142886,
+      "p50_ns": 152649,
+      "p95_ns": 165858,
+      "p99_ns": 174550,
+      "maximum_ns": 1111030
+    },
+    "recovery_ns": 26602494,
+    "uncompacted_recovery_ns": null,
+    "maintenance_ns": null,
+    "write_peak_rss_kib": 9312,
+    "peak_rss_kib": 9504,
+    "maintenance_peak_rss_kib": null,
+    "disk_bytes": 1952956,
+    "semantic_sequence": 4096
+  },
+  "native": {
+    "backend": "native",
+    "correctness_verified": true,
+    "write_operations_per_second": 80439.77461702096,
+    "write_batch_latency": {
+      "samples": 576,
+      "minimum_ns": 662028,
+      "p50_ns": 787538,
+      "p95_ns": 914556,
+      "p99_ns": 1004271,
+      "maximum_ns": 1004271
+    },
+    "read_operations_per_second": 6688.763405916497,
+    "read_latency": {
+      "samples": 36864,
+      "minimum_ns": 143626,
+      "p50_ns": 146022,
+      "p95_ns": 158934,
+      "p99_ns": 164759,
+      "maximum_ns": 246053
+    },
+    "recovery_ns": 8504878,
+    "uncompacted_recovery_ns": 8191508,
+    "maintenance_ns": 44868453,
+    "write_peak_rss_kib": 10688,
+    "peak_rss_kib": 8752,
+    "maintenance_peak_rss_kib": 16388,
+    "disk_bytes": 274872,
+    "semantic_sequence": 4096
+  },
+  "ratios": {
+    "native_to_fjall_write_throughput": 1.177046785253669,
+    "native_to_fjall_read_throughput": 1.0338358706663058,
+    "native_to_fjall_write_p95": 0.8721112190786606,
+    "native_to_fjall_read_p95": 0.9582534457186268,
+    "native_to_fjall_recovery": 0.3197022805455759,
+    "native_to_fjall_peak_rss": 0.9208754208754208,
+    "native_to_fjall_disk": 0.14074664252548444
+  },
+  "promotion": {
+    "policy": "correctness required; native must be equal-or-better in every measured dimension",
+    "passes": true,
+    "failures": []
+  }
+}

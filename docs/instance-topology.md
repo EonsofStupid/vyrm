@@ -56,6 +56,12 @@ dedicated per-checkout isolation. A versioned `.vyrm/instance.toml` now carries
 relocatable identity and topology. Model-facing CLI paths and `vyrmd` reject a
 missing manifest or foreign store/root pairing.
 
+Missing `.vyrm/store` paths now initialize native `vyrmKV`. Runtime entry points
+share `PersistentEngine`: an authenticated native `CURRENT` marker selects
+native on reopen, while an existing non-native directory selects the explicit
+Fjall compatibility adapter. Store identity is derived from durable bytes, not
+from filesystem proximity or a mutable environment default.
+
 Umbrella manifests validate explicit, relative, non-escaping membership, but
 runtime execution intentionally remains denied until routing, reasoning, and
 policy state have explicit member scoping and cross-member tests.

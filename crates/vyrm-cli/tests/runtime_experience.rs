@@ -7,6 +7,7 @@
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use vyrm_store::{Engine, PersistentEngine};
 
 fn vyrm(db: &Path, args: &[&str], stdin_json: Option<&str>) -> (bool, String, String) {
     let mut child = Command::new(env!("CARGO_BIN_EXE_vyrm"))
@@ -182,7 +183,7 @@ fn the_wait_gate_denies_mutation_while_quarantined_and_reset_reopens() {
 
     // Corrupt the stored projection, ground, quarantine.
     {
-        let store = vyrm_store::Store::open(&db).unwrap();
+        let store = PersistentEngine::open(&db).unwrap();
         let bytes = store.get_projection(vyrm_store::CURRENT_PROJECTION).unwrap().unwrap();
         let corrupted = String::from_utf8(bytes).unwrap().replacen("\"active\"", "\"drifted\"", 1);
         store.put_projection(vyrm_store::CURRENT_PROJECTION, corrupted.as_bytes()).unwrap();
@@ -237,7 +238,7 @@ fn routing_is_refreshed_before_mutation_and_corruption_has_an_explicit_recovery(
     assert!(out.is_empty(), "a successful refresh should allow: {out}");
 
     {
-        let store = vyrm_store::Store::open(&db).unwrap();
+        let store = PersistentEngine::open(&db).unwrap();
         store
             .put_projection(vyrm_node::routing::ROUTING_PROJECTION, b"corrupt")
             .unwrap();

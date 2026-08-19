@@ -12,6 +12,30 @@ jobs:
   strict-local-promotion:
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - profile: small-batch
+            operations: 2048
+            batch_size: 16
+            reads: 1024
+            read_width: 16
+          - profile: standard
+            operations: 2048
+            batch_size: 64
+            reads: 1024
+            read_width: 32
+          - profile: read-heavy
+            operations: 4096
+            batch_size: 64
+            reads: 4096
+            read_width: 64
+          - profile: sustained
+            operations: 16384
+            batch_size: 128
+            reads: 2048
+            read_width: 64
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -19,13 +43,14 @@ jobs:
       - name: Run isolated Fjall/native matrix
         run: >-
           cargo run --release --locked -p vyrm-store --example engine_benchmark --
-          --trials 5 --operations 2048 --batch-size 64
-          --reads 512 --read-width 32
-          --output target/vyrmkv-ci.json --require-promotion
+          --trials 9 --operations ${{ matrix.operations }}
+          --batch-size ${{ matrix.batch_size }} --reads ${{ matrix.reads }}
+          --read-width ${{ matrix.read_width }}
+          --output target/vyrmkv-${{ matrix.profile }}.json --require-promotion
       - name: Retain raw benchmark evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: vyrmkv-${{ github.run_id }}-${{ github.run_attempt }}
-          path: target/vyrmkv-ci.json
+          name: vyrmkv-${{ matrix.profile }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: target/vyrmkv-${{ matrix.profile }}.json
           if-no-files-found: error

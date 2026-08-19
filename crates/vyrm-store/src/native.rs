@@ -7,10 +7,12 @@
 
 use crate::engine::Engine;
 use crate::error::{Error, Result};
+use crate::gc::{build_report, RemovalReport, Tally};
+use crate::invocation::{self, Invocation, InvocationInput, RecallOutcome};
 use crate::keyspaces::{self, Durability};
 use crate::store::AppendOutcome;
 use serde::de::DeserializeOwned;
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard};
 use vyrm_core::{
@@ -35,10 +37,22 @@ impl NativeEngine {
     /// An existing but invalid directory fails closed rather than being
     /// silently reinitialized.
     pub fn open(path: &Path) -> Result<Self> {
-        let mut database = if path.exists() {
-            Database::open(path)?
-        } else {
+        if !path.exists() {
+            if let Some(parent) = path.parent() {
+                std::fs::create_dir_all(parent)
+                    .map_err(|error| Error::Substrate(error.to_string()))?;
+            }
+        }
+        let empty = path.exists()
+            && path.is_dir()
+            && std::fs::read_dir(path)
+                .map_err(|error| Error::Substrate(error.to_string()))?
+                .next()
+                .is_none();
+        let mut database = if !path.exists() || empty {
             Database::create(path)?
+        } else {
+            Database::open(path)?
         };
         reconcile_runtime_checkpoints(&mut database, None, 0)?;
         let path = database.root().to_owned();
@@ -71,14 +85,148 @@ impl NativeEngine {
 
     /// Reclaims only objects unreachable from `CURRENT` or a live runtime
     /// snapshot's physical checkpoint.
-    pub fn garbage_collect(
-        &self,
-        now: Millis,
-        at: Millis,
-    ) -> Result<GarbageCollectionReport> {
+    pub fn garbage_collect(&self, now: Millis, at: Millis) -> Result<GarbageCollectionReport> {
         let mut database = self.lock()?;
         reconcile_runtime_checkpoints(&mut database, Some(now), at)?;
         database.garbage_collect().map_err(Error::from)
+    }
+
+    /// Derives the same evidence-backed removal report as the compatibility
+    /// adapter from native claim and access keyspaces.
+    pub fn removal_report(&self, since: Millis, evaluated_at: Millis) -> Result<RemovalReport> {
+        let database = self.lock()?;
+        let snapshot = database.snapshot();
+        let mut tallies = BTreeMap::<(String, String), Tally>::new();
+        for (stored_key, _) in scan_space(&database, snapshot, keyspaces::CLAIMS, &[]) {
+            let (subject, predicate) =
+                key::parse_claim_key(strip_space(keyspaces::CLAIMS, &stored_key)?)?;
+            tallies
+                .entry((subject.to_string(), predicate.to_string()))
+                .or_default()
+                .claim_count += 1;
+        }
+        for (stored_key, _) in scan_space_from(
+            &database,
+            snapshot,
+            keyspaces::ACCESS,
+            &key::access_bound(since),
+        ) {
+            let (at, reader, subject, predicate) =
+                key::parse_access_key(strip_space(keyspaces::ACCESS, &stored_key)?)?;
+            if at > evaluated_at {
+                break;
+            }
+            let tally = tallies
+                .entry((subject.to_string(), predicate.to_string()))
+                .or_default();
+            tally.access_count += 1;
+            if tally.last_access.is_none_or(|previous| at >= previous) {
+                tally.last_access = Some(at);
+                tally.last_reader = Some(reader);
+            }
+        }
+        Ok(build_report(tallies, since, evaluated_at)?)
+    }
+
+    /// Exact native access-record count. The compatibility adapter exposes an
+    /// approximate count because that is all its keyspace API promises.
+    pub fn access_count(&self) -> Result<usize> {
+        let database = self.lock()?;
+        Ok(scan_space(&database, database.snapshot(), keyspaces::ACCESS, &[]).len())
+    }
+
+    /// Persists one authoritative operator invocation and its ordinal in one
+    /// native batch.
+    #[tracing::instrument(level = "debug", skip_all, fields(command = input.command))]
+    pub fn record_invocation(&self, input: InvocationInput<'_>) -> Result<Invocation> {
+        let mut database = self.lock()?;
+        let previous = read_sequence(
+            &database,
+            database.snapshot(),
+            keyspaces::INVOCATION_WATERMARK,
+        )?;
+        let ordinal = previous.checked_add(1).ok_or(Error::SequenceOverflow)?;
+        let record = Invocation {
+            ordinal,
+            at: input.at,
+            trigger: input.trigger,
+            command: input.command.to_owned(),
+            arguments: input.arguments.to_vec(),
+            outcome: input.outcome,
+            duration_ms: input.duration_ms,
+            detail: input.detail,
+            effectiveness: input.effectiveness,
+        };
+        let mut operations = Vec::with_capacity(2);
+        put(
+            &mut operations,
+            keyspaces::INVOCATIONS,
+            &invocation::invocation_key(input.at, ordinal),
+            serde_json::to_vec(&record)?,
+        );
+        put_sequence(&mut operations, keyspaces::INVOCATION_WATERMARK, ordinal);
+        write(&mut database, operations, Durability::Authoritative)?;
+        tracing::debug!(ordinal, "invocation recorded");
+        Ok(record)
+    }
+
+    pub fn set_recall_outcome(&self, ordinal: u64, outcome: RecallOutcome) -> Result<Invocation> {
+        let mut database = self.lock()?;
+        let snapshot = database.snapshot();
+        let mut found = None;
+        for (stored_key, value) in scan_space(&database, snapshot, keyspaces::INVOCATIONS, &[]) {
+            let record: Invocation = serde_json::from_slice(&value)?;
+            if record.ordinal == ordinal {
+                found = Some((
+                    strip_space(keyspaces::INVOCATIONS, &stored_key)?.to_vec(),
+                    record,
+                ));
+                break;
+            }
+        }
+        let Some((invocation_key, mut record)) = found else {
+            return Err(Error::Substrate(format!(
+                "no invocation with ordinal {ordinal}"
+            )));
+        };
+        let Some(effectiveness) = record.effectiveness.as_mut() else {
+            return Err(Error::Substrate(format!(
+                "invocation {ordinal} is `{}`, not a recall — refusing to judge it",
+                record.command
+            )));
+        };
+        effectiveness.outcome = outcome;
+        write(
+            &mut database,
+            vec![Mutation::Put {
+                key: storage_key(keyspaces::INVOCATIONS, &invocation_key),
+                value: serde_json::to_vec(&record)?,
+            }],
+            Durability::Authoritative,
+        )?;
+        Ok(record)
+    }
+
+    pub fn invocations_since(&self, since: Millis) -> Result<Vec<Invocation>> {
+        let database = self.lock()?;
+        scan_space_from(
+            &database,
+            database.snapshot(),
+            keyspaces::INVOCATIONS,
+            &invocation::invocation_bound(since),
+        )
+        .into_iter()
+        .map(|(_, value)| serde_json::from_slice(&value).map_err(Error::from))
+        .collect()
+    }
+
+    pub fn invocation_count(&self) -> Result<u64> {
+        let database = self.lock()?;
+        read_sequence(
+            &database,
+            database.snapshot(),
+            keyspaces::INVOCATION_WATERMARK,
+        )
     }
 
     fn lock(&self) -> Result<MutexGuard<'_, Database>> {
@@ -119,6 +267,7 @@ impl ClaimSource for NativeEngine {
 }
 
 impl Engine for NativeEngine {
+    #[tracing::instrument(level = "debug", skip_all, fields(claims = claims.len()))]
     fn append_batch(&self, claims: &[Claim]) -> Result<AppendOutcome> {
         for claim in claims {
             claim.validate()?;
@@ -156,12 +305,9 @@ impl Engine for NativeEngine {
                 serde_json::to_vec(claim)?,
             );
         }
-        put_sequence(
-            &mut operations,
-            keyspaces::SEQUENCE_WATERMARK,
-            sequence,
-        );
+        put_sequence(&mut operations, keyspaces::SEQUENCE_WATERMARK, sequence);
         write(&mut database, operations, Durability::Authoritative)?;
+        tracing::debug!(first = start + 1, last = sequence, "append committed");
         Ok(AppendOutcome {
             first_sequence: start + 1,
             last_sequence: sequence,
@@ -198,13 +344,16 @@ impl Engine for NativeEngine {
                 &key::sequence_key(sequence),
             )
             .ok_or_else(|| {
-                Error::Substrate(format!("native sequence index is missing sequence {sequence}"))
-            })?;
-            let encoded = get(&database, snapshot, keyspaces::CLAIMS, &claim_key).ok_or_else(|| {
                 Error::Substrate(format!(
-                    "native sequence index references an absent claim at {sequence}"
+                    "native sequence index is missing sequence {sequence}"
                 ))
             })?;
+            let encoded =
+                get(&database, snapshot, keyspaces::CLAIMS, &claim_key).ok_or_else(|| {
+                    Error::Substrate(format!(
+                        "native sequence index references an absent claim at {sequence}"
+                    ))
+                })?;
             claims.push(serde_json::from_slice(&encoded)?);
         }
         Ok(claims)
@@ -274,11 +423,7 @@ impl Engine for NativeEngine {
 
     fn runtime_cursor(&self) -> Result<u64> {
         let database = self.lock()?;
-        read_sequence(
-            &database,
-            database.snapshot(),
-            keyspaces::RUNTIME_CURSOR,
-        )
+        read_sequence(&database, database.snapshot(), keyspaces::RUNTIME_CURSOR)
     }
 
     fn runtime_schema(&self, scope: &ScopeId) -> Result<Option<RuntimeSchemaRegistry>> {
@@ -334,10 +479,7 @@ impl Engine for NativeEngine {
             write(
                 &mut database,
                 vec![Mutation::Delete {
-                    key: storage_key(
-                        keyspaces::RUNTIME_SNAPSHOTS,
-                        handle.id.as_str().as_bytes(),
-                    ),
+                    key: storage_key(keyspaces::RUNTIME_SNAPSHOTS, handle.id.as_str().as_bytes()),
                 }],
                 Durability::Authoritative,
             )?;
@@ -400,15 +542,10 @@ impl Engine for NativeEngine {
     fn runtime_snapshots(&self, now: Millis) -> Result<Vec<SnapshotHandle>> {
         let database = self.lock()?;
         let snapshot = database.snapshot();
-        let mut handles = scan_space(
-            &database,
-            snapshot,
-            keyspaces::RUNTIME_SNAPSHOTS,
-            &[],
-        )
-        .into_iter()
-        .map(|(_, bytes)| serde_json::from_slice::<SnapshotHandle>(&bytes).map_err(Error::from))
-        .collect::<Result<Vec<_>>>()?;
+        let mut handles = scan_space(&database, snapshot, keyspaces::RUNTIME_SNAPSHOTS, &[])
+            .into_iter()
+            .map(|(_, bytes)| serde_json::from_slice::<SnapshotHandle>(&bytes).map_err(Error::from))
+            .collect::<Result<Vec<_>>>()?;
         for handle in &handles {
             handle.validate()?;
         }
@@ -718,15 +855,10 @@ fn reconcile_runtime_checkpoints(
     at: Millis,
 ) -> Result<()> {
     let snapshot = database.snapshot();
-    let handles = scan_space(
-        database,
-        snapshot,
-        keyspaces::RUNTIME_SNAPSHOTS,
-        &[],
-    )
-    .into_iter()
-    .map(|(_, bytes)| serde_json::from_slice::<SnapshotHandle>(&bytes).map_err(Error::from))
-    .collect::<Result<Vec<_>>>()?;
+    let handles = scan_space(database, snapshot, keyspaces::RUNTIME_SNAPSHOTS, &[])
+        .into_iter()
+        .map(|(_, bytes)| serde_json::from_slice::<SnapshotHandle>(&bytes).map_err(Error::from))
+        .collect::<Result<Vec<_>>>()?;
     for handle in &handles {
         handle.validate()?;
     }
@@ -759,7 +891,11 @@ fn runtime_checkpoint_name(id: &SnapshotId) -> String {
     format!("{RUNTIME_CHECKPOINT_PREFIX}{}", id.as_str())
 }
 
-fn native_read_stamp(database: &Database, snapshot: Snapshot, scope: &ScopeId) -> Result<ReadStamp> {
+fn native_read_stamp(
+    database: &Database,
+    snapshot: Snapshot,
+    scope: &ScopeId,
+) -> Result<ReadStamp> {
     let commit_cursor = read_sequence(database, snapshot, keyspaces::RUNTIME_CURSOR)?;
     let schema_revision = get_json::<RuntimeSchemaRegistry>(
         database,
@@ -778,8 +914,14 @@ fn native_read_stamp(database: &Database, snapshot: Snapshot, scope: &ScopeId) -
     .transpose()
     .map_err(|error| Error::CorruptWatermark(error.to_string()))?
     .filter(|digest| !digest.is_empty());
-    ReadStamp::new(scope.clone(), schema_revision, 0, commit_cursor, head_digest)
-        .map_err(Error::from)
+    ReadStamp::new(
+        scope.clone(),
+        schema_revision,
+        0,
+        commit_cursor,
+        head_digest,
+    )
+    .map_err(Error::from)
 }
 
 fn validate_native_read_stamp(
@@ -1001,6 +1143,17 @@ fn scan_space(
 ) -> Vec<(Vec<u8>, Vec<u8>)> {
     let start = storage_key(space, prefix);
     let end = prefix_end(&start);
+    database.scan(&start, end.as_deref(), snapshot)
+}
+
+fn scan_space_from(
+    database: &Database,
+    snapshot: Snapshot,
+    space: &str,
+    from: &[u8],
+) -> Vec<(Vec<u8>, Vec<u8>)> {
+    let start = storage_key(space, from);
+    let end = prefix_end(&storage_key(space, &[]));
     database.scan(&start, end.as_deref(), snapshot)
 }
 

@@ -141,6 +141,7 @@
     const { health, runs, claims, invocations } = state.data;
     const active = runs.find((run) => !run.complete);
     const signals = [
+      ['mint', 'Storage engine', health.storage_backend, `cursor ${health.runtime_cursor}`],
       ['mint', 'Current projection', health.projection_state, `watermark ${health.projection_watermark}`],
       [health.routing_generation ? 'amber' : 'red', 'Source routing', health.routing_generation ? `generation ${health.routing_generation}` : 'projection absent', `${health.indexed_symbols} symbols`],
       [active ? 'violet' : 'mint', 'Reasoning contract', active ? `${active.id} · ${active.state}` : 'no active run', `${runs.length} total run(s)`],
