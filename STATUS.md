@@ -40,6 +40,16 @@ not roadmap language.
   one-call no-network embedding/search; its retained 10k×128 local profile is
   inside binary, artifact, RSS, and latency budgets. This does not certify a
   physical GPU or semantic-model quality.
+- The first M7 protocol gate is executable in `vyrm-cluster`. Canonical
+  placement enforces ordered unique voters and zone diversity; per-shard read
+  stamps compose into a real partial-order snapshot vector. Route evidence,
+  grounded snapshot-plus-WAL transfer, metadata-indexed reshard cutover, and
+  cross-shard denial are typed. A deterministic single-term quorum simulator
+  injects partition, delay, duplication, reorder, crash/restart, clock skew,
+  and disk loss. Enumerated three-voter schedules prove that acknowledged
+  entries retain a durable copy across every tolerated single-disk loss and
+  that a leader minority cannot acknowledge. Production consensus, election,
+  membership change, networking, and Multi-AZ deployment remain unclaimed.
 - A persisted, revisioned schema registry now governs typed runtime records,
   relations, and events. Unknown types and properties fail closed; property
   value types, required fields, event subjects, legal edge endpoints, temporal
@@ -209,11 +219,13 @@ artifact even on failure.
   a tested global-serializable same/disjoint conflict policy. A deterministic
   64-write mixed-scope backend differential is green. Physical segment pins
   are implemented in native M3. M0 through M6 are complete at their local
-  executable kernel gates. Compact HNSW/sparse/multivector layouts, payload
+  executable kernel gates, and the first M7 protocol/simulation slice is
+  green. Compact HNSW/sparse/multivector layouts, payload
   indexes, a physical GPU adapter and benchmark, real-model quality evidence,
   external vector comparison, and Multi-AZ capabilities remain sequenced work,
   not current product claims. See `docs/vyrmds-architecture-research.md`,
-  `docs/vyrm-vector-search.md`, and `docs/vyrm-embedding-edge.md`.
+  `docs/vyrm-vector-search.md`, `docs/vyrm-embedding-edge.md`, and
+  `docs/vyrm-cluster-m7.md`.
 
 - JavaScript application-run claims now use script-sensitive canonical event
   subjects such as `package:bun:test`, `package:pnpm:run:typecheck`, and

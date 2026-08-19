@@ -481,6 +481,12 @@ hardware/model evidence rather than being inferred from the adapter tests. See
   transfer, resharding, and cross-shard transaction policy before code.
 - Start with per-shard consensus and snapshot-plus-WAL-delta recovery.
 
+The first protocol/simulation slice landed on 2026-08-19. `vyrm-cluster`
+provides canonical contracts and a deterministic single-term/per-shard quorum
+model covering all listed fault classes. Cross-shard writes fail closed. This
+does not yet implement elections, reconfiguration, networking, or production
+consensus and therefore does not close M7. See `vyrm-cluster-m7.md`.
+
 Acceptance: deterministic simulation/model checking; partition, delay,
 duplication, reorder, crash, clock-skew, and disk-loss scenarios; linearizable
 metadata; declared transaction isolation; no acknowledged-write loss within the

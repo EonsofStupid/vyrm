@@ -1676,6 +1676,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "vyrm-cluster"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "vyrm-core",
+]
+
+[[package]]
 name = "vyrm-core"
 version = "0.1.0"
 dependencies = [

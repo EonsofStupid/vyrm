@@ -134,8 +134,12 @@ measured local results, never universal superiority.
    verified accelerator/fallback policy, local FastEmbed adapter, and offline
    edge budgets. Physical-GPU and real-model quality evidence remain required
    before competitive vector claims.
-7. Bind declared package workflows to preflight/pre-tool/post-tool policy.
-8. Extend truthful temporal visualization across storage, search, and workflow
+7. **First M7 protocol gate complete:** canonical placement, consistency,
+   snapshot-vector, route, transfer, and reshard contracts plus deterministic
+   single-term quorum fault simulation. Production consensus, elections,
+   membership changes, networking, and Multi-AZ evidence remain open.
+8. Bind declared package workflows to preflight/pre-tool/post-tool policy.
+9. Extend truthful temporal visualization across storage, search, and workflow
    events and continue controlled provider evaluations.
-9. Cut the Vyrm alpha manifest; only then scaffold the separate Clyffy master
+10. Cut the Vyrm alpha manifest; only then scaffold the separate Clyffy master
    repository and its signed tier/update system.

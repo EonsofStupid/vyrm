@@ -148,6 +148,16 @@ disagree, `SPEC.md` is authoritative and this document is wrong.
 > binary/RSS/artifact/latency evidence. No physical GPU or real-model quality
 > result is claimed. See `docs/vyrm-embedding-edge.md`.
 
+> **M7 cluster-contract overlay (2026-08-19).** The first protocol/simulation
+> slice is executable. `vyrm-cluster` freezes canonical three-zone placement,
+> consistency requests, partial-order snapshot vectors, route evidence,
+> snapshot-plus-WAL transfer, metadata-indexed resharding, and an explicit M7
+> denial for cross-shard writes. Its deterministic single-term/per-shard model
+> injects partition, delay, duplication, reorder, crash, restart, clock skew,
+> and disk loss, and enumerates quorum paths against every tolerated single
+> disk loss. This is not a production consensus, networking, election, or
+> Multi-AZ claim. See `docs/vyrm-cluster-m7.md`.
+
 ## 1 · Grounding result
 
 State recomputed from source on 2026-08-10 and differenced against the
