@@ -45,6 +45,8 @@ Vyrm provides:
 - rebuildable projections that quarantine on divergence;
 - an exact dense/sparse/multivector oracle plus freshness-gated, filter-aware
   HNSW candidate generation with exact reranking and measured fallback;
+- provenance/CAS-bound embedding jobs, exact model-space binding, compact
+  dense mmap artifacts, scalar/AVX2 parity, and a no-network edge executable;
 - identical lifecycle semantics through hooks, CLI, and MCP;
 - isolated per-platform instances with explicit store/root binding.
 
@@ -229,6 +231,9 @@ statistically significant model-performance claim.
 - [`docs/vyrm-vector-search.md`](docs/vyrm-vector-search.md) — M5 exact/ANN
   semantics, projection lifecycle, filtered recall/latency/memory evidence, and
   explicit limits
+- [`docs/vyrm-embedding-edge.md`](docs/vyrm-embedding-edge.md) — M6
+  provenance-bound embedding jobs, model-space binding, compact mmap vectors,
+  accelerator admission, and offline edge evidence
 - [`docs/vyrmkv-format.md`](docs/vyrmkv-format.md) — frozen native WAL, segment,
   recovery, and manifest format contract
 - [`docs/vyrmkv-benchmark.md`](docs/vyrmkv-benchmark.md) — isolated

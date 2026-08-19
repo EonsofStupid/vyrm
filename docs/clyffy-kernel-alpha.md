@@ -129,8 +129,11 @@ measured local results, never universal superiority.
    filter-aware dense HNSW with exact reranking, projection lifecycle, and a
    retained recall/latency/memory/update/delete/reopen baseline. Compact
    artifacts, SIMD/GPU/edge work, and external Qdrant proof remain open.
-6. Build provider-neutral embedding jobs, compact/edge artifacts, and CPU/GPU
-   parity before competitive vector claims.
+6. **Complete at the local M6 kernel gate:** provenance/CAS-bound embedding
+   jobs, exact model-space binding, compact dense mmap, scalar/AVX2 parity,
+   verified accelerator/fallback policy, local FastEmbed adapter, and offline
+   edge budgets. Physical-GPU and real-model quality evidence remain required
+   before competitive vector claims.
 7. Bind declared package workflows to preflight/pre-tool/post-tool policy.
 8. Extend truthful temporal visualization across storage, search, and workflow
    events and continue controlled provider evaluations.

@@ -32,6 +32,7 @@ fn deterministic_update_delete_reopen_and_generation_compaction_soak() {
         field: "body".into(),
         dimensions: 16,
         metric: ScoreMetric::Cosine,
+        embedding_model: None,
         filter_properties: BTreeSet::from(["group".into()]),
     };
     let hnsw_config = HnswConfig {
@@ -40,6 +41,7 @@ fn deterministic_update_delete_reopen_and_generation_compaction_soak() {
         field: "body".into(),
         dimensions: 16,
         metric: ScoreMetric::Cosine,
+        embedding_model: None,
         m: 12,
         ef_construction: 64,
         max_level: 10,
@@ -121,6 +123,7 @@ fn request(scope: &ScopeId, cursor: u64, query: Vec<f32>, mode: SearchMode) -> S
         field: "body".into(),
         query: VectorQuery::Dense { values: query },
         metric: ScoreMetric::Cosine,
+        embedding_model: None,
         top_k: 10,
         mode,
         filter: None,

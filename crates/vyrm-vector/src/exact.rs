@@ -74,6 +74,9 @@ fn materialize_visible_refs<'a>(
             continue;
         }
         candidate.validate()?;
+        if !candidate.matches_model(request.embedding_model.as_ref()) {
+            continue;
+        }
         let version = (&candidate.vector.reference, candidate.source_cursor);
         if !versions.insert(version) {
             return invalid("duplicate vector identity/source-cursor version");
@@ -350,6 +353,7 @@ mod tests {
                 values: vec![1.0, 0.0],
             },
             metric: ScoreMetric::Cosine,
+            embedding_model: None,
             top_k: 3,
             mode: crate::SearchMode::Exact,
             filter: Some(crate::FilterExpression::Condition {
@@ -425,6 +429,7 @@ mod tests {
                 values: vec![1.0, 0.0],
             },
             metric: ScoreMetric::Dot,
+            embedding_model: None,
             top_k: 1,
             mode: SearchMode::Exact,
             filter: None,

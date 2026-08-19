@@ -195,6 +195,7 @@ mod tests {
             field: "body".into(),
             dimensions: 2,
             metric: ScoreMetric::Dot,
+            embedding_model: None,
             filter_properties: BTreeSet::new(),
         };
         SegmentDescriptor {
@@ -211,6 +212,7 @@ mod tests {
             field: "body".into(),
             dimensions: 2,
             metric: ScoreMetric::Dot,
+            embedding_model: None,
             filter_properties: BTreeSet::new(),
             minimum_cursor: 0,
             candidate_versions: cursor as usize,

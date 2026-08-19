@@ -20,6 +20,8 @@ ordering semantics.
 - Exact integer/unsigned/decimal/string filters implement `equals`,
   `not_equals`, `in`, ranges, existence, `all`, `any`, and `not`, with explicit
   missing-property behavior and bounded AST depth/size.
+- Optional exact embedding-model bindings prevent same-shaped but incompatible
+  vector spaces from being mixed by exact scans, artifacts, or the planner.
 - Duplicate `(vector identity, source cursor)` versions, dimensional drift,
   non-finite values, corrupt artifacts, wrong fields/metrics/scopes, incomplete
   filter coverage, and stale generations fail closed.
@@ -93,6 +95,14 @@ recall gate, corrupt/stale denial, and eight generations of mixed updates,
 valid-time deletes, deterministic rebuild, byte reopen, catalog replacement,
 snapshot-protected retirement, and reclamation.
 
+## M6 extension
+
+M6 adds a compact exact dense format with mmap reads, scalar/AVX2 differential,
+model-bound requests/projections, and strict accelerator-build admission. See
+[`vyrm-embedding-edge.md`](vyrm-embedding-edge.md). The JSON segment remains
+the portable M5 semantic fixture, while the compact format is the production
+dense payload direction.
+
 ## Honest boundary
 
 This establishes the local M5 semantic and measurement baseline. It does not
@@ -101,14 +111,15 @@ establish superiority over Qdrant or any other vector database.
 - HNSW currently accelerates only dense vectors; sparse and multi-vector ANN
   remain exact-only.
 - Scalar quantization is an experiment, not a published planner path.
-- Reference artifacts are canonical JSON and are storage-heavy. A compact
-  binary/mmap representation is required before edge or competitive claims.
-- There is no SIMD kernel, payload bitmap index, background optimizer, GPU
-  builder, shard replication, or live cross-system benchmark yet.
+- HNSW graph artifacts remain canonical JSON and storage-heavy. Dense exact
+  payloads now have a compact mmap representation; compact graph/payload bitmap
+  indexes and background optimization remain open.
+- Scalar and AVX2 exact kernels exist. The GPU boundary verifies adapter output,
+  but no physical GPU adapter, shard replication, or live cross-system
+  benchmark is certified yet.
 - Recall depends strongly on dimension, corpus, graph parameters, filter
   selectivity, and `ef`. The low-`ef` rows are intentionally retained so the
   project cannot hide that quality/latency tradeoff.
 
-M6 owns embedding jobs, compact/edge packaging, SIMD/GPU builders, and parity
-evidence. Cross-system Qdrant proof remains a separate fixed-hardware protocol
-after those paths are ready.
+Cross-system Qdrant proof remains a separate fixed-hardware protocol after the
+remaining production paths are ready.

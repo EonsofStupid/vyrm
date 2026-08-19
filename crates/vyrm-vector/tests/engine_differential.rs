@@ -71,6 +71,7 @@ fn search(engine: &dyn Engine) -> Vec<(String, f64)> {
                 values: vec![1.0, 0.0],
             },
             metric: ScoreMetric::Cosine,
+            embedding_model: None,
             top_k: 3,
             mode: SearchMode::Exact,
             filter: None,

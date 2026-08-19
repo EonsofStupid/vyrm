@@ -15,6 +15,34 @@ pub enum ScoreMetric {
     Manhattan,
 }
 
+/// Exact embedding space identity. Dimensions alone are insufficient: two
+/// models can emit the same shape while assigning incompatible meanings.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct EmbeddingModelBinding {
+    pub name: String,
+    pub digest: String,
+}
+
+impl EmbeddingModelBinding {
+    pub fn validate(&self) -> Result<()> {
+        if self.name.trim().is_empty() || self.name.as_bytes().contains(&0) {
+            return invalid(
+                "embedding model binding name must be non-empty and contain no NUL bytes",
+            );
+        }
+        if self.digest.len() != 64
+            || !self
+                .digest
+                .bytes()
+                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+        {
+            return invalid("embedding model binding digest must be lowercase SHA-256 hex");
+        }
+        Ok(())
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum MultiVectorComparator {
@@ -93,6 +121,8 @@ pub struct SearchRequest {
     pub field: String,
     pub query: VectorQuery,
     pub metric: ScoreMetric,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub embedding_model: Option<EmbeddingModelBinding>,
     pub top_k: usize,
     pub mode: SearchMode,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -121,6 +151,9 @@ impl SearchRequest {
             }
         }
         self.query.validate()?;
+        if let Some(model) = &self.embedding_model {
+            model.validate()?;
+        }
         if self.metric == ScoreMetric::Cosine && query_norm_is_zero(&self.query) {
             return invalid("cosine query must have non-zero norm");
         }
@@ -148,6 +181,15 @@ impl VectorCandidate {
 
     pub(crate) fn filter_properties(&self) -> &RuntimeProperties {
         &self.vector.properties
+    }
+
+    pub(crate) fn matches_model(&self, model: Option<&EmbeddingModelBinding>) -> bool {
+        let Some(model) = model else {
+            return true;
+        };
+        self.vector.provenance.as_ref().is_some_and(|provenance| {
+            provenance.model == model.name && provenance.model_digest == model.digest
+        })
     }
 }
 

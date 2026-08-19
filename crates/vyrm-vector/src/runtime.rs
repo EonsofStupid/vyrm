@@ -1,7 +1,8 @@
 use crate::contract::invalid;
 use crate::{
-    search_exact_ref, AccessPathKind, HnswIndex, ImmutableVectorSegment, SearchHit, SearchPlan,
-    SearchRequest, VectorCandidate, VectorCatalog, VectorPlanner, VectorProjectionDescriptor,
+    search_exact_ref, AccessPathKind, CompactDenseSegment, HnswIndex, ImmutableVectorSegment,
+    SearchHit, SearchPlan, SearchRequest, VectorCandidate, VectorCatalog, VectorPlanner,
+    VectorProjectionDescriptor,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
@@ -10,6 +11,7 @@ use vyrm_core::{ProjectionId, Result};
 #[derive(Debug, Clone, PartialEq)]
 pub enum VectorArtifact {
     ExactSegment(ImmutableVectorSegment),
+    CompactDense(CompactDenseSegment),
     Hnsw(HnswIndex),
 }
 
@@ -17,6 +19,7 @@ impl VectorArtifact {
     pub fn descriptor(&self) -> VectorProjectionDescriptor {
         match self {
             Self::ExactSegment(segment) => segment.descriptor().clone().into(),
+            Self::CompactDense(segment) => segment.descriptor().clone().into(),
             Self::Hnsw(index) => index.descriptor().clone().into(),
         }
     }
@@ -31,6 +34,12 @@ impl From<ImmutableVectorSegment> for VectorArtifact {
 impl From<HnswIndex> for VectorArtifact {
     fn from(index: HnswIndex) -> Self {
         Self::Hnsw(index)
+    }
+}
+
+impl From<CompactDenseSegment> for VectorArtifact {
+    fn from(segment: CompactDenseSegment) -> Self {
+        Self::CompactDense(segment)
     }
 }
 
@@ -118,7 +127,7 @@ impl VectorRuntime {
                         VectorArtifact::Hnsw(index) => {
                             index.estimated_search_cost(request, ef_search).ok()
                         }
-                        VectorArtifact::ExactSegment(_) => None,
+                        VectorArtifact::ExactSegment(_) | VectorArtifact::CompactDense(_) => None,
                     })
                     .unwrap_or(descriptor.nodes.max(1) as u64),
             };
@@ -146,6 +155,9 @@ impl VectorRuntime {
                 match (plan.selected.kind, artifact) {
                     (AccessPathKind::ExactSegment, VectorArtifact::ExactSegment(segment)) => {
                         segment.search(request)?
+                    }
+                    (AccessPathKind::ExactSegment, VectorArtifact::CompactDense(segment)) => {
+                        segment.search(request, crate::DenseKernel::Auto)?
                     }
                     (AccessPathKind::Hnsw, VectorArtifact::Hnsw(index)) => {
                         index.search(request, ef_search)?
@@ -193,6 +205,7 @@ mod tests {
                 values: vec![1.0, 0.0],
             },
             metric: ScoreMetric::Dot,
+            embedding_model: None,
             top_k: 1,
             mode,
             filter: None,
@@ -215,6 +228,7 @@ mod tests {
                 field: "body".into(),
                 dimensions: 2,
                 metric: ScoreMetric::Dot,
+                embedding_model: None,
                 m: 4,
                 ef_construction: 8,
                 max_level: 4,
@@ -246,6 +260,7 @@ mod tests {
                 field: "body".into(),
                 dimensions: 2,
                 metric: ScoreMetric::Dot,
+                embedding_model: None,
                 filter_properties: BTreeSet::new(),
             },
             1,

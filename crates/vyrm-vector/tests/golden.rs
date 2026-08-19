@@ -26,6 +26,7 @@ fn contract() -> serde_json::Value {
             values: vec![1.0, 0.0],
         },
         metric: ScoreMetric::Dot,
+        embedding_model: None,
         top_k: 2,
         mode: SearchMode::Exact,
         filter: Some(FilterExpression::Condition {
@@ -45,6 +46,7 @@ fn contract() -> serde_json::Value {
             field: "body".into(),
             dimensions: 2,
             metric: ScoreMetric::Dot,
+            embedding_model: None,
             filter_properties: BTreeSet::from(["temperature".into()]),
         },
         1,
@@ -59,6 +61,7 @@ fn contract() -> serde_json::Value {
             field: "body".into(),
             dimensions: 2,
             metric: ScoreMetric::Dot,
+            embedding_model: None,
             m: 4,
             ef_construction: 8,
             max_level: 4,

@@ -22,6 +22,7 @@ fn deterministic_ann_recall_gate_covers_unfiltered_and_selective_queries() {
             field: "body".into(),
             dimensions: 16,
             metric: ScoreMetric::Cosine,
+            embedding_model: None,
             m: 16,
             ef_construction: 100,
             max_level: 10,
@@ -67,6 +68,7 @@ fn request(
         field: "body".into(),
         query: VectorQuery::Dense { values: query },
         metric: ScoreMetric::Cosine,
+        embedding_model: None,
         top_k: 10,
         mode,
         filter: (filter_percent < 100).then(|| FilterExpression::Condition {

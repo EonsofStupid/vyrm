@@ -94,6 +94,7 @@ fn main() {
         field: "body".into(),
         dimensions,
         metric: ScoreMetric::Cosine,
+        embedding_model: None,
         m: 16,
         ef_construction: 100,
         max_level: 12,
@@ -339,6 +340,7 @@ fn request(
             values: query.to_vec(),
         },
         metric: ScoreMetric::Cosine,
+        embedding_model: None,
         top_k,
         mode,
         filter: (filter_percent < 100).then(|| FilterExpression::Condition {

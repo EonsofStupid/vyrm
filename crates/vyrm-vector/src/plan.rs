@@ -1,4 +1,4 @@
-use crate::{ScoreMetric, SearchMode, SearchRequest};
+use crate::{EmbeddingModelBinding, ScoreMetric, SearchMode, SearchRequest};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 use vyrm_core::{ProjectionId, ProjectionStamp, ProjectionState, Result};
@@ -26,6 +26,8 @@ pub struct CandidatePath {
     pub field: String,
     pub dimensions: usize,
     pub metric: ScoreMetric,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub embedding_model: Option<EmbeddingModelBinding>,
     #[serde(default)]
     pub filter_properties: BTreeSet<String>,
     pub estimated_candidates: u64,
@@ -97,6 +99,7 @@ impl VectorPlanner {
             field: request.field.clone(),
             dimensions: request.query.dimensions(),
             metric: request.metric,
+            embedding_model: request.embedding_model.clone(),
             filter_properties: required_property_set.clone(),
             estimated_candidates: self.exact_scan_candidates,
             estimated_cost: self.exact_scan_candidates.max(1),
@@ -188,6 +191,9 @@ fn reject_reasons(
     if candidate.metric != request.metric {
         reasons.push("metric mismatch".into());
     }
+    if candidate.embedding_model != request.embedding_model {
+        reasons.push("embedding model mismatch".into());
+    }
     if !required_properties.is_subset(&candidate.filter_properties) {
         reasons.push("filter coverage is incomplete".into());
     }
@@ -214,6 +220,7 @@ mod tests {
                 values: vec![1.0, 0.0],
             },
             metric: ScoreMetric::Cosine,
+            embedding_model: None,
             top_k: 2,
             mode,
             filter: Some(FilterExpression::Condition {
@@ -242,6 +249,7 @@ mod tests {
             field: "body".into(),
             dimensions: 2,
             metric: ScoreMetric::Cosine,
+            embedding_model: None,
             filter_properties: properties.iter().map(|value| (*value).into()).collect(),
             estimated_candidates: 20,
             estimated_cost: 20,

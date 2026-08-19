@@ -1,0 +1,60 @@
+{
+  "schema": "vyrm-m6-edge-evidence-v1",
+  "recorded_at": "2026-08-19",
+  "profile": {
+    "documents": 10000,
+    "dimensions": 128,
+    "queries": 25,
+    "backend": "vyrm:feature-hash:cpu:v1",
+    "network_policy": "deny",
+    "memory_placement": "mmap",
+    "kernel": "runtime-dispatched-avx2"
+  },
+  "environment": {
+    "rustc": "1.95.0 (59807616e 2026-04-14)",
+    "target": "x86_64-unknown-linux-gnu",
+    "os": "Linux 7.0.0-28-generic x86_64",
+    "cpu": "Intel Xeon E5-2699 v4 @ 2.20GHz",
+    "logical_cpus": 8,
+    "virtualization": "KVM"
+  },
+  "measurements": {
+    "release_binary_bytes": 1343624,
+    "artifact_bytes": 12399360,
+    "raw_vector_bytes": 5120000,
+    "artifact_to_raw_ratio": 2.42175,
+    "build_ms": 695.008546,
+    "mmap_open_and_verify_ms": 166.778778,
+    "query_p50_ms": 10.882584,
+    "query_p95_ms": 10.975428,
+    "fresh_query_process_peak_rss_kib": 42696,
+    "build_and_query_process_peak_rss_kib": 90612,
+    "socket_messages_sent": 0,
+    "socket_messages_received": 0
+  },
+  "budgets": {
+    "release_binary_max_bytes": 2097152,
+    "artifact_to_raw_max_ratio": 2.5,
+    "fresh_query_peak_rss_max_kib": 65536,
+    "query_p95_max_ms": 20.0,
+    "network_runtime_dependencies_max": 0
+  },
+  "dependency_audit": {
+    "command": "cargo tree --locked -p vyrm-edge --edges normal",
+    "network_runtime_dependencies": [],
+    "direct_runtime_dependencies": [
+      "serde",
+      "serde_json",
+      "vyrm-core",
+      "vyrm-embed",
+      "vyrm-vector"
+    ]
+  },
+  "commands": [
+    "cargo build --locked --release -p vyrm-edge",
+    "cargo run --locked --release -p vyrm-edge --example edge_evidence -- /tmp/vyrm-m6-edge-current-10000x128.vyrdense 10000 128",
+    "/usr/bin/time -v vyrm-edge query /tmp/vyrm-m6-edge-current-10000x128.vyrdense 'document 0 modular runtime hook event partition 0' 10 128 7",
+    "cargo tree --locked -p vyrm-edge --edges normal"
+  ],
+  "scope": "Single local fixed-seed observation. FeatureHash proves the offline lifecycle and provenance path, not state-of-the-art semantic quality or superiority over Qdrant."
+}

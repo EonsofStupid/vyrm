@@ -65,6 +65,7 @@ fn deterministic_dense_trace_matches_independent_scalar_oracle() {
             values: query.clone(),
         },
         metric: ScoreMetric::Dot,
+        embedding_model: None,
         top_k: 25,
         mode: SearchMode::Exact,
         filter: Some(FilterExpression::Condition {

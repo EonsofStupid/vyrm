@@ -1,8 +1,8 @@
 use crate::contract::invalid;
 use crate::exact::{score_dense_candidate, validate_candidate_versions};
 use crate::{
-    search_exact, AccessPathKind, CandidatePath, ScoreMetric, SearchHit, SearchMode, SearchRequest,
-    VectorCandidate, VectorQuery,
+    search_exact, AccessPathKind, CandidatePath, EmbeddingModelBinding, ScoreMetric, SearchHit,
+    SearchMode, SearchRequest, VectorCandidate, VectorQuery,
 };
 use serde::{Deserialize, Serialize};
 use std::cmp::{Ordering, Reverse};
@@ -29,6 +29,8 @@ pub struct HnswConfig {
     pub field: String,
     pub dimensions: usize,
     pub metric: ScoreMetric,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub embedding_model: Option<EmbeddingModelBinding>,
     pub m: usize,
     pub ef_construction: usize,
     pub max_level: u8,
@@ -61,6 +63,9 @@ impl HnswConfig {
         {
             return invalid("HNSW filter properties must be valid names");
         }
+        if let Some(model) = &self.embedding_model {
+            model.validate()?;
+        }
         Ok(())
     }
 
@@ -78,6 +83,8 @@ pub struct HnswDescriptor {
     pub field: String,
     pub dimensions: usize,
     pub metric: ScoreMetric,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub embedding_model: Option<EmbeddingModelBinding>,
     pub m: usize,
     pub ef_construction: usize,
     pub max_level: u8,
@@ -105,6 +112,9 @@ impl HnswDescriptor {
         {
             return invalid("HNSW descriptor contains invalid build parameters");
         }
+        if let Some(model) = &self.embedding_model {
+            model.validate()?;
+        }
         Ok(())
     }
 
@@ -115,6 +125,7 @@ impl HnswDescriptor {
             field: self.field.clone(),
             dimensions: self.dimensions,
             metric: self.metric,
+            embedding_model: self.embedding_model.clone(),
             filter_properties: self.filter_properties.clone(),
             estimated_candidates: self.nodes as u64,
             estimated_cost,
@@ -189,6 +200,7 @@ impl HnswIndex {
                 || candidate.source_cursor > source_cursor
                 || candidate.vector.field != config.field
                 || candidate.vector.value.dimensions() != config.dimensions
+                || !candidate.matches_model(config.embedding_model.as_ref())
                 || !matches!(candidate.vector.value, VectorValue::Dense { .. })
             {
                 return invalid("HNSW candidate violates configuration or coverage");
@@ -253,6 +265,7 @@ impl HnswIndex {
             field: envelope.body.config.field.clone(),
             dimensions: envelope.body.config.dimensions,
             metric: envelope.body.config.metric,
+            embedding_model: envelope.body.config.embedding_model.clone(),
             m: envelope.body.config.m,
             ef_construction: envelope.body.config.ef_construction,
             max_level: envelope.body.config.max_level,
@@ -354,6 +367,7 @@ impl HnswIndex {
             || self.descriptor.scope != request.scope
             || self.descriptor.field != request.field
             || self.descriptor.metric != request.metric
+            || self.descriptor.embedding_model != request.embedding_model
             || self.descriptor.dimensions != request.query.dimensions()
             || self.descriptor.stamp.source_cursor < request.read.commit_cursor
         {
@@ -740,6 +754,9 @@ fn validate_graph(
             || node.candidate.source_cursor > source_cursor
             || node.candidate.vector.field != config.field
             || node.candidate.vector.value.dimensions() != config.dimensions
+            || !node
+                .candidate
+                .matches_model(config.embedding_model.as_ref())
             || !matches!(node.candidate.vector.value, VectorValue::Dense { .. })
             || node.level > config.max_level
             || node.neighbors.len() != node.level as usize + 1
@@ -817,6 +834,7 @@ mod tests {
             field: "body".into(),
             dimensions: 2,
             metric: ScoreMetric::Cosine,
+            embedding_model: None,
             m: 8,
             ef_construction: 32,
             max_level: 8,
@@ -852,6 +870,7 @@ mod tests {
                 values: vec![1.0, 0.0],
             },
             metric: ScoreMetric::Cosine,
+            embedding_model: None,
             top_k: 5,
             mode: SearchMode::RequireApproximate { exact_rerank: 20 },
             filter: None,
@@ -885,6 +904,7 @@ mod tests {
                 values: vec![1.0, 0.0],
             },
             metric: ScoreMetric::Cosine,
+            embedding_model: None,
             top_k: 1,
             mode: SearchMode::RequireApproximate { exact_rerank: 1 },
             filter: None,
@@ -923,6 +943,7 @@ mod tests {
                 values: vec![1.0, 0.0],
             },
             metric: ScoreMetric::Cosine,
+            embedding_model: None,
             top_k: 1,
             mode: SearchMode::RequireApproximate { exact_rerank: 10 },
             filter: Some(FilterExpression::Condition {

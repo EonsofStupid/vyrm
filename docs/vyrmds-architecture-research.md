@@ -91,7 +91,7 @@ API would be a regression.
 
 Concrete code anchors reviewed:
 
-- Qdrant [segment manifest](https://github.com/qdrant/qdrant/blob/74f3e85b9473c62560006c043e13737ce6b48412/lib/segment/src/data_types/manifest.rs), [universal query representation](https://github.com/qdrant/qdrant/blob/74f3e85b9473c62560006c043e13737ce6b48412/lib/collection/src/operations/universal_query/collection_query.rs), [update worker](https://github.com/qdrant/qdrant/blob/74f3e85b9473c62560006c043e13737ce6b48412/lib/collection/src/update_workers/update_worker.rs), [GPU HNSW builder](https://github.com/qdrant/qdrant/blob/74f3e85b9473c62560006c043e13737ce6b48412/lib/segment/src/index/hnsw_index/hnsw/gpu_build.rs), and [model verification](https://github.com/qdrant/qdrant/blob/74f3e85b9473c62560006c043e13737ce6b48412/lib/collection/src/model_testing/verify.rs).
+- Qdrant [segment manifest](https://github.com/qdrant/qdrant/blob/74f3e85b9473c62560006c043e13737ce6b48412/lib/segment/src/data_types/manifest.rs), [universal query representation](https://github.com/qdrant/qdrant/blob/74f3e85b9473c62560006c043e13737ce6b48412/lib/collection/src/operations/universal_query/collection_query.rs), [update worker](https://github.com/qdrant/qdrant/blob/74f3e85b9473c62560006c043e13737ce6b48412/lib/collection/src/update_workers/update_worker.rs), [streamed graph builder](https://github.com/qdrant/qdrant/blob/74f3e85b9473c62560006c043e13737ce6b48412/lib/segment/src/index/hnsw_index/graph_layers_builder.rs), [GPU HNSW builder](https://github.com/qdrant/qdrant/blob/74f3e85b9473c62560006c043e13737ce6b48412/lib/segment/src/index/hnsw_index/hnsw/gpu_build.rs), and [model verification](https://github.com/qdrant/qdrant/blob/74f3e85b9473c62560006c043e13737ce6b48412/lib/collection/src/model_testing/verify.rs).
 - SurrealDB [transaction API](https://github.com/surrealdb/surrealdb/blob/9d9a5b0693e499e0d030cac6b618062ec02cd2bc/surrealdb/core/src/kvs/api.rs), [transaction builder](https://github.com/surrealdb/surrealdb/blob/9d9a5b0693e499e0d030cac6b618062ec02cd2bc/surrealdb/core/src/kvs/ds.rs), [version-scope operator](https://github.com/surrealdb/surrealdb/blob/9d9a5b0693e499e0d030cac6b618062ec02cd2bc/surrealdb/core/src/exec/operators/version_scope.rs), and [parser crate](https://github.com/surrealdb/surrealdb/blob/9d9a5b0693e499e0d030cac6b618062ec02cd2bc/surrealdb/parser/src/lib.rs).
 - HelixDB [catalog snapshot](https://github.com/HelixDB/helix-db/blob/475e805cd864be7ff81c09ee6ba9a18ccc4d918b/crates/planner/src/catalog/snapshot.rs), [index lifecycle model](https://github.com/HelixDB/helix-db/blob/475e805cd864be7ff81c09ee6ba9a18ccc4d918b/crates/db/src/index_lifecycle/model.rs), [vector write transaction](https://github.com/HelixDB/helix-db/blob/475e805cd864be7ff81c09ee6ba9a18ccc4d918b/crates/db/src/search/vector/write_transaction.rs), and [production vector planner tests](https://github.com/HelixDB/helix-db/blob/475e805cd864be7ff81c09ee6ba9a18ccc4d918b/crates/db/tests/production_vector_planner.rs).
 
@@ -103,7 +103,8 @@ Concrete code anchors reviewed:
 | [Lance `6bad378` transaction specification](https://github.com/lance-format/lance/blob/6bad378f768e37dd87f993471bbee05005f27868/docs/src/format/table/transaction.md) and [commit boundary](https://github.com/lance-format/lance/blob/6bad378f768e37dd87f993471bbee05005f27868/rust/lance-table/src/io/commit.rs) | Immutable table versions, object-store commit handlers, operation-specific conflict classes, stable row identity, and explicit index coverage | Adapt operation-aware conflicts and manifest publication. Do not claim an object upload itself participates in the local KV transaction. |
 | [Apache DataFusion architecture](https://datafusion.apache.org/contributor-guide/architecture.html) | Frontends lower to logical plans, logical rewrites precede physical lowering, physical rewrites account for resources, and results stream as batches | Mirror the boundary in `vyrmMX`. Delay a DataFusion dependency until relational/analytical benchmarks prove it is cheaper than a small native executor. |
 | [Apache OpenDAL](https://github.com/apache/opendal/tree/013df6a9bf4e1183b539f60bb560f57ab1289f4e) | Capability-aware storage operators with composable retry, timeout, tracing, metrics, throttling, and concurrency layers | Use as an implementation candidate behind a small Vyrm object port. Never assume rename, conditional put, or listing order without checking backend capability. |
-| [NVIDIA cuVS `2140532`](https://github.com/rapidsai/cuvs/tree/2140532c5274dfbd9ba1d18c7bbdac15cc7ea93a) | GPU index construction/search with CPU-deployable artifacts and multiple ANN families | Keep behind a feature-gated builder interface after CPU truth and recall baselines exist. Qdrant’s Vulkan path remains the portable reference. |
+| [NVIDIA cuVS `eb7b342`](https://github.com/rapidsai/cuvs/tree/eb7b342922349b944824714b32ba2dad90d2bc4e) | GPU index construction/search with CPU-loadable HNSW serialization and multiple ANN families | Keep behind a feature-gated builder interface after CPU truth and recall baselines exist. Qdrant’s Vulkan path remains the portable reference. |
+| [FastEmbed-rs `045d591`](https://github.com/Anush008/fastembed-rs/tree/045d59182819dd9145b762685e14c25868b6b0b3) | Synchronous local ONNX inference; caller-supplied model/tokenizer bytes; optional hub/cache features; dense, sparse, image, and multimodal families | Use only behind a provider-neutral job contract. The Vyrm local adapter disables hub/TLS features and hashes every supplied model component; cached downloads are never equivalent to an explicit deny-network build boundary. |
 | [TiKV `877912f`](https://github.com/tikv/tikv/tree/877912ffc232caf257463d17f577b942b2a66e6c) | MVCC transaction scheduler, conflict latches, per-range Raft groups, snapshots, and explicit flow control | Study for the later cluster tier. Do not introduce distributed transactions before single-node semantics survive exhaustive crash points. |
 
 The license/waiver ledger is evidence metadata, not a performance filter.
@@ -454,12 +455,25 @@ denial, and deterministic model-based mutation traces.
 
 ### M6 — embedding, GPU, and edge
 
-- Add provider-neutral embedding jobs with content/model provenance.
-- Add feature-gated GPU builders and an offline edge profile.
+- Local kernel gate passed on 2026-08-19. Provider-neutral jobs bind source,
+  model, backend, network policy, and original read stamp; source changes are
+  checked both around inference and at commit CAS.
+- Compact dense v1 separates canonical metadata from aligned raw values and
+  supports verified owned/mmap reads plus scalar/AVX2 differential.
+- A feature-gated accelerator boundary verifies untrusted builder output
+  against deterministic CPU bytes and makes fallback explicit.
+- `vyrm-edge` packages one-call local embedding/search with no networking stack;
+  optional FastEmbed accepts caller-supplied ONNX/tokenizer bytes only.
 
 Acceptance: source-change conflict during inference; model/dimension mismatch;
 CPU/GPU semantic and recall parity; fallback after GPU failure; offline startup;
 binary/RSS budgets; no network access in edge tests.
+
+Local acceptance is green for the source/model/CAS, scalar/AVX2, adversarial
+accelerator-output/fallback, startup, binary/RSS, and dependency boundaries.
+Physical-GPU and real-model quality certification remain explicitly external
+hardware/model evidence rather than being inferred from the adapter tests. See
+`vyrm-embedding-edge.md`.
 
 ### M7 — cluster and Multi-AZ
 

@@ -137,6 +137,17 @@ disagree, `SPEC.md` is authoritative and this document is wrong.
 > sparse/multivector ANN, embeddings, and external comparison remain gated.
 > See `docs/vyrm-vector-search.md`.
 
+> **M6 embedding/edge overlay (2026-08-19).** The local kernel gate is closed.
+> `vyrm-embed` now provides source-digest/model/read-stamp-bound jobs, two-read
+> inference race detection, final commit CAS, and a no-network local FastEmbed
+> adapter behind an optional feature. Search requests and projections can bind
+> exact model identity. Compact dense v1 adds authenticated aligned `f32`, true
+> read-only mmap, atomic publication, and scalar/AVX2 parity. Accelerator output
+> is untrusted until byte-identical to the CPU artifact; fallback is explicit.
+> `vyrm-edge` supplies one-call offline embed/search and retained 10k×128
+> binary/RSS/artifact/latency evidence. No physical GPU or real-model quality
+> result is claimed. See `docs/vyrm-embedding-edge.md`.
+
 ## 1 · Grounding result
 
 State recomputed from source on 2026-08-10 and differenced against the

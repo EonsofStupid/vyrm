@@ -5,6 +5,7 @@
 //! crate before a planner may select them.
 
 mod catalog;
+mod compact;
 mod contract;
 mod exact;
 mod filter;
@@ -14,10 +15,22 @@ mod quantization;
 mod runtime;
 mod segment;
 
+#[cfg(feature = "accelerator")]
+mod accelerator;
+
+#[cfg(feature = "accelerator")]
+pub use accelerator::{
+    build_dense_artifact, AcceleratedBuildPolicy, AcceleratorTarget, DenseArtifactBuilder,
+    DenseBuildBackend, DenseBuildOutcome,
+};
+
 pub use catalog::{VectorCatalog, VectorProjectionDescriptor};
+pub use compact::{
+    CompactDenseSegment, DenseKernel, DenseMemoryPlacement, COMPACT_DENSE_FORMAT_VERSION,
+};
 pub use contract::{
-    MultiVectorComparator, ScoreMetric, SearchHit, SearchMode, SearchRequest, VectorCandidate,
-    VectorQuery,
+    EmbeddingModelBinding, MultiVectorComparator, ScoreMetric, SearchHit, SearchMode,
+    SearchRequest, VectorCandidate, VectorQuery,
 };
 pub use exact::{candidates_from_changes, search_changes_exact, search_exact, search_exact_ref};
 pub use filter::{FilterCondition, FilterExpression, FilterOperator};

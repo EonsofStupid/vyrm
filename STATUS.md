@@ -26,6 +26,20 @@ not roadmap language.
   real conditional create and passes the same semantic differential fixture.
   Failure injection covers every local publication boundary and both sides of
   commit; mixed-family rollback and native flush/reopen are tested.
+- M6 closes the local embedding/edge kernel gate. `vyrm-embed` binds each job
+  to source bytes, an exact model digest, network policy, and the originating
+  read stamp; it detects source changes around inference and relies on final
+  transaction CAS for commit authority. An optional local FastEmbed adapter is
+  compiled without hub/TLS features and hashes caller-supplied ONNX/tokenizer
+  material. Vector requests and projections now bind model space explicitly.
+  Compact dense v1 stores canonical metadata plus aligned raw `f32`, verifies
+  corruption/layout/model/freshness, publishes atomically, and opens through a
+  real read-only mmap. Scalar and runtime-dispatched AVX2 paths match the exact
+  oracle. The feature-gated accelerator boundary admits only verified
+  CPU-identical bytes and makes fallback policy visible. `vyrm-edge` packages
+  one-call no-network embedding/search; its retained 10k×128 local profile is
+  inside binary, artifact, RSS, and latency budgets. This does not certify a
+  physical GPU or semantic-model quality.
 - A persisted, revisioned schema registry now governs typed runtime records,
   relations, and events. Unknown types and properties fail closed; property
   value types, required fields, event subjects, legal edge endpoints, temporal
@@ -194,11 +208,12 @@ artifact even on failure.
   lease/pin inventory, expiry, release, restart persistence, stamped reads, and
   a tested global-serializable same/disjoint conflict policy. A deterministic
   64-write mixed-scope backend differential is green. Physical segment pins
-  are implemented in native M3. M0 through M5 are complete at their local
-  executable gates. Embedding generation, compact binary/mmap vector
-  artifacts, SIMD/GPU builders, edge packaging, and Multi-AZ capabilities
-  remain sequenced work, not current product claims. See
-  `docs/vyrmds-architecture-research.md` and `docs/vyrm-vector-search.md`.
+  are implemented in native M3. M0 through M6 are complete at their local
+  executable kernel gates. Compact HNSW/sparse/multivector layouts, payload
+  indexes, a physical GPU adapter and benchmark, real-model quality evidence,
+  external vector comparison, and Multi-AZ capabilities remain sequenced work,
+  not current product claims. See `docs/vyrmds-architecture-research.md`,
+  `docs/vyrm-vector-search.md`, and `docs/vyrm-embedding-edge.md`.
 
 - JavaScript application-run claims now use script-sensitive canonical event
   subjects such as `package:bun:test`, `package:pnpm:run:typecheck`, and

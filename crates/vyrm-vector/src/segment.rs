@@ -1,8 +1,8 @@
 use crate::contract::invalid;
 use crate::exact::validate_candidate_versions;
 use crate::{
-    search_exact_ref, AccessPathKind, CandidatePath, ScoreMetric, SearchHit, SearchRequest,
-    VectorCandidate,
+    search_exact_ref, AccessPathKind, CandidatePath, EmbeddingModelBinding, ScoreMetric, SearchHit,
+    SearchRequest, VectorCandidate,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
@@ -24,6 +24,8 @@ pub struct VectorSegmentConfig {
     pub field: String,
     pub dimensions: usize,
     pub metric: ScoreMetric,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub embedding_model: Option<EmbeddingModelBinding>,
     #[serde(default)]
     pub filter_properties: BTreeSet<String>,
 }
@@ -42,6 +44,9 @@ impl VectorSegmentConfig {
             .any(|property| property.trim().is_empty() || property.as_bytes().contains(&0))
         {
             return invalid("vector segment filter properties must be valid names");
+        }
+        if let Some(model) = &self.embedding_model {
+            model.validate()?;
         }
         Ok(())
     }
@@ -63,6 +68,8 @@ pub struct SegmentDescriptor {
     pub field: String,
     pub dimensions: usize,
     pub metric: ScoreMetric,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub embedding_model: Option<EmbeddingModelBinding>,
     #[serde(default)]
     pub filter_properties: BTreeSet<String>,
     pub minimum_cursor: u64,
@@ -81,6 +88,9 @@ impl SegmentDescriptor {
         if self.dimensions == 0 || self.candidate_versions > MAX_VECTOR_SEGMENT_CANDIDATES {
             return invalid("vector segment dimensions or candidate count is invalid");
         }
+        if let Some(model) = &self.embedding_model {
+            model.validate()?;
+        }
         Ok(())
     }
 
@@ -91,6 +101,7 @@ impl SegmentDescriptor {
             field: self.field.clone(),
             dimensions: self.dimensions,
             metric: self.metric,
+            embedding_model: self.embedding_model.clone(),
             filter_properties: self.filter_properties.clone(),
             estimated_candidates: self.candidate_versions as u64,
             estimated_cost,
@@ -145,6 +156,7 @@ impl ImmutableVectorSegment {
                 || candidate.source_cursor > source_cursor
                 || candidate.vector.field != config.field
                 || candidate.vector.value.dimensions() != config.dimensions
+                || !candidate.matches_model(config.embedding_model.as_ref())
             {
                 return invalid("vector segment candidate violates configuration or coverage");
             }
@@ -220,6 +232,7 @@ impl ImmutableVectorSegment {
             field: envelope.body.config.field,
             dimensions: envelope.body.config.dimensions,
             metric: envelope.body.config.metric,
+            embedding_model: envelope.body.config.embedding_model,
             filter_properties: envelope.body.config.filter_properties,
             minimum_cursor: envelope.body.minimum_cursor,
             candidate_versions: envelope.body.candidates.len(),
@@ -231,6 +244,7 @@ impl ImmutableVectorSegment {
                 || candidate.source_cursor > descriptor.stamp.source_cursor
                 || candidate.vector.field != descriptor.field
                 || candidate.vector.value.dimensions() != descriptor.dimensions
+                || !candidate.matches_model(descriptor.embedding_model.as_ref())
             {
                 return invalid("decoded vector segment candidate violates its descriptor");
             }
@@ -256,6 +270,7 @@ impl ImmutableVectorSegment {
             || self.descriptor.scope != request.scope
             || self.descriptor.field != request.field
             || self.descriptor.metric != request.metric
+            || self.descriptor.embedding_model != request.embedding_model
             || self.descriptor.dimensions != request.query.dimensions()
             || self.descriptor.stamp.source_cursor < request.read.commit_cursor
         {
@@ -284,6 +299,7 @@ mod tests {
             field: "body".into(),
             dimensions: 2,
             metric: ScoreMetric::Dot,
+            embedding_model: None,
             filter_properties: BTreeSet::new(),
         }
     }
@@ -331,6 +347,7 @@ mod tests {
                     values: vec![1.0, 0.0],
                 },
                 metric: ScoreMetric::Dot,
+                embedding_model: None,
                 top_k: 2,
                 mode: SearchMode::Exact,
                 filter: None,
@@ -363,6 +380,7 @@ mod tests {
                 values: vec![1.0, 0.0],
             },
             metric: ScoreMetric::Dot,
+            embedding_model: None,
             top_k: 1,
             mode: SearchMode::Exact,
             filter: None,
