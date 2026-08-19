@@ -173,11 +173,8 @@ impl Database {
         let receipt = self
             .wal
             .append_encoded_write_batch(batch, &payload, durability)?;
-        self.memtable.apply_write_batch(
-            batch,
-            receipt.first_sequence,
-            receipt.last_sequence,
-        )?;
+        self.memtable
+            .apply_write_batch(batch, receipt.first_sequence, receipt.last_sequence)?;
         Ok(receipt)
     }
 
@@ -332,7 +329,7 @@ impl Database {
         let mut merged = BTreeMap::<Vec<u8>, BTreeMap<u64, Option<Vec<u8>>>>::new();
         for segment in &self.segments {
             for (key, versions) in segment.all_versions() {
-                let target = merged.entry(key.to_vec()).or_default();
+                let target = merged.entry(key).or_default();
                 for version in versions {
                     match target.get(&version.sequence) {
                         Some(existing) if existing != &version.value => {
@@ -343,7 +340,7 @@ impl Database {
                         }
                         Some(_) => {}
                         None => {
-                            target.insert(version.sequence, version.value.clone());
+                            target.insert(version.sequence, version.value);
                         }
                     }
                 }
@@ -451,8 +448,7 @@ impl Database {
         };
         let manifest_candidates =
             unreachable_files(&manifest_directory, "json", &retained_manifests)?;
-        let segment_candidates =
-            unreachable_files(&segment_directory, "seg", &retained_segments)?;
+        let segment_candidates = unreachable_files(&segment_directory, "seg", &retained_segments)?;
         let wal_candidates = unreachable_files(&wal_directory, "wal", &retained_wals)?;
         remove_candidates(
             &manifest_directory,
@@ -464,18 +460,27 @@ impl Database {
             segment_candidates,
             &mut report.removed_segments,
         )?;
-        remove_candidates(
-            &wal_directory,
-            wal_candidates,
-            &mut report.removed_wals,
-        )?;
+        remove_candidates(&wal_directory, wal_candidates, &mut report.removed_wals)?;
         Ok(report)
     }
 
     pub fn get(&self, key: &[u8], snapshot: Snapshot) -> Option<&[u8]> {
-        self.visible_version(key, snapshot.sequence)?
-            .value
-            .as_deref()
+        let mut best_sequence = 0;
+        let mut best_value = None;
+        for segment in &self.segments {
+            if let Some(version) = segment.get_version(key, snapshot.sequence) {
+                if version.sequence > best_sequence {
+                    best_sequence = version.sequence;
+                    best_value = version.value;
+                }
+            }
+        }
+        if let Some(version) = self.memtable.get_version(key, snapshot.sequence) {
+            if version.sequence > best_sequence {
+                best_value = version.value.as_deref();
+            }
+        }
+        best_value
     }
 
     pub fn scan(
@@ -509,14 +514,6 @@ impl Database {
 
     pub fn memtable(&self) -> &Memtable {
         &self.memtable
-    }
-
-    fn visible_version(&self, key: &[u8], sequence: u64) -> Option<&VersionedValue> {
-        self.segments
-            .iter()
-            .filter_map(|segment| segment.get_version(key, sequence))
-            .chain(self.memtable.get_version(key, sequence))
-            .max_by_key(|version| version.sequence)
     }
 }
 

@@ -444,16 +444,9 @@ fn decode_record_header(header: &[u8; RECORD_HEADER_BYTES], offset: u64) -> Resu
 }
 
 fn crc32c(chunks: &[&[u8]]) -> u32 {
-    let mut crc = !0u32;
-    for chunk in chunks {
-        for byte in *chunk {
-            crc ^= u32::from(*byte);
-            for _ in 0..8 {
-                crc = (crc >> 1) ^ (0x82f6_3b78 & 0u32.wrapping_sub(crc & 1));
-            }
-        }
-    }
-    !crc
+    chunks
+        .iter()
+        .fold(0, |checksum, chunk| crc32c::crc32c_append(checksum, chunk))
 }
 
 #[cfg(test)]

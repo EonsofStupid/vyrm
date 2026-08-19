@@ -70,8 +70,10 @@ disagree, `SPEC.md` is authoritative and this document is wrong.
 > belongs to native M3. M2 is now closed with explicit-time `vyrmQL`, catalog
 > binding, deterministic logical/physical `vyrmMX` plans, exact stamped-log
 > execution, budgets, diagnostics, backend/direct-API differentials, and a
-> browser-visible Query Lab. M3 native `vyrmKV` is the next gate; vector, object,
-> and cluster work remain sequenced behind it. See
+> browser-visible Query Lab. Native `vyrmKV` M3 implementation and its first
+> local promotion gate are now closed; repeated CI/broader workload evidence and
+> the backend-default decision remain. Vector, object, and cluster work stay
+> sequenced behind that explicit decision. See
 > `docs/vyrmds-architecture-research.md`.
 > M3 is now active in a standalone `vyrm-kv` crate. Its v1 WAL, atomic mutation
 > batch, and immutable-manifest formats are frozen by checked-in vectors.
@@ -91,10 +93,12 @@ disagree, `SPEC.md` is authoritative and this document is wrong.
 > physical snapshots; runtime leases create/reconcile manifest checkpoints; GC
 > derives reachability from `CURRENT` plus those pins. Crash and storage-full
 > injection now cover every flush and compaction durability boundary. Native
-> performance proof has a five-trial isolated-process baseline: native wins
-> write p95, bounded replay throughput/p95, and maintained recovery, but remains
-> behind on aggregate write throughput, steady peak RSS, and disk footprint.
-> The equal-or-better gate therefore denies promotion and Fjall remains live.
+> performance proof has a five-trial isolated-process baseline. After segment-v2
+> compression, sparse immutable reads, hardware CRC32C, and fresh steady-state
+> probe processes, native passes correctness and every strict equal-or-better
+> cell: write/read throughput, write/read p95, maintained recovery, steady RSS,
+> and disk. This closes the local M3 gap; Fjall remains live as an oracle until
+> CI and broader workload matrices reproduce the result.
 > The product handoff, canonical package-event grammar, alpha release gates,
 > deployment/update tiers, and separate SurrealDB/Qdrant proof protocols are
 > frozen in `docs/clyffy-kernel-alpha.md`.

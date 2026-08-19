@@ -91,3 +91,130 @@ fn corruption_and_truncation_fail_closed() {
         Err(Error::InvalidSegment(_))
     ));
 }
+
+#[test]
+fn sparse_segment_matches_the_memtable_for_point_range_and_mvcc_reads() {
+    let directory = tempfile::tempdir().unwrap();
+    let wal_path = directory.path().join("many.wal");
+    let mut wal = WalWriter::create(&wal_path).unwrap();
+    for phase in 0..3 {
+        let operations = (0..200)
+            .map(|index| {
+                let key = format!("key:{index:04}").into_bytes();
+                if phase == 2 && index % 5 == 0 {
+                    Mutation::Delete { key }
+                } else {
+                    Mutation::Put {
+                        key,
+                        value: format!("value:{phase}:{index:04}").into_bytes(),
+                    }
+                }
+            })
+            .collect();
+        wal.append_write_batch(
+            &WriteBatch::new(operations).unwrap(),
+            Durability::Authoritative,
+        )
+        .unwrap();
+    }
+    drop(wal);
+    let recovery = vyrm_kv::recover(&wal_path).unwrap();
+    let table = Memtable::recover(&recovery.batches).unwrap();
+    let (segment, path) =
+        Segment::write_from_memtable(&directory.path().join("segments"), &table).unwrap();
+    assert!(segment.sparse_index_entries() >= 3);
+    assert_eq!(&std::fs::read(&path).unwrap()[..8], b"VYRSEG02");
+    assert!(std::fs::metadata(path).unwrap().len() < table.approximate_bytes() as u64);
+
+    for snapshot in [1, 199, 200, 201, 399, 400, 401, 599, 600] {
+        for index in 0..200 {
+            let key = format!("key:{index:04}");
+            assert_eq!(
+                segment.get(key.as_bytes(), snapshot),
+                table.get(key.as_bytes(), snapshot),
+                "point mismatch for {key} at sequence {snapshot}"
+            );
+        }
+        for (start, end) in [
+            (b"key:0000".as_slice(), Some(b"key:0200".as_slice())),
+            (b"key:0063".as_slice(), Some(b"key:0131".as_slice())),
+            (b"key:0190".as_slice(), None),
+        ] {
+            assert_eq!(
+                segment.scan(start, end, snapshot),
+                table.scan(start, end, snapshot),
+                "range mismatch at sequence {snapshot}"
+            );
+        }
+    }
+}
+
+fn rewrite_checksum(bytes: &mut Vec<u8>) {
+    bytes.truncate(bytes.len() - 64);
+    bytes.extend_from_slice(vyrm_core::digest::sha256_hex(bytes).as_bytes());
+}
+
+#[test]
+fn v2_rejects_authenticated_length_and_compressed_body_corruption() {
+    let directory = tempfile::tempdir().unwrap();
+    let segments = directory.path().join("segments");
+    let (_, path) = Segment::write_from_memtable(&segments, &table()).unwrap();
+    let original = std::fs::read(path).unwrap();
+
+    let mut wrong_length = original.clone();
+    wrong_length[40..48].copy_from_slice(&999u64.to_be_bytes());
+    rewrite_checksum(&mut wrong_length);
+    let wrong_length_path = directory.path().join("wrong-length.seg");
+    std::fs::write(&wrong_length_path, wrong_length).unwrap();
+    assert!(matches!(
+        Segment::open(&wrong_length_path),
+        Err(Error::InvalidSegment(_))
+    ));
+
+    let mut unknown_flags = original.clone();
+    unknown_flags[12..16].copy_from_slice(&2u32.to_be_bytes());
+    rewrite_checksum(&mut unknown_flags);
+    let unknown_flags_path = directory.path().join("unknown-flags.seg");
+    std::fs::write(&unknown_flags_path, unknown_flags).unwrap();
+    assert!(matches!(
+        Segment::open(&unknown_flags_path),
+        Err(Error::InvalidSegment(_))
+    ));
+
+    let mut corrupt_body = original;
+    corrupt_body[52] ^= 0xff;
+    rewrite_checksum(&mut corrupt_body);
+    let corrupt_body_path = directory.path().join("corrupt-body.seg");
+    std::fs::write(&corrupt_body_path, corrupt_body).unwrap();
+    assert!(matches!(
+        Segment::open(&corrupt_body_path),
+        Err(Error::InvalidSegment(_))
+    ));
+}
+
+#[test]
+fn legacy_v1_segments_remain_readable_after_v2_compression() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("legacy.seg");
+    let mut bytes = Vec::new();
+    bytes.extend_from_slice(b"VYRSEG01");
+    bytes.extend_from_slice(&1u16.to_be_bytes());
+    bytes.extend_from_slice(&40u16.to_be_bytes());
+    bytes.extend_from_slice(&0u32.to_be_bytes());
+    bytes.extend_from_slice(&1u64.to_be_bytes());
+    bytes.extend_from_slice(&1u64.to_be_bytes());
+    bytes.extend_from_slice(&1u64.to_be_bytes());
+    bytes.push(1);
+    bytes.extend_from_slice(&[0, 0, 0]);
+    bytes.extend_from_slice(&5u32.to_be_bytes());
+    bytes.extend_from_slice(&3u32.to_be_bytes());
+    bytes.extend_from_slice(&1u64.to_be_bytes());
+    bytes.extend_from_slice(b"alpha");
+    bytes.extend_from_slice(b"one");
+    bytes.extend_from_slice(vyrm_core::digest::sha256_hex(&bytes).as_bytes());
+    std::fs::write(&path, bytes).unwrap();
+
+    let segment = Segment::open(&path).unwrap();
+    assert_eq!(segment.get(b"alpha", 1), Some(b"one".as_slice()));
+    assert_eq!(segment.descriptor.entries, 1);
+}

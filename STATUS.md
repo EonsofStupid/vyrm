@@ -84,7 +84,8 @@ not roadmap language.
   relations, events, and claims with Memory/Fjall/native/direct-graph
   differentials.
   Connectome's Query Lab exposes this evidence and result together.
-- M3 native storage is in progress in the standalone `vyrm-kv` crate. WAL v1
+- M3 native storage has passed its first strict local promotion baseline in the
+  standalone `vyrm-kv` crate. WAL v1
   now has frozen CRC32C file/frame formats, atomic batch sequence ranges,
   explicit buffered/authoritative acknowledgments, idempotent recovery, and an
   explicit torn-tail-only repair path; complete corruption fails closed.
@@ -111,17 +112,24 @@ not roadmap language.
   reconcile manifest checkpoints; GC deletes only manifests, segments, and
   WALs unreachable from `CURRENT` or a checkpoint. Deterministic crash and
   storage-full injection covers each flush and compaction durability boundary,
-  followed by reopen and continued writes. The first five-trial isolated
-  Fjall/native baseline verifies correctness and shows native ahead on write
-  p95, bounded replay throughput/p95, and maintained cold recovery. It remains
-  behind on median write throughput (1.3%), steady peak RSS (8.8%), and disk
-  (2.3%), so the strict equal-or-better policy correctly denies promotion.
+  followed by reopen and continued writes. Segment v2 adds authenticated LZ4
+  block compression with explicit v1 read compatibility; sparse immutable
+  indexes replace decoded ordered maps and exact MVCC streaming remains under a
+  Memtable differential. The five-trial isolated Fjall/native baseline verifies
+  correctness and now passes every equal-or-better cell: native is 10.4% ahead
+  on write throughput, 1.3% ahead on bounded replay throughput, has lower
+  write/read p95 and maintained recovery, uses 9.4% less steady RSS, and 86.0%
+  less disk for this workload. This is scoped evidence awaiting CI and broader
+  workload reproduction, not a universal database claim.
 
 ## Verification
 
 CI runs the locked full workspace tests, warning-free clippy, evaluation-evidence
 validation, and the `vyrm-core` serde-only dependency boundary. Compiled-binary
-tests cover operator commands, hooks, explicit recovery, and both MCP eras.
+tests cover operator commands, hooks, explicit recovery, and both MCP eras. A
+separate scheduled/manual workflow executes the isolated five-trial native/Fjall
+matrix with `--require-promotion` and retains its raw JSON artifact even on
+failure.
 
 ## Deliberate limits
 
@@ -144,7 +152,10 @@ tests cover operator commands, hooks, explicit recovery, and both MCP eras.
 - Prompt-flight acceptance without a marker proves process completion only.
   Model-quality conclusions require non-trivial evaluators and repeated trials;
   the flight UI deliberately does not turn one attractive trace into a claim.
-- `vyrmDS` and native `vyrmKV` remain researched target subsystems. `vyrmQL`
+- `vyrmDS` remains a researched target subsystem. Native `vyrmKV` now has an
+  executable WAL/MVCC/segment/manifest/checkpoint/compaction/GC engine and a
+  locally passing promotion baseline; broader promotion and removal of the
+  Fjall oracle remain open. `vyrmQL`
   and the exact reference slice of `vyrmMX` are implemented; later M5 search
   operators must compete against that oracle instead of weakening it. The
   shared data-runtime v1 contract now includes content-addressed read stamps,
@@ -155,7 +166,7 @@ tests cover operator commands, hooks, explicit recovery, and both MCP eras.
   lease/pin inventory, expiry, release, restart persistence, stamped reads, and
   a tested global-serializable same/disjoint conflict policy. A deterministic
   64-write mixed-scope backend differential is green. Physical segment pins
-  belong to native M3. M0, M1, and M2 are complete. Vector, object-store,
+  are implemented in native M3. M0, M1, and M2 are complete. Vector, object-store,
   embedding, GPU, edge, and Multi-AZ capabilities remain sequenced work, not
   current product claims. See
   `docs/vyrmds-architecture-research.md`.

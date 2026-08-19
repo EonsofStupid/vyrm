@@ -57,10 +57,21 @@ struct BackendResult {
     recovery_ns: u64,
     uncompacted_recovery_ns: Option<u64>,
     maintenance_ns: Option<u64>,
+    write_peak_rss_kib: Option<u64>,
     peak_rss_kib: Option<u64>,
     maintenance_peak_rss_kib: Option<u64>,
     disk_bytes: u64,
     semantic_sequence: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct ProbeResult {
+    correctness_verified: bool,
+    semantic_sequence: u64,
+    recovery_ns: u64,
+    read_operations_per_second: f64,
+    read_latency: Latency,
+    peak_rss_kib: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -107,10 +118,19 @@ fn main() {
 
 fn run() -> Result<(), String> {
     let arguments = std::env::args().skip(1).collect::<Vec<_>>();
-    if arguments.first().is_some_and(|argument| argument == "--child") {
+    if arguments
+        .first()
+        .is_some_and(|argument| argument == "--child")
+    {
         return run_child(&arguments);
     }
-    let (config, output) = parse_parent(&arguments)?;
+    if arguments
+        .first()
+        .is_some_and(|argument| argument == "--probe")
+    {
+        return run_probe(&arguments);
+    }
+    let (config, output, require_promotion) = parse_parent(&arguments)?;
     let directory = tempfile::tempdir().map_err(|error| error.to_string())?;
     let mut fjall_trials = Vec::with_capacity(config.trials);
     let mut native_trials = Vec::with_capacity(config.trials);
@@ -159,6 +179,8 @@ fn run() -> Result<(), String> {
         ratios,
         promotion,
     };
+    let promotion_passes = evidence.promotion.passes;
+    let promotion_failures = evidence.promotion.failures.clone();
     let bytes = serde_json::to_vec_pretty(&evidence).map_err(|error| error.to_string())?;
     if let Some(output) = output {
         if let Some(parent) = output.parent() {
@@ -167,15 +189,30 @@ fn run() -> Result<(), String> {
         fs::write(&output, &bytes).map_err(|error| error.to_string())?;
         eprintln!("wrote benchmark evidence to {}", output.display());
     }
-    println!("{}", String::from_utf8(bytes).map_err(|error| error.to_string())?);
+    println!(
+        "{}",
+        String::from_utf8(bytes).map_err(|error| error.to_string())?
+    );
+    if require_promotion && !promotion_passes {
+        return Err(format!(
+            "strict promotion gate failed: {}",
+            promotion_failures.join("; ")
+        ));
+    }
     Ok(())
 }
 
-fn parse_parent(arguments: &[String]) -> Result<(Config, Option<PathBuf>), String> {
+fn parse_parent(arguments: &[String]) -> Result<(Config, Option<PathBuf>, bool), String> {
     let mut config = Config::default();
     let mut output = None;
+    let mut require_promotion = false;
     let mut index = 0;
     while index < arguments.len() {
+        if arguments[index] == "--require-promotion" {
+            require_promotion = true;
+            index += 1;
+            continue;
+        }
         let value = arguments
             .get(index + 1)
             .ok_or_else(|| format!("missing value after {}", arguments[index]))?;
@@ -193,7 +230,7 @@ fn parse_parent(arguments: &[String]) -> Result<(Config, Option<PathBuf>), Strin
     if config.batch_size > config.operations || config.read_width > config.operations {
         return Err("batch size and read width cannot exceed operations".into());
     }
-    Ok((config, output))
+    Ok((config, output, require_promotion))
 }
 
 fn parse_positive(value: &str, label: &str) -> Result<usize, String> {
@@ -246,9 +283,12 @@ fn run_child(arguments: &[String]) -> Result<(), String> {
             .get(3)
             .ok_or_else(|| "child requires a path".to_owned())?,
     );
-    let (config, output) = parse_parent(&arguments[4..])?;
+    let (config, output, require_promotion) = parse_parent(&arguments[4..])?;
     if output.is_some() {
         return Err("child cannot write an output file".into());
+    }
+    if require_promotion {
+        return Err("child cannot require a promotion verdict".into());
     }
     let result = match backend.as_str() {
         "fjall" => run_fjall(&path, &config)?,
@@ -262,82 +302,143 @@ fn run_child(arguments: &[String]) -> Result<(), String> {
     Ok(())
 }
 
-fn run_fjall(path: &Path, config: &Config) -> Result<BackendResult, String> {
-    let store = Store::open(path).map_err(|error| error.to_string())?;
-    let (write_samples, write_elapsed, read_samples, read_elapsed) =
-        workload(&store, config)?;
-    drop(store);
-    let recovery_started = Instant::now();
-    let reopened = Store::open(path).map_err(|error| error.to_string())?;
-    let sequence = reopened.sequence().map_err(|error| error.to_string())?;
-    let recovery = recovery_started.elapsed();
-    let verified = verify(&reopened, config, sequence)?;
-    drop(reopened);
-    Ok(BackendResult {
-        backend: "fjall".into(),
-        correctness_verified: verified,
-        write_operations_per_second: rate(config.operations, write_elapsed),
-        write_batch_latency: summarize(write_samples),
+fn launch_probe(backend: &str, path: &Path, config: &Config) -> Result<ProbeResult, String> {
+    let executable = std::env::current_exe().map_err(|error| error.to_string())?;
+    let output = Command::new(executable)
+        .arg("--probe")
+        .arg(backend)
+        .arg("--path")
+        .arg(path)
+        .arg("--operations")
+        .arg(config.operations.to_string())
+        .arg("--batch-size")
+        .arg(config.batch_size.to_string())
+        .arg("--reads")
+        .arg(config.reads.to_string())
+        .arg("--read-width")
+        .arg(config.read_width.to_string())
+        .arg("--trials")
+        .arg("1")
+        .output()
+        .map_err(|error| error.to_string())?;
+    if !output.status.success() {
+        return Err(format!(
+            "{backend} probe failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        ));
+    }
+    serde_json::from_slice(&output.stdout).map_err(|error| error.to_string())
+}
+
+fn run_probe(arguments: &[String]) -> Result<(), String> {
+    let backend = arguments
+        .get(1)
+        .ok_or_else(|| "missing probe backend".to_owned())?;
+    if arguments.get(2).map(String::as_str) != Some("--path") {
+        return Err("probe requires --path".into());
+    }
+    let path = PathBuf::from(
+        arguments
+            .get(3)
+            .ok_or_else(|| "probe requires a path".to_owned())?,
+    );
+    let (config, output, require_promotion) = parse_parent(&arguments[4..])?;
+    if output.is_some() {
+        return Err("probe cannot write an output file".into());
+    }
+    if require_promotion {
+        return Err("probe cannot require a promotion verdict".into());
+    }
+    let started = Instant::now();
+    let engine: Box<dyn Engine> = match backend.as_str() {
+        "fjall" => Box::new(Store::open(&path).map_err(|error| error.to_string())?),
+        "native" => Box::new(NativeEngine::open(&path).map_err(|error| error.to_string())?),
+        _ => return Err(format!("unknown probe backend {backend}")),
+    };
+    let sequence = engine.sequence().map_err(|error| error.to_string())?;
+    let recovery = started.elapsed();
+    let correctness_verified = verify(engine.as_ref(), &config, sequence)?;
+    let (read_samples, read_elapsed) = read_workload(engine.as_ref(), &config)?;
+    let result = ProbeResult {
+        correctness_verified,
+        semantic_sequence: sequence,
+        recovery_ns: nanos(recovery),
         read_operations_per_second: rate(config.reads, read_elapsed),
         read_latency: summarize(read_samples),
-        recovery_ns: nanos(recovery),
+        peak_rss_kib: peak_rss_kib(),
+    };
+    println!(
+        "{}",
+        serde_json::to_string(&result).map_err(|error| error.to_string())?
+    );
+    Ok(())
+}
+
+fn run_fjall(path: &Path, config: &Config) -> Result<BackendResult, String> {
+    let store = Store::open(path).map_err(|error| error.to_string())?;
+    let (write_samples, write_elapsed) = write_workload(&store, config)?;
+    let write_peak_rss_kib = peak_rss_kib();
+    drop(store);
+    let probe = launch_probe("fjall", path, config)?;
+    Ok(BackendResult {
+        backend: "fjall".into(),
+        correctness_verified: probe.correctness_verified,
+        write_operations_per_second: rate(config.operations, write_elapsed),
+        write_batch_latency: summarize(write_samples),
+        read_operations_per_second: probe.read_operations_per_second,
+        read_latency: probe.read_latency,
+        recovery_ns: probe.recovery_ns,
         uncompacted_recovery_ns: None,
         maintenance_ns: None,
-        peak_rss_kib: peak_rss_kib(),
+        write_peak_rss_kib,
+        peak_rss_kib: probe.peak_rss_kib,
         maintenance_peak_rss_kib: None,
         disk_bytes: directory_bytes(path)?,
-        semantic_sequence: sequence,
+        semantic_sequence: probe.semantic_sequence,
     })
 }
 
 fn run_native(path: &Path, config: &Config) -> Result<BackendResult, String> {
     let store = NativeEngine::open(path).map_err(|error| error.to_string())?;
-    let (write_samples, write_elapsed, read_samples, read_elapsed) =
-        workload(&store, config)?;
+    let (write_samples, write_elapsed) = write_workload(&store, config)?;
+    let write_peak_rss_kib = peak_rss_kib();
     drop(store);
     let recovery_started = Instant::now();
     let reopened = NativeEngine::open(path).map_err(|error| error.to_string())?;
     let sequence = reopened.sequence().map_err(|error| error.to_string())?;
     let recovery = recovery_started.elapsed();
     let verified = verify(&reopened, config, sequence)?;
-    let steady_peak_rss_kib = peak_rss_kib();
     let maintenance_started = Instant::now();
-    reopened
-        .compact(1, 1)
-        .map_err(|error| error.to_string())?;
+    reopened.compact(1, 1).map_err(|error| error.to_string())?;
     reopened
         .garbage_collect(1, 1)
         .map_err(|error| error.to_string())?;
     let maintenance = maintenance_started.elapsed();
     let maintenance_peak_rss_kib = peak_rss_kib();
     drop(reopened);
-    let recovery_after_maintenance_started = Instant::now();
-    let maintained = NativeEngine::open(path).map_err(|error| error.to_string())?;
-    let maintained_sequence = maintained.sequence().map_err(|error| error.to_string())?;
-    let recovery_after_maintenance = recovery_after_maintenance_started.elapsed();
-    let maintained_verified = verify(&maintained, config, maintained_sequence)?;
-    drop(maintained);
+    let probe = launch_probe("native", path, config)?;
     Ok(BackendResult {
         backend: "native".into(),
-        correctness_verified: verified && maintained_verified,
+        correctness_verified: verified && probe.correctness_verified,
         write_operations_per_second: rate(config.operations, write_elapsed),
         write_batch_latency: summarize(write_samples),
-        read_operations_per_second: rate(config.reads, read_elapsed),
-        read_latency: summarize(read_samples),
-        recovery_ns: nanos(recovery_after_maintenance),
+        read_operations_per_second: probe.read_operations_per_second,
+        read_latency: probe.read_latency,
+        recovery_ns: probe.recovery_ns,
         uncompacted_recovery_ns: Some(nanos(recovery)),
         maintenance_ns: Some(nanos(maintenance)),
-        peak_rss_kib: steady_peak_rss_kib,
+        write_peak_rss_kib,
+        peak_rss_kib: probe.peak_rss_kib,
         maintenance_peak_rss_kib,
         disk_bytes: directory_bytes(path)?,
-        semantic_sequence: sequence,
+        semantic_sequence: probe.semantic_sequence,
     })
 }
 
-fn workload(
+fn write_workload(
     engine: &dyn Engine,
     config: &Config,
-) -> Result<(Vec<Duration>, Duration, Vec<Duration>, Duration), String> {
+) -> Result<(Vec<Duration>, Duration), String> {
     let corpus = (0..config.operations)
         .map(|index| {
             Claim::new(
@@ -365,6 +466,13 @@ fn workload(
     }
     let write_elapsed = write_started.elapsed();
 
+    Ok((write_samples, write_elapsed))
+}
+
+fn read_workload(
+    engine: &dyn Engine,
+    config: &Config,
+) -> Result<(Vec<Duration>, Duration), String> {
     let read_started = Instant::now();
     let mut read_samples = Vec::with_capacity(config.reads);
     let span = config.operations - config.read_width + 1;
@@ -384,12 +492,7 @@ fn workload(
         black_box(claims);
         read_samples.push(started.elapsed());
     }
-    Ok((
-        write_samples,
-        write_elapsed,
-        read_samples,
-        read_started.elapsed(),
-    ))
+    Ok((read_samples, read_started.elapsed()))
 }
 
 fn verify(engine: &dyn Engine, config: &Config, sequence: u64) -> Result<bool, String> {
@@ -400,10 +503,12 @@ fn verify(engine: &dyn Engine, config: &Config, sequence: u64) -> Result<bool, S
         .claims_in_range(0, sequence)
         .map_err(|error| error.to_string())?;
     Ok(claims.len() == config.operations
-        && claims.first().is_some_and(|claim| claim.object == "payload-000000000000")
-        && claims.last().is_some_and(|claim| {
-            claim.object == format!("payload-{:012}", config.operations - 1)
-        }))
+        && claims
+            .first()
+            .is_some_and(|claim| claim.object == "payload-000000000000")
+        && claims
+            .last()
+            .is_some_and(|claim| claim.object == format!("payload-{:012}", config.operations - 1)))
 }
 
 fn summarize(mut samples: Vec<Duration>) -> Latency {
@@ -440,9 +545,7 @@ fn aggregate(backend: &str, trials: &[BackendResult]) -> BackendResult {
                 .map(|trial| trial.read_operations_per_second)
                 .collect(),
         ),
-        read_latency: aggregate_latency(
-            trials.iter().map(|trial| &trial.read_latency).collect(),
-        ),
+        read_latency: aggregate_latency(trials.iter().map(|trial| &trial.read_latency).collect()),
         recovery_ns: median_u64(trials.iter().map(|trial| trial.recovery_ns).collect()),
         uncompacted_recovery_ns: median_option(
             trials
@@ -454,6 +557,12 @@ fn aggregate(backend: &str, trials: &[BackendResult]) -> BackendResult {
             trials
                 .iter()
                 .filter_map(|trial| trial.maintenance_ns)
+                .collect(),
+        ),
+        write_peak_rss_kib: median_option(
+            trials
+                .iter()
+                .filter_map(|trial| trial.write_peak_rss_kib)
                 .collect(),
         ),
         peak_rss_kib: median_option(
@@ -469,9 +578,7 @@ fn aggregate(backend: &str, trials: &[BackendResult]) -> BackendResult {
                 .collect(),
         ),
         disk_bytes: median_u64(trials.iter().map(|trial| trial.disk_bytes).collect()),
-        semantic_sequence: median_u64(
-            trials.iter().map(|trial| trial.semantic_sequence).collect(),
-        ),
+        semantic_sequence: median_u64(trials.iter().map(|trial| trial.semantic_sequence).collect()),
     }
 }
 
@@ -532,11 +639,7 @@ fn ratios(fjall: &BackendResult, native: &BackendResult) -> Ratios {
     }
 }
 
-fn promotion(
-    fjall: &BackendResult,
-    native: &BackendResult,
-    ratios: &Ratios,
-) -> PromotionVerdict {
+fn promotion(fjall: &BackendResult, native: &BackendResult, ratios: &Ratios) -> PromotionVerdict {
     let mut failures = Vec::new();
     if !fjall.correctness_verified || !native.correctness_verified {
         failures.push("correctness verification failed".into());
@@ -556,7 +659,10 @@ fn promotion(
     if ratios.native_to_fjall_recovery > 1.0 {
         failures.push("native cold recovery exceeds Fjall".into());
     }
-    if ratios.native_to_fjall_peak_rss.is_some_and(|ratio| ratio > 1.0) {
+    if ratios
+        .native_to_fjall_peak_rss
+        .is_some_and(|ratio| ratio > 1.0)
+    {
         failures.push("native peak RSS exceeds Fjall".into());
     }
     if ratios.native_to_fjall_disk > 1.0 {

@@ -172,9 +172,11 @@ Vyrm owns the storage contract. `vyrm_store::NativeEngine` now implements the
 same `Engine` port as the in-memory reference and transitional Fjall adapter;
 claim recall, projections, schema enforcement, hash-chained commits, snapshots,
 concurrent CAS, restart, and exact `vyrmQL` results run through a three-backend
-differential. Fjall remains live until native compaction, fault injection, and
-benchmarks demonstrate equal-or-better latency, throughput, durability,
-recovery, and memory behavior.
+differential. Fjall remains live until broader benchmark regression runs
+reproduce the native engine's first strict local equal-or-better pass. That
+checked-in five-trial workload has native ahead in write/read throughput,
+write/read p95, maintained recovery, steady RSS, and disk while preserving
+correctness; it is a scoped M3 result, not a general database-superiority claim.
 
 ## Instance boundary
 
@@ -206,10 +208,10 @@ statistically significant model-performance claim.
 - [`docs/vyrmds-architecture-research.md`](docs/vyrmds-architecture-research.md)
   — pinned upstream research, target data-runtime boundaries, and gated build
   sequence for `vyrmQL`/`vyrmMX`/`vyrmDS`/native `vyrmKV`
-- [`docs/vyrmkv-format.md`](docs/vyrmkv-format.md) — frozen native WAL/recovery
+- [`docs/vyrmkv-format.md`](docs/vyrmkv-format.md) — frozen native WAL, segment,
+  recovery, and manifest format contract
 - [`docs/vyrmkv-benchmark.md`](docs/vyrmkv-benchmark.md) — isolated
   Fjall/native methodology, baseline, and promotion verdict
-  and manifest format contract
 - [`eval/results/2026-08-18-summary.json`](eval/results/2026-08-18-summary.json)
   — retained evaluation evidence
 

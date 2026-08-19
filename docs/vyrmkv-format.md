@@ -1,8 +1,10 @@
 # vyrmKV native format contract
 
-Status: M3 in progress, format version 1. The format is pre-release. Any format
-change before alpha must increment its explicit version and update the checked-in
-vectors; readers never guess.
+Status: M3 local promotion baseline passes. WAL, atomic-batch, manifest, and
+checkpoint formats are version 1; new immutable segments are version 2 and the
+reader retains explicit version-1 compatibility. The format is pre-release.
+Any format change before alpha must increment its explicit version and update
+the checked-in vectors; readers never guess.
 
 ## Durability boundary
 
@@ -85,10 +87,21 @@ sequence range, entry count, and byte count. Duplicate identities, inverted
 ranges, empty segments, and segments newer than the manifest's durable sequence
 fail closed.
 
-Immutable segment v1 stores a fixed `VYRSEG01` header followed by key-ascending,
-sequence-ascending MVCC records and a lowercase ASCII SHA-256 footer over the
-header and records. Put/tombstone records retain every version needed for an
-older snapshot. Files are named by that digest, written to a unique temporary,
+Immutable segment v2 stores a fixed 48-byte `VYRSEG02` header, an LZ4 block with
+a prepended decompressed-size field, and a lowercase ASCII SHA-256 footer over
+the physical header and compressed body. Its header declares version, length,
+compression flags, entry count, sequence range, and uncompressed record bytes.
+The decoder bounds decompressed bytes to 1 GiB, requires the LZ4 prefix to equal
+the authenticated declared size, then validates the canonical record stream.
+Unknown flags, corrupt compressed bodies, invalid ordering, and trailing bytes
+fail closed. Version-1 `VYRSEG01` uncompressed segments remain readable through
+an explicit decoder branch; writers emit only version 2.
+
+After validation, the reader retains canonical record bytes plus a sparse key
+index rather than materializing every immutable key/version in another ordered
+map. Point, range, snapshot, and compaction iteration stream exact MVCC records.
+Put/tombstone records retain every version needed for an older snapshot. Files
+are named by their physical-content digest, written to a unique temporary,
 synced, atomically renamed, and followed by a directory sync. Reusing an
 existing content identity first revalidates the complete segment.
 
@@ -110,10 +123,11 @@ a named checkpoint.
 Deterministic crash and storage-full injection covers the WAL-sync,
 segment-sync, successor-WAL-sync, and manifest-publication flush boundaries,
 plus compaction segment and manifest publication. Every cell reopens, verifies
-the accepted data, continues writing, and reopens again. The first comparative
-benchmark is recorded in `vyrmkv-benchmark.md` and denies promotion on the
-remaining write-throughput, RSS, and disk gaps. Until a repeated baseline
-passes, Fjall remains live and no general native performance claim is made.
+the accepted data, continues writing, and reopens again. The comparative
+benchmark is recorded in `vyrmkv-benchmark.md`. The current five-trial isolated
+local baseline passes its strict equal-or-better gate in every measured cell.
+Fjall remains live as a compatibility oracle until the result is reproduced in
+CI and across broader workloads; no general native performance claim is made.
 
 Manifest publication now holds an OS-level exclusive lock for the publication
 session. It validates expected `CURRENT`, generation, and parent; syncs immutable
@@ -135,7 +149,10 @@ reachable through historical manifests/checkpoints until GC proves otherwise.
 - [`batch-v1.hex`](../crates/vyrm-kv/fixtures/batch-v1.hex)
 - [`manifest-v1.json`](../crates/vyrm-kv/fixtures/manifest-v1.json)
 
-The tests also cover CRC32C's published `123456789` check value, ordered replay,
-reopen/continuation, invalid batches, partial headers, partial payloads, complete
-checksum corruption, unknown versions, explicit repair, and repair/recovery
-idempotency.
+CRC32C calculation uses the platform-dispatched implementation while retaining
+the exact v1 bytes and published `123456789` check value. The tests also cover
+ordered replay, reopen/continuation, invalid batches, partial headers, partial
+payloads, complete checksum corruption, unknown versions, explicit repair, and
+repair/recovery idempotency. Segment tests cover sparse-reader/Memtable point,
+range, and MVCC differentials, v1 backward reads, authenticated-length mismatch,
+compressed-body corruption, checksum failure, and truncation.

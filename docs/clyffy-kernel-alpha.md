@@ -113,12 +113,16 @@ measured local results, never universal superiority.
 
 ## Immediate execution order
 
-1. Implement `vyrmQL`/`vyrmMX` over the frozen M0/M1 port; Connectome already
-   exposes live snapshot and retention-pin inspection.
-2. Persist the audit lane atomically with accepted transactions and denied reads.
-3. Build native `vyrmKV` behind the same differential and crash harness.
+1. **Complete:** exact `vyrmQL`/`vyrmMX` over the frozen M0/M1 port and live
+   snapshot/retention-pin inspection in Connectome.
+2. **Complete:** atomic hash-chained audit/runtime commits and deny-by-default
+   reasoning/lifecycle differentials.
+3. **Local gate passed:** native `vyrmKV` behind the same semantic, query,
+   crash, storage-full, compaction, and benchmark harness. Reproduce its strict
+   Fjall baseline in CI and broader workloads before removing the oracle.
 4. Add unified object/vector mutations, then exact and ANN search.
 5. Bind declared package workflows to preflight/pre-tool/post-tool policy.
-6. Complete truthful temporal visualization and controlled provider evals.
+6. Extend truthful temporal visualization across storage, search, and workflow
+   events and continue controlled provider evaluations.
 7. Cut the Vyrm alpha manifest; only then scaffold the separate Clyffy master
    repository and its signed tier/update system.

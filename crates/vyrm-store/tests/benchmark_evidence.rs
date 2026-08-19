@@ -31,4 +31,24 @@ fn checked_in_native_baseline_is_structurally_valid_and_correctness_green() {
         .as_str()
         .unwrap()
         .contains("equal-or-better"));
+    assert_eq!(evidence["promotion"]["passes"], true);
+    assert!(evidence["promotion"]["failures"]
+        .as_array()
+        .unwrap()
+        .is_empty());
+    for name in [
+        "native_to_fjall_write_throughput",
+        "native_to_fjall_read_throughput",
+    ] {
+        assert!(evidence["ratios"][name].as_f64().unwrap() >= 1.0, "{name}");
+    }
+    for name in [
+        "native_to_fjall_write_p95",
+        "native_to_fjall_read_p95",
+        "native_to_fjall_recovery",
+        "native_to_fjall_peak_rss",
+        "native_to_fjall_disk",
+    ] {
+        assert!(evidence["ratios"][name].as_f64().unwrap() <= 1.0, "{name}");
+    }
 }

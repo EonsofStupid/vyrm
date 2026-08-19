@@ -1,0 +1,31 @@
+name: vyrmKV benchmark
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 6 * * 1"
+
+permissions:
+  contents: read
+
+jobs:
+  strict-local-promotion:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Run isolated Fjall/native matrix
+        run: >-
+          cargo run --release --locked -p vyrm-store --example engine_benchmark --
+          --trials 5 --operations 2048 --batch-size 64
+          --reads 512 --read-width 32
+          --output target/vyrmkv-ci.json --require-promotion
+      - name: Retain raw benchmark evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: vyrmkv-${{ github.run_id }}-${{ github.run_attempt }}
+          path: target/vyrmkv-ci.json
+          if-no-files-found: error

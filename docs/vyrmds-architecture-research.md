@@ -481,8 +481,10 @@ checkpoints, manifest CAS, segment flush, WAL rotation, and reopen at the
 manifest replay boundary are covered. The native `Engine` adapter and
 Memory/Fjall/native semantic/query differential are green. Snapshot-aware
 compaction/GC, physical lease pins, and crash/storage-full recovery matrices are
-also green. The first isolated five-trial comparative baseline and strict
-equal-or-better policy are frozen in `docs/vyrmkv-benchmark.md`; native wins
-several latency/read/recovery cells but remains red on write throughput, RSS,
-and disk. Optimize those measured gaps and repeat the matrix. Do not begin
-vectors, S3, GPU, or clustering before native correctness and measurement close.
+also green. The isolated five-trial comparative baseline and strict
+equal-or-better policy are frozen in `docs/vyrmkv-benchmark.md`. Segment-v2
+compression, sparse immutable reads, platform CRC32C, and fresh steady-state
+probes moved every measured cell green while preserving correctness. The local
+M3 gap is closed; next reproduce it under CI and broader mixed/sustained
+workloads, then make the explicit backend-default/removal decision. Do not infer
+SurrealDB or Qdrant superiority from this Fjall-scoped result.
