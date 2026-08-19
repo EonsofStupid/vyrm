@@ -98,13 +98,13 @@ absence, not recollection.
 | §13.2 | Content-addressed objects | **Missing** | absent |
 | §14 | Clyffy consumer | **Missing** | absent |
 
-Implemented and verified: 118 tests, clippy clean at `-D warnings`. Known
-flake, observed once on 2026-08-11: `durability.rs::
-an_unflushed_index_is_as_empty_as_the_claims_it_indexes` found 37 recovered
-claims where it expects 0 — the test presumes an unflushed write is absent
-after a clean reopen, but a clean close can land journal bytes via the page
-cache, so the premise is not guaranteed. To be tightened when `vyrm-store` is
-next touched (Step R item: index persistence).
+Implemented and verified: 118 tests, clippy clean at `-D warnings`. The former
+`durability.rs::an_unflushed_index_is_as_empty_as_the_claims_it_indexes` flake
+was resolved on 2026-08-19. The group-commit worker could observe a non-empty
+queue before entering its timed wait and commit without a full batch, elapsed
+delay, or explicit flush. The worker now carries an explicit flush-request bit
+and waits for one of the documented triggers; a direct long-delay test and
+repeated SIGKILL durability runs cover the boundary.
 
 ## 2 · Findings from this audit
 
