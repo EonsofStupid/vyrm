@@ -92,8 +92,11 @@ not roadmap language.
   tests protect this boundary. The native mutation codec allocates one MVCC
   sequence per operation inside one atomic WAL frame; ordered memtables retain
   historical values/tombstones for repeatable point/range reads across reopen.
-  Segments, manifest publication, compaction, the native `Engine` adapter, and
-  performance claims remain open.
+  Content-addressed immutable segments now retain MVCC history and fail closed
+  on corruption. Locked manifest publication syncs immutable bytes before an
+  atomic, separately checksummed `CURRENT` update and rejects stale parent CAS.
+  Checkpoints, segment/WAL lifecycle integration, compaction, the native
+  `Engine` adapter, and performance claims remain open.
 
 ## Verification
 

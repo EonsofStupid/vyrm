@@ -1,4 +1,4 @@
-use vyrm_kv::{Error, Manifest, SegmentDescriptor};
+use vyrm_kv::{Error, Manifest, ManifestStore, SegmentDescriptor};
 
 fn segment(id: &str, first: &[u8], last: &[u8], minimum: u64, maximum: u64) -> SegmentDescriptor {
     SegmentDescriptor {
@@ -83,4 +83,44 @@ fn tampering_and_invalid_reachability_fail_closed() {
         ),
         Err(Error::InvalidManifest(_))
     ));
+}
+
+#[test]
+fn current_publication_is_ordered_content_addressed_and_compare_and_swap() {
+    let directory = tempfile::tempdir().unwrap();
+    let store = ManifestStore::open(directory.path()).unwrap();
+    assert!(store.current().unwrap().is_none());
+    let first = Manifest::new(1, None, 100, 0, 1, Vec::new()).unwrap();
+    let pointer = store.publish(&first, None).unwrap();
+    assert_eq!(pointer.manifest, first.digest);
+    assert_eq!(store.current().unwrap().unwrap().1, first);
+
+    let second = Manifest::new(2, Some(first.digest.clone()), 101, 0, 1, Vec::new()).unwrap();
+    assert!(matches!(
+        store.publish(&second, None),
+        Err(Error::ManifestConflict { .. })
+    ));
+    store.publish(&second, Some(&first.digest)).unwrap();
+    assert_eq!(store.current().unwrap().unwrap().1, second);
+    assert_eq!(store.load(&first.digest).unwrap(), first);
+    drop(store);
+
+    let reopened = ManifestStore::open(directory.path()).unwrap();
+    assert_eq!(reopened.current().unwrap().unwrap().1, second);
+}
+
+#[test]
+fn a_tampered_current_pointer_fails_closed() {
+    let directory = tempfile::tempdir().unwrap();
+    let store = ManifestStore::open(directory.path()).unwrap();
+    let manifest = Manifest::new(1, None, 100, 0, 1, Vec::new()).unwrap();
+    store.publish(&manifest, None).unwrap();
+    drop(store);
+    let path = directory.path().join("CURRENT");
+    let mut bytes = std::fs::read(&path).unwrap();
+    let index = bytes.iter().position(|byte| *byte == b'1').unwrap();
+    bytes[index] = b'2';
+    std::fs::write(path, bytes).unwrap();
+    let reopened = ManifestStore::open(directory.path()).unwrap();
+    assert!(reopened.current().is_err());
 }

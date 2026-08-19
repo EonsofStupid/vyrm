@@ -112,4 +112,10 @@ impl Memtable {
     pub fn approximate_bytes(&self) -> usize {
         self.approximate_bytes
     }
+
+    pub fn all_versions(&self) -> impl Iterator<Item = (&[u8], &[VersionedValue])> {
+        self.versions
+            .iter()
+            .map(|(key, versions)| (key.as_slice(), versions.as_slice()))
+    }
 }

@@ -1,9 +1,16 @@
 use crate::{Error, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
+use std::fs::{File, OpenOptions};
+use std::io::Write;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use vyrm_core::digest;
 
 pub const MANIFEST_FORMAT_VERSION: u16 = 1;
+const CURRENT_FILE: &str = "CURRENT";
+const MANIFEST_DIRECTORY: &str = "manifests";
+static POINTER_TEMPORARY_ID: AtomicU64 = AtomicU64::new(1);
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SegmentDescriptor {
@@ -182,4 +189,191 @@ impl Manifest {
 
 fn is_sha256(value: &str) -> bool {
     value.len() == 64 && value.bytes().all(|byte| byte.is_ascii_hexdigit())
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CurrentPointer {
+    pub format_version: u16,
+    pub generation: u64,
+    pub manifest: String,
+    pub checksum: String,
+}
+
+impl CurrentPointer {
+    fn new(manifest: &Manifest) -> Self {
+        let mut pointer = Self {
+            format_version: MANIFEST_FORMAT_VERSION,
+            generation: manifest.generation,
+            manifest: manifest.digest.clone(),
+            checksum: String::new(),
+        };
+        pointer.checksum = pointer.expected_checksum();
+        pointer
+    }
+
+    fn validate(&self) -> Result<()> {
+        if self.format_version != MANIFEST_FORMAT_VERSION {
+            return Err(Error::UnsupportedVersion {
+                object: "CURRENT pointer",
+                version: self.format_version,
+            });
+        }
+        if self.generation == 0 || !is_sha256(&self.manifest) || !is_sha256(&self.checksum) {
+            return Err(Error::InvalidManifest(
+                "invalid CURRENT pointer fields".into(),
+            ));
+        }
+        if self.checksum != self.expected_checksum() {
+            return Err(Error::InvalidManifest(
+                "CURRENT pointer checksum mismatch".into(),
+            ));
+        }
+        Ok(())
+    }
+
+    fn expected_checksum(&self) -> String {
+        let mut bytes = b"vyrm-current-v1\0".to_vec();
+        bytes.extend_from_slice(&self.format_version.to_be_bytes());
+        bytes.extend_from_slice(&self.generation.to_be_bytes());
+        bytes.extend_from_slice(self.manifest.as_bytes());
+        digest::sha256_hex(&bytes)
+    }
+}
+
+/// Holds the process lock for the full publication session. Manifest bytes are
+/// synced before `CURRENT`, then the parent directory is synced after rename.
+pub struct ManifestStore {
+    root: PathBuf,
+    _lock: File,
+}
+
+impl ManifestStore {
+    pub fn open(root: &Path) -> Result<Self> {
+        std::fs::create_dir_all(root.join(MANIFEST_DIRECTORY))?;
+        let lock = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(root.join("MANIFEST.LOCK"))?;
+        lock.lock()?;
+        Ok(Self {
+            root: root.to_owned(),
+            _lock: lock,
+        })
+    }
+
+    pub fn current(&self) -> Result<Option<(CurrentPointer, Manifest)>> {
+        let path = self.root.join(CURRENT_FILE);
+        let bytes = match std::fs::read(path) {
+            Ok(bytes) => bytes,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(error) => return Err(error.into()),
+        };
+        let pointer: CurrentPointer = serde_json::from_slice(&bytes)?;
+        pointer.validate()?;
+        let manifest = self.load(&pointer.manifest)?;
+        if manifest.generation != pointer.generation {
+            return Err(Error::InvalidManifest(
+                "CURRENT generation differs from its manifest".into(),
+            ));
+        }
+        Ok(Some((pointer, manifest)))
+    }
+
+    pub fn load(&self, digest: &str) -> Result<Manifest> {
+        if !is_sha256(digest) {
+            return Err(Error::InvalidManifest(
+                "manifest lookup requires a SHA-256 identity".into(),
+            ));
+        }
+        let bytes = std::fs::read(
+            self.root
+                .join(MANIFEST_DIRECTORY)
+                .join(format!("{digest}.json")),
+        )?;
+        let manifest: Manifest = serde_json::from_slice(&bytes)?;
+        manifest.validate()?;
+        if manifest.digest != digest {
+            return Err(Error::InvalidManifest(
+                "manifest filename differs from its content identity".into(),
+            ));
+        }
+        Ok(manifest)
+    }
+
+    pub fn publish(&self, manifest: &Manifest, expected: Option<&str>) -> Result<CurrentPointer> {
+        manifest.validate()?;
+        let current = self.current()?;
+        let actual = current
+            .as_ref()
+            .map(|(pointer, _)| pointer.manifest.clone());
+        if actual.as_deref() != expected {
+            return Err(Error::ManifestConflict {
+                expected: expected.map(str::to_owned),
+                actual,
+            });
+        }
+        match current {
+            None if manifest.generation == 1 && manifest.parent.is_none() => {}
+            Some((pointer, _))
+                if manifest.generation == pointer.generation + 1
+                    && manifest.parent.as_deref() == Some(pointer.manifest.as_str()) => {}
+            _ => {
+                return Err(Error::InvalidManifest(
+                    "manifest generation/parent does not extend CURRENT".into(),
+                ))
+            }
+        }
+        self.persist_manifest(manifest)?;
+        let pointer = CurrentPointer::new(manifest);
+        self.publish_pointer(&pointer)?;
+        Ok(pointer)
+    }
+
+    fn persist_manifest(&self, manifest: &Manifest) -> Result<()> {
+        let directory = self.root.join(MANIFEST_DIRECTORY);
+        let path = directory.join(format!("{}.json", manifest.digest));
+        let bytes = serde_json::to_vec(manifest)?;
+        if path.exists() {
+            if std::fs::read(&path)? != bytes {
+                return Err(Error::InvalidManifest(
+                    "existing manifest identity has different bytes".into(),
+                ));
+            }
+            return Ok(());
+        }
+        let temporary = directory.join(format!(
+            ".{}.{}.tmp",
+            manifest.digest,
+            POINTER_TEMPORARY_ID.fetch_add(1, Ordering::Relaxed)
+        ));
+        persist_rename(&directory, &temporary, &path, &bytes)
+    }
+
+    fn publish_pointer(&self, pointer: &CurrentPointer) -> Result<()> {
+        let path = self.root.join(CURRENT_FILE);
+        let temporary = self.root.join(format!(
+            ".CURRENT.{}.tmp",
+            POINTER_TEMPORARY_ID.fetch_add(1, Ordering::Relaxed)
+        ));
+        persist_rename(&self.root, &temporary, &path, &serde_json::to_vec(pointer)?)
+    }
+}
+
+fn persist_rename(directory: &Path, temporary: &Path, target: &Path, bytes: &[u8]) -> Result<()> {
+    let mut file = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(temporary)?;
+    if let Err(error) = (|| -> std::io::Result<()> {
+        file.write_all(bytes)?;
+        file.sync_all()?;
+        std::fs::rename(temporary, target)?;
+        File::open(directory)?.sync_all()
+    })() {
+        let _ = std::fs::remove_file(temporary);
+        return Err(Error::Io(error));
+    }
+    Ok(())
 }

@@ -80,9 +80,22 @@ sequence range, entry count, and byte count. Duplicate identities, inverted
 ranges, empty segments, and segments newer than the manifest's durable sequence
 fail closed.
 
-Manifest publication, `CURRENT` compare-and-swap, segments, snapshot pinning,
-and compaction are subsequent M3 gates. Until those pass their fault matrices,
-Fjall remains the compatibility store and no native performance claim is made.
+Immutable segment v1 stores a fixed `VYRSEG01` header followed by key-ascending,
+sequence-ascending MVCC records and a lowercase ASCII SHA-256 footer over the
+header and records. Put/tombstone records retain every version needed for an
+older snapshot. Files are named by that digest, written to a unique temporary,
+synced, atomically renamed, and followed by a directory sync. Reusing an
+existing content identity first revalidates the complete segment.
+
+Checkpoint pinning and compaction are subsequent M3 gates. Until those and the
+native adapter pass their fault matrices, Fjall remains the compatibility store
+and no native performance claim is made.
+
+Manifest publication now holds an OS-level exclusive lock for the publication
+session. It validates expected `CURRENT`, generation, and parent; syncs immutable
+manifest bytes; atomically renames a separately checksummed `CURRENT` pointer;
+then syncs the containing directory. Stale compare-and-swap expectations fail
+without changing reachability. Checkpoint pinning and compaction remain open.
 
 ## Frozen vectors
 

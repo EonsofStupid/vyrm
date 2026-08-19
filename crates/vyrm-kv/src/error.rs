@@ -5,11 +5,24 @@ pub type Result<T> = std::result::Result<T, Error>;
 #[derive(Debug)]
 pub enum Error {
     Io(std::io::Error),
-    Corruption { offset: u64, reason: String },
-    UnsupportedVersion { object: &'static str, version: u16 },
+    Corruption {
+        offset: u64,
+        reason: String,
+    },
+    UnsupportedVersion {
+        object: &'static str,
+        version: u16,
+    },
     InvalidBatch(String),
     InvalidManifest(String),
-    TornTail { offset: u64 },
+    ManifestConflict {
+        expected: Option<String>,
+        actual: Option<String>,
+    },
+    InvalidSegment(String),
+    TornTail {
+        offset: u64,
+    },
     PoisonedWriter,
 }
 
@@ -25,6 +38,11 @@ impl fmt::Display for Error {
             }
             Self::InvalidBatch(reason) => write!(formatter, "invalid WAL batch: {reason}"),
             Self::InvalidManifest(reason) => write!(formatter, "invalid manifest: {reason}"),
+            Self::ManifestConflict { expected, actual } => write!(
+                formatter,
+                "manifest compare-and-swap conflict: expected {expected:?}, actual {actual:?}"
+            ),
+            Self::InvalidSegment(reason) => write!(formatter, "invalid segment: {reason}"),
             Self::TornTail { offset } => write!(
                 formatter,
                 "WAL has an incomplete tail at byte {offset}; explicit repair is required"
