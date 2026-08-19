@@ -189,6 +189,18 @@ disagree, `SPEC.md` is authoritative and this document is wrong.
 > pass. A real four-node run snapshots a `RuntimeCommit`, purges the leader log,
 > catches up a new learner, and reopens the runtime truth on all four nodes.
 
+> **M7 epoch/retention overlay (2026-08-19).** Adapter format `v4` makes
+> placement initialization and advance an explicit replicated operation. Epoch
+> 1 must match the applied OpenRaft voter canonical ids and zones; later epochs
+> must be exact successors and bind the same way. Normal operations can no
+> longer establish an epoch implicitly, and later voter-binding changes
+> invalidate it until the next placement transition while learner-only metadata
+> does not. Full identity responses are retained for exactly 4,096 applied-log
+> positions, with deterministic pruning in the state machine and its snapshots;
+> canonical runtime commit identity remains independently durable.
+> Initialization, successor, skipped/stale, membership mismatch/rebinding,
+> duplicate, retention-boundary, snapshot, and reopen evidence pass.
+
 > **M7 canonical-runtime overlay (2026-08-19).** Adapter format `v2` first added a
 > typed `runtime_commit` operation. `NativeEngine` now exposes a validated
 > no-write plan, allowing canonical mutations, audit/outbox work, the Raft
@@ -196,9 +208,9 @@ disagree, `SPEC.md` is authoritative and this document is wrong.
 > authoritative VyrmKV WAL frame. Reopen, duplicate, stale-cursor denial, and
 > same-frame differentials are green. A real three-voter run reopens identical
 > canonical runtime truth through `NativeEngine` on every voter. Runtime-bearing
-> snapshots are now transferred by adapter v3's physical ownership split;
-> production transport, explicit epoch transition, bounded request state,
-> independent-process chaos, and Multi-AZ evidence remain open.
+> snapshots are now transferred by adapter v4's physical ownership split;
+> production transport, independent-process chaos, and Multi-AZ evidence
+> remain open.
 
 ## 1 · Grounding result
 

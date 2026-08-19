@@ -1,6 +1,6 @@
 //! OpenRaft adapter over the Vyrm-native durable key/value substrate.
 //!
-//! Adapter v3 physically separates node-local Raft history from transferable
+//! Adapter v4 physically separates node-local Raft history from transferable
 //! canonical state. Votes, logs, purge/commit cursors, and snapshot cache
 //! references stay local; state-machine application and canonical runtime data
 //! share one authoritative VyrmKV WAL frame.
@@ -10,7 +10,7 @@
 // generic threshold, so adapter helpers preserve that required type too.
 #![allow(clippy::result_large_err)]
 
-use crate::{ClusterError, Result as ClusterResult, ShardId};
+use crate::{ClusterError, Result as ClusterResult, ShardId, ShardPlacement};
 use openraft::storage::{RaftLogStorage, RaftStateMachine};
 use openraft::{
     Entry, EntryPayload, ErrorSubject, ErrorVerb, LogId, LogState, RaftLogReader,
@@ -18,7 +18,7 @@ use openraft::{
     Vote,
 };
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Debug;
 use std::io::Cursor;
 use std::ops::{Bound, RangeBounds};
@@ -31,18 +31,19 @@ use vyrm_store::{
     LocalObjectStore,
 };
 
-const ADAPTER_FORMAT_VERSION: u16 = 3;
-const LOCAL_DATABASE_DIRECTORY: &str = "raft-local-v3";
+const ADAPTER_FORMAT_VERSION: u16 = 4;
+const LOCAL_DATABASE_DIRECTORY: &str = "raft-local-v4";
 const SNAPSHOT_OBJECT_DIRECTORY: &str = "snapshot-objects";
-const KEY_STATE_CONFIG: &[u8] = b"vyrm/raft/v3/state/config";
-const KEY_LOCAL_CONFIG: &[u8] = b"vyrm/raft/v3/local/config";
-const KEY_VOTE: &[u8] = b"vyrm/raft/v3/local/vote";
-const KEY_COMMITTED: &[u8] = b"vyrm/raft/v3/local/committed";
-const KEY_PURGED: &[u8] = b"vyrm/raft/v3/local/purged";
-const KEY_STATE: &[u8] = b"vyrm/raft/v3/state/current";
-const KEY_SNAPSHOT: &[u8] = b"vyrm/raft/v3/local/snapshot";
-const LOG_PREFIX: &[u8] = b"vyrm/raft/v3/local/log/";
-const SNAPSHOT_MEDIA_TYPE: &str = "application/vnd.vyrm.raft-state-snapshot.v3";
+const KEY_STATE_CONFIG: &[u8] = b"vyrm/raft/v4/state/config";
+const KEY_LOCAL_CONFIG: &[u8] = b"vyrm/raft/v4/local/config";
+const KEY_VOTE: &[u8] = b"vyrm/raft/v4/local/vote";
+const KEY_COMMITTED: &[u8] = b"vyrm/raft/v4/local/committed";
+const KEY_PURGED: &[u8] = b"vyrm/raft/v4/local/purged";
+const KEY_STATE: &[u8] = b"vyrm/raft/v4/state/current";
+const KEY_SNAPSHOT: &[u8] = b"vyrm/raft/v4/local/snapshot";
+const LOG_PREFIX: &[u8] = b"vyrm/raft/v4/local/log/";
+const SNAPSHOT_MEDIA_TYPE: &str = "application/vnd.vyrm.raft-state-snapshot.v4";
+pub const VYRM_RAFT_REQUEST_RETENTION_LOGS: u64 = 4096;
 // JSON is only the correctness-gate codec. Keep worst-case byte-array expansion
 // comfortably below VyrmKV's 8 MiB value ceiling until a compact codec lands.
 const MAX_COMMAND_BYTES: usize = 1024 * 1024;
@@ -74,6 +75,9 @@ impl VyrmRaftNode {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "operation", rename_all = "snake_case")]
 pub enum VyrmRaftOperation {
+    PlacementTransition {
+        placement: ShardPlacement,
+    },
     Probe {
         payload_digest: String,
         payload: Vec<u8>,
@@ -86,6 +90,7 @@ pub enum VyrmRaftOperation {
 impl VyrmRaftOperation {
     fn validate(&self) -> ClusterResult<()> {
         match self {
+            Self::PlacementTransition { placement } => placement.validate(),
             Self::Probe {
                 payload_digest,
                 payload,
@@ -100,14 +105,23 @@ impl VyrmRaftOperation {
     }
 
     fn digest(&self) -> String {
-        let mut bytes = b"vyrm.raft.operation.v1".to_vec();
+        let mut bytes = b"vyrm.raft.operation.v2".to_vec();
         match self {
-            Self::Probe { payload_digest, .. } => {
+            Self::PlacementTransition { placement } => {
                 bytes.push(1);
+                bytes.extend_from_slice(
+                    placement
+                        .digest()
+                        .expect("validated placement has a canonical digest")
+                        .as_bytes(),
+                );
+            }
+            Self::Probe { payload_digest, .. } => {
+                bytes.push(2);
                 bytes.extend_from_slice(payload_digest.as_bytes());
             }
             Self::RuntimeCommit { commit } => {
-                bytes.push(2);
+                bytes.push(3);
                 bytes.extend_from_slice(commit.digest().as_bytes());
             }
         }
@@ -125,6 +139,22 @@ pub struct VyrmRaftCommand {
 }
 
 impl VyrmRaftCommand {
+    pub fn placement_transition(
+        request_id: impl Into<String>,
+        placement: ShardPlacement,
+        expected_commit_index: Option<u64>,
+    ) -> ClusterResult<Self> {
+        let command = Self {
+            request_id: request_id.into(),
+            shard: placement.shard,
+            placement_epoch: placement.epoch,
+            expected_commit_index,
+            operation: VyrmRaftOperation::PlacementTransition { placement },
+        };
+        command.validate()?;
+        Ok(command)
+    }
+
     pub fn new(
         request_id: impl Into<String>,
         shard: ShardId,
@@ -175,6 +205,13 @@ impl VyrmRaftCommand {
             ));
         }
         self.operation.validate()?;
+        if let VyrmRaftOperation::PlacementTransition { placement } = &self.operation {
+            if placement.shard != self.shard || placement.epoch != self.placement_epoch {
+                return Err(ClusterError::Invalid(
+                    "placement transition command and placement identity differ".into(),
+                ));
+            }
+        }
         let encoded = serde_json::to_vec(&self.operation)
             .map_err(|error| ClusterError::Invalid(error.to_string()))?;
         if encoded.len() > MAX_COMMAND_BYTES {
@@ -226,6 +263,7 @@ enum AdapterDomain {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct AppliedRequest {
+    first_applied_index: u64,
     command_digest: String,
     response: VyrmRaftResponse,
 }
@@ -238,6 +276,14 @@ struct StateMachineData {
     #[serde(default)]
     placement_epoch: Option<u64>,
     #[serde(default)]
+    placement_digest: Option<String>,
+    #[serde(default)]
+    placement_membership_digest: Option<String>,
+    #[serde(default)]
+    voter_membership_generation: u64,
+    #[serde(default)]
+    placement_membership_generation: Option<u64>,
+    #[serde(default)]
     runtime_commit_count: u64,
     state_digest: String,
     requests: BTreeMap<String, AppliedRequest>,
@@ -249,6 +295,10 @@ impl Default for StateMachineData {
             last_applied: None,
             last_membership: StoredMembership::default(),
             placement_epoch: None,
+            placement_digest: None,
+            placement_membership_digest: None,
+            voter_membership_generation: 0,
+            placement_membership_generation: None,
             runtime_commit_count: 0,
             state_digest: sha256_hex(b"vyrm.raft.state.v1"),
             requests: BTreeMap::new(),
@@ -372,7 +422,7 @@ fn ensure_adapter_database(
     }
     if snapshot.sequence != 0 {
         return Err(ClusterError::Denied(
-            "existing database is not a Vyrm OpenRaft v3 storage domain".into(),
+            "existing database is not a Vyrm OpenRaft v4 storage domain".into(),
         ));
     }
     let mut operations = vec![put_json(config_key, &expected)?];
@@ -602,7 +652,23 @@ impl RaftStateMachine<VyrmRaftTypeConfig> for VyrmRaftStateMachine {
             let response = match entry.payload {
                 EntryPayload::Blank => blank_response(&state, entry.log_id),
                 EntryPayload::Membership(membership) => {
+                    let prior_binding = membership_binding(&state.last_membership)
+                        .map(|voters| membership_binding_digest(&voters));
                     state.last_membership = StoredMembership::new(Some(entry.log_id), membership);
+                    let next_binding = membership_binding(&state.last_membership)
+                        .map(|voters| membership_binding_digest(&voters));
+                    if prior_binding != next_binding {
+                        state.voter_membership_generation = state
+                            .voter_membership_generation
+                            .checked_add(1)
+                            .ok_or_else(|| {
+                                storage_error(
+                                    ErrorSubject::Apply(entry.log_id),
+                                    ErrorVerb::Write,
+                                    "voter membership generation overflowed",
+                                )
+                            })?;
+                    }
                     blank_response(&state, entry.log_id)
                 }
                 EntryPayload::Normal(command) => {
@@ -613,6 +679,7 @@ impl RaftStateMachine<VyrmRaftTypeConfig> for VyrmRaftStateMachine {
                 }
             };
             state.last_applied = Some(entry.log_id);
+            prune_request_history(&mut state, entry.log_id.index);
             operations.push(put_json_storage(
                 KEY_STATE,
                 &state,
@@ -803,7 +870,7 @@ fn state_from_snapshot_bundle(
 
 fn expected_snapshot_id(state: &StateMachineData, bundle: &SnapshotBundle) -> String {
     format!(
-        "v3-{}-{}",
+        "v4-{}-{}",
         state.last_applied.map_or(0, |log_id| log_id.index),
         bundle.digest
     )
@@ -907,23 +974,47 @@ fn apply_command(
     }
 
     let current_index = state.last_applied.map_or(0, |applied| applied.index);
-    let epoch_matches = state
-        .placement_epoch
-        .is_none_or(|epoch| epoch == command.placement_epoch);
+    let is_transition = matches!(
+        &command.operation,
+        VyrmRaftOperation::PlacementTransition { .. }
+    );
+    let epoch_matches = match &command.operation {
+        VyrmRaftOperation::PlacementTransition { placement } => {
+            state.placement_epoch.map_or(placement.epoch == 1, |epoch| {
+                epoch.checked_add(1) == Some(placement.epoch)
+            }) && command.placement_epoch == placement.epoch
+        }
+        _ => state.placement_epoch == Some(command.placement_epoch),
+    };
+    let current_membership_digest =
+        membership_binding(&state.last_membership).map(|voters| membership_binding_digest(&voters));
+    let membership_matches = is_transition
+        || (state.placement_membership_digest.as_ref() == current_membership_digest.as_ref()
+            && state.placement_membership_generation == Some(state.voter_membership_generation));
     let commit_index_matches = command
         .expected_commit_index
         .is_none_or(|expected| expected == current_index);
-    let mut accepted = epoch_matches && commit_index_matches;
+    let mut accepted = epoch_matches && membership_matches && commit_index_matches;
     let mut operations = Vec::new();
     let mut runtime_outcome = None;
-    let mut reason = if !epoch_matches {
+    let mut reason = if !epoch_matches && is_transition {
         format!(
-            "placement epoch {} does not match state-machine epoch {}",
+            "placement transition epoch {} is not the successor of state-machine epoch {}",
             command.placement_epoch,
             state
                 .placement_epoch
-                .expect("mismatched epoch requires an established epoch")
+                .map_or_else(|| "uninitialized".into(), |epoch| epoch.to_string())
         )
+    } else if !epoch_matches {
+        format!(
+            "placement epoch {} does not match established state-machine epoch {}",
+            command.placement_epoch,
+            state
+                .placement_epoch
+                .map_or_else(|| "uninitialized".into(), |epoch| epoch.to_string())
+        )
+    } else if !membership_matches {
+        "applied Raft membership no longer matches the established placement epoch".into()
     } else if !commit_index_matches {
         format!(
             "expected commit index {} but state machine was at {current_index}",
@@ -937,6 +1028,28 @@ fn apply_command(
 
     if accepted {
         match &command.operation {
+            VyrmRaftOperation::PlacementTransition { placement } => {
+                if let Some(membership_voters) =
+                    placement_membership_binding(placement, &state.last_membership)
+                {
+                    state.placement_epoch = Some(placement.epoch);
+                    state.placement_digest = Some(placement.digest().map_err(|error| {
+                        storage_error(
+                            ErrorSubject::Apply(log_id),
+                            ErrorVerb::Write,
+                            error.to_string(),
+                        )
+                    })?);
+                    state.placement_membership_digest =
+                        Some(membership_binding_digest(&membership_voters));
+                    state.placement_membership_generation = Some(state.voter_membership_generation);
+                    reason = "quorum-committed placement epoch transition applied".into();
+                } else {
+                    accepted = false;
+                    reason =
+                        "placement voters and zones do not match applied Raft membership".into();
+                }
+            }
             VyrmRaftOperation::Probe { .. } => {
                 reason = "quorum-committed probe applied".into();
             }
@@ -988,7 +1101,6 @@ fn apply_command(
     }
 
     if accepted {
-        state.placement_epoch = Some(command.placement_epoch);
         let mut bytes = b"vyrm.raft.state.transition.v1".to_vec();
         bytes.extend_from_slice(state.state_digest.as_bytes());
         bytes.extend_from_slice(&log_id.leader_id.term.to_be_bytes());
@@ -1008,6 +1120,7 @@ fn apply_command(
     state.requests.insert(
         command.request_id,
         AppliedRequest {
+            first_applied_index: log_id.index,
             command_digest,
             response: response.clone(),
         },
@@ -1016,6 +1129,55 @@ fn apply_command(
         response,
         operations,
     })
+}
+
+fn placement_membership_binding(
+    placement: &ShardPlacement,
+    membership: &StoredMembership<u64, VyrmRaftNode>,
+) -> Option<BTreeSet<(String, String)>> {
+    let raft_voters = membership_binding(membership)?;
+    let declared_voters = placement
+        .voters()
+        .map(|replica| (replica.node.to_string(), replica.zone.to_string()))
+        .collect::<BTreeSet<_>>();
+    (raft_voters == declared_voters).then_some(raft_voters)
+}
+
+fn membership_binding(
+    membership: &StoredMembership<u64, VyrmRaftNode>,
+) -> Option<BTreeSet<(String, String)>> {
+    let voter_ids = membership.voter_ids().collect::<Vec<_>>();
+    let raft_voters = voter_ids
+        .iter()
+        .copied()
+        .map(|id| membership.membership().get_node(&id))
+        .collect::<Option<Vec<_>>>()?;
+    if raft_voters.is_empty() || raft_voters.iter().any(|node| node.validate().is_err()) {
+        return None;
+    }
+    let raft_voters = raft_voters
+        .into_iter()
+        .map(|node| (node.canonical_id.clone(), node.zone.clone()))
+        .collect::<BTreeSet<_>>();
+    (raft_voters.len() == voter_ids.len()).then_some(raft_voters)
+}
+
+fn membership_binding_digest(voters: &BTreeSet<(String, String)>) -> String {
+    let mut bytes = b"vyrm.raft.membership-binding.v1".to_vec();
+    for (canonical_id, zone) in voters {
+        bytes.extend_from_slice(&(canonical_id.len() as u64).to_be_bytes());
+        bytes.extend_from_slice(canonical_id.as_bytes());
+        bytes.extend_from_slice(&(zone.len() as u64).to_be_bytes());
+        bytes.extend_from_slice(zone.as_bytes());
+    }
+    sha256_hex(&bytes)
+}
+
+fn prune_request_history(state: &mut StateMachineData, through_index: u64) {
+    let oldest_retained = through_index.saturating_sub(VYRM_RAFT_REQUEST_RETENTION_LOGS - 1);
+    state
+        .requests
+        .retain(|_, request| request.first_applied_index >= oldest_retained);
 }
 
 fn deterministic_runtime_rejection(error: &StoreError) -> bool {
@@ -1253,4 +1415,68 @@ fn range_contains<R: RangeBounds<u64>>(range: &R, value: u64) -> bool {
         Bound::Unbounded => true,
     };
     after_start && before_end
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn request_history_retains_exactly_the_declared_log_window() {
+        let mut state = StateMachineData::default();
+        for index in 1..=VYRM_RAFT_REQUEST_RETENTION_LOGS {
+            state.requests.insert(
+                format!("request-{index}"),
+                AppliedRequest {
+                    first_applied_index: index,
+                    command_digest: format!("digest-{index}"),
+                    response: VyrmRaftResponse {
+                        accepted: true,
+                        duplicate: false,
+                        term: 1,
+                        index,
+                        state_digest: "a".repeat(64),
+                        reason: "retention fixture".into(),
+                        runtime_outcome: None,
+                    },
+                },
+            );
+            prune_request_history(&mut state, index);
+        }
+        assert_eq!(
+            state.requests.len() as u64,
+            VYRM_RAFT_REQUEST_RETENTION_LOGS
+        );
+        assert!(state.requests.contains_key("request-1"));
+
+        let next = VYRM_RAFT_REQUEST_RETENTION_LOGS + 1;
+        state.requests.insert(
+            format!("request-{next}"),
+            AppliedRequest {
+                first_applied_index: next,
+                command_digest: format!("digest-{next}"),
+                response: VyrmRaftResponse {
+                    accepted: false,
+                    duplicate: false,
+                    term: 1,
+                    index: next,
+                    state_digest: "b".repeat(64),
+                    reason: "retention boundary".into(),
+                    runtime_outcome: None,
+                },
+            },
+        );
+        prune_request_history(&mut state, next);
+        assert_eq!(
+            state.requests.len() as u64,
+            VYRM_RAFT_REQUEST_RETENTION_LOGS
+        );
+        assert!(!state.requests.contains_key("request-1"));
+        assert!(state.requests.contains_key("request-2"));
+        assert!(state.requests.contains_key(&format!("request-{next}")));
+
+        let reopened: StateMachineData =
+            serde_json::from_slice(&serde_json::to_vec(&state).unwrap()).unwrap();
+        assert_eq!(reopened.requests, state.requests);
+    }
 }

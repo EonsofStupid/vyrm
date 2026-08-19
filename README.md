@@ -51,7 +51,8 @@ Vyrm provides:
   deterministic quorum fault simulator, and a feature-gated real-consensus
   adapter that atomically applies canonical runtime commits over native VyrmKV
   and transfers that runtime truth to post-purge learners through authenticated
-  physical snapshots (production clustering remains gated);
+  physical snapshots, with explicit membership-bound placement epochs and
+  bounded request identity retention (production clustering remains gated);
 - identical lifecycle semantics through hooks, CLI, and MCP;
 - isolated per-platform instances with explicit store/root binding.
 

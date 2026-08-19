@@ -14,7 +14,11 @@ use std::sync::Arc;
 use std::time::Duration;
 use tempfile::TempDir;
 use tokio::sync::RwLock;
-use vyrm_cluster::{ShardId, VyrmRaftCommand, VyrmRaftNode, VyrmRaftStore, VyrmRaftTypeConfig};
+use vyrm_cluster::{
+    ClusterId, NodeId, PlacementPolicy, ReplicaPlacement, ReplicaRole, ShardId, ShardPlacement,
+    VyrmRaftCommand, VyrmRaftNode, VyrmRaftStore, VyrmRaftTypeConfig, ZoneId,
+    CLUSTER_CONTRACT_VERSION,
+};
 use vyrm_core::{
     RuntimeCommit, RuntimeMutation, RuntimeRecordSchema, RuntimeSchemaRegistry, RuntimeType,
     ScopeId,
@@ -211,6 +215,20 @@ fn real_consensus_elects_fails_over_installs_snapshot_and_changes_membership() {
             .await
             .unwrap();
 
+        let transition = cluster
+            .node(1)
+            .client_write(
+                VyrmRaftCommand::placement_transition(
+                    "placement-epoch-1",
+                    test_placement(ShardId(5), 1),
+                    None,
+                )
+                .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert!(transition.data.accepted);
+
         for index in 0..8 {
             let response = cluster
                 .node(1)
@@ -303,6 +321,34 @@ fn real_consensus_elects_fails_over_installs_snapshot_and_changes_membership() {
                 .await
                 .unwrap();
         }
+        let replacement_transition = cluster
+            .node(2)
+            .client_write(
+                VyrmRaftCommand::placement_transition(
+                    "placement-epoch-2",
+                    test_placement_for(ShardId(5), 2, [2, 3, 4]),
+                    None,
+                )
+                .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert!(replacement_transition.data.accepted);
+        let replacement_probe = cluster
+            .node(2)
+            .client_write(
+                VyrmRaftCommand::new(
+                    "after-membership-rebind",
+                    ShardId(5),
+                    2,
+                    None,
+                    b"replacement-placement-is-live".to_vec(),
+                )
+                .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert!(replacement_probe.data.accepted);
         cluster.shutdown().await;
     });
 }
@@ -330,6 +376,20 @@ fn real_consensus_replicates_canonical_runtime_truth_to_every_voter() {
             .change_membership(BTreeSet::from([1, 2, 3]), false)
             .await
             .unwrap();
+
+        let transition = cluster
+            .node(1)
+            .client_write(
+                VyrmRaftCommand::placement_transition(
+                    "runtime-placement-1",
+                    test_placement(ShardId(5), 1),
+                    None,
+                )
+                .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert!(transition.data.accepted);
 
         let commit = bootstrap_runtime_commit();
         let response = cluster
@@ -450,5 +510,31 @@ fn bootstrap_runtime_commit() -> RuntimeCommit {
         actor: "agent:cluster-test".into(),
         expected_cursor: 0,
         mutations: vec![RuntimeMutation::Schema { registry }],
+    }
+}
+
+fn test_placement(shard: ShardId, epoch: u64) -> ShardPlacement {
+    test_placement_for(shard, epoch, [1, 2, 3])
+}
+
+fn test_placement_for(shard: ShardId, epoch: u64, voter_ids: [u64; 3]) -> ShardPlacement {
+    ShardPlacement {
+        contract_version: CLUSTER_CONTRACT_VERSION,
+        cluster: ClusterId::new("cluster:consensus-test").unwrap(),
+        shard,
+        epoch,
+        policy: PlacementPolicy {
+            voter_count: 3,
+            minimum_voter_zones: 3,
+            maximum_voters_per_zone: 1,
+        },
+        replicas: voter_ids
+            .into_iter()
+            .map(|id| ReplicaPlacement {
+                node: NodeId::new(format!("node-{id}")).unwrap(),
+                zone: ZoneId::new(format!("az-{id}")).unwrap(),
+                role: ReplicaRole::Voter,
+            })
+            .collect(),
     }
 }

@@ -158,7 +158,7 @@ publication reopens the imported state. Corruption, truncation, stale install,
 round-trip, reopen, idempotency, target-state replacement, and post-install
 continuation are executable tests in `tests/snapshot_bundle.rs`.
 
-OpenRaft adapter v3 consumes this exact contract for canonical-state transfer.
+OpenRaft adapter v4 consumes this exact contract for canonical-state transfer.
 It inspects the authenticated state/domain records before installation, then
 publishes the imported closure through the same local manifest CAS. Vote, log,
 commit, purge, and snapshot-cache records live in a separate node-local VyrmKV

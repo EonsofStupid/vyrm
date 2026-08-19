@@ -53,7 +53,7 @@ not roadmap language.
   snapshots in native VyrmKV and passes the complete upstream storage suite. A
   four-node in-process test covers election, quorum commit, snapshot catch-up,
   majority-side failover, post-failover commit, and voter replacement.
-  Adapter format v3 physically separates node-local vote/log/commit/purge and
+  Adapter format v4 physically separates node-local vote/log/commit/purge and
   snapshot-cache state from transferable canonical application state. A typed
   `RuntimeCommit` and Raft applied state still publish in one state-domain WAL
   frame. Authenticated VyrmKV bundles now carry that complete canonical state;
@@ -62,13 +62,23 @@ not roadmap language.
   are not imported. Corrupt, forged-metadata, stale, duplicate, restart, and
   same-frame differentials are green. Production transport, independent-
   process chaos, and Multi-AZ deployment remain unclaimed.
+  Placement epochs are now explicit replicated `placement_transition`
+  operations: initialization must be epoch 1, advances must be exact successors,
+  and declared voter canonical ids/zones must equal the applied OpenRaft
+  membership. Ordinary work before initialization or at another epoch is
+  durably denied; a later Raft voter identity/zone change invalidates the old
+  binding until an exact-successor placement rebinds it. Learner-only metadata
+  does not create false invalidation. Request identities retain exactly the last
+  4,096 applied-log positions and prune deterministically into state/snapshots;
+  runtime commits retain independent content idempotency after that request
+  window expires.
 - Native VyrmKV now provides the required physical snapshot-bundle primitive.
   Bundle v1 is a deterministic SHA-256-authenticated binary closure over a
   flush-bounded manifest and all reachable immutable segments. Installation
   syncs segments and an empty continuation WAL before one local manifest CAS;
   it never imports the source manifest lineage. Round-trip, reopen, stale and
   corrupt denial, idempotency, continued-write, and crash/storage-full matrices
-  are green. Adapter v3 consumes this closure for OpenRaft snapshot build and
+  are green. Adapter v4 consumes this closure for OpenRaft snapshot build and
   installation while retaining source and target node-local Raft history.
 - A persisted, revisioned schema registry now governs typed runtime records,
   relations, and events. Unknown types and properties fail closed; property

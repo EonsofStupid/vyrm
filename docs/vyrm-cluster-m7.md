@@ -44,18 +44,26 @@ Selection matrix:
 | OpenRaft 0.10 alpha | Reject for this gate | Alpha API/behavior is not the right persistence-format dependency |
 | TiKV `raft-rs` | Defer, retain as a design reference | Strong production lineage, but lower-level integration and readiness driving would add more Vyrm-owned consensus plumbing before this contract is proved |
 
-The Vyrm adapter format is now `v3`. It supplies:
+The Vyrm adapter format is now `v4`. It supplies:
 
-- a canonical command/response/node `RaftTypeConfig` with typed `probe` and
-  `runtime_commit` operations;
+- a canonical command/response/node `RaftTypeConfig` with typed
+  `placement_transition`, `probe`, and `runtime_commit` operations;
 - a store permanently bound to one shard and two explicit physical domains:
   canonical state at the instance root and node-local Raft state under
-  `raft-local-v3`;
+  `raft-local-v4`;
 - authoritative VyrmKV batches for node-local votes, committed/purged pointers,
   and ordered logs, without placing those records in transferable state;
 - monotonic vote persistence and append-batch hole rejection;
-- full-command idempotency, payload integrity, shard binding, placement-epoch
-  binding, and optional expected-commit-index comparison;
+- full-command idempotency, payload integrity, shard binding, explicit
+  placement-epoch transitions, and optional expected-commit-index comparison;
+- epoch 1 initialization and exact-successor advance bound to the currently
+  applied OpenRaft voter canonical ids/zones; ordinary work fails closed before
+  initialization, at another epoch, or after voter identity/zone changes until
+  a new matching epoch is committed; learner-only metadata does not invalidate
+  a valid binding;
+- deterministic request-response retention across exactly the latest 4,096
+  applied-log positions, while canonical runtime content identity remains
+  independently durable;
 - native `RuntimeCommit` planning without publication, allowing canonical
   runtime mutations, audit/outbox work, the Raft applied cursor, response, and
   idempotency state to share one authoritative VyrmKV WAL frame;
@@ -79,7 +87,9 @@ as all voters. Storage differentials additionally prove same-frame
 Raft/runtime publication, duplicate replay without a second runtime mutation,
 durable expected-cursor denial, corrupt-byte and forged-metadata refusal before
 state publication, idempotent reinstallation, stale refusal, restart recovery,
-and preservation of the target node's local vote.
+preservation of the target node's local vote, placement initialization and
+successor ordering, voter-binding mismatch/churn denial and rebinding, and the
+exact request retention boundary.
 
 Snapshot data is exactly VyrmKV physical snapshot-bundle v1: a flush-bounded,
 SHA-256-authenticated manifest and immutable-segment closure installed through
@@ -178,13 +188,12 @@ identity/CAS/digest semantics and now atomically dispatches canonical
 in Raft snapshots. Snapshot construction and receipt currently use
 `Cursor<Vec<u8>>`; OpenRaft can chunk those bytes on the wire, but Vyrm does not
 yet claim file-backed or bounded-memory snapshot streaming. Its synchronous
-mutex, prefix scans, JSON protocol state, and unbounded request-id map are
-correctness-first test implementations, not production throughput or footprint
-claims. Commands are limited to 1 MiB and physical snapshot envelopes to 1 GiB
-until compact and streaming codecs land.
+mutex, prefix scans, and JSON protocol state are correctness-first test
+implementations, not production throughput or footprint claims. Commands are
+limited to 1 MiB and physical snapshot envelopes to 1 GiB until compact and
+streaming codecs land.
 
-The next M7 slice must define an explicit placement-epoch transition command,
-bound idempotency state, add authenticated production transport, and run
+The next M7 slice must add authenticated production transport and run
 process/network/disk chaos on independently restarted nodes. File-backed,
 bounded-memory snapshot creation/receipt is also required before high-volume
 cluster claims. Only that evidence can advance a Multi-AZ claim.
