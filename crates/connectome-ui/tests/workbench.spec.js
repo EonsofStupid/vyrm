@@ -112,6 +112,31 @@ test('persisted schema is readable as a developer contract', async ({ page, requ
   await expect(page.locator('.schema-contract-line')).toContainText('Deny or commit');
 });
 
+test('query lab exposes exact plan evidence and deterministic rows', async ({ page, request }) => {
+  const seed = await request.post(`${baseURL}/api/flights`, {
+    data: {
+      prompt: 'Create a typed runtime row for query inspection.',
+      provider: 'observe',
+      context_mode: 'fresh',
+      budget: 512,
+      acceptance_marker: '',
+      reasoning_profile: 'default',
+    },
+  });
+  expect(seed.ok()).toBeTruthy();
+
+  await page.goto(`${baseURL}/#query`);
+  await expect(page.getByRole('heading', { name: 'vyrmQL contract lab' })).toBeVisible();
+  await page.locator('#query-source').fill(
+    `FROM record:prompt_flight AT VALID ${Date.now()} KNOWN HEAD PROJECT id, status LIMIT 5 EXPLAIN CONTRACT`,
+  );
+  await page.getByRole('button', { name: 'Plan and execute' }).click();
+  await expect(page.locator('.query-contract-grid')).toContainText('Exact');
+  await expect(page.locator('.query-paths .selected')).toContainText('authoritative log scan');
+  await expect(page.locator('.query-paths .rejected')).toContainText('no projection generation');
+  await expect(page.locator('.query-rows')).toContainText('record:prompt_flight:');
+});
+
 test('custom prompt editing is stable while live snapshots and flight polling continue', async ({ page }) => {
   await page.goto(`${baseURL}/#flight`);
   const prompt = 'Compare the runtime graph and report verified evidence with a stop condition.';

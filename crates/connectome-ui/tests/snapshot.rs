@@ -131,6 +131,20 @@ fn snapshot_exposes_runtime_objects_without_mutating_the_store() {
         4
     );
     assert_eq!(runtime.relations.len(), 4);
+
+    let query = connectome_ui::runtime_query(
+        &store,
+        vyrm_core::ScopeId::new("instance:default").unwrap(),
+        "FROM record:reasoning_run AT VALID 10 KNOWN HEAD PROJECT id EXPLAIN CONTRACT",
+        &vyrm_mx::ExecutionBudget::default(),
+    )
+    .unwrap();
+    assert_eq!(query.execution.returned_rows, 1);
+    assert!(query.plan.explanation.contract.exact);
+    assert_eq!(
+        query.plan.explanation.candidates[0].name,
+        "authoritative_log_scan"
+    );
 }
 
 #[test]

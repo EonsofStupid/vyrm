@@ -17,7 +17,9 @@ use vyrm_core::{
     resolve_as_of, Claim, ClaimSource, ReasoningEvent, ReasoningPayload, RetentionPin,
     RuntimeGraphSnapshot, RuntimeSchemaRegistry, ScopeId, SnapshotHandle,
 };
+use vyrm_mx::{BoundQuery, Catalog, ExecutionBudget, Parameters, PhysicalPlan, QueryExecution};
 use vyrm_node::{InstanceBinding, InstanceMode};
+use vyrm_ql::Query;
 use vyrm_store::{Engine, Invocation, ProjectionStatus, Store};
 
 const INDEX: &str = include_str!("../static/index.html");
@@ -78,6 +80,15 @@ pub struct RuntimeRetentionView {
     pub observed_at: u64,
     pub snapshots: Vec<SnapshotHandle>,
     pub pins: Vec<RetentionPin>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct RuntimeQueryView {
+    pub canonical: String,
+    pub query: Query,
+    pub bound: BoundQuery,
+    pub plan: PhysicalPlan,
+    pub execution: QueryExecution,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -277,6 +288,30 @@ pub fn runtime_retention(
         observed_at: at,
         snapshots,
         pins,
+    })
+}
+
+/// Parses, binds, plans, and executes one read-only query against a single
+/// captured runtime stamp. The returned plan is the inspectable proof of the
+/// selected path, not server-side commentary added after execution.
+pub fn runtime_query(
+    store: &Store,
+    scope: ScopeId,
+    source: &str,
+    budget: &ExecutionBudget,
+) -> Result<RuntimeQueryView, Box<dyn std::error::Error>> {
+    let query = vyrm_ql::parse(source)?;
+    let canonical = query.canonical();
+    let catalog = Catalog::capture(store, &scope)?;
+    let bound = vyrm_mx::bind(&query, &Parameters::new(), &catalog)?;
+    let plan = vyrm_mx::plan(&bound)?;
+    let execution = vyrm_mx::execute(store, &plan, budget)?;
+    Ok(RuntimeQueryView {
+        canonical,
+        query,
+        bound,
+        plan,
+        execution,
     })
 }
 
@@ -677,6 +712,41 @@ fn respond(
                 &serde_json::json!({"error":error.to_string()}),
             ),
         },
+        "/api/runtime/query" => {
+            let params = query_params(query);
+            let source = params.get("ql").map(String::as_str).unwrap_or("");
+            let budget = ExecutionBudget {
+                max_scanned_changes: params
+                    .get("max_scanned_changes")
+                    .and_then(|value| value.parse().ok())
+                    .unwrap_or(100_000)
+                    .clamp(1, 1_000_000),
+                max_rows: params
+                    .get("max_rows")
+                    .and_then(|value| value.parse().ok())
+                    .unwrap_or(1_000)
+                    .clamp(1, 10_000),
+                max_output_bytes: 2 * 1024 * 1024,
+                max_batch_rows: 256,
+            };
+            if source.trim().is_empty() {
+                json_response(
+                    StatusCode(400),
+                    &serde_json::json!({"error":"ql query parameter is required"}),
+                )
+            } else {
+                match ScopeId::new(vyrm_node::REASONING_SCOPE)
+                    .map_err(|error| -> Box<dyn std::error::Error> { error.into() })
+                    .and_then(|scope| runtime_query(store, scope, source, &budget))
+                {
+                    Ok(result) => json_response(StatusCode(200), &result),
+                    Err(error) => json_response(
+                        StatusCode(400),
+                        &serde_json::json!({"error":error.to_string()}),
+                    ),
+                }
+            }
+        }
         "/api/runtime/graph" => {
             let params = query_params(query);
             let valid_at = params

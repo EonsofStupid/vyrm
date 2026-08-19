@@ -396,6 +396,19 @@ Acceptance: parser corpus and fuzzing, AST golden files, equivalent typed-SDK
 and text plans, deterministic plan diagnostics, and result differentials against
 direct current APIs.
 
+Status (2026-08-19): **complete.** `vyrm-ql` owns a canonical, dependency-light
+AST/parser with mandatory `VALID` and `KNOWN` selectors, scalar parameters,
+record/relation/event/claim sources, corpus/negative/mutation-fuzz tests, and
+checked-in golden vectors. `vyrm-mx` captures an immutable catalog/read stamp,
+binds types and fields against schema history, emits content-addressed logical
+and physical plans, and executes deterministic budgeted batches through the
+shared `Engine` port. `EXPLAIN CONTRACT` records exactness, ordering,
+authorization scope, resource needs, and why the authoritative log path won
+while an ungrounded projection was rejected. Memory/Fjall, typed/text, and
+direct graph API differentials are green. Connectome's Query Lab renders the
+same plan contract beside its rows. The reference path deliberately contains
+no ANN, embedding, network, or GPU behavior; those remain gated to M5.
+
 ### M3 — native `vyrmKV`
 
 - Implement checksummed WAL records, MVCC sequence assignment, memtables,

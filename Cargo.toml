@@ -2,7 +2,9 @@
 resolver = "2"
 members = [
     "crates/vyrm-core",
+    "crates/vyrm-ql",
     "crates/vyrm-store",
+    "crates/vyrm-mx",
     "crates/vyrm-graph",
     "crates/vyrm-node",
     "crates/vyrm-cli",

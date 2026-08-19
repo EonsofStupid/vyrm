@@ -67,7 +67,10 @@ disagree, `SPEC.md` is authoritative and this document is wrong.
 > M1 is now closed with stamped transaction reads, prospective read-your-writes,
 > same/disjoint global-CAS coverage, repeatable paged replay, and logical
 > retention-pin inventory exposed to Connectome. Physical segment attachment
-> belongs to native M3. M2 `vyrmQL`/`vyrmMX` is the next gate; vector, object,
+> belongs to native M3. M2 is now closed with explicit-time `vyrmQL`, catalog
+> binding, deterministic logical/physical `vyrmMX` plans, exact stamped-log
+> execution, budgets, diagnostics, backend/direct-API differentials, and a
+> browser-visible Query Lab. M3 native `vyrmKV` is the next gate; vector, object,
 > and cluster work remain sequenced behind it. See
 > `docs/vyrmds-architecture-research.md`.
 > The product handoff, canonical package-event grammar, alpha release gates,

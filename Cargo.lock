@@ -206,7 +206,9 @@ dependencies = [
  "tempfile",
  "tiny_http",
  "vyrm-core",
+ "vyrm-mx",
  "vyrm-node",
+ "vyrm-ql",
  "vyrm-store",
 ]
 
@@ -1062,6 +1064,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "vyrm-mx"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "tempfile",
+ "vyrm-core",
+ "vyrm-ql",
+ "vyrm-store",
+]
+
+[[package]]
 name = "vyrm-node"
 version = "0.1.0"
 dependencies = [
@@ -1073,6 +1087,15 @@ dependencies = [
  "vyrm-core",
  "vyrm-graph",
  "vyrm-store",
+]
+
+[[package]]
+name = "vyrm-ql"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "vyrm-core",
 ]
 
 [[package]]

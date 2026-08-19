@@ -1,7 +1,7 @@
 (() => {
   'use strict';
 
-  const views = new Set(['overview', 'flight', 'graph', 'schema', 'runs', 'claims', 'routes', 'activity']);
+  const views = new Set(['overview', 'flight', 'graph', 'schema', 'query', 'runs', 'claims', 'routes', 'activity']);
   const initialView = location.hash.slice(1);
   const promptPresets = {
     weak: 'Make this better.',
@@ -128,7 +128,7 @@
   function render() {
     if (!state.data) return;
     updateChrome();
-    const renderers = { overview: renderOverview, flight: renderFlight, graph: renderGraph, schema: renderSchema, runs: renderRuns, claims: renderClaims, routes: renderRoutes, activity: renderActivity };
+    const renderers = { overview: renderOverview, flight: renderFlight, graph: renderGraph, schema: renderSchema, query: renderQuery, runs: renderRuns, claims: renderClaims, routes: renderRoutes, activity: renderActivity };
     (renderers[state.view] || renderOverview)();
     renderInspector();
   }
@@ -568,6 +568,41 @@
     return `<details class="schema-type" ${properties.length <= 5 ? 'open' : ''}><summary><span class="schema-kind ${category}"></span><strong>${escapeHtml(kind.replaceAll('_', ' '))}</strong><small>${properties.length} properties</small></summary>${relationship}<div class="schema-properties">${properties.length ? properties.map(([name, rule]) => `<div><code>${escapeHtml(name)}</code><span>${escapeHtml(rule.value_type)}</span><b>${rule.required ? 'required' : 'optional'}${unique.has(name) ? ' · unique' : ''}</b></div>`).join('') : '<div><code>no properties</code><span>closed</span><b>additional denied</b></div>'}</div><footer>${definition.allow_additional_properties ? 'Additional properties allowed' : 'Undeclared properties denied'}</footer></details>`;
   }
 
+  function renderQuery() {
+    const firstType = Object.keys(state.data.schema?.records || {})[0] || 'reasoning_run';
+    const sample = `FROM record:${firstType} AT VALID ${Date.now()} KNOWN HEAD PROJECT * LIMIT 25 EXPLAIN CONTRACT`;
+    $('#main').innerHTML = pageHead('vyrmQL contract lab', 'Run an explicit bi-temporal query and inspect the binding, chosen physical path, rejected alternatives, budgets, and exact result.') + `
+      <form id="query-form" class="query-composer">
+        <textarea id="query-source" spellcheck="false" aria-label="vyrmQL query">${escapeHtml(sample)}</textarea>
+        <div><span>Read-only · scope instance:default · exact path required</span><button class="primary-button">Plan and execute</button></div>
+      </form>
+      <div id="query-result">${empty('Ready to inspect', 'The planner will expose its evidence contract before showing deterministic batches.')}</div>`;
+    $('#query-form').addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const target = $('#query-result');
+      target.innerHTML = empty('Capturing read stamp…', 'Parsing, binding, planning, then executing against one immutable manifest.');
+      try {
+        const response = await fetch(`/api/runtime/query?ql=${encodeURIComponent($('#query-source').value)}`);
+        const value = await response.json();
+        if (!response.ok) throw new Error(value.error || `HTTP ${response.status}`);
+        const contract = value.plan.explanation.contract;
+        const rows = value.execution.batches.flatMap((batch) => batch.rows);
+        target.innerHTML = `
+          <section class="query-contract-grid">
+            <article><span>READ MANIFEST</span><strong>${escapeHtml(contract.read_manifest.slice(0, 14))}…</strong><small>cursor ${human(contract.known_at_cursor)} · schema r${human(contract.schema_revision)}</small></article>
+            <article><span>SEMANTICS</span><strong>${contract.exact ? 'Exact' : 'Approximate'}</strong><small>valid ${human(contract.valid_at)} · ${escapeHtml(contract.deterministic_order)}</small></article>
+            <article><span>EXECUTION</span><strong>${human(value.execution.returned_rows)} rows</strong><small>${human(value.execution.scanned_changes)} changes · ${human(value.execution.output_bytes)} bytes</small></article>
+            <article><span>BOUNDARY</span><strong>${escapeHtml(contract.scope)}</strong><small>network ${contract.network_required ? 'yes' : 'no'} · GPU ${contract.gpu_required ? 'yes' : 'no'}</small></article>
+          </section>
+          <section class="query-paths">${value.plan.explanation.candidates.map((candidate) => `<article class="${candidate.selected ? 'selected' : 'rejected'}"><span>${candidate.selected ? 'SELECTED' : 'REJECTED'}</span><strong>${escapeHtml(candidate.name.replaceAll('_', ' '))}</strong><p>${escapeHtml(candidate.reason)}</p></article>`).join('')}</section>
+          <details class="query-plan" open><summary>Canonical query and operator pipeline</summary><code>${escapeHtml(value.canonical)}</code><pre>${escapeHtml(JSON.stringify(value.plan.operators, null, 2))}</pre></details>
+          <section class="query-rows"><header><strong>Deterministic result</strong><span>${value.execution.truncated ? 'truncated by declared budget' : 'complete within budget'}</span></header>${rows.length ? rows.map((row) => `<article><code>${escapeHtml(row.identity)}</code><pre>${escapeHtml(JSON.stringify(row.values, null, 2))}</pre></article>`).join('') : empty('No rows at this time', 'The query executed successfully but no identity satisfied its temporal and filter contract.')}</section>`;
+      } catch (error) {
+        target.innerHTML = empty('Query denied', error.message);
+      }
+    });
+  }
+
   function renderGraph() {
     const kinds = ['subject', 'claim', 'run', 'event', 'evidence', 'file', 'invocation', 'flight', 'flight_event'];
     $('#main').innerHTML = pageHead('Runtime graph', 'Traverse local evidence neighborhoods by default. Switch to global only when orientation matters more than detail.') + `
@@ -803,6 +838,7 @@
     if (key === '/') { event.preventDefault(); $('#global-search').focus(); }
     if (key === 'g') navigate('graph');
     if (key === 's') navigate('schema');
+    if (key === 'q') navigate('query');
     if (key === 'f') navigate('flight');
     if (key === 'r') navigate('runs');
     if (key === 'c') navigate('claims');

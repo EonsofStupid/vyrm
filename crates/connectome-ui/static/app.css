@@ -212,6 +212,31 @@ kbd { background: var(--panel-3); border: 1px solid #373d37; border-radius: 4px;
 .route-result p { margin: 5px 0 0; color: var(--muted); font-size: 11px; }
 .route-score { text-align: right; color: var(--faint); font: 10px var(--mono); }
 
+.query-composer { margin-bottom: 14px; overflow: hidden; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); }
+.query-composer textarea { display: block; width: 100%; min-height: 104px; resize: vertical; padding: 16px; border: 0; border-bottom: 1px solid var(--line-soft); outline: 0; background: #111411; color: var(--mint); font: 12px/1.7 var(--mono); }
+.query-composer textarea:focus { box-shadow: inset 3px 0 var(--mint); }
+.query-composer > div { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 10px 12px; color: var(--faint); font: 9px var(--mono); }
+.query-composer .primary-button { height: 32px; }
+.query-contract-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin-bottom: 10px; }
+.query-contract-grid article { display: grid; gap: 7px; min-width: 0; padding: 13px; border: 1px solid var(--line-soft); border-radius: 9px; background: var(--panel); }
+.query-contract-grid span, .query-paths span { color: var(--faint); font: 8px var(--mono); letter-spacing: .09em; }
+.query-contract-grid strong { overflow: hidden; color: var(--text); font: 13px var(--mono); text-overflow: ellipsis; }
+.query-contract-grid small { color: var(--muted); font: 9px/1.5 var(--mono); }
+.query-paths { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 8px; margin-bottom: 10px; }
+.query-paths article { padding: 13px; border: 1px solid var(--line-soft); border-radius: 9px; background: var(--panel); }
+.query-paths article.selected { border-color: var(--mint-dim); box-shadow: inset 2px 0 var(--mint); }
+.query-paths article.rejected { opacity: .7; box-shadow: inset 2px 0 var(--red); }
+.query-paths strong { display: block; margin: 7px 0; font-size: 12px; text-transform: capitalize; }
+.query-paths p { margin: 0; color: var(--muted); font-size: 10px; line-height: 1.5; }
+.query-plan, .query-rows { margin-bottom: 10px; border: 1px solid var(--line-soft); border-radius: 9px; background: var(--panel); overflow: hidden; }
+.query-plan summary, .query-rows header { padding: 12px 14px; border-bottom: 1px solid var(--line-soft); color: var(--text); font-size: 11px; }
+.query-plan > code { display: block; padding: 12px 14px; color: var(--mint); font: 10px/1.6 var(--mono); }
+.query-plan pre, .query-rows pre { margin: 0; padding: 12px 14px; overflow: auto; background: #111411; color: var(--muted); font: 9px/1.55 var(--mono); }
+.query-rows header { display: flex; justify-content: space-between; }
+.query-rows header span { color: var(--faint); font: 9px var(--mono); }
+.query-rows article { border-top: 1px solid var(--line-soft); }
+.query-rows article > code { display: block; padding: 9px 14px; color: var(--violet); font: 9px var(--mono); }
+
 .flight-composer, .prompt-lab { margin-bottom: 18px; border: 1px solid var(--line); border-radius: 14px; background: linear-gradient(145deg, #191d19, #141714); overflow: hidden; box-shadow: 0 18px 70px rgba(0,0,0,.18); }
 .flight-composer textarea { display: block; width: 100%; min-height: 88px; resize: vertical; padding: 18px 19px; border: 0; border-bottom: 1px solid var(--line-soft); outline: 0; background: transparent; color: var(--text); font-size: 15px; line-height: 1.55; }
 .flight-composer textarea::placeholder { color: #626a62; }

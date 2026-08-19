@@ -75,6 +75,14 @@ not roadmap language.
   scrub, rewind, resume, fast-forward up to 8×, jump to boundaries, inspect the
   entire retained envelope, and compare identical-prompt effort runs using
   provider-reported token, cache, tool, latency, and acceptance evidence.
+- `vyrmQL` and `vyrmMX` now form a separate read-only query layer above the
+  frozen engine port. The language requires explicit valid and known time;
+  catalog binding rejects unknown types/fields and missing parameters; the
+  reference planner publishes a content-addressed logical/physical plan,
+  resource/authorization contract, and selected/rejected access paths. Its
+  exact stamped-log executor returns deterministic bounded batches for records,
+  relations, events, and claims with Memory/Fjall/direct-graph differentials.
+  Connectome's Query Lab exposes this evidence and result together.
 
 ## Verification
 
@@ -103,17 +111,20 @@ tests cover operator commands, hooks, explicit recovery, and both MCP eras.
 - Prompt-flight acceptance without a marker proves process completion only.
   Model-quality conclusions require non-trivial evaluators and repeated trials;
   the flight UI deliberately does not turn one attractive trace into a claim.
-- `vyrmQL`, `vyrmMX`, `vyrmDS`, and native `vyrmKV` have a researched target
-  architecture but are not implemented subsystems. The shared data-runtime v1
-  contract now includes content-addressed read stamps, leased snapshot handles,
+- `vyrmDS` and native `vyrmKV` remain researched target subsystems. `vyrmQL`
+  and the exact reference slice of `vyrmMX` are implemented; later M5 search
+  operators must compete against that oracle instead of weakening it. The
+  shared data-runtime v1 contract now includes content-addressed read stamps,
+  leased snapshot handles,
   read-bound transactions and prospective read-your-writes views, projection
   stamps, logical retention pins, and hash-chained audit envelopes. M1 is
   complete: MemoryEngine and Fjall implement frozen/repeatable snapshot replay,
   lease/pin inventory, expiry, release, restart persistence, stamped reads, and
   a tested global-serializable same/disjoint conflict policy. A deterministic
   64-write mixed-scope backend differential is green. Physical segment pins
-  belong to native M3. Vector, object-store, embedding, GPU, edge, and Multi-AZ
-  capabilities remain sequenced work, not current product claims. See
+  belong to native M3. M0, M1, and M2 are complete. Vector, object-store,
+  embedding, GPU, edge, and Multi-AZ capabilities remain sequenced work, not
+  current product claims. See
   `docs/vyrmds-architecture-research.md`.
 
 - JavaScript application-run claims now use script-sensitive canonical event
