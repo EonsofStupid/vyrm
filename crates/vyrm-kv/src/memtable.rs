@@ -74,25 +74,76 @@ impl Memtable {
 
     pub fn apply(&mut self, recovered: &RecoveredBatch) -> Result<()> {
         let batch = WriteBatch::decode(&recovered.payload)?;
+        self.apply_write_batch(
+            &batch,
+            recovered.first_sequence,
+            recovered.last_sequence,
+        )
+    }
+
+    pub(crate) fn apply_write_batch(
+        &mut self,
+        batch: &WriteBatch,
+        first_sequence: u64,
+        last_sequence: u64,
+    ) -> Result<()> {
         let operation_count = u64::try_from(batch.len())
             .map_err(|_| Error::InvalidBatch("operation count exceeds u64".into()))?;
-        let expected_last = recovered
-            .first_sequence
+        let expected_last = first_sequence
             .checked_add(operation_count - 1)
             .ok_or_else(|| Error::InvalidBatch("batch sequence range overflow".into()))?;
-        if recovered.first_sequence != self.maximum_sequence.saturating_add(1)
-            || recovered.last_sequence != expected_last
+        if first_sequence != self.maximum_sequence.saturating_add(1)
+            || last_sequence != expected_last
         {
             return Err(Error::InvalidBatch(format!(
                 "batch sequence range {}..={} does not match {} operation(s) after sequence {}",
-                recovered.first_sequence,
-                recovered.last_sequence,
+                first_sequence,
+                last_sequence,
                 batch.len(),
                 self.maximum_sequence
             )));
         }
+        for (index, operation) in batch.operations.iter().enumerate() {
+            let sequence = first_sequence + index as u64;
+            let (key, value) = match operation {
+                Mutation::Put { key, value } => (key.clone(), Some(value.clone())),
+                Mutation::Delete { key } => (key.clone(), None),
+            };
+            self.approximate_bytes = self
+                .approximate_bytes
+                .saturating_add(key.len())
+                .saturating_add(value.as_ref().map_or(0, Vec::len))
+                .saturating_add(std::mem::size_of::<VersionedValue>());
+            self.versions
+                .entry(key)
+                .or_default()
+                .push(VersionedValue { sequence, value });
+        }
+        self.maximum_sequence = last_sequence;
+        Ok(())
+    }
+
+    pub(crate) fn apply_owned_write_batch(
+        &mut self,
+        batch: WriteBatch,
+        first_sequence: u64,
+        last_sequence: u64,
+    ) -> Result<()> {
+        let operation_count = u64::try_from(batch.len())
+            .map_err(|_| Error::InvalidBatch("operation count exceeds u64".into()))?;
+        let expected_last = first_sequence
+            .checked_add(operation_count - 1)
+            .ok_or_else(|| Error::InvalidBatch("batch sequence range overflow".into()))?;
+        if first_sequence != self.maximum_sequence.saturating_add(1)
+            || last_sequence != expected_last
+        {
+            return Err(Error::InvalidBatch(format!(
+                "batch sequence range {first_sequence}..={last_sequence} does not match {} operation(s) after sequence {}",
+                batch.len(), self.maximum_sequence
+            )));
+        }
         for (index, operation) in batch.operations.into_iter().enumerate() {
-            let sequence = recovered.first_sequence + index as u64;
+            let sequence = first_sequence + index as u64;
             let (key, value) = match operation {
                 Mutation::Put { key, value } => (key, Some(value)),
                 Mutation::Delete { key } => (key, None),
@@ -107,7 +158,7 @@ impl Memtable {
                 .or_default()
                 .push(VersionedValue { sequence, value });
         }
-        self.maximum_sequence = recovered.last_sequence;
+        self.maximum_sequence = last_sequence;
         Ok(())
     }
 

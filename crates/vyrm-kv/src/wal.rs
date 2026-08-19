@@ -189,6 +189,15 @@ impl WalWriter {
         durability: Durability,
     ) -> Result<AppendReceipt> {
         let payload = batch.encode()?;
+        self.append_encoded_write_batch(batch, &payload, durability)
+    }
+
+    pub(crate) fn append_encoded_write_batch(
+        &mut self,
+        batch: &WriteBatch,
+        payload: &[u8],
+        durability: Durability,
+    ) -> Result<AppendReceipt> {
         let count = u64::try_from(batch.len())
             .map_err(|_| Error::InvalidBatch("operation count exceeds u64".into()))?;
         let last_sequence = self
@@ -199,7 +208,7 @@ impl WalWriter {
             &WalBatch {
                 first_sequence: self.next_sequence,
                 last_sequence,
-                payload: &payload,
+                payload,
             },
             durability,
         )

@@ -1,6 +1,6 @@
 use crate::{
     recover_from, AppendReceipt, Checkpoint, Durability, Error, Manifest, ManifestStore, Memtable,
-    RecoveredBatch, Result, Segment, VersionedValue, WalWriter, WriteBatch,
+    Result, Segment, VersionedValue, WalWriter, WriteBatch,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
@@ -170,14 +170,34 @@ impl Database {
 
     pub fn write(&mut self, batch: &WriteBatch, durability: Durability) -> Result<AppendReceipt> {
         let payload = batch.encode()?;
-        let receipt = self.wal.append_write_batch(batch, durability)?;
-        self.memtable.apply(&RecoveredBatch {
-            offset: receipt.offset,
-            first_sequence: receipt.first_sequence,
-            last_sequence: receipt.last_sequence,
-            checksum: receipt.checksum,
-            payload,
-        })?;
+        let receipt = self
+            .wal
+            .append_encoded_write_batch(batch, &payload, durability)?;
+        self.memtable.apply_write_batch(
+            batch,
+            receipt.first_sequence,
+            receipt.last_sequence,
+        )?;
+        Ok(receipt)
+    }
+
+    /// Owned fast path used by adapters that build a batch for immediate
+    /// commit. Keys and values move into the memtable after WAL encoding rather
+    /// than being cloned a second time.
+    pub fn write_owned(
+        &mut self,
+        batch: WriteBatch,
+        durability: Durability,
+    ) -> Result<AppendReceipt> {
+        let payload = batch.encode()?;
+        let receipt = self
+            .wal
+            .append_encoded_write_batch(&batch, &payload, durability)?;
+        self.memtable.apply_owned_write_batch(
+            batch,
+            receipt.first_sequence,
+            receipt.last_sequence,
+        )?;
         Ok(receipt)
     }
 

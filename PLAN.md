@@ -91,7 +91,10 @@ disagree, `SPEC.md` is authoritative and this document is wrong.
 > physical snapshots; runtime leases create/reconcile manifest checkpoints; GC
 > derives reachability from `CURRENT` plus those pins. Crash and storage-full
 > injection now cover every flush and compaction durability boundary. Native
-> performance proof remains open, so Fjall remains live.
+> performance proof has a five-trial isolated-process baseline: native wins
+> write p95, bounded replay throughput/p95, and maintained recovery, but remains
+> behind on aggregate write throughput, steady peak RSS, and disk footprint.
+> The equal-or-better gate therefore denies promotion and Fjall remains live.
 > The product handoff, canonical package-event grammar, alpha release gates,
 > deployment/update tiers, and separate SurrealDB/Qdrant proof protocols are
 > frozen in `docs/clyffy-kernel-alpha.md`.

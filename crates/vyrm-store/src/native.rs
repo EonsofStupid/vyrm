@@ -935,8 +935,8 @@ fn runtime_identity_key(scope: &ScopeId, reference: &RuntimeRef) -> Vec<u8> {
 }
 
 fn write(database: &mut Database, operations: Vec<Mutation>, durability: Durability) -> Result<()> {
-    database.write(
-        &WriteBatch::new(operations)?,
+    database.write_owned(
+        WriteBatch::new(operations)?,
         match durability {
             Durability::Authoritative => vyrm_kv::Durability::Authoritative,
             Durability::Buffered => vyrm_kv::Durability::Buffered,

@@ -207,6 +207,8 @@ statistically significant model-performance claim.
   — pinned upstream research, target data-runtime boundaries, and gated build
   sequence for `vyrmQL`/`vyrmMX`/`vyrmDS`/native `vyrmKV`
 - [`docs/vyrmkv-format.md`](docs/vyrmkv-format.md) — frozen native WAL/recovery
+- [`docs/vyrmkv-benchmark.md`](docs/vyrmkv-benchmark.md) — isolated
+  Fjall/native methodology, baseline, and promotion verdict
   and manifest format contract
 - [`eval/results/2026-08-18-summary.json`](eval/results/2026-08-18-summary.json)
   — retained evaluation evidence

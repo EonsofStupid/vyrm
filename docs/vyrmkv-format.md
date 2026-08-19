@@ -110,9 +110,10 @@ a named checkpoint.
 Deterministic crash and storage-full injection covers the WAL-sync,
 segment-sync, successor-WAL-sync, and manifest-publication flush boundaries,
 plus compaction segment and manifest publication. Every cell reopens, verifies
-the accepted data, continues writing, and reopens again. Comparative benchmarks
-remain the final M3 gate; until they pass, Fjall remains live and no native
-performance claim is made.
+the accepted data, continues writing, and reopens again. The first comparative
+benchmark is recorded in `vyrmkv-benchmark.md` and denies promotion on the
+remaining write-throughput, RSS, and disk gaps. Until a repeated baseline
+passes, Fjall remains live and no general native performance claim is made.
 
 Manifest publication now holds an OS-level exclusive lock for the publication
 session. It validates expected `CURRENT`, generation, and parent; syncs immutable

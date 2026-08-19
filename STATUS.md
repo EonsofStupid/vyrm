@@ -111,8 +111,11 @@ not roadmap language.
   reconcile manifest checkpoints; GC deletes only manifests, segments, and
   WALs unreachable from `CURRENT` or a checkpoint. Deterministic crash and
   storage-full injection covers each flush and compaction durability boundary,
-  followed by reopen and continued writes. Comparative performance claims
-  remain open.
+  followed by reopen and continued writes. The first five-trial isolated
+  Fjall/native baseline verifies correctness and shows native ahead on write
+  p95, bounded replay throughput/p95, and maintained cold recovery. It remains
+  behind on median write throughput (1.3%), steady peak RSS (8.8%), and disk
+  (2.3%), so the strict equal-or-better policy correctly denies promotion.
 
 ## Verification
 

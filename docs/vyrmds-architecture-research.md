@@ -481,6 +481,8 @@ checkpoints, manifest CAS, segment flush, WAL rotation, and reopen at the
 manifest replay boundary are covered. The native `Engine` adapter and
 Memory/Fjall/native semantic/query differential are green. Snapshot-aware
 compaction/GC, physical lease pins, and crash/storage-full recovery matrices are
-also green. Next run comparative latency, throughput, recovery, and RSS
-benchmarks and freeze promotion thresholds. Do not begin vectors, S3, GPU, or
-clustering before native correctness and measurement close.
+also green. The first isolated five-trial comparative baseline and strict
+equal-or-better policy are frozen in `docs/vyrmkv-benchmark.md`; native wins
+several latency/read/recovery cells but remains red on write throughput, RSS,
+and disk. Optimize those measured gaps and repeat the matrix. Do not begin
+vectors, S3, GPU, or clustering before native correctness and measurement close.
