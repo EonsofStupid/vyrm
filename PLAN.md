@@ -83,8 +83,12 @@ disagree, `SPEC.md` is authoritative and this document is wrong.
 > pin historical manifests and release explicitly. Database flush now orders
 > WAL sync, content-addressed segment sync, successor-WAL creation, and manifest
 > CAS publication; reopen validates reachable segments and replays only the
-> manifest-declared WAL range. The native `Engine` adapter, compaction/GC,
-> fault matrices, and performance proof remain open. Fjall remains live.
+> manifest-declared WAL range. `NativeEngine` now implements the complete
+> semantic port over prefixed native keys and one atomic `vyrmKV` batch per
+> commit. Memory/Fjall/native differentials cover claims, projections, runtime
+> schemas and hash chains, snapshots, restart, concurrent CAS, and exact query
+> results. Compaction/GC, fault matrices, and performance proof remain open.
+> Fjall remains live.
 > The product handoff, canonical package-event grammar, alpha release gates,
 > deployment/update tiers, and separate SurrealDB/Qdrant proof protocols are
 > frozen in `docs/clyffy-kernel-alpha.md`.

@@ -92,6 +92,12 @@ impl From<fjall::Error> for Error {
     }
 }
 
+impl From<vyrm_kv::Error> for Error {
+    fn from(value: vyrm_kv::Error) -> Self {
+        Error::Substrate(value.to_string())
+    }
+}
+
 impl From<vyrm_core::Error> for Error {
     fn from(value: vyrm_core::Error) -> Self {
         Error::Kernel(value)

@@ -8,6 +8,7 @@ description = "vyrm storage contract and transitional Fjall adapter: atomic runt
 
 [dependencies]
 vyrm-core = { path = "../vyrm-core" }
+vyrm-kv = { path = "../vyrm-kv" }
 fjall = "=3.1.8"
 serde = { workspace = true }
 serde_json = { workspace = true }

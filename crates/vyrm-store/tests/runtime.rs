@@ -5,7 +5,7 @@ use vyrm_core::{
     RuntimeRelationSchema, RuntimeSchemaRegistry, RuntimeType, RuntimeValue, RuntimeValueType,
     ScopeId, Subject,
 };
-use vyrm_store::{Engine, Error, MemoryEngine, Store};
+use vyrm_store::{Engine, Error, MemoryEngine, NativeEngine, Store};
 
 fn record(kind: &str, id: &str) -> RuntimeRecord {
     RuntimeRecord {
@@ -123,11 +123,14 @@ fn assert_runtime_contract(engine: &dyn Engine) {
 }
 
 #[test]
-fn fjall_and_memory_enforce_the_same_runtime_contract() {
+fn all_engines_enforce_the_same_runtime_contract() {
     let dir = tempfile::tempdir().unwrap();
     let fjall = Store::open(dir.path()).unwrap();
+    let native_dir = tempfile::tempdir().unwrap();
+    let native = NativeEngine::open(&native_dir.path().join("native")).unwrap();
     let memory = MemoryEngine::new();
     assert_runtime_contract(&fjall);
+    assert_runtime_contract(&native);
     assert_runtime_contract(&memory);
 }
 
@@ -206,6 +209,41 @@ fn runtime_log_survives_reopen_and_continues_its_hash_chain() {
         change.previous_digest.as_deref(),
         Some(first_digest.as_str())
     );
+    assert_eq!(reopened.runtime_cursor().unwrap(), 7);
+}
+
+#[test]
+fn native_runtime_log_survives_flush_reopen_and_continues_its_hash_chain() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("native");
+    let first_digest = {
+        let store = NativeEngine::open(&path).unwrap();
+        store.commit_runtime(&commit(0, "instance:a")).unwrap();
+        store.flush(150).unwrap();
+        store.runtime_changes_since(4, 1, None).unwrap().changes[0]
+            .digest
+            .clone()
+    };
+    let reopened = NativeEngine::open(&path).unwrap();
+    let next = RuntimeCommit {
+        scope: ScopeId::new("instance:b").unwrap(),
+        at: 200,
+        actor: "agent:test".into(),
+        expected_cursor: 5,
+        mutations: vec![
+            test_schema(),
+            RuntimeMutation::Record {
+                record: record("prompt", "p2"),
+            },
+        ],
+    };
+    reopened.commit_runtime(&next).unwrap();
+    let change = reopened
+        .runtime_changes_since(5, 1, None)
+        .unwrap()
+        .changes
+        .remove(0);
+    assert_eq!(change.previous_digest.as_deref(), Some(first_digest.as_str()));
     assert_eq!(reopened.runtime_cursor().unwrap(), 7);
 }
 
@@ -344,15 +382,29 @@ fn assert_schema_contract(engine: &dyn Engine) {
 }
 
 #[test]
-fn fjall_and_memory_enforce_schema_types_cardinality_and_migrations() {
+fn all_engines_enforce_schema_types_cardinality_and_migrations() {
     let dir = tempfile::tempdir().unwrap();
     let fjall = Store::open(dir.path()).unwrap();
+    let native_dir = tempfile::tempdir().unwrap();
+    let native_path = native_dir.path().join("native");
+    let native = NativeEngine::open(&native_path).unwrap();
     let memory = MemoryEngine::new();
     assert_schema_contract(&fjall);
+    assert_schema_contract(&native);
     assert_schema_contract(&memory);
 
     drop(fjall);
     let reopened = Store::open(dir.path()).unwrap();
+    assert_eq!(
+        reopened
+            .runtime_schema(&ScopeId::new("instance:schema").unwrap())
+            .unwrap()
+            .unwrap()
+            .revision,
+        2
+    );
+    drop(native);
+    let reopened = NativeEngine::open(&native_path).unwrap();
     assert_eq!(
         reopened
             .runtime_schema(&ScopeId::new("instance:schema").unwrap())

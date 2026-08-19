@@ -98,9 +98,10 @@ repeating identical bytes is idempotent, rebinding a name fails closed, and
 release is explicit and directory-synced. Retention and GC consume this
 inventory rather than inferring reachability from filenames.
 
-Compaction is a subsequent M3 gate. Until it and the native adapter pass their
-fault matrices, Fjall remains the compatibility store and no native performance
-claim is made.
+The native `Engine` adapter now passes Memory/Fjall/native semantic and exact
+query differentials, including flush/reopen. Compaction and systematic fault
+matrices are subsequent M3 gates. Until those and comparative benchmarks pass,
+Fjall remains the compatibility store and no native performance claim is made.
 
 Manifest publication now holds an OS-level exclusive lock for the publication
 session. It validates expected `CURRENT`, generation, and parent; syncs immutable

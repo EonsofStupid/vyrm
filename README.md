@@ -153,7 +153,7 @@ measurement contract.
 | Crate | Responsibility |
 |---|---|
 | `vyrm-core` | Claim, reasoning, typed runtime graph, traversal, and differential contracts; serde-only boundary |
-| `vyrm-store` | Storage port plus transitional Fjall adapter; atomic runtime commits, hash-chained changefeed, durability classes, sequences, projections |
+| `vyrm-store` | Storage port with native `vyrmKV`, transitional Fjall, and memory adapters; atomic runtime commits, hash-chained changefeed, durability classes, sequences, projections |
 | `vyrm-graph` | Parsing, incremental freshness, grounding, source routing |
 | `vyrm-node` | Runtime lifecycle, instance binding, policy, append-only reasoning composition |
 | `vyrm-cli` | Operator surface |
@@ -168,12 +168,13 @@ so `pnpm run typecheck` and `pnpm run test` do not overwrite each other. These
 events are evidence for later workflow policy; they do not yet constitute a
 package-script allowlist or a pre-execution gate.
 
-Vyrm owns the storage contract and is moving toward a Vyrm-native engine. Fjall
-is the current transitional compatibility adapter behind
-`vyrm_store::Engine`, not the permanent architecture. The port and in-memory
-reference differential preserve semantics while the native engine replaces it;
-the replacement must retain correctness and demonstrate equal or better
-throughput, latency, durability, recovery, and memory behavior.
+Vyrm owns the storage contract. `vyrm_store::NativeEngine` now implements the
+same `Engine` port as the in-memory reference and transitional Fjall adapter;
+claim recall, projections, schema enforcement, hash-chained commits, snapshots,
+concurrent CAS, restart, and exact `vyrmQL` results run through a three-backend
+differential. Fjall remains live until native compaction, fault injection, and
+benchmarks demonstrate equal-or-better latency, throughput, durability,
+recovery, and memory behavior.
 
 ## Instance boundary
 

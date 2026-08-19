@@ -404,8 +404,8 @@ binds types and fields against schema history, emits content-addressed logical
 and physical plans, and executes deterministic budgeted batches through the
 shared `Engine` port. `EXPLAIN CONTRACT` records exactness, ordering,
 authorization scope, resource needs, and why the authoritative log path won
-while an ungrounded projection was rejected. Memory/Fjall, typed/text, and
-direct graph API differentials are green. Connectome's Query Lab renders the
+while an ungrounded projection was rejected. Memory/Fjall/native, typed/text,
+and direct graph API differentials are green. Connectome's Query Lab renders the
 same plan contract beside its rows. The reference path deliberately contains
 no ANN, embedding, network, or GPU behavior; those remain gated to M5.
 
@@ -478,7 +478,8 @@ M2 is closed and the first M3 storage lifecycle is implemented beside—not
 underneath—the compatibility adapter. WAL, atomic mutation, immutable segment,
 manifest, and `CURRENT` formats are frozen; torn/corrupt recovery, MVCC,
 checkpoints, manifest CAS, segment flush, WAL rotation, and reopen at the
-manifest replay boundary are covered. Next implement the native `Engine`
-adapter and the Memory/Fjall/native differential, then pinned-snapshot
-compaction/GC and the crash/disk-full/recovery matrix. Do not begin vectors, S3,
-GPU, or clustering before native correctness and measurement close.
+manifest replay boundary are covered. The native `Engine` adapter and
+Memory/Fjall/native semantic/query differential are now green. Next implement
+pinned-snapshot compaction/GC and the crash/disk-full/recovery matrix, followed
+by comparative benchmarks. Do not begin vectors, S3, GPU, or clustering before
+native correctness and measurement close.

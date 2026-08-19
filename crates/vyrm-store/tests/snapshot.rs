@@ -7,7 +7,7 @@ use vyrm_core::{
     RuntimeGraphSnapshot, RuntimeMutation, RuntimeProperties, RuntimeRecord, RuntimeRecordSchema,
     RuntimeRef, RuntimeSchemaRegistry, RuntimeType, ScopeId,
 };
-use vyrm_store::{Engine, Error, MemoryEngine, Store};
+use vyrm_store::{Engine, Error, MemoryEngine, NativeEngine, Store};
 
 fn schema() -> RuntimeSchemaRegistry {
     let mut registry = RuntimeSchemaRegistry::empty(1, "snapshot test schema");
@@ -124,11 +124,14 @@ fn assert_snapshot_contract(engine: &dyn Engine) {
 }
 
 #[test]
-fn memory_and_fjall_enforce_identical_snapshot_semantics() {
+fn all_engines_enforce_identical_snapshot_semantics() {
     let dir = tempfile::tempdir().unwrap();
     let fjall = Store::open(dir.path()).unwrap();
+    let native_dir = tempfile::tempdir().unwrap();
+    let native = NativeEngine::open(&native_dir.path().join("native")).unwrap();
     let memory = MemoryEngine::new();
     assert_snapshot_contract(&fjall);
+    assert_snapshot_contract(&native);
     assert_snapshot_contract(&memory);
 }
 
@@ -152,6 +155,29 @@ fn fjall_snapshot_catalog_survives_restart() {
     let pins = reopened.runtime_retention_pins(20).unwrap();
     assert_eq!(pins.len(), 1);
     assert_eq!(pins[0].snapshot_id, handle.id);
+    let page = reopened
+        .runtime_snapshot_changes(&handle, 0, 10, 20)
+        .unwrap();
+    assert_eq!(page.head_cursor, 1);
+    assert_eq!(page.changes.len(), 1);
+}
+
+#[test]
+fn native_snapshot_catalog_survives_flush_and_restart() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("native");
+    let scope = ScopeId::new("instance:native-restart").unwrap();
+    let handle = {
+        let store = NativeEngine::open(&path).unwrap();
+        store.commit_runtime(&bootstrap(&scope, 0)).unwrap();
+        let handle = store
+            .open_runtime_snapshot(&scope, "agent:restart", 10, 100)
+            .unwrap();
+        store.flush(15).unwrap();
+        handle
+    };
+    let reopened = NativeEngine::open(&path).unwrap();
+    assert_eq!(reopened.runtime_snapshots(20).unwrap(), vec![handle.clone()]);
     let page = reopened
         .runtime_snapshot_changes(&handle, 0, 10, 20)
         .unwrap();
@@ -215,9 +241,13 @@ fn assert_data_transaction_contract(engine: &dyn Engine) {
 }
 
 #[test]
-fn data_transactions_bind_writes_to_their_read_state_on_both_engines() {
+fn data_transactions_bind_writes_to_their_read_state_on_all_engines() {
     let dir = tempfile::tempdir().unwrap();
     assert_data_transaction_contract(&Store::open(dir.path()).unwrap());
+    let native_dir = tempfile::tempdir().unwrap();
+    assert_data_transaction_contract(
+        &NativeEngine::open(&native_dir.path().join("native")).unwrap(),
+    );
     assert_data_transaction_contract(&MemoryEngine::new());
 }
 
@@ -280,6 +310,10 @@ where
 fn concurrent_transactions_never_lose_an_update() {
     let dir = tempfile::tempdir().unwrap();
     assert_concurrent_compare_and_swap(Arc::new(Store::open(dir.path()).unwrap()));
+    let native_dir = tempfile::tempdir().unwrap();
+    assert_concurrent_compare_and_swap(Arc::new(
+        NativeEngine::open(&native_dir.path().join("native")).unwrap(),
+    ));
     assert_concurrent_compare_and_swap(Arc::new(MemoryEngine::new()));
 }
 
@@ -287,6 +321,8 @@ fn concurrent_transactions_never_lose_an_update() {
 fn deterministic_mixed_scope_trace_is_identical_across_backends() {
     let dir = tempfile::tempdir().unwrap();
     let fjall = Store::open(dir.path()).unwrap();
+    let native_dir = tempfile::tempdir().unwrap();
+    let native = NativeEngine::open(&native_dir.path().join("native")).unwrap();
     let memory = MemoryEngine::new();
     let scopes = [
         ScopeId::new("instance:trace-a").unwrap(),
@@ -299,6 +335,10 @@ fn deterministic_mixed_scope_trace_is_identical_across_backends() {
         assert_eq!(
             fjall.commit_runtime(&commit).unwrap().commit_id,
             memory.commit_runtime(&commit).unwrap().commit_id
+        );
+        assert_eq!(
+            fjall.runtime_cursor().unwrap(),
+            native.commit_runtime(&commit).unwrap().last_cursor
         );
     }
 
@@ -313,8 +353,11 @@ fn deterministic_mixed_scope_trace_is_identical_across_backends() {
         let commit = pulse(scope, cursor);
         let left = fjall.commit_runtime(&commit).unwrap();
         let right = memory.commit_runtime(&commit).unwrap();
+        let native_outcome = native.commit_runtime(&commit).unwrap();
         assert_eq!(left.commit_id, right.commit_id);
+        assert_eq!(left.commit_id, native_outcome.commit_id);
         assert_eq!(left.last_cursor, right.last_cursor);
+        assert_eq!(left.last_cursor, native_outcome.last_cursor);
 
         if step == 15 {
             let left = fjall
@@ -323,7 +366,11 @@ fn deterministic_mixed_scope_trace_is_identical_across_backends() {
             let right = memory
                 .open_runtime_snapshot(&scopes[0], "agent:trace", 10_000, 1_000)
                 .unwrap();
+            let native_handle = native
+                .open_runtime_snapshot(&scopes[0], "agent:trace", 10_000, 1_000)
+                .unwrap();
             assert_eq!(left, right);
+            assert_eq!(left, native_handle);
             frozen = Some(left);
         }
         if step % 7 == 0 {
@@ -333,8 +380,16 @@ fn deterministic_mixed_scope_trace_is_identical_across_backends() {
                 memory.runtime_changes_since(after, 4, Some(scope)).unwrap()
             );
             assert_eq!(
+                fjall.runtime_changes_since(after, 4, Some(scope)).unwrap(),
+                native.runtime_changes_since(after, 4, Some(scope)).unwrap()
+            );
+            assert_eq!(
                 fjall.runtime_read_stamp(scope).unwrap(),
                 memory.runtime_read_stamp(scope).unwrap()
+            );
+            assert_eq!(
+                fjall.runtime_read_stamp(scope).unwrap(),
+                native.runtime_read_stamp(scope).unwrap()
             );
         }
     }
@@ -348,6 +403,14 @@ fn deterministic_mixed_scope_trace_is_identical_across_backends() {
             .runtime_snapshot_changes(&frozen, 0, 128, 10_500)
             .unwrap()
     );
+    assert_eq!(
+        fjall
+            .runtime_snapshot_changes(&frozen, 0, 128, 10_500)
+            .unwrap(),
+        native
+            .runtime_snapshot_changes(&frozen, 0, 128, 10_500)
+            .unwrap()
+    );
     let mut after = 0;
     let mut replayed = Vec::new();
     loop {
@@ -357,7 +420,11 @@ fn deterministic_mixed_scope_trace_is_identical_across_backends() {
         let right = memory
             .runtime_snapshot_changes(&frozen, after, 3, 10_500)
             .unwrap();
+        let native_page = native
+            .runtime_snapshot_changes(&frozen, after, 3, 10_500)
+            .unwrap();
         assert_eq!(left, right);
+        assert_eq!(left, native_page);
         let has_more = left.has_more();
         let through = left.through_cursor;
         replayed.extend(left.changes);

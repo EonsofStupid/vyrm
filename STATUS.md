@@ -81,7 +81,8 @@ not roadmap language.
   reference planner publishes a content-addressed logical/physical plan,
   resource/authorization contract, and selected/rejected access paths. Its
   exact stamped-log executor returns deterministic bounded batches for records,
-  relations, events, and claims with Memory/Fjall/direct-graph differentials.
+  relations, events, and claims with Memory/Fjall/native/direct-graph
+  differentials.
   Connectome's Query Lab exposes this evidence and result together.
 - M3 native storage is in progress in the standalone `vyrm-kv` crate. WAL v1
   now has frozen CRC32C file/frame formats, atomic batch sequence ranges,
@@ -101,8 +102,12 @@ not roadmap language.
   content-addressed segment, creates its successor WAL, then publishes the new
   manifest by expected-parent CAS. Reopen validates every reachable segment and
   replays at the manifest WAL boundary, preserving historical snapshots across
-  repeated flushes. Compaction/GC, the native `Engine` adapter, systematic
-  fault matrices, and performance claims remain open.
+  repeated flushes. `NativeEngine` now maps the complete semantic `Engine` port
+  onto stable prefixed keys and atomic native batches. Three-backend tests cover
+  claims, projections, schema/cardinality enforcement, hash-chain replay,
+  leased snapshots, stamped transactions, concurrent global CAS, flush/reopen,
+  and exact `vyrmQL` execution. Compaction/GC, systematic fault matrices, and
+  performance claims remain open.
 
 ## Verification
 

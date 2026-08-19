@@ -27,6 +27,7 @@ mod error;
 mod gc;
 mod invocation;
 mod keyspaces;
+mod native;
 mod projection;
 mod store;
 mod writer;
@@ -36,6 +37,7 @@ pub use error::{Error, Result};
 pub use gc::{PairStatus, RemovalReport, Verdict};
 pub use invocation::{Effectiveness, Invocation, InvocationInput, Outcome, RecallOutcome, Trigger};
 pub use keyspaces::Durability;
+pub use native::NativeEngine;
 pub use projection::{
     CurrentProjection, GroundedStamp, GroundingReport, ProjectionStatus, RebuildOutcome,
     CURRENT_PROJECTION,

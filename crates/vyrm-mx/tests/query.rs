@@ -7,7 +7,7 @@ use vyrm_core::{
 };
 use vyrm_mx::{bind, execute, plan, Catalog, Error, ExecutionBudget, Parameters};
 use vyrm_ql::{parse, CursorExpr, Projection, Query, Source, TemporalSelector, TimeExpr};
-use vyrm_store::{Engine, MemoryEngine, Store};
+use vyrm_store::{Engine, MemoryEngine, NativeEngine, Store};
 
 fn value(value: &str) -> RuntimeValue {
     RuntimeValue::String(value.into())
@@ -139,14 +139,18 @@ fn execute_fixture<E: Engine>(engine: &E, text: &str) -> vyrm_mx::QueryExecution
 }
 
 #[test]
-fn memory_and_fjall_return_identical_exact_rows() {
+fn memory_fjall_and_native_return_identical_exact_rows() {
     let memory = MemoryEngine::new();
     let dir = tempfile::tempdir().unwrap();
     let store = Store::open(dir.path()).unwrap();
+    let native_dir = tempfile::tempdir().unwrap();
+    let native = NativeEngine::open(&native_dir.path().join("native")).unwrap();
     let text = "FROM record:document AT VALID 100 KNOWN HEAD WHERE status = \"open\" PROJECT id, title EXPLAIN CONTRACT";
     let left = execute_fixture(&memory, text);
     let right = execute_fixture(&store, text);
+    let native_result = execute_fixture(&native, text);
     assert_eq!(left, right);
+    assert_eq!(left, native_result);
     assert_eq!(left.returned_rows, 1);
     assert_eq!(left.batches[0].rows[0].values["id"], value("a"));
     assert_eq!(left.batches[0].rows[0].values["title"], value("Alpha"));
