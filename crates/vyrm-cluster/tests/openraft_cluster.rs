@@ -15,6 +15,11 @@ use std::time::Duration;
 use tempfile::TempDir;
 use tokio::sync::RwLock;
 use vyrm_cluster::{ShardId, VyrmRaftCommand, VyrmRaftNode, VyrmRaftStore, VyrmRaftTypeConfig};
+use vyrm_core::{
+    RuntimeCommit, RuntimeMutation, RuntimeRecordSchema, RuntimeSchemaRegistry, RuntimeType,
+    ScopeId,
+};
+use vyrm_store::{Engine, NativeEngine};
 
 type VyrmRaft = Raft<VyrmRaftTypeConfig>;
 
@@ -124,7 +129,7 @@ impl RaftNetwork<VyrmRaftTypeConfig> for TestNetwork {
 }
 
 struct TestCluster {
-    _directories: Vec<TempDir>,
+    directories: BTreeMap<u64, TempDir>,
     hub: NetworkHub,
     nodes: BTreeMap<u64, VyrmRaft>,
 }
@@ -132,7 +137,7 @@ struct TestCluster {
 impl TestCluster {
     async fn start(ids: &[u64]) -> Self {
         let hub = NetworkHub::default();
-        let mut directories = Vec::new();
+        let mut directories = BTreeMap::new();
         let mut nodes = BTreeMap::new();
         for id in ids {
             let directory = tempfile::tempdir().unwrap();
@@ -151,10 +156,10 @@ impl TestCluster {
             .unwrap();
             hub.register(*id, raft.clone()).await;
             nodes.insert(*id, raft);
-            directories.push(directory);
+            directories.insert(*id, directory);
         }
         Self {
-            _directories: directories,
+            directories,
             hub,
             nodes,
         }
@@ -162,6 +167,10 @@ impl TestCluster {
 
     fn node(&self, id: u64) -> &VyrmRaft {
         &self.nodes[&id]
+    }
+
+    fn directory(&self, id: u64) -> &std::path::Path {
+        self.directories[&id].path()
     }
 
     async fn shutdown(&self) {
@@ -298,6 +307,74 @@ fn real_consensus_elects_fails_over_installs_snapshot_and_changes_membership() {
     });
 }
 
+#[test]
+fn real_consensus_replicates_canonical_runtime_truth_to_every_voter() {
+    tokio::runtime::Runtime::new().unwrap().block_on(async {
+        let cluster = TestCluster::start(&[1, 2, 3]).await;
+        cluster
+            .node(1)
+            .initialize(BTreeMap::from([(1, node(1))]))
+            .await
+            .unwrap();
+        cluster.node(1).trigger().elect().await.unwrap();
+        cluster
+            .node(1)
+            .wait(Some(Duration::from_secs(5)))
+            .current_leader(1, "runtime leader election")
+            .await
+            .unwrap();
+        cluster.node(1).add_learner(2, node(2), true).await.unwrap();
+        cluster.node(1).add_learner(3, node(3), true).await.unwrap();
+        cluster
+            .node(1)
+            .change_membership(BTreeSet::from([1, 2, 3]), false)
+            .await
+            .unwrap();
+
+        let commit = bootstrap_runtime_commit();
+        let response = cluster
+            .node(1)
+            .client_write(
+                VyrmRaftCommand::runtime_commit(
+                    "runtime-consensus-1",
+                    ShardId(5),
+                    1,
+                    None,
+                    commit.clone(),
+                )
+                .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert!(response.data.accepted);
+        assert_eq!(
+            response.data.runtime_outcome.as_ref().unwrap().commit_id,
+            commit.digest()
+        );
+        for id in [1, 2, 3] {
+            cluster
+                .node(id)
+                .wait(Some(Duration::from_secs(5)))
+                .ge(
+                    Metric::AppliedIndex(Some(response.log_id.index)),
+                    "canonical runtime apply on every voter",
+                )
+                .await
+                .unwrap();
+        }
+        cluster.shutdown().await;
+
+        for id in [1, 2, 3] {
+            let engine = NativeEngine::open(cluster.directory(id)).unwrap();
+            assert_eq!(engine.runtime_cursor().unwrap(), 1);
+            assert!(engine
+                .runtime_commit_outcome(&commit.digest())
+                .unwrap()
+                .is_some());
+        }
+    });
+}
+
 fn node(id: u64) -> VyrmRaftNode {
     VyrmRaftNode {
         canonical_id: format!("node-{id}"),
@@ -325,4 +402,19 @@ where
     E: std::error::Error,
 {
     RPCError::Unreachable(Unreachable::new(&io::Error::other(message)))
+}
+
+fn bootstrap_runtime_commit() -> RuntimeCommit {
+    let mut registry = RuntimeSchemaRegistry::empty(1, "consensus bootstrap");
+    registry.records.insert(
+        RuntimeType::new("reasoning_run").unwrap(),
+        RuntimeRecordSchema::default(),
+    );
+    RuntimeCommit {
+        scope: ScopeId::new("cluster:consensus").unwrap(),
+        at: 1,
+        actor: "agent:cluster-test".into(),
+        expected_cursor: 0,
+        mutations: vec![RuntimeMutation::Schema { registry }],
+    }
 }

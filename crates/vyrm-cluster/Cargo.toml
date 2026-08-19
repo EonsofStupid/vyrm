@@ -8,11 +8,12 @@ description = "Canonical Multi-AZ contracts and deterministic failure simulation
 
 [features]
 default = []
-openraft-adapter = ["dep:openraft", "dep:vyrm-kv"]
+openraft-adapter = ["dep:openraft", "dep:vyrm-kv", "dep:vyrm-store"]
 
 [dependencies]
 vyrm-core = { path = "../vyrm-core" }
 vyrm-kv = { path = "../vyrm-kv", optional = true }
+vyrm-store = { path = "../vyrm-store", optional = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 openraft = { version = "=0.9.25", optional = true, features = ["serde", "storage-v2"] }

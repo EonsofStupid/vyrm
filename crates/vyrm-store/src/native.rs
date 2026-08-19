@@ -582,302 +582,10 @@ impl Engine for NativeEngine {
     }
 
     fn commit_runtime(&self, commit: &RuntimeCommit) -> Result<RuntimeCommitOutcome> {
-        commit.validate()?;
         let mut database = self.lock()?;
-        let snapshot = database.snapshot();
-        let commit_id = commit.digest();
-        let start = read_sequence(&database, snapshot, keyspaces::RUNTIME_CURSOR)?;
-        if start != commit.expected_cursor {
-            return Err(Error::RuntimeConflict {
-                expected: commit.expected_cursor,
-                actual: start,
-            });
-        }
-
-        let previous_schema: Option<RuntimeSchemaRegistry> = get_json(
-            &database,
-            snapshot,
-            keyspaces::RUNTIME_SCHEMAS,
-            commit.scope.as_str().as_bytes(),
-        )?;
-        let proposed_schema = commit.mutations.iter().find_map(|mutation| match mutation {
-            RuntimeMutation::Schema { registry } => Some(registry),
-            _ => None,
-        });
-        let effective_schema = match (previous_schema.as_ref(), proposed_schema) {
-            (None, Some(registry)) if registry.revision == 1 => registry,
-            (None, Some(registry)) => {
-                return Err(Error::RuntimeSchemaConflict {
-                    expected: 1,
-                    actual: registry.revision,
-                });
-            }
-            (Some(previous), Some(registry))
-                if registry.revision == previous.revision.saturating_add(1) =>
-            {
-                registry
-            }
-            (Some(previous), Some(registry)) => {
-                return Err(Error::RuntimeSchemaConflict {
-                    expected: previous.revision.saturating_add(1),
-                    actual: registry.revision,
-                });
-            }
-            (Some(previous), None) => previous,
-            (None, None) => {
-                return Err(Error::RuntimeSchemaMissing(commit.scope.to_string()));
-            }
-        };
-        let existing_records = if effective_schema
-            .records
-            .values()
-            .any(|schema| !schema.unique_properties.is_empty())
-        {
-            native_values_for_scope::<RuntimeRecord>(
-                &database,
-                snapshot,
-                keyspaces::RUNTIME_RECORDS,
-                &commit.scope,
-            )?
-        } else {
-            Vec::new()
-        };
-        let existing_relations = if effective_schema.relations.values().any(|schema| {
-            schema.unique_pair || schema.max_outgoing.is_some() || schema.max_incoming.is_some()
-        }) {
-            native_values_for_scope::<RuntimeRelation>(
-                &database,
-                snapshot,
-                keyspaces::RUNTIME_RELATIONS,
-                &commit.scope,
-            )?
-        } else {
-            Vec::new()
-        };
-        effective_schema.validate_objects(
-            &commit.mutations,
-            &existing_records,
-            &existing_relations,
-        )?;
-
-        let new_records = commit
-            .mutations
-            .iter()
-            .filter_map(|mutation| match mutation {
-                RuntimeMutation::Record { record } => Some(record.reference.clone()),
-                _ => None,
-            })
-            .collect::<BTreeSet<_>>();
-        for mutation in &commit.mutations {
-            let references: Vec<&RuntimeRef> = match mutation {
-                RuntimeMutation::Relation { relation } => vec![&relation.from, &relation.to],
-                RuntimeMutation::Event { event } => event.subject.iter().collect(),
-                RuntimeMutation::Vector { vector } => vec![&vector.subject],
-                RuntimeMutation::SeriesSample { sample } => vec![&sample.series],
-                RuntimeMutation::Geo { geo } => vec![&geo.subject],
-                RuntimeMutation::Object { object } => object.subject.iter().collect(),
-                RuntimeMutation::Claim { .. }
-                | RuntimeMutation::Schema { .. }
-                | RuntimeMutation::Record { .. } => Vec::new(),
-            };
-            for reference in references {
-                if !new_records.contains(reference)
-                    && get(
-                        &database,
-                        snapshot,
-                        keyspaces::RUNTIME_RECORDS,
-                        &runtime_identity_key(&commit.scope, reference),
-                    )
-                    .is_none()
-                {
-                    return Err(Error::DanglingRuntimeReference(format!(
-                        "{}/{} in scope {}",
-                        reference.kind, reference.id, commit.scope
-                    )));
-                }
-            }
-        }
-
-        let claim_count = commit
-            .mutations
-            .iter()
-            .filter(|mutation| matches!(mutation, RuntimeMutation::Claim { .. }))
-            .count();
-        let claim_start = read_sequence(&database, snapshot, keyspaces::SEQUENCE_WATERMARK)?;
-        let mut claim_sequence = claim_start;
-        let mut cursor = start;
-        let mut previous_digest = get(
-            &database,
-            snapshot,
-            keyspaces::META,
-            keyspaces::RUNTIME_LAST_DIGEST,
-        )
-        .map(String::from_utf8)
-        .transpose()
-        .map_err(|error| Error::CorruptWatermark(error.to_string()))?
-        .filter(|digest| !digest.is_empty());
-        let previous_audit_digest = get(
-            &database,
-            snapshot,
-            keyspaces::META,
-            keyspaces::RUNTIME_LAST_AUDIT_DIGEST,
-        )
-        .map(String::from_utf8)
-        .transpose()
-        .map_err(|error| Error::CorruptWatermark(error.to_string()))?
-        .filter(|digest| !digest.is_empty());
-        let mut operations = Vec::new();
-        let mut outbox_count = 0;
-
-        for (ordinal, mutation) in commit.mutations.iter().cloned().enumerate() {
-            if let RuntimeMutation::Claim { claim } = &mutation {
-                claim.validate()?;
-                claim_sequence = claim_sequence
-                    .checked_add(1)
-                    .ok_or(Error::SequenceOverflow)?;
-                let claim_key = key::claim_key(
-                    &claim.subject,
-                    &claim.predicate,
-                    claim.valid_from,
-                    claim.tx_time,
-                );
-                put(
-                    &mut operations,
-                    keyspaces::SEQUENCE_INDEX,
-                    &key::sequence_key(claim_sequence),
-                    claim_key.clone(),
-                );
-                put(
-                    &mut operations,
-                    keyspaces::CLAIMS,
-                    &claim_key,
-                    serde_json::to_vec(claim)?,
-                );
-            }
-
-            cursor = cursor.checked_add(1).ok_or(Error::SequenceOverflow)?;
-            let change = RuntimeChange::committed(
-                cursor,
-                commit,
-                &commit_id,
-                ordinal as u64,
-                mutation.clone(),
-                previous_digest.clone(),
-            );
-            put(
-                &mut operations,
-                keyspaces::RUNTIME_CHANGES,
-                &cursor.to_be_bytes(),
-                serde_json::to_vec(&change)?,
-            );
-            if let Some(family) = projection_family(&mutation) {
-                let work = ProjectionWork::for_change(
-                    commit.scope.clone(),
-                    cursor,
-                    commit_id.clone(),
-                    ordinal as u64,
-                    family,
-                )?;
-                put(
-                    &mut operations,
-                    keyspaces::RUNTIME_OUTBOX,
-                    &cursor.to_be_bytes(),
-                    serde_json::to_vec(&work)?,
-                );
-                outbox_count += 1;
-            }
-            match mutation {
-                RuntimeMutation::Schema { registry } => put(
-                    &mut operations,
-                    keyspaces::RUNTIME_SCHEMAS,
-                    commit.scope.as_str().as_bytes(),
-                    serde_json::to_vec(&registry)?,
-                ),
-                RuntimeMutation::Record { record } => put(
-                    &mut operations,
-                    keyspaces::RUNTIME_RECORDS,
-                    &runtime_identity_key(&commit.scope, &record.reference),
-                    serde_json::to_vec(&record)?,
-                ),
-                RuntimeMutation::Relation { relation } => put(
-                    &mut operations,
-                    keyspaces::RUNTIME_RELATIONS,
-                    &runtime_identity_key(&commit.scope, &relation.reference),
-                    serde_json::to_vec(&relation)?,
-                ),
-                RuntimeMutation::Vector { vector } => put(
-                    &mut operations,
-                    keyspaces::RUNTIME_VECTORS,
-                    &runtime_identity_key(&commit.scope, &vector.reference),
-                    serde_json::to_vec(&vector)?,
-                ),
-                RuntimeMutation::SeriesSample { sample } => put(
-                    &mut operations,
-                    keyspaces::RUNTIME_SERIES,
-                    &runtime_identity_key(&commit.scope, &sample.reference),
-                    serde_json::to_vec(&sample)?,
-                ),
-                RuntimeMutation::Geo { geo } => put(
-                    &mut operations,
-                    keyspaces::RUNTIME_GEO,
-                    &runtime_identity_key(&commit.scope, &geo.reference),
-                    serde_json::to_vec(&geo)?,
-                ),
-                RuntimeMutation::Object { object } => put(
-                    &mut operations,
-                    keyspaces::RUNTIME_OBJECTS,
-                    &runtime_identity_key(&commit.scope, &object.reference),
-                    serde_json::to_vec(&object)?,
-                ),
-                RuntimeMutation::Claim { .. } | RuntimeMutation::Event { .. } => {}
-            }
-            previous_digest = Some(change.digest);
-        }
-        if claim_count > 0 {
-            put_sequence(
-                &mut operations,
-                keyspaces::SEQUENCE_WATERMARK,
-                claim_sequence,
-            );
-        }
-        put_sequence(&mut operations, keyspaces::RUNTIME_CURSOR, cursor);
-        put(
-            &mut operations,
-            keyspaces::META,
-            keyspaces::RUNTIME_LAST_DIGEST,
-            previous_digest.as_deref().unwrap_or("").as_bytes().to_vec(),
-        );
-        let audit =
-            AuditEnvelope::accepted_commit(commit, &commit_id, cursor, previous_audit_digest)?;
-        put(
-            &mut operations,
-            keyspaces::RUNTIME_AUDIT,
-            commit_id.as_bytes(),
-            serde_json::to_vec(&audit)?,
-        );
-        put(
-            &mut operations,
-            keyspaces::META,
-            keyspaces::RUNTIME_LAST_AUDIT_DIGEST,
-            audit.digest.as_bytes().to_vec(),
-        );
-        let outcome = RuntimeCommitOutcome {
-            commit_id,
-            first_cursor: start + 1,
-            last_cursor: cursor,
-            count: commit.mutations.len(),
-            first_claim_sequence: (claim_count > 0).then_some(claim_start + 1),
-            last_claim_sequence: (claim_count > 0).then_some(claim_sequence),
-            outbox_count,
-        };
-        put(
-            &mut operations,
-            keyspaces::RUNTIME_COMMITS,
-            outcome.commit_id.as_bytes(),
-            serde_json::to_vec(&outcome)?,
-        );
+        let plan = prepare_native_runtime_commit(&database, commit)?;
+        let (outcome, operations) = plan.into_parts();
         write(&mut database, operations, Durability::Authoritative)?;
-
         Ok(outcome)
     }
 
@@ -939,6 +647,355 @@ impl Engine for NativeEngine {
             commit_id.as_bytes(),
         )
     }
+}
+
+/// A validated native runtime transaction that has not yet crossed the WAL
+/// durability boundary. The caller may append metadata operations and publish
+/// the combined vector as one VyrmKV [`WriteBatch`].
+///
+/// Planning reads the supplied database's current snapshot. Correct callers
+/// therefore hold the database's exclusive writer guard from planning through
+/// publication; `NativeEngine` does this internally and the Raft adapter uses
+/// the same discipline.
+#[derive(Debug)]
+pub struct NativeRuntimeCommitPlan {
+    outcome: RuntimeCommitOutcome,
+    operations: Vec<Mutation>,
+}
+
+impl NativeRuntimeCommitPlan {
+    pub fn outcome(&self) -> &RuntimeCommitOutcome {
+        &self.outcome
+    }
+
+    pub fn into_parts(self) -> (RuntimeCommitOutcome, Vec<Mutation>) {
+        (self.outcome, self.operations)
+    }
+}
+
+/// Validates and lowers one canonical [`RuntimeCommit`] into native VyrmKV
+/// mutations without writing them. This is the composition boundary used when
+/// a coordinator must atomically include its own durable metadata.
+pub fn prepare_native_runtime_commit(
+    database: &Database,
+    commit: &RuntimeCommit,
+) -> Result<NativeRuntimeCommitPlan> {
+    commit.validate()?;
+    let snapshot = database.snapshot();
+    let commit_id = commit.digest();
+    let start = read_sequence(database, snapshot, keyspaces::RUNTIME_CURSOR)?;
+    if start != commit.expected_cursor {
+        return Err(Error::RuntimeConflict {
+            expected: commit.expected_cursor,
+            actual: start,
+        });
+    }
+
+    let previous_schema: Option<RuntimeSchemaRegistry> = get_json(
+        database,
+        snapshot,
+        keyspaces::RUNTIME_SCHEMAS,
+        commit.scope.as_str().as_bytes(),
+    )?;
+    let proposed_schema = commit.mutations.iter().find_map(|mutation| match mutation {
+        RuntimeMutation::Schema { registry } => Some(registry),
+        _ => None,
+    });
+    let effective_schema = match (previous_schema.as_ref(), proposed_schema) {
+        (None, Some(registry)) if registry.revision == 1 => registry,
+        (None, Some(registry)) => {
+            return Err(Error::RuntimeSchemaConflict {
+                expected: 1,
+                actual: registry.revision,
+            });
+        }
+        (Some(previous), Some(registry))
+            if registry.revision == previous.revision.saturating_add(1) =>
+        {
+            registry
+        }
+        (Some(previous), Some(registry)) => {
+            return Err(Error::RuntimeSchemaConflict {
+                expected: previous.revision.saturating_add(1),
+                actual: registry.revision,
+            });
+        }
+        (Some(previous), None) => previous,
+        (None, None) => {
+            return Err(Error::RuntimeSchemaMissing(commit.scope.to_string()));
+        }
+    };
+    let existing_records = if effective_schema
+        .records
+        .values()
+        .any(|schema| !schema.unique_properties.is_empty())
+    {
+        native_values_for_scope::<RuntimeRecord>(
+            database,
+            snapshot,
+            keyspaces::RUNTIME_RECORDS,
+            &commit.scope,
+        )?
+    } else {
+        Vec::new()
+    };
+    let existing_relations = if effective_schema.relations.values().any(|schema| {
+        schema.unique_pair || schema.max_outgoing.is_some() || schema.max_incoming.is_some()
+    }) {
+        native_values_for_scope::<RuntimeRelation>(
+            database,
+            snapshot,
+            keyspaces::RUNTIME_RELATIONS,
+            &commit.scope,
+        )?
+    } else {
+        Vec::new()
+    };
+    effective_schema.validate_objects(&commit.mutations, &existing_records, &existing_relations)?;
+
+    let new_records = commit
+        .mutations
+        .iter()
+        .filter_map(|mutation| match mutation {
+            RuntimeMutation::Record { record } => Some(record.reference.clone()),
+            _ => None,
+        })
+        .collect::<BTreeSet<_>>();
+    for mutation in &commit.mutations {
+        let references: Vec<&RuntimeRef> = match mutation {
+            RuntimeMutation::Relation { relation } => vec![&relation.from, &relation.to],
+            RuntimeMutation::Event { event } => event.subject.iter().collect(),
+            RuntimeMutation::Vector { vector } => vec![&vector.subject],
+            RuntimeMutation::SeriesSample { sample } => vec![&sample.series],
+            RuntimeMutation::Geo { geo } => vec![&geo.subject],
+            RuntimeMutation::Object { object } => object.subject.iter().collect(),
+            RuntimeMutation::Claim { .. }
+            | RuntimeMutation::Schema { .. }
+            | RuntimeMutation::Record { .. } => Vec::new(),
+        };
+        for reference in references {
+            if !new_records.contains(reference)
+                && get(
+                    database,
+                    snapshot,
+                    keyspaces::RUNTIME_RECORDS,
+                    &runtime_identity_key(&commit.scope, reference),
+                )
+                .is_none()
+            {
+                return Err(Error::DanglingRuntimeReference(format!(
+                    "{}/{} in scope {}",
+                    reference.kind, reference.id, commit.scope
+                )));
+            }
+        }
+    }
+
+    let claim_count = commit
+        .mutations
+        .iter()
+        .filter(|mutation| matches!(mutation, RuntimeMutation::Claim { .. }))
+        .count();
+    let claim_start = read_sequence(database, snapshot, keyspaces::SEQUENCE_WATERMARK)?;
+    let mut claim_sequence = claim_start;
+    let mut cursor = start;
+    let mut previous_digest = get(
+        database,
+        snapshot,
+        keyspaces::META,
+        keyspaces::RUNTIME_LAST_DIGEST,
+    )
+    .map(String::from_utf8)
+    .transpose()
+    .map_err(|error| Error::CorruptWatermark(error.to_string()))?
+    .filter(|digest| !digest.is_empty());
+    let previous_audit_digest = get(
+        database,
+        snapshot,
+        keyspaces::META,
+        keyspaces::RUNTIME_LAST_AUDIT_DIGEST,
+    )
+    .map(String::from_utf8)
+    .transpose()
+    .map_err(|error| Error::CorruptWatermark(error.to_string()))?
+    .filter(|digest| !digest.is_empty());
+    let mut operations = Vec::new();
+    let mut outbox_count = 0;
+
+    for (ordinal, mutation) in commit.mutations.iter().cloned().enumerate() {
+        if let RuntimeMutation::Claim { claim } = &mutation {
+            claim.validate()?;
+            claim_sequence = claim_sequence
+                .checked_add(1)
+                .ok_or(Error::SequenceOverflow)?;
+            let claim_key = key::claim_key(
+                &claim.subject,
+                &claim.predicate,
+                claim.valid_from,
+                claim.tx_time,
+            );
+            put(
+                &mut operations,
+                keyspaces::SEQUENCE_INDEX,
+                &key::sequence_key(claim_sequence),
+                claim_key.clone(),
+            );
+            put(
+                &mut operations,
+                keyspaces::CLAIMS,
+                &claim_key,
+                serde_json::to_vec(claim)?,
+            );
+        }
+
+        cursor = cursor.checked_add(1).ok_or(Error::SequenceOverflow)?;
+        let change = RuntimeChange::committed(
+            cursor,
+            commit,
+            &commit_id,
+            ordinal as u64,
+            mutation.clone(),
+            previous_digest.clone(),
+        );
+        put(
+            &mut operations,
+            keyspaces::RUNTIME_CHANGES,
+            &cursor.to_be_bytes(),
+            serde_json::to_vec(&change)?,
+        );
+        if let Some(family) = projection_family(&mutation) {
+            let work = ProjectionWork::for_change(
+                commit.scope.clone(),
+                cursor,
+                commit_id.clone(),
+                ordinal as u64,
+                family,
+            )?;
+            put(
+                &mut operations,
+                keyspaces::RUNTIME_OUTBOX,
+                &cursor.to_be_bytes(),
+                serde_json::to_vec(&work)?,
+            );
+            outbox_count += 1;
+        }
+        match mutation {
+            RuntimeMutation::Schema { registry } => put(
+                &mut operations,
+                keyspaces::RUNTIME_SCHEMAS,
+                commit.scope.as_str().as_bytes(),
+                serde_json::to_vec(&registry)?,
+            ),
+            RuntimeMutation::Record { record } => put(
+                &mut operations,
+                keyspaces::RUNTIME_RECORDS,
+                &runtime_identity_key(&commit.scope, &record.reference),
+                serde_json::to_vec(&record)?,
+            ),
+            RuntimeMutation::Relation { relation } => put(
+                &mut operations,
+                keyspaces::RUNTIME_RELATIONS,
+                &runtime_identity_key(&commit.scope, &relation.reference),
+                serde_json::to_vec(&relation)?,
+            ),
+            RuntimeMutation::Vector { vector } => put(
+                &mut operations,
+                keyspaces::RUNTIME_VECTORS,
+                &runtime_identity_key(&commit.scope, &vector.reference),
+                serde_json::to_vec(&vector)?,
+            ),
+            RuntimeMutation::SeriesSample { sample } => put(
+                &mut operations,
+                keyspaces::RUNTIME_SERIES,
+                &runtime_identity_key(&commit.scope, &sample.reference),
+                serde_json::to_vec(&sample)?,
+            ),
+            RuntimeMutation::Geo { geo } => put(
+                &mut operations,
+                keyspaces::RUNTIME_GEO,
+                &runtime_identity_key(&commit.scope, &geo.reference),
+                serde_json::to_vec(&geo)?,
+            ),
+            RuntimeMutation::Object { object } => put(
+                &mut operations,
+                keyspaces::RUNTIME_OBJECTS,
+                &runtime_identity_key(&commit.scope, &object.reference),
+                serde_json::to_vec(&object)?,
+            ),
+            RuntimeMutation::Claim { .. } | RuntimeMutation::Event { .. } => {}
+        }
+        previous_digest = Some(change.digest);
+    }
+    if claim_count > 0 {
+        put_sequence(
+            &mut operations,
+            keyspaces::SEQUENCE_WATERMARK,
+            claim_sequence,
+        );
+    }
+    put_sequence(&mut operations, keyspaces::RUNTIME_CURSOR, cursor);
+    put(
+        &mut operations,
+        keyspaces::META,
+        keyspaces::RUNTIME_LAST_DIGEST,
+        previous_digest.as_deref().unwrap_or("").as_bytes().to_vec(),
+    );
+    let audit = AuditEnvelope::accepted_commit(commit, &commit_id, cursor, previous_audit_digest)?;
+    put(
+        &mut operations,
+        keyspaces::RUNTIME_AUDIT,
+        commit_id.as_bytes(),
+        serde_json::to_vec(&audit)?,
+    );
+    put(
+        &mut operations,
+        keyspaces::META,
+        keyspaces::RUNTIME_LAST_AUDIT_DIGEST,
+        audit.digest.as_bytes().to_vec(),
+    );
+    let outcome = RuntimeCommitOutcome {
+        commit_id,
+        first_cursor: start + 1,
+        last_cursor: cursor,
+        count: commit.mutations.len(),
+        first_claim_sequence: (claim_count > 0).then_some(claim_start + 1),
+        last_claim_sequence: (claim_count > 0).then_some(claim_sequence),
+        outbox_count,
+    };
+    put(
+        &mut operations,
+        keyspaces::RUNTIME_COMMITS,
+        outcome.commit_id.as_bytes(),
+        serde_json::to_vec(&outcome)?,
+    );
+    Ok(NativeRuntimeCommitPlan {
+        outcome,
+        operations,
+    })
+}
+
+/// Reads a previously accepted native runtime outcome from a caller-held
+/// database snapshot. Coordinators use this before planning so content-addressed
+/// retries remain idempotent even when the transport request id changes.
+pub fn native_runtime_commit_outcome(
+    database: &Database,
+    commit_id: &str,
+) -> Result<Option<RuntimeCommitOutcome>> {
+    let outcome: Option<RuntimeCommitOutcome> = get_json(
+        database,
+        database.snapshot(),
+        keyspaces::RUNTIME_COMMITS,
+        commit_id.as_bytes(),
+    )?;
+    if outcome
+        .as_ref()
+        .is_some_and(|outcome| outcome.commit_id != commit_id)
+    {
+        return Err(Error::Substrate(
+            "runtime commit outcome key does not match its content identity".into(),
+        ));
+    }
+    Ok(outcome)
 }
 
 fn scan_claims(database: &Database, prefix: Vec<u8>, from: Vec<u8>) -> Result<Vec<Claim>> {

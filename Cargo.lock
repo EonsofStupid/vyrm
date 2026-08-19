@@ -2381,6 +2381,7 @@ dependencies = [
  "tokio",
  "vyrm-core",
  "vyrm-kv",
+ "vyrm-store",
 ]
 
 [[package]]

@@ -23,17 +23,20 @@ use std::io::Cursor;
 use std::ops::{Bound, RangeBounds};
 use std::path::Path;
 use std::sync::{Arc, Mutex, MutexGuard};
-use vyrm_core::digest::sha256_hex;
+use vyrm_core::{digest::sha256_hex, RuntimeCommit, RuntimeCommitOutcome};
 use vyrm_kv::{Database, Durability, Mutation, WriteBatch};
+use vyrm_store::{
+    native_runtime_commit_outcome, prepare_native_runtime_commit, Error as StoreError,
+};
 
-const ADAPTER_FORMAT_VERSION: u16 = 1;
-const KEY_CONFIG: &[u8] = b"vyrm/raft/v1/meta/config";
-const KEY_VOTE: &[u8] = b"vyrm/raft/v1/meta/vote";
-const KEY_COMMITTED: &[u8] = b"vyrm/raft/v1/meta/committed";
-const KEY_PURGED: &[u8] = b"vyrm/raft/v1/meta/purged";
-const KEY_STATE: &[u8] = b"vyrm/raft/v1/state/current";
-const KEY_SNAPSHOT: &[u8] = b"vyrm/raft/v1/state/snapshot";
-const LOG_PREFIX: &[u8] = b"vyrm/raft/v1/log/";
+const ADAPTER_FORMAT_VERSION: u16 = 2;
+const KEY_CONFIG: &[u8] = b"vyrm/raft/v2/meta/config";
+const KEY_VOTE: &[u8] = b"vyrm/raft/v2/meta/vote";
+const KEY_COMMITTED: &[u8] = b"vyrm/raft/v2/meta/committed";
+const KEY_PURGED: &[u8] = b"vyrm/raft/v2/meta/purged";
+const KEY_STATE: &[u8] = b"vyrm/raft/v2/state/current";
+const KEY_SNAPSHOT: &[u8] = b"vyrm/raft/v2/state/snapshot";
+const LOG_PREFIX: &[u8] = b"vyrm/raft/v2/log/";
 // JSON is only the correctness-gate codec. Keep worst-case byte-array expansion
 // comfortably below VyrmKV's 8 MiB value ceiling until a compact codec lands.
 const MAX_COMMAND_BYTES: usize = 1024 * 1024;
@@ -62,14 +65,57 @@ impl VyrmRaftNode {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "operation", rename_all = "snake_case")]
+pub enum VyrmRaftOperation {
+    Probe {
+        payload_digest: String,
+        payload: Vec<u8>,
+    },
+    RuntimeCommit {
+        commit: RuntimeCommit,
+    },
+}
+
+impl VyrmRaftOperation {
+    fn validate(&self) -> ClusterResult<()> {
+        match self {
+            Self::Probe {
+                payload_digest,
+                payload,
+            } if !payload.is_empty() && payload_digest == &sha256_hex(payload) => Ok(()),
+            Self::Probe { .. } => Err(ClusterError::Invalid(
+                "raft probe payload or digest is invalid".into(),
+            )),
+            Self::RuntimeCommit { commit } => commit
+                .validate()
+                .map_err(|error| ClusterError::Invalid(error.to_string())),
+        }
+    }
+
+    fn digest(&self) -> String {
+        let mut bytes = b"vyrm.raft.operation.v1".to_vec();
+        match self {
+            Self::Probe { payload_digest, .. } => {
+                bytes.push(1);
+                bytes.extend_from_slice(payload_digest.as_bytes());
+            }
+            Self::RuntimeCommit { commit } => {
+                bytes.push(2);
+                bytes.extend_from_slice(commit.digest().as_bytes());
+            }
+        }
+        sha256_hex(&bytes)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct VyrmRaftCommand {
     pub request_id: String,
     pub shard: ShardId,
     pub placement_epoch: u64,
     pub expected_commit_index: Option<u64>,
-    pub payload_digest: String,
-    pub payload: Vec<u8>,
+    pub operation: VyrmRaftOperation,
 }
 
 impl VyrmRaftCommand {
@@ -85,8 +131,28 @@ impl VyrmRaftCommand {
             shard,
             placement_epoch,
             expected_commit_index,
-            payload_digest: sha256_hex(&payload),
-            payload,
+            operation: VyrmRaftOperation::Probe {
+                payload_digest: sha256_hex(&payload),
+                payload,
+            },
+        };
+        command.validate()?;
+        Ok(command)
+    }
+
+    pub fn runtime_commit(
+        request_id: impl Into<String>,
+        shard: ShardId,
+        placement_epoch: u64,
+        expected_commit_index: Option<u64>,
+        commit: RuntimeCommit,
+    ) -> ClusterResult<Self> {
+        let command = Self {
+            request_id: request_id.into(),
+            shard,
+            placement_epoch,
+            expected_commit_index,
+            operation: VyrmRaftOperation::RuntimeCommit { commit },
         };
         command.validate()?;
         Ok(command)
@@ -97,13 +163,18 @@ impl VyrmRaftCommand {
             || self.request_id.len() > 256
             || self.request_id.as_bytes().contains(&0)
             || self.placement_epoch == 0
-            || self.payload.is_empty()
-            || self.payload.len() > MAX_COMMAND_BYTES
-            || self.payload_digest != sha256_hex(&self.payload)
         {
             return Err(ClusterError::Invalid(
-                "raft command identity, epoch, size, or payload digest is invalid".into(),
+                "raft command identity or placement epoch is invalid".into(),
             ));
+        }
+        self.operation.validate()?;
+        let encoded = serde_json::to_vec(&self.operation)
+            .map_err(|error| ClusterError::Invalid(error.to_string()))?;
+        if encoded.len() > MAX_COMMAND_BYTES {
+            return Err(ClusterError::Invalid(format!(
+                "raft command operation exceeds {MAX_COMMAND_BYTES} encoded bytes"
+            )));
         }
         Ok(())
     }
@@ -117,6 +188,8 @@ pub struct VyrmRaftResponse {
     pub index: u64,
     pub state_digest: String,
     pub reason: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runtime_outcome: Option<RuntimeCommitOutcome>,
 }
 
 openraft::declare_raft_types!(
@@ -147,6 +220,8 @@ struct StateMachineData {
     last_membership: StoredMembership<u64, VyrmRaftNode>,
     #[serde(default)]
     placement_epoch: Option<u64>,
+    #[serde(default)]
+    runtime_commit_count: u64,
     state_digest: String,
     requests: BTreeMap<String, AppliedRequest>,
 }
@@ -157,6 +232,7 @@ impl Default for StateMachineData {
             last_applied: None,
             last_membership: StoredMembership::default(),
             placement_epoch: None,
+            runtime_commit_count: 0,
             state_digest: sha256_hex(b"vyrm.raft.state.v1"),
             requests: BTreeMap::new(),
         }
@@ -391,6 +467,13 @@ impl RaftSnapshotBuilder<VyrmRaftTypeConfig> for VyrmRaftStateMachine {
         &mut self,
     ) -> std::result::Result<Snapshot<VyrmRaftTypeConfig>, StorageError<u64>> {
         let state = self.read_state()?;
+        if state.runtime_commit_count > 0 {
+            return Err(storage_error(
+                ErrorSubject::Snapshot(None),
+                ErrorVerb::Read,
+                "canonical runtime state has no transferable VyrmKV snapshot bundle",
+            ));
+        }
         let data = encode_json(&state, ErrorSubject::StateMachine, ErrorVerb::Read)?;
         let snapshot_id = format!(
             "{}-{}",
@@ -440,9 +523,12 @@ impl RaftStateMachine<VyrmRaftTypeConfig> for VyrmRaftStateMachine {
         I: IntoIterator<Item = VyrmRaftEntry> + Send,
         I::IntoIter: Send,
     {
-        let mut state = self.read_state()?;
+        let mut database =
+            lock_database(&self.database, ErrorSubject::StateMachine, ErrorVerb::Write)?;
+        let mut state = read_state_from_database(&database)?;
         let mut responses = Vec::new();
         for entry in entries {
+            let mut operations = Vec::new();
             let response = match entry.payload {
                 EntryPayload::Blank => blank_response(&state, entry.log_id),
                 EntryPayload::Membership(membership) => {
@@ -450,18 +536,36 @@ impl RaftStateMachine<VyrmRaftTypeConfig> for VyrmRaftStateMachine {
                     blank_response(&state, entry.log_id)
                 }
                 EntryPayload::Normal(command) => {
-                    apply_command(self.shard, &mut state, entry.log_id, command)?
+                    let application =
+                        apply_command(&database, self.shard, &mut state, entry.log_id, command)?;
+                    operations.extend(application.operations);
+                    application.response
                 }
             };
             state.last_applied = Some(entry.log_id);
+            operations.push(put_json_storage(
+                KEY_STATE,
+                &state,
+                ErrorSubject::StateMachine,
+            )?);
+            let batch = WriteBatch::new(operations).map_err(|error| {
+                storage_error(
+                    ErrorSubject::Apply(entry.log_id),
+                    ErrorVerb::Write,
+                    error.to_string(),
+                )
+            })?;
+            database
+                .write_owned(batch, Durability::Authoritative)
+                .map_err(|error| {
+                    storage_error(
+                        ErrorSubject::Apply(entry.log_id),
+                        ErrorVerb::Write,
+                        error.to_string(),
+                    )
+                })?;
             responses.push(response);
         }
-        write_json(
-            &self.database,
-            KEY_STATE,
-            &state,
-            ErrorSubject::StateMachine,
-        )?;
         Ok(responses)
     }
 
@@ -496,6 +600,13 @@ impl RaftStateMachine<VyrmRaftTypeConfig> for VyrmRaftStateMachine {
                 "snapshot metadata does not match its state bytes",
             ));
         }
+        if state.runtime_commit_count > 0 {
+            return Err(storage_error(
+                ErrorSubject::Snapshot(Some(meta.signature())),
+                ErrorVerb::Write,
+                "refusing a snapshot that declares runtime commits without a VyrmKV bundle",
+            ));
+        }
         let operations = vec![
             put_json_storage(KEY_STATE, &state, ErrorSubject::StateMachine)?,
             put_json_storage(
@@ -528,22 +639,39 @@ impl RaftStateMachine<VyrmRaftTypeConfig> for VyrmRaftStateMachine {
 
 impl VyrmRaftStateMachine {
     fn read_state(&self) -> std::result::Result<StateMachineData, StorageError<u64>> {
-        read_json(&self.database, KEY_STATE, ErrorSubject::StateMachine)?.ok_or_else(|| {
+        let database = lock_database(&self.database, ErrorSubject::StateMachine, ErrorVerb::Read)?;
+        read_state_from_database(&database)
+    }
+}
+
+fn read_state_from_database(
+    database: &Database,
+) -> std::result::Result<StateMachineData, StorageError<u64>> {
+    database
+        .get(KEY_STATE, database.snapshot())
+        .map(|bytes| decode_json(bytes, ErrorSubject::StateMachine, ErrorVerb::Read))
+        .transpose()?
+        .ok_or_else(|| {
             storage_error(
                 ErrorSubject::StateMachine,
                 ErrorVerb::Read,
                 "state machine key is absent",
             )
         })
-    }
+}
+
+struct CommandApplication {
+    response: VyrmRaftResponse,
+    operations: Vec<Mutation>,
 }
 
 fn apply_command(
+    database: &Database,
     shard: ShardId,
     state: &mut StateMachineData,
     log_id: LogId<u64>,
     command: VyrmRaftCommand,
-) -> std::result::Result<VyrmRaftResponse, StorageError<u64>> {
+) -> std::result::Result<CommandApplication, StorageError<u64>> {
     command.validate().map_err(|error| {
         storage_error(
             ErrorSubject::Apply(log_id),
@@ -561,20 +689,27 @@ fn apply_command(
     let command_digest = command_identity_digest(&command);
     if let Some(previous) = state.requests.get(&command.request_id) {
         if previous.command_digest != command_digest {
-            return Ok(VyrmRaftResponse {
-                accepted: false,
-                duplicate: false,
-                term: log_id.leader_id.term,
-                index: log_id.index,
-                state_digest: state.state_digest.clone(),
-                reason: "request id was reused with a different command identity".into(),
+            return Ok(CommandApplication {
+                response: VyrmRaftResponse {
+                    accepted: false,
+                    duplicate: false,
+                    term: log_id.leader_id.term,
+                    index: log_id.index,
+                    state_digest: state.state_digest.clone(),
+                    reason: "request id was reused with a different command identity".into(),
+                    runtime_outcome: None,
+                },
+                operations: Vec::new(),
             });
         }
         let mut response = previous.response.clone();
         response.duplicate = true;
         response.term = log_id.leader_id.term;
         response.index = log_id.index;
-        return Ok(response);
+        return Ok(CommandApplication {
+            response,
+            operations: Vec::new(),
+        });
     }
 
     let current_index = state.last_applied.map_or(0, |applied| applied.index);
@@ -584,14 +719,87 @@ fn apply_command(
     let commit_index_matches = command
         .expected_commit_index
         .is_none_or(|expected| expected == current_index);
-    let accepted = epoch_matches && commit_index_matches;
+    let mut accepted = epoch_matches && commit_index_matches;
+    let mut operations = Vec::new();
+    let mut runtime_outcome = None;
+    let mut reason = if !epoch_matches {
+        format!(
+            "placement epoch {} does not match state-machine epoch {}",
+            command.placement_epoch,
+            state
+                .placement_epoch
+                .expect("mismatched epoch requires an established epoch")
+        )
+    } else if !commit_index_matches {
+        format!(
+            "expected commit index {} but state machine was at {current_index}",
+            command
+                .expected_commit_index
+                .expect("rejected CAS has expectation")
+        )
+    } else {
+        String::new()
+    };
+
+    if accepted {
+        match &command.operation {
+            VyrmRaftOperation::Probe { .. } => {
+                reason = "quorum-committed probe applied".into();
+            }
+            VyrmRaftOperation::RuntimeCommit { commit } => {
+                let commit_id = commit.digest();
+                match native_runtime_commit_outcome(database, &commit_id) {
+                    Ok(Some(outcome)) => {
+                        reason = "canonical runtime transaction was already committed".into();
+                        runtime_outcome = Some(outcome);
+                    }
+                    Ok(None) => match prepare_native_runtime_commit(database, commit) {
+                        Ok(plan) => {
+                            let (outcome, runtime_operations) = plan.into_parts();
+                            state.runtime_commit_count =
+                                state.runtime_commit_count.checked_add(1).ok_or_else(|| {
+                                    storage_error(
+                                        ErrorSubject::Apply(log_id),
+                                        ErrorVerb::Write,
+                                        "runtime commit count overflowed",
+                                    )
+                                })?;
+                            reason =
+                                "quorum-committed canonical runtime transaction applied".into();
+                            runtime_outcome = Some(outcome);
+                            operations = runtime_operations;
+                        }
+                        Err(error) if deterministic_runtime_rejection(&error) => {
+                            accepted = false;
+                            reason = format!("canonical runtime transaction denied: {error}");
+                        }
+                        Err(error) => {
+                            return Err(storage_error(
+                                ErrorSubject::Apply(log_id),
+                                ErrorVerb::Write,
+                                error.to_string(),
+                            ));
+                        }
+                    },
+                    Err(error) => {
+                        return Err(storage_error(
+                            ErrorSubject::Apply(log_id),
+                            ErrorVerb::Read,
+                            error.to_string(),
+                        ));
+                    }
+                }
+            }
+        }
+    }
+
     if accepted {
         state.placement_epoch = Some(command.placement_epoch);
         let mut bytes = b"vyrm.raft.state.transition.v1".to_vec();
         bytes.extend_from_slice(state.state_digest.as_bytes());
         bytes.extend_from_slice(&log_id.leader_id.term.to_be_bytes());
         bytes.extend_from_slice(&log_id.index.to_be_bytes());
-        bytes.extend_from_slice(command.payload_digest.as_bytes());
+        bytes.extend_from_slice(command.operation.digest().as_bytes());
         state.state_digest = sha256_hex(&bytes);
     }
     let response = VyrmRaftResponse {
@@ -600,24 +808,8 @@ fn apply_command(
         term: log_id.leader_id.term,
         index: log_id.index,
         state_digest: state.state_digest.clone(),
-        reason: if accepted {
-            "quorum-committed command applied".into()
-        } else if !epoch_matches {
-            format!(
-                "placement epoch {} does not match state-machine epoch {}",
-                command.placement_epoch,
-                state
-                    .placement_epoch
-                    .expect("mismatched epoch requires an established epoch")
-            )
-        } else {
-            format!(
-                "expected commit index {} but state machine was at {current_index}",
-                command
-                    .expected_commit_index
-                    .expect("rejected CAS has expectation")
-            )
-        },
+        reason,
+        runtime_outcome,
     };
     state.requests.insert(
         command.request_id,
@@ -626,7 +818,21 @@ fn apply_command(
             response: response.clone(),
         },
     );
-    Ok(response)
+    Ok(CommandApplication {
+        response,
+        operations,
+    })
+}
+
+fn deterministic_runtime_rejection(error: &StoreError) -> bool {
+    matches!(
+        error,
+        StoreError::Kernel(_)
+            | StoreError::RuntimeConflict { .. }
+            | StoreError::DanglingRuntimeReference(_)
+            | StoreError::RuntimeSchemaMissing(_)
+            | StoreError::RuntimeSchemaConflict { .. }
+    )
 }
 
 fn command_identity_digest(command: &VyrmRaftCommand) -> String {
@@ -640,7 +846,7 @@ fn command_identity_digest(command: &VyrmRaftCommand) -> String {
         }
         None => bytes.push(0),
     }
-    bytes.extend_from_slice(command.payload_digest.as_bytes());
+    bytes.extend_from_slice(command.operation.digest().as_bytes());
     sha256_hex(&bytes)
 }
 
@@ -652,6 +858,7 @@ fn blank_response(state: &StateMachineData, log_id: LogId<u64>) -> VyrmRaftRespo
         index: log_id.index,
         state_digest: state.state_digest.clone(),
         reason: "raft protocol entry applied".into(),
+        runtime_outcome: None,
     }
 }
 

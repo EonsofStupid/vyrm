@@ -138,9 +138,11 @@ measured local results, never universal superiority.
    consistency, snapshot-vector, route, transfer, and reshard contracts;
    deterministic single-term fault simulation; and a feature-gated OpenRaft
    adapter over native VyrmKV with storage conformance and real four-node
-   election/failover/snapshot/membership evidence. Production transport,
-   unified runtime application, independent-node chaos, and Multi-AZ evidence
-   remain open.
+   election/failover/snapshot/membership evidence. Typed canonical
+   `RuntimeCommit` application now shares one WAL frame with Raft state and is
+   reopened identically across three voters. Runtime-bearing snapshot bundles,
+   production transport, independent-node chaos, and Multi-AZ evidence remain
+   open.
 8. Bind declared package workflows to preflight/pre-tool/post-tool policy.
 9. Extend truthful temporal visualization across storage, search, and workflow
    events and continue controlled provider evaluations.

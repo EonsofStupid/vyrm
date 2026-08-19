@@ -168,6 +168,17 @@ disagree, `SPEC.md` is authoritative and this document is wrong.
 > CAS. Production transport, unified `RuntimeCommit` dispatch, bounded state,
 > independent-process chaos, and Multi-AZ evidence remain open.
 
+> **M7 canonical-runtime overlay (2026-08-19).** Adapter format `v2` adds a
+> typed `runtime_commit` operation. `NativeEngine` now exposes a validated
+> no-write plan, allowing canonical mutations, audit/outbox work, the Raft
+> applied cursor, response, and idempotency record to publish in one
+> authoritative VyrmKV WAL frame. Reopen, duplicate, stale-cursor denial, and
+> same-frame differentials are green. A real three-voter run reopens identical
+> canonical runtime truth through `NativeEngine` on every voter. Runtime-bearing
+> snapshots fail closed until transferable manifest/segment/WAL bundles exist;
+> production transport, explicit epoch transition, bounded request state,
+> independent-process chaos, and Multi-AZ evidence remain open.
+
 ## 1 · Grounding result
 
 State recomputed from source on 2026-08-10 and differenced against the

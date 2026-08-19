@@ -44,21 +44,40 @@ Selection matrix:
 | OpenRaft 0.10 alpha | Reject for this gate | Alpha API/behavior is not the right persistence-format dependency |
 | TiKV `raft-rs` | Defer, retain as a design reference | Strong production lineage, but lower-level integration and readiness driving would add more Vyrm-owned consensus plumbing before this contract is proved |
 
-The Vyrm adapter supplies:
+The Vyrm adapter format is now `v2`. It supplies:
 
-- a canonical Vyrm command/response/node `RaftTypeConfig`;
+- a canonical command/response/node `RaftTypeConfig` with typed `probe` and
+  `runtime_commit` operations;
 - a store permanently bound to one shard and one versioned keyspace;
 - authoritative VyrmKV batches for votes, committed pointers, ordered logs,
-  state-machine application, and snapshot publication/installation;
+  state-machine application, and protocol-only snapshot
+  publication/installation;
 - monotonic vote persistence and append-batch hole rejection;
 - full-command idempotency, payload integrity, shard binding, placement-epoch
   binding, and optional expected-commit-index comparison;
+- native `RuntimeCommit` planning without publication, allowing canonical
+  runtime mutations, audit/outbox work, the Raft applied cursor, response, and
+  idempotency state to share one authoritative VyrmKV WAL frame;
 - digest-chained application state and metadata-checked snapshot installation;
 - the complete upstream OpenRaft storage conformance suite; and
 - a real four-node in-process engine test that elects a leader, commits
   commands, purges snapshotted logs, catches up a new learner through snapshot
   transfer, isolates the leader, elects on the majority side, commits after
   failover, and completes joint-to-uniform membership replacement.
+
+A separate three-voter run commits a real canonical `RuntimeCommit`, waits for
+every voter to apply it, shuts all Raft tasks down, and reopens each directory
+through `NativeEngine`. Every voter exposes the same runtime commit identity and
+cursor. Storage differentials additionally prove same-frame Raft/runtime
+publication, duplicate replay without a second runtime mutation, durable
+expected-cursor denial, restart recovery, and snapshot refusal.
+
+Runtime-bearing snapshots deliberately fail closed. The existing OpenRaft
+snapshot/catch-up test remains valid for protocol/probe state, but once a
+canonical runtime transaction is present the adapter refuses to publish or
+install a state-only snapshot. This prevents a new learner from receiving an
+apparently current Raft cursor while silently missing runtime truth. Transferable
+VyrmKV manifest/segment/WAL bundles are the next storage prerequisite.
 
 This is stronger evidence than the single-term simulator, but the two tests
 serve different purposes. The simulator gives replayable schedules for explicit
@@ -143,14 +162,15 @@ also enumerate leader-minority partitions and require no acknowledgement.
 This gate still does not contain production RPC, node identity/authentication,
 TLS, membership discovery, admission control, multi-shard atomic commit, or
 metadata-shard reshard cutover. Application state currently proves ordered
-identity/CAS/digest semantics; it does not yet dispatch the complete canonical
-`RuntimeCommit` into the unified engine. Its synchronous mutex, prefix scans,
-JSON state/snapshots, and unbounded idempotency map are correctness-first test
+identity/CAS/digest semantics and now atomically dispatches canonical
+`RuntimeCommit` transactions into native VyrmKV. It does not yet transfer that
+runtime state in a Raft snapshot. Its synchronous mutex, prefix scans, JSON
+protocol state, and unbounded request-id map are correctness-first test
 implementations, not production throughput or footprint claims. Commands are
-limited to 1 MiB so worst-case JSON byte-array expansion remains below VyrmKV's
-8 MiB value ceiling until the adapter receives a compact codec.
+limited to 1 MiB until the adapter receives a compact codec.
 
-The next M7 slice must bind committed commands to the unified runtime engine,
-define an explicit placement-epoch transition command, bound idempotency state,
-add authenticated production transport, and run process/network/disk chaos on
-independently restarted nodes. Only that evidence can advance a Multi-AZ claim.
+The next M7 slice must implement authenticated transferable VyrmKV snapshot
+bundles, define an explicit placement-epoch transition command, bound
+idempotency state, add authenticated production transport, and run
+process/network/disk chaos on independently restarted nodes. Only that evidence
+can advance a Multi-AZ claim.

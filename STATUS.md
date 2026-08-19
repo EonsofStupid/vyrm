@@ -53,8 +53,13 @@ not roadmap language.
   snapshots in native VyrmKV and passes the complete upstream storage suite. A
   four-node in-process test covers election, quorum commit, snapshot catch-up,
   majority-side failover, post-failover commit, and voter replacement.
-  Production transport, unified runtime application, independent-process chaos,
-  and Multi-AZ deployment remain unclaimed.
+  Adapter format v2 also atomically publishes a typed canonical `RuntimeCommit`
+  and Raft application state in one VyrmKV WAL frame. A three-voter test reopens
+  identical runtime truth through `NativeEngine` on every voter; duplicate,
+  stale-cursor, restart, and same-frame differentials are green. Runtime-bearing
+  snapshots fail closed until a transferable VyrmKV bundle exists. Production
+  transport, independent-process chaos, and Multi-AZ deployment remain
+  unclaimed.
 - A persisted, revisioned schema registry now governs typed runtime records,
   relations, and events. Unknown types and properties fail closed; property
   value types, required fields, event subjects, legal edge endpoints, temporal

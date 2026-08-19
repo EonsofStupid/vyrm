@@ -49,7 +49,8 @@ Vyrm provides:
   dense mmap artifacts, scalar/AVX2 parity, and a no-network edge executable;
 - canonical Multi-AZ placement/snapshot/route/transfer contracts, a
   deterministic quorum fault simulator, and a feature-gated real-consensus
-  adapter over native VyrmKV (not yet a production cluster);
+  adapter that atomically applies canonical runtime commits over native VyrmKV
+  (runtime-bearing snapshot transfer and production clustering remain gated);
 - identical lifecycle semantics through hooks, CLI, and MCP;
 - isolated per-platform instances with explicit store/root binding.
 
