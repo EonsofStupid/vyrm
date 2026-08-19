@@ -441,9 +441,10 @@ database truth; performance and recall regressions fail CI at explicit bounds.
 
 ## Immediate next implementation slice
 
-M1 is the narrowest useful next change. It should add the typed read stamp,
-snapshot handle, and transaction port to `vyrm-core`/`vyrm-store`, implement
-them in `MemoryEngine` and the Fjall adapter, and prove backend parity. It must
-not yet add a query language, vectors, S3, or a new physical engine. That slice
-creates the stable boundary all later work depends on and prevents the native
-KV effort from baking current per-call snapshot limitations into its format.
+Execute M0 into M1 without skipping the contract gate: freeze serialized golden
+fixtures for the typed read stamp, snapshot handle, and transaction envelope,
+then implement that port in `MemoryEngine` and the Fjall adapter and prove
+backend parity. It must not yet add a query language, vectors, S3, or a new
+physical engine. That slice creates the stable boundary all later work depends
+on and prevents the native KV effort from baking current per-call snapshot
+limitations into its format.
