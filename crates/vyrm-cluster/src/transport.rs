@@ -25,6 +25,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::io;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
@@ -45,6 +46,27 @@ type AppendResult = std::result::Result<AppendEntriesResponse<u64>, RaftError<u6
 type SnapshotResult =
     std::result::Result<InstallSnapshotResponse<u64>, RaftError<u64, InstallSnapshotError>>;
 type VoteResult = std::result::Result<VoteResponse<u64>, RaftError<u64>>;
+
+#[derive(Debug, Clone)]
+pub struct VyrmTransportGate {
+    enabled: Arc<AtomicBool>,
+}
+
+impl VyrmTransportGate {
+    pub fn enabled() -> Self {
+        Self {
+            enabled: Arc::new(AtomicBool::new(true)),
+        }
+    }
+
+    pub fn set_enabled(&self, enabled: bool) {
+        self.enabled.store(enabled, Ordering::Release);
+    }
+
+    pub fn is_enabled(&self) -> bool {
+        self.enabled.load(Ordering::Acquire)
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct VyrmTransportBinding {
@@ -157,14 +179,24 @@ pub fn build_vyrm_tls_configs(
 pub struct VyrmRaftNetworkFactory {
     binding: VyrmTransportBinding,
     connector: TlsConnector,
+    gate: VyrmTransportGate,
 }
 
 impl VyrmRaftNetworkFactory {
     pub fn new(binding: VyrmTransportBinding, client: Arc<ClientConfig>) -> ClusterResult<Self> {
+        Self::new_with_gate(binding, client, VyrmTransportGate::enabled())
+    }
+
+    pub fn new_with_gate(
+        binding: VyrmTransportBinding,
+        client: Arc<ClientConfig>,
+        gate: VyrmTransportGate,
+    ) -> ClusterResult<Self> {
         binding.validate()?;
         Ok(Self {
             binding,
             connector: TlsConnector::from(client),
+            gate,
         })
     }
 }
@@ -174,6 +206,7 @@ pub struct VyrmRaftNetworkClient {
     target_id: u64,
     target: VyrmRaftNode,
     connector: TlsConnector,
+    gate: VyrmTransportGate,
 }
 
 impl RaftNetworkFactory<VyrmRaftTypeConfig> for VyrmRaftNetworkFactory {
@@ -185,6 +218,7 @@ impl RaftNetworkFactory<VyrmRaftTypeConfig> for VyrmRaftNetworkFactory {
             target_id: target,
             target: node.clone(),
             connector: self.connector.clone(),
+            gate: self.gate.clone(),
         }
     }
 }
@@ -285,6 +319,9 @@ impl VyrmRaftNetworkClient {
     where
         E: std::error::Error,
     {
+        if !self.gate.is_enabled() {
+            return Err(unreachable("local Raft transport is disabled"));
+        }
         self.target
             .validate()
             .map_err(|error| unreachable(error.to_string()))?;
@@ -322,6 +359,7 @@ pub struct VyrmRaftTlsServer {
     raft: VyrmRaft,
     acceptor: TlsAcceptor,
     admission: Arc<Semaphore>,
+    gate: VyrmTransportGate,
 }
 
 impl VyrmRaftTlsServer {
@@ -331,6 +369,16 @@ impl VyrmRaftTlsServer {
         raft: VyrmRaft,
         server: Arc<ServerConfig>,
     ) -> ClusterResult<Self> {
+        Self::new_with_gate(binding, trust, raft, server, VyrmTransportGate::enabled())
+    }
+
+    pub fn new_with_gate(
+        binding: VyrmTransportBinding,
+        trust: VyrmTransportTrust,
+        raft: VyrmRaft,
+        server: Arc<ServerConfig>,
+        gate: VyrmTransportGate,
+    ) -> ClusterResult<Self> {
         binding.validate()?;
         Ok(Self {
             binding,
@@ -338,6 +386,7 @@ impl VyrmRaftTlsServer {
             raft,
             acceptor: TlsAcceptor::from(server),
             admission: Arc::new(Semaphore::new(VYRM_RAFT_MAX_IN_FLIGHT_RPCS)),
+            gate,
         })
     }
 
@@ -361,6 +410,12 @@ impl VyrmRaftTlsServer {
     }
 
     pub async fn serve_connection(&self, stream: TcpStream) -> io::Result<()> {
+        if !self.gate.is_enabled() {
+            return Err(io::Error::new(
+                io::ErrorKind::ConnectionRefused,
+                "local Raft transport is disabled",
+            ));
+        }
         let mut stream = self.acceptor.accept(stream).await?;
         let peer = certificate_spiffe_id(stream.get_ref().1.peer_certificates())?;
         let envelope: WireEnvelope = read_frame(&mut stream).await?;
@@ -530,7 +585,7 @@ fn peer_binding_for_node(
     })
 }
 
-fn verify_peer_identity(
+pub fn verify_vyrm_certificate_identity(
     certificates: Option<&[CertificateDer<'_>]>,
     expected: &VyrmTransportBinding,
 ) -> ClusterResult<()> {
@@ -542,6 +597,13 @@ fn verify_peer_identity(
         ));
     }
     Ok(())
+}
+
+fn verify_peer_identity(
+    certificates: Option<&[CertificateDer<'_>]>,
+    expected: &VyrmTransportBinding,
+) -> ClusterResult<()> {
+    verify_vyrm_certificate_identity(certificates, expected)
 }
 
 fn certificate_spiffe_id(certificates: Option<&[CertificateDer<'_>]>) -> io::Result<String> {

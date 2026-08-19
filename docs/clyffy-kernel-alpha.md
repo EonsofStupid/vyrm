@@ -148,9 +148,12 @@ measured local results, never universal superiority.
    request retention.
    An opt-in TLS 1.3/mTLS OpenRaft transport now binds canonical workload
    identity and bounded RPC envelopes and passes real loopback replication plus
-   post-purge snapshot catch-up. Independent-process chaos, credential
-   rotation/revocation, chunked/file-backed local snapshot handling, and
-   Multi-AZ evidence remain open.
+   post-purge snapshot catch-up. A real node executable and versioned local
+   supervisor contract additionally pass four-process crash/restart, live
+   partition failover, reconciliation, post-purge snapshot catch-up, identity
+   denial, and corrupt-pointer restart denial on one host. Independent-host and
+   hardware chaos, credential rotation/revocation, file-backed bounded-memory
+   snapshot handling, and Multi-AZ evidence remain open.
 8. Bind declared package workflows to preflight/pre-tool/post-tool policy.
 9. Extend truthful temporal visualization across storage, search, and workflow
    events and continue controlled provider evaluations.

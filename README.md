@@ -53,8 +53,11 @@ Vyrm provides:
   and transfers that runtime truth to post-purge learners through authenticated
   physical snapshots, with explicit membership-bound placement epochs and
   bounded request identity retention; an opt-in TLS 1.3/mTLS transport binds
-  every RPC to canonical workload identity and bounded frames (production
-  clustering remains gated);
+  every RPC to canonical workload identity and bounded frames. A real node
+  executable and versioned local supervisor protocol now prove process-isolated
+  crash/restart, leader replacement during a live transport partition,
+  reconciliation, post-purge learner snapshot catch-up, identity confusion
+  denial, and corrupt-pointer refusal (production clustering remains gated);
 - identical lifecycle semantics through hooks, CLI, and MCP;
 - isolated per-platform instances with explicit store/root binding.
 

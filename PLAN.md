@@ -213,6 +213,20 @@ disagree, `SPEC.md` is authoritative and this document is wrong.
 > Independent-process chaos, rotation/revocation, production telemetry, and
 > Multi-AZ evidence remain open.
 
+> **M7 process-isolation overlay (2026-08-19).** The feature-gated
+> `vyrm-cluster-node` executable opens one durable shard root, validates its own
+> canonical SPIFFE leaf before readiness, and serves the authenticated OpenRaft
+> transport. A bounded/versioned/request-correlated JSON-lines lifecycle
+> protocol stays on inherited stdin/stdout rather than exposing an
+> unauthenticated network admin port. A four-OS-process black-box run now covers
+> abrupt crash/restart and catch-up, leader failover and commit, controlled
+> bidirectional transport isolation of the live leader, majority-side election
+> and commit, healing/reconciliation, log-purged physical snapshot catch-up,
+> certificate/node confusion denial, and corrupt `CURRENT` refusal. Five
+> consecutive stress repetitions pass. This is process-isolation evidence on
+> one host, not independent-host, credential-lifecycle, production telemetry,
+> bounded-memory snapshot, or Multi-AZ certification.
+
 > **M7 canonical-runtime overlay (2026-08-19).** Adapter format `v2` first added a
 > typed `runtime_commit` operation. `NativeEngine` now exposes a validated
 > no-write plan, allowing canonical mutations, audit/outbox work, the Raft
@@ -221,8 +235,9 @@ disagree, `SPEC.md` is authoritative and this document is wrong.
 > same-frame differentials are green. A real three-voter run reopens identical
 > canonical runtime truth through `NativeEngine` on every voter. Runtime-bearing
 > snapshots are now transferred by adapter v4's physical ownership split and
-> the opt-in authenticated transport. Independent-process chaos, credential
-> lifecycle, and Multi-AZ evidence remain open.
+> the opt-in authenticated transport. One-host process-isolation chaos now
+> passes through the node runner; independent-host faults, credential lifecycle,
+> and Multi-AZ evidence remain open.
 
 ## 1 · Grounding result
 

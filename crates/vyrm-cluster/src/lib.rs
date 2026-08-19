@@ -16,6 +16,8 @@ mod openraft_adapter;
 mod sim;
 #[cfg(feature = "openraft-transport")]
 mod transport;
+#[cfg(feature = "openraft-transport")]
+mod node_runtime;
 
 pub use contract::*;
 #[cfg(feature = "openraft-adapter")]
@@ -23,3 +25,5 @@ pub use openraft_adapter::*;
 pub use sim::*;
 #[cfg(feature = "openraft-transport")]
 pub use transport::*;
+#[cfg(feature = "openraft-transport")]
+pub use node_runtime::*;

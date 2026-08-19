@@ -67,9 +67,18 @@ not roadmap language.
   binding, 16 MiB pre-allocation frame limits, OpenRaft hard TTLs, 256-RPC
   admission, and a 30-second ingress lifetime fail closed. A four-node loopback
   run covers election, replication, post-purge snapshot catch-up, certificate
-  impersonation denial, and authenticated vote-source forgery denial.
-  Independent-process/network/disk chaos, certificate rotation/revocation,
-  production observability, and Multi-AZ deployment remain unclaimed.
+  impersonation denial, and authenticated vote-source forgery denial. The
+  feature also ships a real `vyrm-cluster-node` process boundary with a bounded,
+  versioned, request-correlated JSON-lines supervisor protocol over inherited
+  stdin/stdout. A four-process black-box run proves abrupt voter restart and
+  catch-up, failover write, bidirectional live-leader transport isolation,
+  majority-side replacement and write, healing/reconciliation, post-purge
+  physical snapshot catch-up, leaf/node identity confusion denial before
+  readiness, and corrupt VyrmKV `CURRENT` refusal on restart. The monotonic
+  wait contract is stress-tested against learners that advance beyond the
+  requested index. Independent hosts/hardware faults, certificate
+  rotation/revocation, production observability, and Multi-AZ deployment remain
+  unclaimed.
   Placement epochs are now explicit replicated `placement_transition`
   operations: initialization must be epoch 1, advances must be exact successors,
   and declared voter canonical ids/zones must equal the applied OpenRaft

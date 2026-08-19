@@ -1,7 +1,8 @@
 # Vyrm M7 cluster contract and deterministic simulation
 
-Status: protocol/simulation gate plus the first real-consensus adapter slice
-implemented on 2026-08-19. This is not a production Multi-AZ implementation.
+Status: protocol/simulation, real-consensus adapter, authenticated transport,
+and one-host process-isolation gates implemented on 2026-08-19. This is not a
+production Multi-AZ implementation.
 
 ## Outcome
 
@@ -134,6 +135,45 @@ fault events; the in-process test exercises the real consensus engine and
 durable adapter. The latter uses a controlled wall-clock lease wait and is not
 represented as deterministic virtual-time model checking.
 
+## Process-isolated node evidence
+
+The feature-gated `vyrm-cluster-node` executable is the first deployable process
+boundary. It opens one shard's durable VyrmKV domains, verifies that its own
+leaf certificate's exact SPIFFE URI matches the configured canonical node before
+emitting readiness, and then serves the authenticated OpenRaft transport. Node
+configuration and TLS inputs are size bounded. Lifecycle control is a versioned,
+request-correlated JSON-lines contract over inherited stdin/stdout, not a public
+unauthenticated admin listener. Unknown envelope fields, unsupported versions,
+invalid request identities, empty frames, and frames above 1 MiB fail closed;
+oversized input is drained only to the next newline without unbounded allocation.
+
+A black-box integration run owns four child processes and four independent data
+roots. It:
+
+1. forms three voters, commits placement and application probes, abruptly kills
+   a voter, commits with quorum, restarts that voter, and waits for catch-up;
+2. abruptly kills the leader, elects another voter, and commits after the
+   leadership no-op is durably applied;
+3. disables both ingress and egress at the live leader's transport boundary,
+   elects and commits on the majority side, heals the partition, and proves the
+   isolated process advances to at least the committed index;
+4. creates a physical snapshot, purges the leader log, starts the fourth process
+   as a learner, and proves its applied state and snapshot cursor catch up;
+5. denies readiness when a node-four config is paired with node three's trusted
+   leaf; and
+6. shuts down the learner, corrupts its VyrmKV `CURRENT` pointer, and proves
+   restart refuses readiness with an error.
+
+The complete scenario passes five consecutive stress repetitions. It also
+exposed and corrected an exact-equality wait race: supervisor `wait_applied`
+now means monotonic “at least,” so a follower that advances beyond the requested
+index cannot falsely time out.
+
+This is deliberately scoped evidence. The processes share one host and loopback
+network; the transport gate is controlled fault injection, not a kernel/network
+appliance; and the corrupted object is one authenticated pointer, not an
+exhaustive disk/controller fault campaign.
+
 Research sources, retrieved 2026-08-19:
 
 - [OpenRaft releases](https://github.com/databendlabs/openraft/releases)
@@ -225,8 +265,8 @@ implementations, not production throughput or footprint claims. Commands are
 limited to 1 MiB and physical snapshot envelopes to 1 GiB until compact and
 streaming codecs land.
 
-The next M7 slice must run process/network/disk chaos on independently restarted
-nodes and prove a credential lifecycle compatible with rotating workload
-identity. File-backed, bounded-memory snapshot creation/receipt is also required
-before high-volume cluster claims. Only that evidence can advance a Multi-AZ
-claim.
+The next M7 slice must extend the passing one-host process matrix to independent
+hosts and real network/disk fault mechanisms, and prove a credential lifecycle
+compatible with rotating and revoking workload identity. File-backed,
+bounded-memory snapshot creation/receipt is also required before high-volume
+cluster claims. Only that evidence can advance a Multi-AZ claim.
