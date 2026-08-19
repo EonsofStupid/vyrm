@@ -125,9 +125,14 @@ measured local results, never universal superiority.
 4. **Complete at the local M4 gate:** unified vector/series/geo/object
    mutations, verified content-addressed publication, atomic outbox/audit, and
    idempotent retry. Live S3 endpoint certification remains deployment evidence.
-5. Build exact dense/sparse/multivector search and its oracle before ANN.
-6. Bind declared package workflows to preflight/pre-tool/post-tool policy.
-7. Extend truthful temporal visualization across storage, search, and workflow
+5. **Complete at the local M5 gate:** exact dense/sparse/multivector truth,
+   filter-aware dense HNSW with exact reranking, projection lifecycle, and a
+   retained recall/latency/memory/update/delete/reopen baseline. Compact
+   artifacts, SIMD/GPU/edge work, and external Qdrant proof remain open.
+6. Build provider-neutral embedding jobs, compact/edge artifacts, and CPU/GPU
+   parity before competitive vector claims.
+7. Bind declared package workflows to preflight/pre-tool/post-tool policy.
+8. Extend truthful temporal visualization across storage, search, and workflow
    events and continue controlled provider evaluations.
-8. Cut the Vyrm alpha manifest; only then scaffold the separate Clyffy master
+9. Cut the Vyrm alpha manifest; only then scaffold the separate Clyffy master
    repository and its signed tier/update system.

@@ -178,8 +178,14 @@ artifact even on failure.
   executable WAL/MVCC/segment/manifest/checkpoint/compaction/GC engine and a
   locally passing promotion baseline; broader promotion and removal of the
   Fjall oracle remain open. `vyrmQL`
-  and the exact reference slice of `vyrmMX` are implemented; later M5 search
-  operators must compete against that oracle instead of weakening it. The
+  and the exact reference slice of `vyrmMX` are implemented. M5 now adds a
+  separate `vyrm-vector` exact dense/sparse/multivector oracle, deterministic
+  filter-aware HNSW, exact reranking, immutable authenticated artifacts,
+  freshness/cost planning, CAS generation retirement/quarantine, a portable
+  fixture, backend differential, recall gate, and update/delete/reopen soak.
+  The retained 10k×128 local profile records 0.98 recall@10 at `ef=256`, but
+  also records 3.90× JSON artifact overhead; no Qdrant comparison or general
+  superiority is claimed. The
   shared data-runtime v1 contract now includes content-addressed read stamps,
   leased snapshot handles,
   read-bound transactions and prospective read-your-writes views, projection
@@ -188,11 +194,11 @@ artifact even on failure.
   lease/pin inventory, expiry, release, restart persistence, stamped reads, and
   a tested global-serializable same/disjoint conflict policy. A deterministic
   64-write mixed-scope backend differential is green. Physical segment pins
-  are implemented in native M3. M0 through M4 are complete at their local
-  executable gates. Exact/ANN vector search, embedding generation, GPU
-  builders, edge packaging, and Multi-AZ capabilities remain sequenced work,
-  not current product claims. See
-  `docs/vyrmds-architecture-research.md`.
+  are implemented in native M3. M0 through M5 are complete at their local
+  executable gates. Embedding generation, compact binary/mmap vector
+  artifacts, SIMD/GPU builders, edge packaging, and Multi-AZ capabilities
+  remain sequenced work, not current product claims. See
+  `docs/vyrmds-architecture-research.md` and `docs/vyrm-vector-search.md`.
 
 - JavaScript application-run claims now use script-sensitive canonical event
   subjects such as `package:bun:test`, `package:pnpm:run:typecheck`, and

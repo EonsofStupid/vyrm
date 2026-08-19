@@ -1154,6 +1154,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "vyrm-vector"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "tempfile",
+ "vyrm-core",
+ "vyrm-store",
+]
+
+[[package]]
 name = "vyrmd"
 version = "0.1.0"
 dependencies = [

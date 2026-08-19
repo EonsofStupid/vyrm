@@ -1,0 +1,154 @@
+{
+  "approximate_hits": [
+    {
+      "reference": { "id": "a", "kind": "embedding" },
+      "score": 0.800000011920929,
+      "source_cursor": 4,
+      "subject": { "id": "a", "kind": "document" }
+    },
+    {
+      "reference": { "id": "c", "kind": "embedding" },
+      "score": 0.6000000238418579,
+      "source_cursor": 3,
+      "subject": { "id": "c", "kind": "document" }
+    }
+  ],
+  "candidates": [
+    {
+      "scope": "instance:vector-golden",
+      "source_cursor": 1,
+      "vector": {
+        "field": "body",
+        "id": "a",
+        "kind": "embedding",
+        "properties": { "temperature": { "type": "string", "value": "hot" } },
+        "subject": { "id": "a", "kind": "document" },
+        "valid_from": 1,
+        "value": { "kind": "dense", "values": [1.0, 0.0] }
+      }
+    },
+    {
+      "scope": "instance:vector-golden",
+      "source_cursor": 2,
+      "vector": {
+        "field": "body",
+        "id": "b",
+        "kind": "embedding",
+        "properties": { "temperature": { "type": "string", "value": "cold" } },
+        "subject": { "id": "b", "kind": "document" },
+        "valid_from": 1,
+        "value": { "kind": "dense", "values": [0.0, 1.0] }
+      }
+    },
+    {
+      "scope": "instance:vector-golden",
+      "source_cursor": 3,
+      "vector": {
+        "field": "body",
+        "id": "c",
+        "kind": "embedding",
+        "properties": { "temperature": { "type": "string", "value": "hot" } },
+        "subject": { "id": "c", "kind": "document" },
+        "valid_from": 1,
+        "value": {
+          "kind": "dense",
+          "values": [0.6000000238418579, 0.4000000059604645]
+        }
+      }
+    },
+    {
+      "scope": "instance:vector-golden",
+      "source_cursor": 4,
+      "vector": {
+        "field": "body",
+        "id": "a",
+        "kind": "embedding",
+        "properties": { "temperature": { "type": "string", "value": "hot" } },
+        "subject": { "id": "a", "kind": "document" },
+        "valid_from": 1,
+        "value": {
+          "kind": "dense",
+          "values": [0.800000011920929, 0.20000000298023224]
+        }
+      }
+    }
+  ],
+  "comment": "M5 portable vector contract; changes require an explicit format-version decision",
+  "exact_hits": [
+    {
+      "reference": { "id": "a", "kind": "embedding" },
+      "score": 0.800000011920929,
+      "source_cursor": 4,
+      "subject": { "id": "a", "kind": "document" }
+    },
+    {
+      "reference": { "id": "c", "kind": "embedding" },
+      "score": 0.6000000238418579,
+      "source_cursor": 3,
+      "subject": { "id": "c", "kind": "document" }
+    }
+  ],
+  "hnsw_descriptor": {
+    "dimensions": 2,
+    "ef_construction": 8,
+    "field": "body",
+    "filter_properties": ["temperature"],
+    "m": 4,
+    "max_level": 4,
+    "metric": "dot",
+    "nodes": 4,
+    "scope": "instance:vector-golden",
+    "stamp": {
+      "artifact_digest": "c7b9edf1731ba980e28e25029f3b645a6416673446572070f93c6c6544a4ba30",
+      "config_digest": "229d146576a37ed2a6268dc9a523d1d49fc69f1380d70624ee353a3a3deabf96",
+      "contract_version": 1,
+      "generation": 1,
+      "id": "vector:hnsw:golden",
+      "source_cursor": 4,
+      "state": "ready"
+    }
+  },
+  "request": {
+    "field": "body",
+    "filter": {
+      "condition": {
+        "operator": "equals",
+        "property": "temperature",
+        "value": { "type": "string", "value": "hot" }
+      },
+      "kind": "condition"
+    },
+    "metric": "dot",
+    "mode": { "mode": "exact" },
+    "query": { "kind": "dense", "values": [1.0, 0.0] },
+    "read": {
+      "catalog_revision": 0,
+      "commit_cursor": 4,
+      "contract_version": 1,
+      "head_digest": "1111111111111111111111111111111111111111111111111111111111111111",
+      "manifest_id": "b32f8521fa33fa2136177f650d9da9fccde6a8033d789d9b776a26e437e9a858",
+      "scope": "instance:vector-golden"
+    },
+    "scope": "instance:vector-golden",
+    "top_k": 2,
+    "valid_at": 10
+  },
+  "segment_descriptor": {
+    "candidate_versions": 4,
+    "dimensions": 2,
+    "field": "body",
+    "filter_properties": ["temperature"],
+    "metric": "dot",
+    "minimum_cursor": 0,
+    "scope": "instance:vector-golden",
+    "stamp": {
+      "artifact_digest": "c1ac9fb9e5451aa7a080226d94dc8327b67427622aca5f7be603f6e35f75f034",
+      "config_digest": "fb9ba3b9a0879da2ba42f3ed3076e2cd80e19c6d803e5586fdfdf48c579f44c3",
+      "contract_version": 1,
+      "generation": 1,
+      "id": "vector:exact:golden",
+      "source_cursor": 4,
+      "state": "ready"
+    }
+  }
+}

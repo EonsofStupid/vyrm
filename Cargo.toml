@@ -5,6 +5,7 @@ members = [
     "crates/vyrm-ql",
     "crates/vyrm-store",
     "crates/vyrm-mx",
+    "crates/vyrm-vector",
     "crates/vyrm-kv",
     "crates/vyrm-graph",
     "crates/vyrm-node",

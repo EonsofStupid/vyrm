@@ -439,6 +439,10 @@ canonical mutation families; local/S3 adapter differential.
 
 ### M5 — vector/search subsystem
 
+Local reference gate passed on 2026-08-19. See `vyrm-vector-search.md` for the
+frozen semantics, retained matrix, and the compact-artifact/SIMD/GPU limits that
+remain before competitive proof.
+
 - Ship exact dense/sparse/multivector search, filtered planning, immutable
   segments, HNSW, reranking, quantization experiments, lifecycle generations,
   and coverage-aware query planning.

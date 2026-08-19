@@ -1,0 +1,190 @@
+{
+  "schema": "vyrm.vector-evidence.v1",
+  "profile": {
+    "vectors": 10000,
+    "dimensions": 128,
+    "queries": 25,
+    "top_k": 10,
+    "m": 16,
+    "ef_construction": 100,
+    "seed": 1592639999
+  },
+  "build": {
+    "milliseconds": 18938.477314,
+    "artifact_bytes": 19971560,
+    "raw_f32_payload_bytes": 5120000,
+    "artifact_to_raw_payload_ratio": 3.9006953125,
+    "resident_kib_before_build": 19764,
+    "resident_kib_after_reopen": 90060,
+    "peak_resident_kib_after_reopen": 130348
+  },
+  "quantization": {
+    "payload_bytes": 1320000,
+    "raw_payload_ratio": 0.2578125,
+    "mean_absolute_score_error": 0.0002736899494914036,
+    "recall_at_k_after_exact_rerank": 1.0,
+    "rerank_candidates": 64
+  },
+  "searches": [
+    {
+      "filter_percent": 100,
+      "ef_search": 32,
+      "estimated_graph_cost_units": 128,
+      "planner_preference": "hnsw",
+      "mean_recall_at_k": 0.4760000000000001,
+      "complete_result_rate": 1.0,
+      "exact_mean_milliseconds": 23.038866159999998,
+      "ann_mean_milliseconds": 1.25960052
+    },
+    {
+      "filter_percent": 100,
+      "ef_search": 64,
+      "estimated_graph_cost_units": 256,
+      "planner_preference": "hnsw",
+      "mean_recall_at_k": 0.6639999999999999,
+      "complete_result_rate": 1.0,
+      "exact_mean_milliseconds": 23.376447079999995,
+      "ann_mean_milliseconds": 2.1794635999999996
+    },
+    {
+      "filter_percent": 100,
+      "ef_search": 128,
+      "estimated_graph_cost_units": 512,
+      "planner_preference": "hnsw",
+      "mean_recall_at_k": 0.8919999999999999,
+      "complete_result_rate": 1.0,
+      "exact_mean_milliseconds": 24.55866496,
+      "ann_mean_milliseconds": 4.09867324
+    },
+    {
+      "filter_percent": 100,
+      "ef_search": 256,
+      "estimated_graph_cost_units": 1024,
+      "planner_preference": "hnsw",
+      "mean_recall_at_k": 0.9799999999999999,
+      "complete_result_rate": 1.0,
+      "exact_mean_milliseconds": 23.4595442,
+      "ann_mean_milliseconds": 5.9074387999999995
+    },
+    {
+      "filter_percent": 50,
+      "ef_search": 32,
+      "estimated_graph_cost_units": 256,
+      "planner_preference": "hnsw",
+      "mean_recall_at_k": 0.6439999999999999,
+      "complete_result_rate": 1.0,
+      "exact_mean_milliseconds": 19.27850324,
+      "ann_mean_milliseconds": 1.90859716
+    },
+    {
+      "filter_percent": 50,
+      "ef_search": 64,
+      "estimated_graph_cost_units": 512,
+      "planner_preference": "hnsw",
+      "mean_recall_at_k": 0.8839999999999999,
+      "complete_result_rate": 1.0,
+      "exact_mean_milliseconds": 19.33755576,
+      "ann_mean_milliseconds": 3.2398267999999995
+    },
+    {
+      "filter_percent": 50,
+      "ef_search": 128,
+      "estimated_graph_cost_units": 1024,
+      "planner_preference": "hnsw",
+      "mean_recall_at_k": 0.9719999999999999,
+      "complete_result_rate": 1.0,
+      "exact_mean_milliseconds": 20.267020560000002,
+      "ann_mean_milliseconds": 6.2211676
+    },
+    {
+      "filter_percent": 50,
+      "ef_search": 256,
+      "estimated_graph_cost_units": 2048,
+      "planner_preference": "hnsw",
+      "mean_recall_at_k": 1.0,
+      "complete_result_rate": 1.0,
+      "exact_mean_milliseconds": 20.054377159999998,
+      "ann_mean_milliseconds": 9.04337212
+    },
+    {
+      "filter_percent": 10,
+      "ef_search": 32,
+      "estimated_graph_cost_units": 1280,
+      "planner_preference": "hnsw",
+      "mean_recall_at_k": 0.9440000000000001,
+      "complete_result_rate": 1.0,
+      "exact_mean_milliseconds": 16.71202,
+      "ann_mean_milliseconds": 6.855978280000001
+    },
+    {
+      "filter_percent": 10,
+      "ef_search": 64,
+      "estimated_graph_cost_units": 2560,
+      "planner_preference": "hnsw",
+      "mean_recall_at_k": 0.992,
+      "complete_result_rate": 1.0,
+      "exact_mean_milliseconds": 16.084325959999997,
+      "ann_mean_milliseconds": 8.554944520000001
+    },
+    {
+      "filter_percent": 10,
+      "ef_search": 128,
+      "estimated_graph_cost_units": 5120,
+      "planner_preference": "hnsw",
+      "mean_recall_at_k": 1.0,
+      "complete_result_rate": 1.0,
+      "exact_mean_milliseconds": 16.12833252,
+      "ann_mean_milliseconds": 12.464652320000003
+    },
+    {
+      "filter_percent": 10,
+      "ef_search": 256,
+      "estimated_graph_cost_units": 10240,
+      "planner_preference": "exact_scan",
+      "mean_recall_at_k": 1.0,
+      "complete_result_rate": 1.0,
+      "exact_mean_milliseconds": 16.11966248,
+      "ann_mean_milliseconds": 18.09152652
+    },
+    {
+      "filter_percent": 1,
+      "ef_search": 32,
+      "estimated_graph_cost_units": 12800,
+      "planner_preference": "exact_scan",
+      "mean_recall_at_k": 1.0,
+      "complete_result_rate": 1.0,
+      "exact_mean_milliseconds": 15.41656008,
+      "ann_mean_milliseconds": 19.490040720000003
+    },
+    {
+      "filter_percent": 1,
+      "ef_search": 64,
+      "estimated_graph_cost_units": 25600,
+      "planner_preference": "exact_scan",
+      "mean_recall_at_k": 1.0,
+      "complete_result_rate": 1.0,
+      "exact_mean_milliseconds": 15.585316959999998,
+      "ann_mean_milliseconds": 31.354053160000007
+    },
+    {
+      "filter_percent": 1,
+      "ef_search": 128,
+      "estimated_graph_cost_units": 40000,
+      "planner_preference": "exact_scan",
+      "mean_recall_at_k": 1.0,
+      "complete_result_rate": 1.0,
+      "exact_mean_milliseconds": 15.80545776,
+      "ann_mean_milliseconds": 44.6452634
+    },
+    {
+      "filter_percent": 1,
+      "ef_search": 256,
+      "estimated_graph_cost_units": 40000,
+      "planner_preference": "exact_scan",
+      "mean_recall_at_k": 1.0,
+      "complete_result_rate": 1.0,
+      "exact_mean_milliseconds": 15.854628039999998,
+      "ann_mean_milliseconds": 44.47817688
+    }
+  ]
+}

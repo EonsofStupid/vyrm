@@ -121,8 +121,21 @@ disagree, `SPEC.md` is authoritative and this document is wrong.
 > adapter. Three-engine mixed-family rollback/reopen tests, publication/commit
 > fault injection, quarantine, orphan reclamation, and local/S3 semantic
 > differential are green. Live cloud transport certification and automatic
-> retention-aware object GC are deployment work; M5 exact vector/search is the
-> next subsystem gate. See `docs/vyrmds-object-contract.md`.
+> retention-aware object GC are deployment work. See
+> `docs/vyrmds-object-contract.md`; the M5 overlay below records the next gate.
+
+> **M5 vector/search overlay (2026-08-19).** The local semantic and evidence
+> gate is closed. `vyrm-vector` now supplies the borrowing exact
+> dense/sparse/multivector oracle, bounded typed filters, immutable exact
+> segments, deterministic dense HNSW with filter-aware admission and exact
+> reranking, a freshness-aware planner/executor, unified CAS generation
+> lifecycle, scalar-quantization experiment, portable fixture, backend
+> differential, recall gate, and eight-generation update/delete/reopen/
+> replacement soak. The retained 10k×128 profile reaches 0.98 recall@10 at
+> `ef=256` while exposing a 3.90× JSON-artifact overhead; this is a local
+> baseline, not a Qdrant superiority claim. Compact binary/mmap, SIMD/GPU,
+> sparse/multivector ANN, embeddings, and external comparison remain gated.
+> See `docs/vyrm-vector-search.md`.
 
 ## 1 · Grounding result
 
