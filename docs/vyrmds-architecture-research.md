@@ -508,6 +508,17 @@ Acceptance: every visual value links to its source cursor/snapshot/manifest;
 freeze/rewind uses real persisted events; no synthetic UI state is presented as
 database truth; performance and recall regressions fail CI at explicit bounds.
 
+Status (2026-08-20): the first cross-M3–M6 tracing slice is executable. Exact
+query execution records a nested storage span with complete logical evidence
+and bounded native VyrmKV physical counter deltas. Vector projection
+publication, sealed planning/execution, and embedding inference/read-bound
+commit emit linked, privacy-bounded spans. Vector freshness advances on its
+projection-family source cursor rather than trace traffic; embedding may rebase
+over trace-only observer writes but denies any intervening data/schema change.
+Connectome proves these audited events reach search and storage lanes. Rich
+causal analysis, provider/cluster coverage, persistent artifact-catalog
+publication, OTLP export, and pgvector remain promotion gates.
+
 ## Immediate next implementation slice
 
 M2 is closed and the first M3 storage lifecycle is implemented beside—not

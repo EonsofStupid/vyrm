@@ -1140,10 +1140,19 @@ These apply to every step and are not restated per step.
   causal tree without persisting raw query or parameter values. Connectome's
   GET Query Lab stays read-only. Observer-effect, privacy, failure, visual, and
   Memory/Fjall/native differentials are green.
-- **Next:** emit the contract across VyrmKV, projection/vector/embedding,
-  provider/tool, and cluster boundaries. Connectome must then distinguish
-  complete logical evidence from sampled physical detail and derive causal
-  trees and critical paths.
+- **Complete at the local M3–M6 boundary:** query execution contains a bounded
+  storage child with complete logical evidence and native VyrmKV physical
+  counter deltas. Projection publication and sealed vector plan/execution emit
+  causal spans bound to request, read, plan, catalog, and projection stamps.
+  Embedding inference and vector commit share a causal tree; the commit may
+  rebase across trace-only observer mutations but denies any concurrent data or
+  schema change. Raw vectors, filters, and source content are never persisted.
+  Memory/Fjall/native parity, denial paths, native reopen, and Connectome lane
+  projection are green.
+- **Next:** add provider/tool, storage-write, and cluster boundary coverage,
+  then make Connectome distinguish complete logical evidence from bounded
+  physical detail and derive causal trees and critical paths. Persisted vector
+  artifact catalog publication also remains open.
 - **Then:** implement a project-scoped pgvector operator-knowledge adapter with
   captured source revision, exact/model-space oracle, filtered ANN controls,
   stale denial/fallback, and idempotent outbox. It is not a second canonical

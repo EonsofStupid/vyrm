@@ -42,6 +42,13 @@ pub struct BlockCacheStats {
     pub hits: u64,
     pub misses: u64,
     pub evictions: u64,
+    /// Number of encoded blocks successfully loaded and decoded after a cache
+    /// miss. This may be lower than `misses` when backing reads fail.
+    pub loads: u64,
+    /// Cumulative encoded bytes fetched from the segment backing store.
+    pub bytes_loaded: u64,
+    /// Cumulative resident bytes produced by successful block decoding.
+    pub bytes_decoded: u64,
 }
 
 #[derive(Debug)]
@@ -54,6 +61,9 @@ pub(crate) struct BlockCache {
     hits: u64,
     misses: u64,
     evictions: u64,
+    loads: u64,
+    bytes_loaded: u64,
+    bytes_decoded: u64,
 }
 
 #[derive(Debug)]
@@ -74,6 +84,9 @@ pub(crate) fn new_block_cache(capacity_bytes: usize) -> SharedBlockCache {
         hits: 0,
         misses: 0,
         evictions: 0,
+        loads: 0,
+        bytes_loaded: 0,
+        bytes_decoded: 0,
     }))
 }
 
@@ -88,6 +101,9 @@ pub(crate) fn block_cache_stats(cache: &SharedBlockCache) -> BlockCacheStats {
         hits: cache.hits,
         misses: cache.misses,
         evictions: cache.evictions,
+        loads: cache.loads,
+        bytes_loaded: cache.bytes_loaded,
+        bytes_decoded: cache.bytes_decoded,
     }
 }
 
@@ -670,20 +686,25 @@ impl Segment {
             }
             cache.misses = cache.misses.saturating_add(1);
         }
-        let decoded = Arc::new(DecodedBlock::parse(read_and_decode_block(
-            source,
-            &blocks[block_index],
-        )?)?);
+        let block = &blocks[block_index];
+        let decoded = Arc::new(DecodedBlock::parse(read_and_decode_block(source, block)?)?);
+        let encoded_bytes = u64::try_from(block.physical_bytes)
+            .map_err(|_| Error::InvalidSegment("encoded block size exceeds u64".into()))?;
+        let decoded_bytes = decoded.resident_bytes();
+        let decoded_bytes_counter = u64::try_from(decoded_bytes)
+            .map_err(|_| Error::InvalidSegment("decoded block size exceeds u64".into()))?;
         let mut cache = cache
             .lock()
             .map_err(|_| Error::InvalidSegment("block cache lock poisoned".into()))?;
+        cache.loads = cache.loads.saturating_add(1);
+        cache.bytes_loaded = cache.bytes_loaded.saturating_add(encoded_bytes);
+        cache.bytes_decoded = cache.bytes_decoded.saturating_add(decoded_bytes_counter);
         if cache.values.contains_key(&key) {
             cache.touch(key);
             let value = Arc::clone(&cache.values[&key].value);
             cache.maybe_rebuild_order();
             return Ok(value);
         }
-        let decoded_bytes = decoded.resident_bytes();
         if decoded_bytes <= cache.capacity_bytes {
             while cache.resident_bytes.saturating_add(decoded_bytes) > cache.capacity_bytes {
                 let Some(Reverse((stamp, oldest))) = cache.order.pop() else {

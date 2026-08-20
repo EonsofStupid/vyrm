@@ -7,7 +7,7 @@
 
 use crate::{
     migration_status, Durability, Engine, Error, Invocation, InvocationInput, MigrationPhase,
-    NativeEngine, RecallOutcome, RemovalReport, Result, Store,
+    NativeEngine, PhysicalStoreEvidence, RecallOutcome, RemovalReport, Result, Store,
 };
 use std::path::Path;
 use vyrm_core::{
@@ -156,6 +156,13 @@ impl ClaimSource for PersistentEngine {
 }
 
 impl Engine for PersistentEngine {
+    fn physical_store_evidence(&self) -> Result<PhysicalStoreEvidence> {
+        match self {
+            Self::Native(engine) => Engine::physical_store_evidence(engine),
+            Self::FjallCompatibility(engine) => Engine::physical_store_evidence(engine),
+        }
+    }
+
     fn append_batch(&self, claims: &[Claim]) -> Result<crate::AppendOutcome> {
         match self {
             Self::Native(engine) => Engine::append_batch(engine, claims),
@@ -341,9 +348,7 @@ impl Engine for PersistentEngine {
     fn runtime_commit_outcome(&self, commit_id: &str) -> Result<Option<RuntimeCommitOutcome>> {
         match self {
             Self::Native(engine) => Engine::runtime_commit_outcome(engine, commit_id),
-            Self::FjallCompatibility(engine) => {
-                Engine::runtime_commit_outcome(engine, commit_id)
-            }
+            Self::FjallCompatibility(engine) => Engine::runtime_commit_outcome(engine, commit_id),
         }
     }
 

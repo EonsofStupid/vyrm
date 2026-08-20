@@ -12,6 +12,8 @@ vyrm-graph = { path = "../vyrm-graph" }
 vyrm-ql = { path = "../vyrm-ql" }
 vyrm-mx = { path = "../vyrm-mx" }
 vyrm-store = { path = "../vyrm-store" }
+vyrm-vector = { path = "../vyrm-vector" }
+vyrm-embed = { path = "../vyrm-embed" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tracing = { workspace = true }

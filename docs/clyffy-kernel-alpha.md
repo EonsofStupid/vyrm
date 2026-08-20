@@ -172,7 +172,9 @@ measured local results, never universal superiority.
    persisted mutation stream into reasoning, routing, workflow, model/flight,
    search, and storage/data lanes. Freeze, scrub, rewind, forward, and inspection
    retain the exact cursor, scope, mutation digest, full mutation, and available
-   hash-chained audit envelope. Cursor-delta transport and controlled provider
-   evaluations remain open.
+   hash-chained audit envelope. Query/storage, projection/vector, and embedding
+   runtime spans now feed those lanes with three-engine and native-reopen proof.
+   Causal-tree/critical-path rendering, provider/cluster span coverage,
+   cursor-delta transport, and controlled provider evaluations remain open.
 10. Cut the Vyrm alpha manifest; only then scaffold the separate Clyffy master
    repository and its signed tier/update system.

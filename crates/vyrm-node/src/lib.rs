@@ -19,6 +19,7 @@
 //! turn; recall is the only synchronous path.
 
 pub mod hook;
+pub mod data_plane;
 pub mod init;
 pub mod instance;
 pub mod policy;
@@ -32,6 +33,10 @@ pub mod trace;
 pub mod workflow;
 
 pub use hook::{handle, HookContext, HookEvent, HookResponse};
+pub use data_plane::{
+    execute_traced_embedding, execute_traced_vector_search, publish_traced_vector_artifact,
+    TracedEmbeddingExecution, TracedVectorSearch,
+};
 pub use init::{init, InitReport, STORE_DIR};
 pub use instance::{
     InstanceBinding, InstanceManifest, InstanceMode, INSTANCE_FILE, INSTANCE_FORMAT,

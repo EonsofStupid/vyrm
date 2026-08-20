@@ -158,6 +158,51 @@ fn snapshot_exposes_runtime_objects_without_mutating_the_store() {
         .unwrap(),
     )
     .unwrap();
+    for (seed, actor, domain, name, duration_micros) in [
+        (
+            b"connectome-vector-trace".as_slice(),
+            "vector:test",
+            TraceDomain::Search,
+            "vector.search",
+            375,
+        ),
+        (
+            b"connectome-embedding-trace".as_slice(),
+            "embedding:test",
+            TraceDomain::Embedding,
+            "embedding.run",
+            500,
+        ),
+        (
+            b"connectome-storage-trace".as_slice(),
+            "storage:test",
+            TraceDomain::Storage,
+            "vyrmkv.runtime_read",
+            75,
+        ),
+    ] {
+        let identity = vyrm_node::TraceIdentity::derive(&[seed]).unwrap();
+        vyrm_node::record_runtime_trace(
+            &store,
+            &ScopeId::new(vyrm_node::REASONING_SCOPE).unwrap(),
+            actor,
+            RuntimeTraceEvent::finish(
+                identity.trace_id,
+                identity.span_id,
+                None,
+                domain,
+                name,
+                10,
+                duration_micros,
+                TraceOutcome::Ok,
+                TraceDataClass::Control,
+                Vec::new(),
+                RuntimeProperties::new(),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+    }
     let lease = store
         .open_runtime_snapshot(
             &vyrm_core::ScopeId::new("instance:default").unwrap(),
@@ -172,11 +217,11 @@ fn snapshot_exposes_runtime_objects_without_mutating_the_store() {
     assert_eq!(snapshot.instance.mode, "dedicated");
     assert_eq!(snapshot.health.storage_backend, "vyrmkv_native");
     assert_eq!(snapshot.health.current_claims, 2);
-    assert_eq!(snapshot.health.runtime_cursor, 14);
+    assert_eq!(snapshot.health.runtime_cursor, 17);
     assert_eq!(snapshot.health.schema_revision, Some(2));
     assert_eq!(snapshot.health.snapshot_leases, 1);
     assert_eq!(snapshot.health.retention_pins, 1);
-    assert_eq!(snapshot.health.oldest_retained_cursor, Some(14));
+    assert_eq!(snapshot.health.oldest_retained_cursor, Some(17));
     let retention = connectome_ui::runtime_retention(&store, 10).unwrap();
     assert_eq!(retention.snapshots, vec![lease.clone()]);
     assert_eq!(retention.pins[0].snapshot_id, lease.id);
@@ -225,6 +270,21 @@ fn snapshot_exposes_runtime_objects_without_mutating_the_store() {
     assert_eq!(plan_trace.family, "routing");
     assert_eq!(plan_trace.action, "trace_finish");
     assert_eq!(plan_trace.detail, "planning; ok; 125 µs");
+    for (label, family, detail) in [
+        ("vector.search", "search", "search; ok; 375 µs"),
+        ("embedding.run", "search", "embedding; ok; 500 µs"),
+        ("vyrmkv.runtime_read", "storage", "storage; ok; 75 µs"),
+    ] {
+        let event = snapshot
+            .temporal_events
+            .iter()
+            .find(|event| event.label == label)
+            .unwrap_or_else(|| panic!("{label} trace is visible in the temporal stream"));
+        assert_eq!(event.family, family);
+        assert_eq!(event.action, "trace_finish");
+        assert_eq!(event.detail, detail);
+        assert!(event.audit.is_some());
+    }
     assert_eq!(
         store.sequence().unwrap(),
         before,

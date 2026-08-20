@@ -375,7 +375,7 @@ fn query_command_is_project_bound_observer_safe_and_durably_traced() {
     assert_eq!(result["execution"]["scanned_changes"], 2);
 
     let store = PersistentEngine::open(&db).unwrap();
-    assert_eq!(store.runtime_cursor().unwrap(), 10);
+    assert_eq!(store.runtime_cursor().unwrap(), 12);
     let changes = store
         .runtime_changes_since(
             0,
@@ -391,6 +391,7 @@ fn query_command_is_project_bound_observer_safe_and_durably_traced() {
     assert!(encoded_changes.contains("vyrmql.parse_bind"));
     assert!(encoded_changes.contains("vyrmmx.plan"));
     assert!(encoded_changes.contains("vyrmmx.execute"));
+    assert!(encoded_changes.contains("vyrmkv.runtime_read"));
 }
 
 #[test]

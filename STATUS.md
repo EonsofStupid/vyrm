@@ -1,4 +1,4 @@
-# Runtime status — 2026-08-19
+# Runtime status — 2026-08-20
 
 vyrm now implements the complete runtime loop described by the current plan.
 It is pre-release software, but the listed behavior is executable and tested,
@@ -199,6 +199,20 @@ not roadmap language.
   plan/read coordinates, and result counts without persisting raw query or
   parameter values. Observer-effect and Memory/Fjall/native parity tests are
   green.
+- The local M3–M6 data path now emits one durable causal evidence model rather
+  than disconnected telemetry. Query execution brackets an exact storage-read
+  span; all engines report logical work and native VyrmKV additionally reports
+  bounded manifest, memtable, segment, shared-cache, block-load, and byte
+  deltas. Vector search seals and revalidates its prepared plan against request
+  digest and catalog revision, links the selected projection generation, and
+  derives freshness from vector-family work rather than trace traffic.
+  Projection publication records source/config/artifact identities. Embedding
+  records inference and authoritative vector commit separately; it can rebase
+  only over valid trace events and denies any intervening data/schema mutation.
+  Three-engine parity, failure/denial, privacy, native reopen, and audited
+  Connectome search/embedding/storage lane tests are green. Provider/tool and
+  cluster spans, richer causal rendering, persistent vector artifact catalogs,
+  and the project-scoped pgvector adapter remain open.
 - M3 native storage has passed its first strict local promotion baseline in the
   standalone `vyrm-kv` crate. WAL v1
   now has frozen CRC32C file/frame formats, atomic batch sequence ranges,

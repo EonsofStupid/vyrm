@@ -288,8 +288,14 @@ fn database_block_cache_is_shared_bounded_and_observable() {
     database.get(b"cache:0001", snapshot).unwrap();
     let after_miss = database.block_cache_stats();
     assert_eq!(after_miss.misses, 1);
+    assert_eq!(after_miss.loads, 1);
+    assert!(after_miss.bytes_loaded > 0);
+    assert!(after_miss.bytes_decoded >= after_miss.bytes_loaded);
     database.get(b"cache:0001", snapshot).unwrap();
-    assert_eq!(database.block_cache_stats().hits, 1);
+    let after_hit = database.block_cache_stats();
+    assert_eq!(after_hit.hits, 1);
+    assert_eq!(after_hit.loads, after_miss.loads);
+    assert_eq!(after_hit.bytes_loaded, after_miss.bytes_loaded);
     for index in [70, 140, 210, 299] {
         database
             .get(format!("cache:{index:04}").as_bytes(), snapshot)

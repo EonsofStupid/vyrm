@@ -38,7 +38,7 @@ mod store;
 mod writer;
 
 pub use ds::{DataRuntime, DataRuntimeStep};
-pub use engine::{Engine, MemoryEngine};
+pub use engine::{Engine, MemoryEngine, PhysicalStoreEvidence};
 pub use error::{Error, Result};
 pub use gc::{PairStatus, RemovalReport, Verdict};
 pub use invocation::{Effectiveness, Invocation, InvocationInput, Outcome, RecallOutcome, Trigger};

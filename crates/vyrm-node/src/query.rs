@@ -15,7 +15,7 @@ use vyrm_core::{
 use vyrm_mx::{BoundQuery, Catalog, PhysicalPlan, QueryExecution};
 pub use vyrm_mx::{ExecutionBudget, Parameters};
 use vyrm_ql::{Query, Source, QUERY_CONTRACT_VERSION};
-use vyrm_store::Engine;
+use vyrm_store::{Engine, PhysicalStoreEvidence};
 
 const MAX_QUERY_BYTES: usize = 64 * 1024;
 const MAX_QUERY_PARAMETERS: usize = 128;
@@ -359,15 +359,16 @@ pub fn execute_traced_query<E: Engine>(
     }
 
     let execution_identity = root_identity.child(&[b"vyrmmx.execute"])?;
+    let storage_identity = execution_identity.child(&[b"vyrmkv.runtime_read"])?;
     let mut execution_links = links;
     execution_links.push(TraceLink::Plan {
         plan_digest: plan.digest.clone(),
     });
     let execution_span = match DurableTraceSpan::start(
         store,
-        scope,
+        scope.clone(),
         actor,
-        execution_identity,
+        execution_identity.clone(),
         Some(root_identity.span_id),
         TraceDomain::Query,
         "vyrmmx.execute",
@@ -389,7 +390,39 @@ pub fn execute_traced_query<E: Engine>(
             )
         }
     };
-    let execution = match vyrm_mx::execute(store, &plan, budget) {
+    let storage_span = match DurableTraceSpan::start(
+        store,
+        scope,
+        actor,
+        storage_identity,
+        Some(execution_identity.span_id),
+        TraceDomain::Storage,
+        "vyrmkv.runtime_read",
+        root.observed_at(),
+        TraceDataClass::Control,
+        execution_links_for_storage(&read, &plan),
+        RuntimeProperties::from([(
+            "evidence_policy".into(),
+            RuntimeValue::String("complete_logical_bounded_physical".into()),
+        )]),
+    ) {
+        Ok(span) => span,
+        Err(error) => {
+            return fail_query(
+                store,
+                Some(execution_span),
+                root,
+                "storage",
+                "trace_start",
+                TraceOutcome::Error,
+                error,
+            )
+        }
+    };
+    let physical_before = store.physical_store_evidence();
+    let execution_result = vyrm_mx::execute(store, &plan, budget);
+    let physical_after = store.physical_store_evidence();
+    let execution = match execution_result {
         Ok(execution) => execution,
         Err(error) => {
             let outcome = if matches!(error, vyrm_mx::Error::Budget(_)) {
@@ -397,17 +430,59 @@ pub fn execute_traced_query<E: Engine>(
             } else {
                 TraceOutcome::Error
             };
+            let error_class = mx_error_class(&error);
+            let rendered = error.to_string();
+            let mut storage_attributes =
+                physical_storage_attributes(&physical_before, &physical_after, None);
+            storage_attributes.insert(
+                "error_class".into(),
+                RuntimeValue::String(error_class.into()),
+            );
+            storage_attributes.insert(
+                "error_digest".into(),
+                RuntimeValue::Digest(digest::sha256_hex(rendered.as_bytes())),
+            );
+            let error: Box<dyn std::error::Error> = error.into();
+            if let Err(trace_error) =
+                storage_span.finish(store, outcome, Vec::new(), storage_attributes)
+            {
+                return fail_query(
+                    store,
+                    Some(execution_span),
+                    root,
+                    "storage",
+                    "trace_finish",
+                    TraceOutcome::Error,
+                    format!("{rendered}; storage trace finish failed: {trace_error}").into(),
+                );
+            }
             return fail_query(
                 store,
                 Some(execution_span),
                 root,
                 "execution",
-                mx_error_class(&error),
+                error_class,
                 outcome,
-                error.into(),
+                error,
             );
         }
     };
+    if let Err(error) = storage_span.finish(
+        store,
+        TraceOutcome::Ok,
+        Vec::new(),
+        physical_storage_attributes(&physical_before, &physical_after, Some(&execution)),
+    ) {
+        return fail_query(
+            store,
+            Some(execution_span),
+            root,
+            "storage",
+            "trace_finish",
+            TraceOutcome::Error,
+            error,
+        );
+    }
     let execution_attributes = execution_attributes(&execution);
     if let Err(error) = execution_span.finish(
         store,
@@ -444,6 +519,167 @@ pub fn execute_traced_query<E: Engine>(
         plan,
         execution,
     })
+}
+
+fn execution_links_for_storage(read: &vyrm_core::ReadStamp, plan: &PhysicalPlan) -> Vec<TraceLink> {
+    vec![
+        TraceLink::Read {
+            stamp: read.clone(),
+        },
+        TraceLink::Plan {
+            plan_digest: plan.digest.clone(),
+        },
+    ]
+}
+
+fn physical_storage_attributes(
+    before: &Result<PhysicalStoreEvidence, vyrm_store::Error>,
+    after: &Result<PhysicalStoreEvidence, vyrm_store::Error>,
+    execution: Option<&QueryExecution>,
+) -> RuntimeProperties {
+    let mut attributes = RuntimeProperties::new();
+    match (before, after) {
+        (Ok(before), Ok(after)) => {
+            attributes.insert(
+                "backend".into(),
+                RuntimeValue::String(after.backend.clone()),
+            );
+            attributes.insert(
+                "physical_evidence".into(),
+                RuntimeValue::String(after.evidence_level.clone()),
+            );
+            attributes.insert(
+                "physical_evidence_consistent".into(),
+                RuntimeValue::Bool(
+                    before.backend == after.backend
+                        && before.evidence_level == after.evidence_level,
+                ),
+            );
+            insert_counter(
+                &mut attributes,
+                "physical_sequence",
+                after.physical_sequence,
+            );
+            insert_counter(
+                &mut attributes,
+                "manifest_generation",
+                after.manifest_generation,
+            );
+            insert_counter(&mut attributes, "durable_sequence", after.durable_sequence);
+            insert_counter(
+                &mut attributes,
+                "memtable_versions",
+                after.memtable_versions,
+            );
+            insert_counter(&mut attributes, "memtable_bytes", after.memtable_bytes);
+            insert_counter(&mut attributes, "segment_count", after.segment_count);
+            insert_counter(&mut attributes, "segment_bytes", after.segment_bytes);
+            insert_counter(
+                &mut attributes,
+                "cache_capacity_bytes",
+                after.cache_capacity_bytes,
+            );
+            insert_counter(
+                &mut attributes,
+                "cache_resident_bytes",
+                after.cache_resident_bytes,
+            );
+            insert_counter(&mut attributes, "cache_entries", after.cache_entries);
+            insert_delta(
+                &mut attributes,
+                "cache_hits_delta",
+                before.cache_hits,
+                after.cache_hits,
+            );
+            insert_delta(
+                &mut attributes,
+                "cache_misses_delta",
+                before.cache_misses,
+                after.cache_misses,
+            );
+            insert_delta(
+                &mut attributes,
+                "cache_evictions_delta",
+                before.cache_evictions,
+                after.cache_evictions,
+            );
+            insert_delta(
+                &mut attributes,
+                "block_loads_delta",
+                before.block_loads,
+                after.block_loads,
+            );
+            insert_delta(
+                &mut attributes,
+                "block_bytes_loaded_delta",
+                before.block_bytes_loaded,
+                after.block_bytes_loaded,
+            );
+            insert_delta(
+                &mut attributes,
+                "block_bytes_decoded_delta",
+                before.block_bytes_decoded,
+                after.block_bytes_decoded,
+            );
+        }
+        (Err(before_error), Err(after_error)) => {
+            attributes.insert(
+                "physical_evidence".into(),
+                RuntimeValue::String("unavailable".into()),
+            );
+            attributes.insert(
+                "physical_error_digest".into(),
+                RuntimeValue::Digest(digest::sha256_hex(
+                    format!("{before_error}; {after_error}").as_bytes(),
+                )),
+            );
+        }
+        (Err(error), Ok(after)) | (Ok(after), Err(error)) => {
+            attributes.insert(
+                "backend".into(),
+                RuntimeValue::String(after.backend.clone()),
+            );
+            attributes.insert(
+                "physical_evidence".into(),
+                RuntimeValue::String("partial".into()),
+            );
+            attributes.insert(
+                "physical_error_digest".into(),
+                RuntimeValue::Digest(digest::sha256_hex(error.to_string().as_bytes())),
+            );
+        }
+    }
+    if let Some(execution) = execution {
+        attributes.insert(
+            "logical_scanned_changes".into(),
+            RuntimeValue::Unsigned(execution.scanned_changes as u64),
+        );
+        attributes.insert(
+            "logical_output_bytes".into(),
+            RuntimeValue::Unsigned(execution.output_bytes as u64),
+        );
+    }
+    attributes
+}
+
+fn insert_counter(attributes: &mut RuntimeProperties, name: &str, value: Option<u64>) {
+    if let Some(value) = value {
+        attributes.insert(name.into(), RuntimeValue::Unsigned(value));
+    }
+}
+
+fn insert_delta(
+    attributes: &mut RuntimeProperties,
+    name: &str,
+    before: Option<u64>,
+    after: Option<u64>,
+) {
+    if let (Some(before), Some(after)) = (before, after) {
+        attributes.insert(
+            name.into(),
+            RuntimeValue::Unsigned(after.saturating_sub(before)),
+        );
+    }
 }
 
 fn execution_attributes(execution: &QueryExecution) -> RuntimeProperties {

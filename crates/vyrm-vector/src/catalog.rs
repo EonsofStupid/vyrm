@@ -19,6 +19,13 @@ impl VectorProjectionDescriptor {
         }
     }
 
+    pub fn scope(&self) -> &vyrm_core::ScopeId {
+        match self {
+            Self::ExactSegment { descriptor } => &descriptor.scope,
+            Self::Hnsw { descriptor } => &descriptor.scope,
+        }
+    }
+
     fn stamp_mut(&mut self) -> &mut ProjectionStamp {
         match self {
             Self::ExactSegment { descriptor } => &mut descriptor.stamp,

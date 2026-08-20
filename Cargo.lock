@@ -2766,10 +2766,12 @@ dependencies = [
  "toml",
  "tracing",
  "vyrm-core",
+ "vyrm-embed",
  "vyrm-graph",
  "vyrm-mx",
  "vyrm-ql",
  "vyrm-store",
+ "vyrm-vector",
 ]
 
 [[package]]

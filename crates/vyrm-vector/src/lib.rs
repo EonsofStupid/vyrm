@@ -40,7 +40,7 @@ pub use plan::{
     EXACT_SCAN_PROJECTION_ID,
 };
 pub use quantization::ScalarQuantizedVector;
-pub use runtime::{SearchExecution, VectorArtifact, VectorRuntime};
+pub use runtime::{PreparedVectorSearch, SearchExecution, VectorArtifact, VectorRuntime};
 pub use segment::{
     ImmutableVectorSegment, SegmentDescriptor, VectorSegmentConfig, VECTOR_SEGMENT_FORMAT_VERSION,
 };

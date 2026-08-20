@@ -35,6 +35,10 @@ Vyrm provides:
   workflows, providers, and external operator-knowledge revisions; project
   initialization installs their strict schema, while lifecycle hooks/MCP write
   separate durable start and finish events so crashes remain visible;
+- observer-safe query, storage-read, vector-plan/search, projection-publication,
+  and embedding-inference/commit trace trees; native reads include bounded
+  manifest/memtable/segment/cache/block deltas, while raw queries, parameters,
+  vectors, filters, and embedding source bytes remain outside persisted traces;
 - optimistic concurrency that rejects stale writers instead of losing updates;
 - content-addressed read stamps, persisted snapshot leases, and replay that is
   bounded to the exact captured cursor/hash/schema state;
@@ -136,16 +140,18 @@ cargo run -p vyrm-cli -- \
 ```
 
 That path captures `KNOWN HEAD` before observability writes, then persists one
-parent query span and child parse/bind, planning, and execution spans. Query and
-parameter content remains caller-visible but trace and invocation state retain
-only digests, counts, budgets, plan/read coordinates, and result metrics.
+parent query span and child parse/bind, planning, execution, and physical-store
+read spans. Query and parameter content remains caller-visible but trace and
+invocation state retain only digests, counts, budgets, plan/read coordinates,
+result metrics, and bounded storage counter deltas.
 
 The temporal stream is a read-only projection of the newest 512 authoritative
 runtime mutations in the snapshot (up to 4,096 through the event API), not an
 independent telemetry store. It attaches the full mutation and available
 hash-chained audit envelope. The lanes describe persisted logical mutations;
-they do not imply physical WAL micro-events, unpersisted search execution, or
-private model chain-of-thought.
+search, embedding, and storage lanes now include their persisted runtime spans.
+They do not imply per-operation physical WAL micro-events, complete provider or
+cluster coverage, unpersisted activity, or private model chain-of-thought.
 
 At the Rust port today, `MemoryEngine` and the transitional Fjall adapter expose
 the same versioned read-stamp, snapshot, and data-transaction semantics. The

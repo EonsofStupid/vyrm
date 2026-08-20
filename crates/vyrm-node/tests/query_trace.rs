@@ -157,11 +157,12 @@ fn traced_query_is_observer_safe_causal_and_equal_across_all_engines() {
         memory_result.execution.batches[0].rows[0].identity,
         "record:document:a"
     );
-    assert_eq!(memory.runtime_cursor().unwrap(), 12);
+    assert_eq!(memory.runtime_cursor().unwrap(), 14);
 
-    let normalize = |traces: &[TraceView]| {
+    let normalize_logical = |traces: &[TraceView]| {
         traces
             .iter()
+            .filter(|trace| trace.name != "vyrmkv.runtime_read")
             .map(|trace| {
                 (
                     trace.name.clone(),
@@ -176,8 +177,14 @@ fn traced_query_is_observer_safe_causal_and_equal_across_all_engines() {
             })
             .collect::<Vec<_>>()
     };
-    assert_eq!(normalize(&memory_traces), normalize(&fjall_traces));
-    assert_eq!(normalize(&memory_traces), normalize(&native_traces));
+    assert_eq!(
+        normalize_logical(&memory_traces),
+        normalize_logical(&fjall_traces)
+    );
+    assert_eq!(
+        normalize_logical(&memory_traces),
+        normalize_logical(&native_traces)
+    );
     assert_eq!(
         memory_traces
             .iter()
@@ -194,6 +201,8 @@ fn traced_query_is_observer_safe_causal_and_equal_across_all_engines() {
             ("vyrmmx.plan", "start", "running"),
             ("vyrmmx.plan", "finish", "ok"),
             ("vyrmmx.execute", "start", "running"),
+            ("vyrmkv.runtime_read", "start", "running"),
+            ("vyrmkv.runtime_read", "finish", "ok"),
             ("vyrmmx.execute", "finish", "ok"),
             ("query.run", "finish", "ok"),
         ]
@@ -201,8 +210,13 @@ fn traced_query_is_observer_safe_causal_and_equal_across_all_engines() {
     let root_span = &memory_traces[0].span_id;
     assert!(memory_traces
         .iter()
-        .filter(|trace| trace.name != "query.run")
+        .filter(|trace| trace.name != "query.run" && trace.name != "vyrmkv.runtime_read")
         .all(|trace| trace.parent_span_id.as_ref() == Some(root_span)));
+    let execution_span = &memory_traces[5].span_id;
+    assert!(memory_traces
+        .iter()
+        .filter(|trace| trace.name == "vyrmkv.runtime_read")
+        .all(|trace| trace.parent_span_id.as_ref() == Some(execution_span)));
     assert!(memory_traces
         .iter()
         .all(|trace| trace.trace_id == memory_traces[0].trace_id));
@@ -214,9 +228,24 @@ fn traced_query_is_observer_safe_causal_and_equal_across_all_engines() {
         RuntimeValue::List(vec![RuntimeValue::String("authoritative_log_scan".into())])
     );
     assert_eq!(
-        memory_traces[6].attributes["returned_rows"],
+        memory_traces[8].attributes["returned_rows"],
         RuntimeValue::Unsigned(1)
     );
+    assert_eq!(
+        memory_traces[7].attributes["backend"],
+        RuntimeValue::String("memory".into())
+    );
+    assert_eq!(
+        fjall_traces[7].attributes["backend"],
+        RuntimeValue::String("fjall_compatibility".into())
+    );
+    assert_eq!(
+        native_traces[7].attributes["physical_evidence"],
+        RuntimeValue::String("native_counters".into())
+    );
+    assert!(native_traces[7]
+        .attributes
+        .contains_key("block_bytes_loaded_delta"));
 }
 
 #[test]
@@ -264,11 +293,12 @@ fn parse_and_budget_failures_finish_the_active_tree_with_typed_evidence() {
     .unwrap_err();
     assert!(error.to_string().contains("budget allows 1"));
     let budget_traces = trace_views(&budget_store);
-    assert_eq!(budget_traces.len(), 8);
-    assert_eq!(budget_traces[6].outcome, "denied");
+    assert_eq!(budget_traces.len(), 10);
     assert_eq!(budget_traces[7].outcome, "denied");
+    assert_eq!(budget_traces[8].outcome, "denied");
+    assert_eq!(budget_traces[9].outcome, "denied");
     assert_eq!(
-        budget_traces[6].attributes["error_class"],
+        budget_traces[7].attributes["error_class"],
         RuntimeValue::String("budget".into())
     );
 }

@@ -1,3 +1,4 @@
+use crate::contract::invalid;
 use crate::{EmbeddingModelBinding, ScoreMetric, SearchMode, SearchRequest};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
@@ -77,7 +78,22 @@ impl VectorPlanner {
         request: &SearchRequest,
         candidates: impl IntoIterator<Item = CandidatePath>,
     ) -> Result<SearchPlan> {
+        self.plan_at(request, request.read.commit_cursor, candidates)
+    }
+
+    /// Plans against the newest canonical source cursor for this projection
+    /// family, which may be behind the global runtime cursor when intervening
+    /// mutations (for example durable trace events) do not affect vectors.
+    pub fn plan_at(
+        &self,
+        request: &SearchRequest,
+        required_source_cursor: u64,
+        candidates: impl IntoIterator<Item = CandidatePath>,
+    ) -> Result<SearchPlan> {
         request.validate()?;
+        if required_source_cursor > request.read.commit_cursor {
+            return invalid("vector source cursor exceeds the request read stamp");
+        }
         let required_properties = request
             .filter
             .as_ref()
@@ -90,7 +106,7 @@ impl VectorPlanner {
                 contract_version: vyrm_core::DATA_RUNTIME_CONTRACT_VERSION,
                 id: ProjectionId::new(EXACT_SCAN_PROJECTION_ID)?,
                 generation: 1,
-                source_cursor: request.read.commit_cursor,
+                source_cursor: required_source_cursor,
                 config_digest: "00".repeat(32),
                 artifact_digest: "00".repeat(32),
                 state: ProjectionState::Ready,
@@ -108,7 +124,12 @@ impl VectorPlanner {
         let mut accepted = Vec::new();
         let mut rejected = Vec::new();
         for candidate in std::iter::once(exact_scan).chain(candidates) {
-            let reasons = reject_reasons(request, &candidate, &required_property_set);
+            let reasons = reject_reasons(
+                request,
+                required_source_cursor,
+                &candidate,
+                &required_property_set,
+            );
             if reasons.is_empty() {
                 accepted.push(candidate);
             } else {
@@ -154,7 +175,7 @@ impl VectorPlanner {
                 exact_rerank,
             },
             rejected,
-            required_source_cursor: request.read.commit_cursor,
+            required_source_cursor,
             required_filter_properties: required_properties,
             approximation_requested,
         })
@@ -163,6 +184,7 @@ impl VectorPlanner {
 
 fn reject_reasons(
     request: &SearchRequest,
+    required_source_cursor: u64,
     candidate: &CandidatePath,
     required_properties: &BTreeSet<String>,
 ) -> Vec<String> {
@@ -176,10 +198,10 @@ fn reject_reasons(
             candidate.stamp.state
         ));
     }
-    if candidate.stamp.source_cursor < request.read.commit_cursor {
+    if candidate.stamp.source_cursor < required_source_cursor {
         reasons.push(format!(
             "stale source coverage {} < required {}",
-            candidate.stamp.source_cursor, request.read.commit_cursor
+            candidate.stamp.source_cursor, required_source_cursor
         ));
     }
     if candidate.field != request.field {

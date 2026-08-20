@@ -39,6 +39,57 @@ use vyrm_core::{
     Subject,
 };
 
+/// A read-only physical counter snapshot used to attribute bounded storage
+/// work to one logical operation. Counters are cumulative; callers difference
+/// two snapshots taken immediately around the work. Backends without stable
+/// physical counters return `logical_only` evidence instead of inventing it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PhysicalStoreEvidence {
+    pub backend: String,
+    pub evidence_level: String,
+    pub physical_sequence: Option<u64>,
+    pub manifest_generation: Option<u64>,
+    pub durable_sequence: Option<u64>,
+    pub memtable_versions: Option<u64>,
+    pub memtable_bytes: Option<u64>,
+    pub segment_count: Option<u64>,
+    pub segment_bytes: Option<u64>,
+    pub cache_capacity_bytes: Option<u64>,
+    pub cache_resident_bytes: Option<u64>,
+    pub cache_entries: Option<u64>,
+    pub cache_hits: Option<u64>,
+    pub cache_misses: Option<u64>,
+    pub cache_evictions: Option<u64>,
+    pub block_loads: Option<u64>,
+    pub block_bytes_loaded: Option<u64>,
+    pub block_bytes_decoded: Option<u64>,
+}
+
+impl PhysicalStoreEvidence {
+    pub fn logical_only(backend: impl Into<String>) -> Self {
+        Self {
+            backend: backend.into(),
+            evidence_level: "logical_only".into(),
+            physical_sequence: None,
+            manifest_generation: None,
+            durable_sequence: None,
+            memtable_versions: None,
+            memtable_bytes: None,
+            segment_count: None,
+            segment_bytes: None,
+            cache_capacity_bytes: None,
+            cache_resident_bytes: None,
+            cache_entries: None,
+            cache_hits: None,
+            cache_misses: None,
+            cache_evictions: None,
+            block_loads: None,
+            block_bytes_loaded: None,
+            block_bytes_decoded: None,
+        }
+    }
+}
+
 pub trait Engine: ClaimSource<Error = Error> {
     // ---- primitives every backend supplies ----
 
@@ -137,6 +188,13 @@ pub trait Engine: ClaimSource<Error = Error> {
 
     /// Looks up a durably accepted content identity for coordinator retry.
     fn runtime_commit_outcome(&self, commit_id: &str) -> Result<Option<RuntimeCommitOutcome>>;
+
+    /// Captures cumulative, non-mutating physical counters. This deliberately
+    /// does not emit a trace: callers bracket logical work and persist one
+    /// bounded summary afterward, avoiding recursive tracing of the trace log.
+    fn physical_store_evidence(&self) -> Result<PhysicalStoreEvidence> {
+        Ok(PhysicalStoreEvidence::logical_only("unspecified"))
+    }
 
     /// Commits a mutation envelope bound to its exact read stamp. The existing
     /// runtime CAS remains the final race-proof authority.
@@ -308,6 +366,10 @@ pub trait Engine: ClaimSource<Error = Error> {
 }
 
 impl Engine for Store {
+    fn physical_store_evidence(&self) -> Result<PhysicalStoreEvidence> {
+        Ok(PhysicalStoreEvidence::logical_only("fjall_compatibility"))
+    }
+
     fn append_batch(&self, claims: &[Claim]) -> Result<AppendOutcome> {
         Store::append_batch(self, claims)
     }
@@ -478,6 +540,10 @@ fn infallible<T>(result: std::result::Result<T, std::convert::Infallible>) -> T 
 }
 
 impl Engine for MemoryEngine {
+    fn physical_store_evidence(&self) -> Result<PhysicalStoreEvidence> {
+        Ok(PhysicalStoreEvidence::logical_only("memory"))
+    }
+
     fn append_batch(&self, claims: &[Claim]) -> Result<AppendOutcome> {
         let mut inner = self.inner.lock().expect("engine mutex");
         // Match Fjall rollback: reject the whole batch before mutating either

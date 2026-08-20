@@ -5,7 +5,7 @@
 //! database's physical MVCC sequence is deliberately independent of claim and
 //! runtime cursors stored in the batch.
 
-use crate::engine::Engine;
+use crate::engine::{Engine, PhysicalStoreEvidence};
 use crate::error::{Error, Result};
 use crate::gc::{build_report, RemovalReport, Tally};
 use crate::invocation::{self, Invocation, InvocationInput, RecallOutcome};
@@ -268,6 +268,32 @@ impl ClaimSource for NativeEngine {
 }
 
 impl Engine for NativeEngine {
+    fn physical_store_evidence(&self) -> Result<PhysicalStoreEvidence> {
+        let database = self.lock()?;
+        let manifest = database.manifest();
+        let cache = database.block_cache_stats();
+        Ok(PhysicalStoreEvidence {
+            backend: "vyrmkv_native".into(),
+            evidence_level: "native_counters".into(),
+            physical_sequence: Some(database.snapshot().sequence),
+            manifest_generation: Some(manifest.generation),
+            durable_sequence: Some(manifest.durable_sequence),
+            memtable_versions: Some(database.memtable().version_count() as u64),
+            memtable_bytes: Some(database.memtable().approximate_bytes() as u64),
+            segment_count: Some(manifest.segments.len() as u64),
+            segment_bytes: Some(manifest.segments.iter().map(|segment| segment.bytes).sum()),
+            cache_capacity_bytes: Some(cache.capacity_bytes as u64),
+            cache_resident_bytes: Some(cache.resident_bytes as u64),
+            cache_entries: Some(cache.entries as u64),
+            cache_hits: Some(cache.hits),
+            cache_misses: Some(cache.misses),
+            cache_evictions: Some(cache.evictions),
+            block_loads: Some(cache.loads),
+            block_bytes_loaded: Some(cache.bytes_loaded),
+            block_bytes_decoded: Some(cache.bytes_decoded),
+        })
+    }
+
     #[tracing::instrument(level = "debug", skip_all, fields(claims = claims.len()))]
     fn append_batch(&self, claims: &[Claim]) -> Result<AppendOutcome> {
         for claim in claims {

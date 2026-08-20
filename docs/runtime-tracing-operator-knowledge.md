@@ -1,9 +1,9 @@
 # Runtime tracing and operator-knowledge boundary
 
-Status: contract, conflict-safe recorder, instance bootstrap, lifecycle, and
-explicit query/planner/executor slices implemented; wider subsystem coverage
-and the pgvector adapter remain pending. Research and repository state were
-verified 2026-08-20.
+Status: contract, conflict-safe recorder, instance bootstrap, lifecycle, query,
+native-storage-read, projection-publication, vector-search, and embedding-commit
+slices implemented. Provider, tool-execution, cluster, export, and the pgvector
+adapter remain pending. Repository state was verified 2026-08-20.
 
 ## Why this is a kernel feature
 
@@ -48,6 +48,24 @@ family/type, schema revision, selected and rejected paths, budgets, scan/row/
 batch/byte counts, truncation, or a bounded error class and digest. Budget
 refusal is a denial rather than an apparent execution failure.
 
+The query execution span now contains a `vyrmkv.runtime_read` child. Every
+engine reports complete logical scan/result evidence. Native VyrmKV also
+captures cumulative manifest, memtable, segment, shared-cache, block-load, and
+encoded/decoded-byte counters immediately around the logical execution and
+persists only their bounded deltas. Memory and Fjall explicitly label that
+evidence `logical_only`; they do not synthesize physical work.
+
+The M5/M6 data plane uses the same contract. A vector search emits
+`vector.search → vector.plan → vector.execute`, binds a sealed prepared plan to
+the request digest and catalog revision, and revalidates it at execution.
+Projection publication records generation plus source/config/artifact digests.
+Freshness is derived from the vector-family projection cursor rather than the
+global trace cursor, so observation cannot make an otherwise current index
+appear stale. Embedding emits `embedding.run → embedding.infer →
+embedding.commit`; the commit may rebase over canonical trace-only mutations,
+but any intervening data or schema mutation denies it. The vector and its
+provenance still publish through one read-bound data transaction.
+
 The explicit surfaces are CLI `vyrm query` and MCP `vyrm_query`. Connectome's
 GET Query Lab deliberately remains a read-only lens. Raw query text and
 parameter values are returned to the caller but are represented in durable
@@ -56,8 +74,10 @@ coordinates.
 
 Connectome's existing authoritative Temporal stream classifies these durable
 events into its reasoning, workflow, routing, search, model, and storage lanes.
-This is initial lane-level visibility, not yet the causal-tree, critical-path,
-fan-out, or sampled-versus-complete interface described below.
+Regression coverage proves persisted vector, embedding, and storage events are
+audit-attached and visible through that read-only projection. This is initial
+lane-level visibility, not yet the causal-tree, critical-path, fan-out, or
+sampled-versus-complete interface described below.
 
 This follows the useful part of the
 [OpenTelemetry trace model and database semantic conventions](https://opentelemetry.io/docs/specs/semconv/db/database-spans/)
@@ -197,8 +217,11 @@ superiority claim.
    incomplete spans across native reopen — complete. Explicit query parse/bind,
    planning, and execution emit a parent/child tree linked to the pre-trace read
    stamp and plan digest, including error and budget-denial finishes — complete.
-   Storage, projection, vector, embedding, provider, and cluster emission remain
-   open.
+   Query storage reads, vector plan/execution, vector projection publication,
+   and embedding inference/atomic commit now emit observer-safe causal spans —
+   complete at the local M3–M6 boundary. Provider/tool and cluster emission,
+   storage-write coverage outside embedding commit, and persistent vector
+   artifact-catalog publication remain open.
 4. Connectome renders causal trace trees, critical path, fan-out, cache/IO/token
    mass, stale/fallback decisions, and sampled-versus-complete status. Basic
    durable-event lane classification is complete; the richer analysis is open.

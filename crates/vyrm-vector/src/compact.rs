@@ -315,15 +315,27 @@ impl CompactDenseSegment {
     }
 
     pub fn search(&self, request: &SearchRequest, kernel: DenseKernel) -> Result<Vec<SearchHit>> {
+        self.search_at(request, kernel, request.read.commit_cursor)
+    }
+
+    pub fn search_at(
+        &self,
+        request: &SearchRequest,
+        kernel: DenseKernel,
+        required_source_cursor: u64,
+    ) -> Result<Vec<SearchHit>> {
         request.validate()?;
         self.descriptor.validate()?;
+        if required_source_cursor > request.read.commit_cursor {
+            return invalid("compact dense source cursor exceeds the request read stamp");
+        }
         if self.descriptor.stamp.state != ProjectionState::Ready
             || self.descriptor.scope != request.scope
             || self.descriptor.field != request.field
             || self.descriptor.metric != request.metric
             || self.descriptor.embedding_model != request.embedding_model
             || self.descriptor.dimensions != request.query.dimensions()
-            || self.descriptor.stamp.source_cursor < request.read.commit_cursor
+            || self.descriptor.stamp.source_cursor < required_source_cursor
         {
             return invalid("compact dense segment does not satisfy request identity or freshness");
         }
