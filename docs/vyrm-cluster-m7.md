@@ -185,8 +185,10 @@ request-correlated JSON-lines contract over inherited stdin/stdout, not a public
 unauthenticated admin listener. Unknown envelope fields, unsupported versions,
 invalid request identities, empty frames, and frames above 1 MiB fail closed;
 oversized input is drained only to the next newline without unbounded allocation.
-Config v2 requires one project scope. Control v2 adds typed `RuntimeCommit`
-submission and rejects commits for any other scope before Raft submission.
+Config v2 requires one project scope and accepts a bounded transport-admission
+policy. Control v3 adds typed `RuntimeCommit` submission, rejects commits for
+any other scope before Raft submission, and returns reset-explicit operational
+telemetry in node status.
 
 A black-box integration run owns four child processes and four independent data
 roots. It:
@@ -413,15 +415,36 @@ restart reconstruction, receipt replay/expiry, and distinct-session concurrency.
 The synchronous S3-compatible port has the same verify-before-publish
 semantics, but currently materializes one object because its transport contract
 does not expose multipart streaming. Multipart S3, retained large-closure soak,
-production admission telemetry, and independent-machine chaos remain required
+retained telemetry export/alerting, and independent-machine chaos remain required
 before calling this production artifact replication.
+
+## Operational telemetry and per-identity admission
+
+Transport telemetry v1 is a typed JSON contract with a checked-in golden
+fixture. Every snapshot carries process start and observation times, configured
+policy, accepted/denied connections, and per-operation plus
+per-authenticated-identity attempted/allowed/denied/failed counts, request/response bytes,
+current/peak in-flight work, and total/maximum duration. Counter saturation sets
+an explicit overflow flag rather than wrapping. It retains no frame content,
+credentials, errors, prompts, embeddings, or artifact bytes.
+
+The same admission coordinator enforces a bounded identity table, global and
+per-identity concurrency, and a fixed-window request budget before application
+dispatch. A dropped or timed-out guard records failed work. Receiver telemetry
+reports durable inventory separately from process-local begin/chunk/complete,
+receipt replay, quota, GC, denial, and failure counters. Consensus trace health
+reports observation phases, commit acknowledgements, cursor conflicts, leader
+changes, unavailable leaders, denials, and failures. Node control v3 returns
+all three sections under the configured project scope and one observation time. This is
+scrapeable operator/benchmark evidence; it is not substituted for canonical
+runtime traces or hash-chained audit truth and resets explicitly on restart.
 
 ## What is not yet claimed
 
 This gate still does not contain dynamic membership discovery, automatic
 certificate issuance or Workload API streaming, durable supervisor generation,
-per-identity rate policy, production transport telemetry, multi-shard atomic
-commit, or metadata-shard reshard cutover.
+retained telemetry export/alerting, multi-shard atomic commit, or metadata-shard
+reshard cutover.
 Application state currently proves ordered identity/CAS/digest semantics and
 now atomically dispatches canonical `RuntimeCommit` transactions into native
 VyrmKV and transfers that runtime state in file-backed Raft snapshots. The
@@ -435,18 +458,20 @@ codec remains open; the disk-resident segment path is executable, while broader
 mixed-workload and hardware reproduction remain promotion gates.
 
 The four-process matrix now commits a project-scoped vector artifact through
-the version-2 control protocol, stages its immutable bytes on all voters,
+the version-3 control protocol, stages its immutable bytes on all voters,
 forces every possible source beyond the snapshot/purge boundary, and verifies
 the fresh learner's activated snapshot, exact bytes, manifest, and durable
-receipt after leadership changes. Node config v2 requires the project scope;
-control v2 accepts typed runtime commits and denies a foreign scope.
+receipt after leadership changes. Node config v2 requires the project scope and
+may configure transport admission and bounded Raft heartbeat/election timing;
+control v3 accepts typed runtime commits,
+denies a foreign scope, and exposes privacy-bounded operational telemetry.
 
 The next M7 slice must extend that passing one-host process matrix to independent
 hosts and real network/disk fault mechanisms, connect the passing credential
-state machine to an attested Workload API source, and retain production
-telemetry. File-backed, bounded-memory snapshot creation/receipt, resumable
-scoped artifact transfer, bounded receiver lifecycle, and consensus-replicated
-transfer traces are closed for the fixture, but larger retained
+state machine to an attested Workload API source, and add retained telemetry
+export/alerting. File-backed, bounded-memory snapshot creation/receipt,
+resumable scoped artifact transfer, bounded receiver lifecycle, and
+consensus-replicated transfer traces are closed for the fixture, but larger retained
 segment/query/closure soak evidence is still required before high-volume
 cluster claims.
 Only that evidence can advance a Multi-AZ claim.

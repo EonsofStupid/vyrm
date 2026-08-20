@@ -11,15 +11,16 @@ use std::io::{BufRead, BufReader, Write};
 use std::net::TcpListener;
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
-use std::thread;
+use std::sync::mpsc::{self, Receiver};
+use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 use tempfile::TempDir;
 use vyrm_cluster::{
     ArtifactTransferManifest, ArtifactTransferReceipt, ClusterId, NodeId, PlacementPolicy,
     ReplicaPlacement, ReplicaRole, ShardId, ShardPlacement, VyrmNodeCommand, VyrmNodeConfig,
     VyrmNodeReply, VyrmNodeRequest, VyrmNodeResult, VyrmNodeStatus, VyrmRaftNode, VyrmTlsFiles,
-    VyrmTransportBinding, ZoneId, CLUSTER_CONTRACT_VERSION, VYRM_NODE_CONFIG_VERSION,
-    VYRM_NODE_CONTROL_VERSION,
+    VyrmTransportBinding, VyrmTransportOperation, ZoneId, CLUSTER_CONTRACT_VERSION,
+    VYRM_NODE_CONFIG_VERSION, VYRM_NODE_CONTROL_VERSION,
 };
 use vyrm_core::{
     ObjectReference, RuntimeChange, RuntimeCommit, RuntimeMutation, RuntimeRecordSchema,
@@ -36,7 +37,8 @@ fn project_scope() -> ScopeId {
 struct ProcessNode {
     child: Child,
     input: ChildStdin,
-    output: BufReader<ChildStdout>,
+    output: Receiver<Result<VyrmNodeReply, String>>,
+    reader: Option<JoinHandle<()>>,
     next_request: u64,
 }
 
@@ -50,14 +52,29 @@ impl ProcessNode {
             .spawn()
             .unwrap();
         let input = child.stdin.take().unwrap();
-        let mut output = BufReader::new(child.stdout.take().unwrap());
-        let ready = read_reply(&mut output);
+        let mut child_output = BufReader::new(child.stdout.take().unwrap());
+        let ready = read_reply(&mut child_output);
         assert!(ready.ok, "node did not become ready: {ready:?}");
         assert!(matches!(ready.value, Some(VyrmNodeResult::Ready { .. })));
+        let (reply_sender, output) = mpsc::channel();
+        let reader = thread::spawn(move || loop {
+            let mut line = String::new();
+            let reply = match child_output.read_line(&mut line) {
+                Ok(0) => Err("node closed its supervisor output".into()),
+                Ok(_) => serde_json::from_str(&line)
+                    .map_err(|error| format!("node emitted an invalid supervisor reply: {error}")),
+                Err(error) => Err(format!("read node supervisor reply: {error}")),
+            };
+            let terminal = reply.is_err();
+            if reply_sender.send(reply).is_err() || terminal {
+                break;
+            }
+        });
         Self {
             child,
             input,
             output,
+            reader: Some(reader),
             next_request: 1,
         }
     }
@@ -82,14 +99,20 @@ impl ProcessNode {
         .unwrap();
         self.input.write_all(b"\n").unwrap();
         self.input.flush().unwrap();
-        let reply = read_reply(&mut self.output);
+        let reply = self
+            .output
+            .recv_timeout(Duration::from_secs(45))
+            .unwrap_or_else(|error| {
+                panic!("node supervisor reply timed out for {command:?}: {error}")
+            })
+            .unwrap_or_else(|error| panic!("node supervisor reply failed: {error}"));
         assert_eq!(reply.request_id.as_deref(), Some(request_id.as_str()));
         reply
     }
 
     fn status(&mut self) -> VyrmNodeStatus {
         match self.command(&VyrmNodeCommand::Status) {
-            VyrmNodeResult::Status { status } => status,
+            VyrmNodeResult::Status { status } => *status,
             other => panic!("expected status, got {other:?}"),
         }
     }
@@ -97,6 +120,7 @@ impl ProcessNode {
     fn crash(&mut self) {
         self.child.kill().unwrap();
         self.child.wait().unwrap();
+        self.join_reader();
     }
 
     fn shutdown(mut self) {
@@ -105,6 +129,13 @@ impl ProcessNode {
             VyrmNodeResult::Ack
         );
         assert!(self.child.wait().unwrap().success());
+        self.join_reader();
+    }
+
+    fn join_reader(&mut self) {
+        if let Some(reader) = self.reader.take() {
+            reader.join().expect("node supervisor reader panicked");
+        }
     }
 }
 
@@ -114,6 +145,7 @@ impl Drop for ProcessNode {
             let _ = self.child.kill();
             let _ = self.child.wait();
         }
+        self.join_reader();
     }
 }
 
@@ -354,6 +386,43 @@ fn independent_processes_recover_fail_over_snapshot_and_reject_corruption() {
         }
     );
 
+    let learner_status = node4.status();
+    assert_eq!(learner_status.project_scope, project_scope());
+    assert_eq!(
+        learner_status.telemetry.observed_at,
+        learner_status.telemetry.transport_ingress.observed_at
+    );
+    assert_eq!(
+        learner_status.telemetry.observed_at,
+        learner_status.telemetry.artifacts.observed_at
+    );
+    assert!(
+        learner_status.telemetry.transport_ingress.operations[&VyrmTransportOperation::Artifact]
+            .allowed
+            > 0
+    );
+    assert!(learner_status.telemetry.artifacts.completed_responses > 0);
+    assert!(
+        learner_status
+            .telemetry
+            .artifacts
+            .inventory
+            .retained_receipts
+            > 0
+    );
+    assert!(!learner_status.telemetry.transport_ingress.overflowed);
+    assert!(!learner_status.telemetry.artifacts.overflowed);
+    let voter_telemetry = voter_statuses(&mut [&mut node1, &mut node2, &mut node3]);
+    assert!(voter_telemetry.iter().any(|status| status
+        .telemetry
+        .consensus_traces
+        .commit_acknowledgements
+        > 0));
+    let encoded_status = serde_json::to_vec(&learner_status).unwrap();
+    assert!(!encoded_status
+        .windows(64)
+        .any(|window| window == &artifact_bytes[..64]));
+
     node4.shutdown();
     let learner_changes = project_changes(&fixture.data_roots[&4]);
     let trace_events = learner_changes
@@ -540,7 +609,7 @@ fn snapshot_purge_and_add_learner(
     at_least: u64,
     learner: u64,
 ) -> u64 {
-    let deadline = Instant::now() + Duration::from_secs(30);
+    let deadline = Instant::now() + Duration::from_secs(60);
     let mut next_trigger = Instant::now();
     let mut last_add_reply = None;
     loop {
@@ -767,6 +836,8 @@ impl ProcessFixture {
                 certificate_der: certificate_path.clone(),
                 private_key_der: key_path,
                 trust_root_der: trust_root.clone(),
+                transport_admission: Default::default(),
+                raft_timing: Default::default(),
             };
             let config_path = directory.path().join(format!("node-{id}.json"));
             fs::write(&config_path, serde_json::to_vec_pretty(&config).unwrap()).unwrap();

@@ -12,7 +12,8 @@ use crate::{
     ArtifactTransferReceiver, ClusterError, ClusterId, NodeId, Result as ClusterResult, ShardId,
     ShardPlacement, VyrmRaftCommand, VyrmRaftNetworkFactory, VyrmRaftNode, VyrmRaftResponse,
     VyrmRaftStateMachine, VyrmRaftStore, VyrmRaftTlsServer, VyrmTlsGeneration, VyrmTlsMaterial,
-    VyrmTlsReloader, VyrmTransportBinding, VyrmTransportGate, VyrmTransportTrust,
+    VyrmTlsReloader, VyrmTransportAdmissionPolicy, VyrmTransportBinding, VyrmTransportGate,
+    VyrmTransportTelemetrySnapshot, VyrmTransportTrust,
 };
 use openraft::metrics::Metric;
 use openraft::{Config, Raft, SnapshotPolicy};
@@ -24,14 +25,15 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, OnceLock};
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::TcpListener;
 use vyrm_core::{RuntimeCommit, ScopeId};
 
 pub const VYRM_NODE_CONFIG_VERSION: u16 = 2;
-pub const VYRM_NODE_CONTROL_VERSION: u16 = 2;
+pub const VYRM_NODE_CONTROL_VERSION: u16 = 3;
 pub const VYRM_NODE_MAX_CONFIG_BYTES: u64 = 1024 * 1024;
 pub const VYRM_NODE_MAX_CONTROL_LINE_BYTES: usize = 1024 * 1024;
 const LEARNER_CATCH_UP_TIMEOUT: Duration = Duration::from_secs(10);
@@ -39,6 +41,134 @@ const CONSENSUS_TRACE_COMMIT_RETRIES: usize = 16;
 const CONSENSUS_TRACE_ROUTE_RETRIES: usize = 32;
 
 type VyrmRaft = Raft<crate::VyrmRaftTypeConfig>;
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct VyrmRaftTimingPolicy {
+    pub heartbeat_interval_millis: u64,
+    pub election_timeout_min_millis: u64,
+    pub election_timeout_max_millis: u64,
+}
+
+impl Default for VyrmRaftTimingPolicy {
+    fn default() -> Self {
+        Self {
+            heartbeat_interval_millis: 250,
+            election_timeout_min_millis: 1_000,
+            election_timeout_max_millis: 2_000,
+        }
+    }
+}
+
+impl VyrmRaftTimingPolicy {
+    pub fn validate(&self) -> ClusterResult<()> {
+        if self.heartbeat_interval_millis == 0
+            || self.heartbeat_interval_millis > 60_000
+            || self.election_timeout_min_millis <= self.heartbeat_interval_millis
+            || self.election_timeout_max_millis <= self.election_timeout_min_millis
+            || self.election_timeout_max_millis > 300_000
+        {
+            return Err(ClusterError::Invalid(
+                "Raft timing policy is outside its bounded contract".into(),
+            ));
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct VyrmConsensusTraceTelemetrySnapshot {
+    pub started_at: u64,
+    pub observed_at: u64,
+    pub prepared_observations: u64,
+    pub chunk_observations: u64,
+    pub completed_observations: u64,
+    pub failed_observations: u64,
+    pub commit_acknowledgements: u64,
+    pub cursor_conflicts: u64,
+    pub leader_changes: u64,
+    pub leader_unavailable: u64,
+    pub denied: u64,
+    pub failed: u64,
+    pub overflowed: bool,
+}
+
+#[derive(Debug)]
+struct ConsensusTraceTelemetry {
+    started_at: u64,
+    prepared_observations: AtomicU64,
+    chunk_observations: AtomicU64,
+    completed_observations: AtomicU64,
+    failed_observations: AtomicU64,
+    commit_acknowledgements: AtomicU64,
+    cursor_conflicts: AtomicU64,
+    leader_changes: AtomicU64,
+    leader_unavailable: AtomicU64,
+    denied: AtomicU64,
+    failed: AtomicU64,
+    overflowed: AtomicBool,
+}
+
+impl ConsensusTraceTelemetry {
+    fn new(started_at: u64) -> Self {
+        Self {
+            started_at,
+            prepared_observations: AtomicU64::new(0),
+            chunk_observations: AtomicU64::new(0),
+            completed_observations: AtomicU64::new(0),
+            failed_observations: AtomicU64::new(0),
+            commit_acknowledgements: AtomicU64::new(0),
+            cursor_conflicts: AtomicU64::new(0),
+            leader_changes: AtomicU64::new(0),
+            leader_unavailable: AtomicU64::new(0),
+            denied: AtomicU64::new(0),
+            failed: AtomicU64::new(0),
+            overflowed: AtomicBool::new(false),
+        }
+    }
+
+    fn record_observation(&self, observation: &ArtifactTransferObservation) {
+        use crate::ArtifactTransferObservationPhase as Phase;
+        let counter = match observation.phase {
+            Phase::Prepared => &self.prepared_observations,
+            Phase::ChunkAccepted => &self.chunk_observations,
+            Phase::Completed => &self.completed_observations,
+            Phase::Failed => &self.failed_observations,
+        };
+        telemetry_increment(counter, &self.overflowed);
+    }
+
+    fn snapshot(&self, observed_at: u64) -> ClusterResult<VyrmConsensusTraceTelemetrySnapshot> {
+        if observed_at < self.started_at {
+            return Err(ClusterError::Invalid(
+                "consensus trace telemetry observation predates this process".into(),
+            ));
+        }
+        Ok(VyrmConsensusTraceTelemetrySnapshot {
+            started_at: self.started_at,
+            observed_at,
+            prepared_observations: self.prepared_observations.load(Ordering::Relaxed),
+            chunk_observations: self.chunk_observations.load(Ordering::Relaxed),
+            completed_observations: self.completed_observations.load(Ordering::Relaxed),
+            failed_observations: self.failed_observations.load(Ordering::Relaxed),
+            commit_acknowledgements: self.commit_acknowledgements.load(Ordering::Relaxed),
+            cursor_conflicts: self.cursor_conflicts.load(Ordering::Relaxed),
+            leader_changes: self.leader_changes.load(Ordering::Relaxed),
+            leader_unavailable: self.leader_unavailable.load(Ordering::Relaxed),
+            denied: self.denied.load(Ordering::Relaxed),
+            failed: self.failed.load(Ordering::Relaxed),
+            overflowed: self.overflowed.load(Ordering::Relaxed),
+        })
+    }
+}
+
+#[derive(Clone)]
+struct VyrmNodeTelemetrySources {
+    transport: VyrmRaftTlsServer,
+    artifacts: ArtifactTransferReceiver,
+    traces: Arc<ConsensusTraceTelemetry>,
+}
 
 struct ConsensusArtifactTransferObserver {
     raft: Arc<OnceLock<VyrmRaft>>,
@@ -48,6 +178,7 @@ struct ConsensusArtifactTransferObserver {
     local_node_id: u64,
     project_scope: ScopeId,
     actor: String,
+    telemetry: Arc<ConsensusTraceTelemetry>,
 }
 
 impl ConsensusArtifactTransferObserver {
@@ -60,6 +191,10 @@ impl ConsensusArtifactTransferObserver {
         for _ in 0..CONSENSUS_TRACE_ROUTE_RETRIES {
             let metrics = raft.metrics().borrow().clone();
             let Some(leader) = metrics.current_leader else {
+                telemetry_increment(
+                    &self.telemetry.leader_unavailable,
+                    &self.telemetry.overflowed,
+                );
                 last_error = Some("no current leader".into());
                 tokio::time::sleep(Duration::from_millis(25)).await;
                 continue;
@@ -93,6 +228,7 @@ impl ConsensusArtifactTransferObserver {
             match result {
                 Ok(response) => return Ok(response),
                 Err(VyrmConsensusCommitError::ForwardToLeader) => {
+                    telemetry_increment(&self.telemetry.leader_changes, &self.telemetry.overflowed);
                     last_error = Some("leader changed while routing".into());
                     tokio::time::sleep(Duration::from_millis(25)).await;
                 }
@@ -143,6 +279,10 @@ impl ConsensusArtifactTransferObserver {
             )?;
             let response = self.submit(&raft, command).await?;
             if response.data.accepted && response.data.runtime_outcome.is_some() {
+                telemetry_increment(
+                    &self.telemetry.commit_acknowledgements,
+                    &self.telemetry.overflowed,
+                );
                 return Ok(());
             }
             if response
@@ -150,6 +290,7 @@ impl ConsensusArtifactTransferObserver {
                 .reason
                 .contains("runtime commit conflict: expected cursor")
             {
+                telemetry_increment(&self.telemetry.cursor_conflicts, &self.telemetry.overflowed);
                 last_conflict = Some(response.data.reason);
                 continue;
             }
@@ -170,7 +311,21 @@ impl ArtifactTransferObserver for ConsensusArtifactTransferObserver {
         &self,
         observation: ArtifactTransferObservation,
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ClusterResult<()>> + Send + '_>> {
-        Box::pin(self.commit(observation))
+        Box::pin(async move {
+            self.telemetry.record_observation(&observation);
+            let result = self.commit(observation).await;
+            if let Err(error) = &result {
+                match error {
+                    ClusterError::Denied(_) | ClusterError::Invalid(_) => {
+                        telemetry_increment(&self.telemetry.denied, &self.telemetry.overflowed)
+                    }
+                    ClusterError::Unavailable(_) | ClusterError::NotFound(_) => {
+                        telemetry_increment(&self.telemetry.failed, &self.telemetry.overflowed)
+                    }
+                }
+            }
+            result
+        })
     }
 }
 
@@ -189,6 +344,10 @@ pub struct VyrmNodeConfig {
     pub certificate_der: PathBuf,
     pub private_key_der: PathBuf,
     pub trust_root_der: PathBuf,
+    #[serde(default)]
+    pub transport_admission: VyrmTransportAdmissionPolicy,
+    #[serde(default)]
+    pub raft_timing: VyrmRaftTimingPolicy,
 }
 
 impl VyrmNodeConfig {
@@ -237,7 +396,9 @@ impl VyrmNodeConfig {
             raft_node_id: self.raft_node_id,
             canonical_node_id: NodeId::new(local.canonical_id.clone())?,
         }
-        .validate()
+        .validate()?;
+        self.transport_admission.validate()?;
+        self.raft_timing.validate()
     }
 }
 
@@ -324,6 +485,7 @@ impl VyrmNodeRequest {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct VyrmNodeStatus {
+    pub project_scope: ScopeId,
     pub raft_node_id: u64,
     pub current_term: u64,
     pub current_leader: Option<u64>,
@@ -333,6 +495,16 @@ pub struct VyrmNodeStatus {
     pub purged_index: Option<u64>,
     pub state: String,
     pub credentials: VyrmTlsGeneration,
+    pub telemetry: VyrmNodeTelemetrySnapshot,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct VyrmNodeTelemetrySnapshot {
+    pub observed_at: u64,
+    pub transport_ingress: VyrmTransportTelemetrySnapshot,
+    pub artifacts: crate::ArtifactTransferTelemetrySnapshot,
+    pub consensus_traces: VyrmConsensusTraceTelemetrySnapshot,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -343,7 +515,7 @@ pub enum VyrmNodeResult {
     },
     Ack,
     Status {
-        status: VyrmNodeStatus,
+        status: Box<VyrmNodeStatus>,
     },
     Write {
         log_index: u64,
@@ -416,6 +588,8 @@ pub async fn run_vyrm_node(config: VyrmNodeConfig) -> ClusterResult<()> {
     let (log, state_machine) = VyrmRaftStore::open(&config.data_root, config.shard)?;
     let application_objects = state_machine.application_objects();
     let artifact_receiver = ArtifactTransferReceiver::open(application_objects.clone())?;
+    let artifact_status = artifact_receiver.clone();
+    let trace_telemetry = Arc::new(ConsensusTraceTelemetry::new(node_now_millis()));
     let raft_slot = Arc::new(OnceLock::new());
     let network = VyrmRaftNetworkFactory::new_reloadable_with_artifacts(
         binding.clone(),
@@ -433,10 +607,14 @@ pub async fn run_vyrm_node(config: VyrmNodeConfig) -> ClusterResult<()> {
         local_node_id: config.raft_node_id,
         project_scope: config.project_scope.clone(),
         actor: format!("cluster:artifact-transfer:{}", config.raft_node_id),
+        telemetry: Arc::clone(&trace_telemetry),
     });
     let network = network.with_artifact_observer(trace_observer);
     let raft_config = Arc::new(
         Config {
+            heartbeat_interval: config.raft_timing.heartbeat_interval_millis,
+            election_timeout_min: config.raft_timing.election_timeout_min_millis,
+            election_timeout_max: config.raft_timing.election_timeout_max_millis,
             snapshot_policy: SnapshotPolicy::Never,
             max_in_snapshot_log_to_keep: 0,
             purge_batch_size: 1,
@@ -468,7 +646,13 @@ pub async fn run_vyrm_node(config: VyrmNodeConfig) -> ClusterResult<()> {
         transport_gate.clone(),
         artifact_receiver,
         config.project_scope.clone(),
-    )?;
+    )?
+    .with_admission_policy(config.transport_admission.clone())?;
+    let telemetry_sources = VyrmNodeTelemetrySources {
+        transport: server.clone(),
+        artifacts: artifact_status,
+        traces: trace_telemetry,
+    };
     let server_task = tokio::spawn(async move { server.serve(listener).await });
 
     write_reply(&VyrmNodeReply::success(
@@ -516,6 +700,7 @@ pub async fn run_vyrm_node(config: VyrmNodeConfig) -> ClusterResult<()> {
                     &config,
                     &transport_gate,
                     &credentials,
+                    &telemetry_sources,
                     command,
                 )
                 .await
@@ -593,11 +778,18 @@ async fn execute_command(
     config: &VyrmNodeConfig,
     transport_gate: &VyrmTransportGate,
     credentials: &VyrmTlsReloader,
+    telemetry: &VyrmNodeTelemetrySources,
     command: VyrmNodeCommand,
 ) -> Result<VyrmNodeResult, String> {
     match command {
         VyrmNodeCommand::Status => Ok(VyrmNodeResult::Status {
-            status: node_status(raft, state_machine, credentials)?,
+            status: Box::new(node_status(
+                raft,
+                state_machine,
+                credentials,
+                config,
+                telemetry,
+            )?),
         }),
         VyrmNodeCommand::Initialize => raft
             .initialize(BTreeMap::from([(
@@ -739,8 +931,10 @@ async fn execute_command(
                 )
                 .await
                 .map(|_| VyrmNodeResult::Status {
-                    status: node_status(raft, state_machine, credentials)
-                        .expect("validated TLS credential state remains readable"),
+                    status: Box::new(
+                        node_status(raft, state_machine, credentials, config, telemetry)
+                            .expect("validated TLS credential state remains readable"),
+                    ),
                 })
                 .map_err(|error| error.to_string())
         }
@@ -780,13 +974,17 @@ fn node_status(
     raft: &VyrmRaft,
     state_machine: &crate::VyrmRaftStateMachine,
     credentials: &VyrmTlsReloader,
+    config: &VyrmNodeConfig,
+    telemetry: &VyrmNodeTelemetrySources,
 ) -> Result<VyrmNodeStatus, String> {
     let metrics = raft.metrics().borrow().clone();
     let snapshot_index = state_machine
         .persisted_snapshot_meta()
         .map_err(|error| error.to_string())?
         .and_then(|meta| meta.last_log_id.map(|log| log.index));
+    let observed_at = node_now_millis();
     Ok(VyrmNodeStatus {
+        project_scope: config.project_scope.clone(),
         raft_node_id: metrics.id,
         current_term: metrics.current_term,
         current_leader: metrics.current_leader,
@@ -796,7 +994,42 @@ fn node_status(
         purged_index: metrics.purged.map(|log| log.index),
         state: format!("{:?}", metrics.state).to_ascii_lowercase(),
         credentials: credentials.identity().map_err(|error| error.to_string())?,
+        telemetry: VyrmNodeTelemetrySnapshot {
+            observed_at,
+            transport_ingress: telemetry
+                .transport
+                .telemetry_snapshot(observed_at)
+                .map_err(|error| error.to_string())?,
+            artifacts: telemetry
+                .artifacts
+                .telemetry_snapshot(observed_at)
+                .map_err(|error| error.to_string())?,
+            consensus_traces: telemetry
+                .traces
+                .snapshot(observed_at)
+                .map_err(|error| error.to_string())?,
+        },
     })
+}
+
+fn node_now_millis() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis()
+        .try_into()
+        .unwrap_or(u64::MAX)
+}
+
+fn telemetry_increment(counter: &AtomicU64, overflowed: &AtomicBool) {
+    if counter
+        .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |value| {
+            value.checked_add(1)
+        })
+        .is_err()
+    {
+        overflowed.store(true, Ordering::Relaxed);
+    }
 }
 
 fn load_tls_material(files: &VyrmTlsFiles) -> ClusterResult<VyrmTlsMaterial> {

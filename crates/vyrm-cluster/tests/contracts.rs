@@ -226,6 +226,40 @@ fn artifact_manifest_binds_project_read_plan_objects_and_receipt() {
 }
 
 #[test]
+fn transport_telemetry_v1_fixture_round_trips_and_denies_shape_drift() {
+    let fixture = include_str!("../fixtures/transport-telemetry-v1.json");
+    let snapshot: vyrm_cluster::VyrmTransportTelemetrySnapshot =
+        serde_json::from_str(fixture).unwrap();
+    assert_eq!(
+        snapshot.contract_version,
+        vyrm_cluster::VYRM_CLUSTER_TELEMETRY_VERSION
+    );
+    snapshot.policy.validate().unwrap();
+    assert_eq!(
+        serde_json::to_value(&snapshot).unwrap(),
+        serde_json::from_str::<serde_json::Value>(fixture).unwrap()
+    );
+
+    let mut unknown: serde_json::Value = serde_json::from_str(fixture).unwrap();
+    unknown["secret_payload"] = serde_json::Value::String("must fail closed".into());
+    assert!(
+        serde_json::from_value::<vyrm_cluster::VyrmTransportTelemetrySnapshot>(unknown).is_err()
+    );
+}
+
+#[test]
+fn raft_timing_policy_rejects_election_windows_that_cannot_tolerate_a_heartbeat() {
+    let policy = vyrm_cluster::VyrmRaftTimingPolicy::default();
+    policy.validate().unwrap();
+    let invalid = vyrm_cluster::VyrmRaftTimingPolicy {
+        heartbeat_interval_millis: 250,
+        election_timeout_min_millis: 250,
+        election_timeout_max_millis: 500,
+    };
+    assert!(invalid.validate().is_err());
+}
+
+#[test]
 fn reshard_cutover_is_bound_to_exact_source_vector() {
     let target = ShardPlacement {
         contract_version: 1,

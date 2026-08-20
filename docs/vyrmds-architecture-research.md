@@ -497,10 +497,12 @@ closure rather than trusted as source assertions. The remote path now uses
 bounded authenticated chunks, fsynced exact-offset resume, idempotent receipts,
 and typed transfer observations before activation; the four-process test moves
 a real vector artifact after purge. Cross-shard writes still fail closed.
-Receiver quota/GC, concurrent-session scheduling, and cluster-consensus trace
-persistence now have executable restart/failover/privacy evidence. Independent-host
-faults, automatic workload identity, production telemetry, retained large-closure
-soak, and real Multi-AZ operations remain open, so M7 is not closed. See
+Receiver quota/GC, concurrent-session scheduling, cluster-consensus trace
+persistence, identity-scoped transport admission, and reset-explicit node
+telemetry now have executable restart/failover/privacy evidence.
+Independent-host faults, automatic workload identity, retained telemetry
+export/alerting, retained large-closure soak, and real Multi-AZ operations remain
+open, so M7 is not closed. See
 `vyrm-cluster-m7.md`.
 
 Acceptance: deterministic simulation/model checking; partition, delay,
@@ -531,9 +533,10 @@ causal lifecycle analysis, control-only JSON export, and Connectome
 provider/tool-envelope coverage are now implemented. Local artifact-catalog
 publication is also authoritative: immutable exact/compact/HNSW bytes, a typed
 catalog record, and a verified object reference cross one `vyrmDS` transaction;
-restart reconstruction rejects gaps and mismatches. Cluster coverage,
-cross-node catalog replication, OTLP translation, and the remaining pgvector
-production gates stay open.
+restart reconstruction rejects gaps and mismatches. Project-node status now
+exposes typed transport-ingress, artifact-session, and consensus-trace health; a
+Connectome cluster lens, cross-node catalog replication, OTLP translation, and
+the remaining pgvector production gates stay open.
 
 The portable operator-knowledge prerequisite is now implemented separately from
 live endpoint certification. `vyrm-operator` binds project/member, external

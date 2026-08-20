@@ -19,6 +19,7 @@ const REPLAY_PAGE: usize = 4_096;
 const TRANSFER_SESSION_DIRECTORY: &str = "transfer-sessions-v1";
 const TRANSFER_SESSION_STATE_FILE: &str = "session.json";
 const TRANSFER_SESSION_STATE_VERSION: u16 = 1;
+pub const ARTIFACT_TRANSFER_TELEMETRY_VERSION: u16 = 1;
 static PUBLISH_ORDINAL: AtomicU64 = AtomicU64::new(1);
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -78,6 +79,58 @@ pub struct ArtifactTransferGcReport {
     pub removed_completed: usize,
     pub reclaimed_partial_bytes: u64,
     pub remaining: ArtifactTransferSessionInventory,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ArtifactTransferTelemetrySnapshot {
+    pub contract_version: u16,
+    pub started_at: u64,
+    pub observed_at: u64,
+    pub policy: ArtifactTransferSessionPolicy,
+    pub inventory: ArtifactTransferSessionInventory,
+    pub begin_requests: u64,
+    pub chunk_requests: u64,
+    pub complete_requests: u64,
+    pub begin_responses: u64,
+    pub accepted_chunks: u64,
+    pub completed_responses: u64,
+    pub completed_receipt_replays: u64,
+    pub denied: u64,
+    pub failed: u64,
+    pub quota_denials: u64,
+    pub gc_runs: u64,
+    pub gc_removed_incomplete: u64,
+    pub gc_removed_completed: u64,
+    pub gc_reclaimed_partial_bytes: u64,
+    pub overflowed: bool,
+}
+
+#[derive(Debug)]
+struct ArtifactTransferTelemetryState {
+    started_at: u64,
+    begin_requests: u64,
+    chunk_requests: u64,
+    complete_requests: u64,
+    begin_responses: u64,
+    accepted_chunks: u64,
+    completed_responses: u64,
+    completed_receipt_replays: u64,
+    denied: u64,
+    failed: u64,
+    quota_denials: u64,
+    gc_runs: u64,
+    gc_removed_incomplete: u64,
+    gc_removed_completed: u64,
+    gc_reclaimed_partial_bytes: u64,
+    overflowed: bool,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum ArtifactTransferRequestKind {
+    Begin,
+    Chunk,
+    Complete,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -237,6 +290,7 @@ pub struct ArtifactTransferReceiver {
     policy: ArtifactTransferSessionPolicy,
     lifecycle: Arc<RwLock<()>>,
     session_locks: Arc<Mutex<BTreeMap<String, Weak<Mutex<()>>>>>,
+    telemetry: Arc<Mutex<ArtifactTransferTelemetryState>>,
 }
 
 impl ArtifactTransferReceiver {
@@ -248,6 +302,16 @@ impl ArtifactTransferReceiver {
         store: LocalObjectStore,
         policy: ArtifactTransferSessionPolicy,
     ) -> Result<Self> {
+        Self::open_with_policy_at(store, policy, receiver_now_millis())
+    }
+
+    /// Deterministic-clock constructor used by failure simulation and contract
+    /// tests. Production callers should use [`Self::open_with_policy`].
+    pub fn open_with_policy_at(
+        store: LocalObjectStore,
+        policy: ArtifactTransferSessionPolicy,
+        started_at: u64,
+    ) -> Result<Self> {
         policy.validate()?;
         let sessions = store.root().join(TRANSFER_SESSION_DIRECTORY);
         fs::create_dir_all(&sessions).map_err(cluster_io_error)?;
@@ -258,8 +322,26 @@ impl ArtifactTransferReceiver {
             policy,
             lifecycle: Arc::new(RwLock::new(())),
             session_locks: Arc::new(Mutex::new(BTreeMap::new())),
+            telemetry: Arc::new(Mutex::new(ArtifactTransferTelemetryState {
+                started_at,
+                begin_requests: 0,
+                chunk_requests: 0,
+                complete_requests: 0,
+                begin_responses: 0,
+                accepted_chunks: 0,
+                completed_responses: 0,
+                completed_receipt_replays: 0,
+                denied: 0,
+                failed: 0,
+                quota_denials: 0,
+                gc_runs: 0,
+                gc_removed_incomplete: 0,
+                gc_removed_completed: 0,
+                gc_reclaimed_partial_bytes: 0,
+                overflowed: false,
+            })),
         };
-        receiver.collect_garbage(receiver_now_millis())?;
+        receiver.collect_garbage(started_at)?;
         Ok(receiver)
     }
 
@@ -288,49 +370,59 @@ impl ArtifactTransferReceiver {
         request: ArtifactTransferRpc,
         now: u64,
     ) -> Result<ArtifactTransferRpcResult> {
-        request.validate()?;
-        match request.operation {
-            ArtifactTransferOperation::Begin { manifest } => {
-                let _lifecycle = self.lifecycle.write().map_err(lock_error)?;
-                let lock = self.session_lock(&manifest.manifest_digest)?;
-                let _session = lock.lock().map_err(lock_error)?;
-                self.begin(authenticated_source, local_target, *manifest, now)
-            }
-            ArtifactTransferOperation::Chunk {
-                manifest_digest,
-                sha256,
-                offset,
-                bytes,
-                ..
-            } => {
-                let _lifecycle = self.lifecycle.read().map_err(lock_error)?;
-                let lock = self.session_lock(&manifest_digest)?;
-                let _session = lock.lock().map_err(lock_error)?;
-                self.chunk(
-                    (authenticated_source, local_target),
-                    &manifest_digest,
-                    &sha256,
+        let kind = match &request.operation {
+            ArtifactTransferOperation::Begin { .. } => ArtifactTransferRequestKind::Begin,
+            ArtifactTransferOperation::Chunk { .. } => ArtifactTransferRequestKind::Chunk,
+            ArtifactTransferOperation::Complete { .. } => ArtifactTransferRequestKind::Complete,
+        };
+        self.record_request(kind)?;
+        let result = (|| {
+            request.validate()?;
+            match request.operation {
+                ArtifactTransferOperation::Begin { manifest } => {
+                    let _lifecycle = self.lifecycle.write().map_err(lock_error)?;
+                    let lock = self.session_lock(&manifest.manifest_digest)?;
+                    let _session = lock.lock().map_err(lock_error)?;
+                    self.begin(authenticated_source, local_target, *manifest, now)
+                }
+                ArtifactTransferOperation::Chunk {
+                    manifest_digest,
+                    sha256,
                     offset,
-                    &bytes,
-                    now,
-                )
-            }
-            ArtifactTransferOperation::Complete {
-                manifest_digest,
-                completed_at,
-            } => {
-                let _lifecycle = self.lifecycle.read().map_err(lock_error)?;
-                let lock = self.session_lock(&manifest_digest)?;
-                let _session = lock.lock().map_err(lock_error)?;
-                self.complete(
-                    authenticated_source,
-                    local_target,
-                    &manifest_digest,
+                    bytes,
+                    ..
+                } => {
+                    let _lifecycle = self.lifecycle.read().map_err(lock_error)?;
+                    let lock = self.session_lock(&manifest_digest)?;
+                    let _session = lock.lock().map_err(lock_error)?;
+                    self.chunk(
+                        (authenticated_source, local_target),
+                        &manifest_digest,
+                        &sha256,
+                        offset,
+                        &bytes,
+                        now,
+                    )
+                }
+                ArtifactTransferOperation::Complete {
+                    manifest_digest,
                     completed_at,
-                    now,
-                )
+                } => {
+                    let _lifecycle = self.lifecycle.read().map_err(lock_error)?;
+                    let lock = self.session_lock(&manifest_digest)?;
+                    let _session = lock.lock().map_err(lock_error)?;
+                    self.complete(
+                        authenticated_source,
+                        local_target,
+                        &manifest_digest,
+                        completed_at,
+                        now,
+                    )
+                }
             }
-        }
+        })();
+        self.record_result(&result)?;
+        result
     }
 
     fn begin(
@@ -464,6 +556,7 @@ impl ArtifactTransferReceiver {
             let receipt: ArtifactTransferReceipt = read_json(&receipt_path, "artifact receipt")?;
             receipt.validate(&manifest)?;
             self.touch_session(&directory, manifest_digest, now, true)?;
+            self.record_receipt_replay()?;
             return Ok(ArtifactTransferRpcResult::Completed { receipt });
         }
         let mut accounted = BTreeSet::new();
@@ -604,6 +697,7 @@ impl ArtifactTransferReceiver {
         let entries = self.session_entries(now)?;
         let inventory = summarize_sessions(&entries)?;
         if inventory.active_sessions >= self.policy.max_active_sessions {
+            self.record_quota_denial()?;
             return Err(ClusterError::Unavailable(format!(
                 "artifact receiver active-session quota {} is exhausted",
                 self.policy.max_active_sessions
@@ -615,6 +709,7 @@ impl ArtifactTransferReceiver {
             .checked_add(reservation)
             .ok_or_else(|| ClusterError::Unavailable("artifact reservation overflowed".into()))?;
         if next > self.policy.max_reserved_bytes {
+            self.record_quota_denial()?;
             return Err(ClusterError::Unavailable(format!(
                 "artifact receiver reserved-byte quota {} would be exceeded",
                 self.policy.max_reserved_bytes
@@ -649,6 +744,39 @@ impl ArtifactTransferReceiver {
     pub fn session_inventory(&self, now: u64) -> Result<ArtifactTransferSessionInventory> {
         let _lifecycle = self.lifecycle.write().map_err(lock_error)?;
         summarize_sessions(&self.session_entries(now)?)
+    }
+
+    pub fn telemetry_snapshot(&self, now: u64) -> Result<ArtifactTransferTelemetrySnapshot> {
+        let started_at = self.telemetry.lock().map_err(lock_error)?.started_at;
+        if now < started_at {
+            return Err(ClusterError::Invalid(
+                "artifact telemetry observation predates this receiver process".into(),
+            ));
+        }
+        let inventory = self.session_inventory(now)?;
+        let state = self.telemetry.lock().map_err(lock_error)?;
+        Ok(ArtifactTransferTelemetrySnapshot {
+            contract_version: ARTIFACT_TRANSFER_TELEMETRY_VERSION,
+            started_at: state.started_at,
+            observed_at: now,
+            policy: self.policy.clone(),
+            inventory,
+            begin_requests: state.begin_requests,
+            chunk_requests: state.chunk_requests,
+            complete_requests: state.complete_requests,
+            begin_responses: state.begin_responses,
+            accepted_chunks: state.accepted_chunks,
+            completed_responses: state.completed_responses,
+            completed_receipt_replays: state.completed_receipt_replays,
+            denied: state.denied,
+            failed: state.failed,
+            quota_denials: state.quota_denials,
+            gc_runs: state.gc_runs,
+            gc_removed_incomplete: state.gc_removed_incomplete,
+            gc_removed_completed: state.gc_removed_completed,
+            gc_reclaimed_partial_bytes: state.gc_reclaimed_partial_bytes,
+            overflowed: state.overflowed,
+        })
     }
 
     pub fn collect_garbage(&self, now: u64) -> Result<ArtifactTransferGcReport> {
@@ -725,13 +853,15 @@ impl ArtifactTransferReceiver {
             }
         }
         let remaining = summarize_sessions(&self.session_entries(now)?)?;
-        Ok(ArtifactTransferGcReport {
+        let report = ArtifactTransferGcReport {
             scanned_sessions,
             removed_incomplete,
             removed_completed,
             reclaimed_partial_bytes,
             remaining,
-        })
+        };
+        self.record_gc(&report)?;
+        Ok(report)
     }
 
     fn session_entries(&self, now: u64) -> Result<Vec<SessionInventoryEntry>> {
@@ -862,6 +992,80 @@ impl ArtifactTransferReceiver {
         entries.sort_by(|left, right| left.digest.cmp(&right.digest));
         Ok(entries)
     }
+
+    fn record_request(&self, kind: ArtifactTransferRequestKind) -> Result<()> {
+        let mut state = self.telemetry.lock().map_err(lock_error)?;
+        let mut overflowed = state.overflowed;
+        let counter = match kind {
+            ArtifactTransferRequestKind::Begin => &mut state.begin_requests,
+            ArtifactTransferRequestKind::Chunk => &mut state.chunk_requests,
+            ArtifactTransferRequestKind::Complete => &mut state.complete_requests,
+        };
+        telemetry_add(counter, 1, &mut overflowed);
+        state.overflowed = overflowed;
+        Ok(())
+    }
+
+    fn record_result(&self, result: &Result<ArtifactTransferRpcResult>) -> Result<()> {
+        let mut state = self.telemetry.lock().map_err(lock_error)?;
+        let mut overflowed = state.overflowed;
+        match result {
+            Ok(ArtifactTransferRpcResult::Progress { .. }) => {
+                telemetry_add(&mut state.begin_responses, 1, &mut overflowed)
+            }
+            Ok(ArtifactTransferRpcResult::ChunkAccepted { .. }) => {
+                telemetry_add(&mut state.accepted_chunks, 1, &mut overflowed)
+            }
+            Ok(ArtifactTransferRpcResult::Completed { .. }) => {
+                telemetry_add(&mut state.completed_responses, 1, &mut overflowed)
+            }
+            Err(ClusterError::Invalid(_) | ClusterError::Denied(_)) => {
+                telemetry_add(&mut state.denied, 1, &mut overflowed)
+            }
+            Err(_) => telemetry_add(&mut state.failed, 1, &mut overflowed),
+        }
+        state.overflowed = overflowed;
+        Ok(())
+    }
+
+    fn record_receipt_replay(&self) -> Result<()> {
+        let mut state = self.telemetry.lock().map_err(lock_error)?;
+        let mut overflowed = state.overflowed;
+        telemetry_add(&mut state.completed_receipt_replays, 1, &mut overflowed);
+        state.overflowed = overflowed;
+        Ok(())
+    }
+
+    fn record_quota_denial(&self) -> Result<()> {
+        let mut state = self.telemetry.lock().map_err(lock_error)?;
+        let mut overflowed = state.overflowed;
+        telemetry_add(&mut state.quota_denials, 1, &mut overflowed);
+        state.overflowed = overflowed;
+        Ok(())
+    }
+
+    fn record_gc(&self, report: &ArtifactTransferGcReport) -> Result<()> {
+        let mut state = self.telemetry.lock().map_err(lock_error)?;
+        let mut overflowed = state.overflowed;
+        telemetry_add(&mut state.gc_runs, 1, &mut overflowed);
+        telemetry_add(
+            &mut state.gc_removed_incomplete,
+            report.removed_incomplete as u64,
+            &mut overflowed,
+        );
+        telemetry_add(
+            &mut state.gc_removed_completed,
+            report.removed_completed as u64,
+            &mut overflowed,
+        );
+        telemetry_add(
+            &mut state.gc_reclaimed_partial_bytes,
+            report.reclaimed_partial_bytes,
+            &mut overflowed,
+        );
+        state.overflowed = overflowed;
+        Ok(())
+    }
 }
 
 fn distinct_objects(manifest: &ArtifactTransferManifest) -> BTreeMap<String, u64> {
@@ -945,6 +1149,16 @@ fn receiver_now_millis() -> u64 {
 
 fn lock_error<T>(error: std::sync::PoisonError<T>) -> ClusterError {
     ClusterError::Unavailable(format!("artifact session lock was poisoned: {error}"))
+}
+
+fn telemetry_add(counter: &mut u64, value: u64, overflowed: &mut bool) {
+    match counter.checked_add(value) {
+        Some(next) => *counter = next,
+        None => {
+            *counter = u64::MAX;
+            *overflowed = true;
+        }
+    }
 }
 
 fn validate_peers(

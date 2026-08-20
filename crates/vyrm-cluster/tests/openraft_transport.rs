@@ -21,8 +21,8 @@ use vyrm_cluster::{
     ArtifactTransferObserver, ArtifactTransferReceiver, ClusterId, NodeId, PlacementPolicy,
     ReplicaPlacement, ReplicaRole, ShardId, ShardPlacement, VyrmRaftCommand,
     VyrmRaftNetworkFactory, VyrmRaftNode, VyrmRaftStateMachine, VyrmRaftStore, VyrmRaftTlsServer,
-    VyrmTlsMaterial, VyrmTlsReloader, VyrmTransportBinding, VyrmTransportGate, VyrmTransportTrust,
-    ZoneId, CLUSTER_CONTRACT_VERSION,
+    VyrmTlsMaterial, VyrmTlsReloader, VyrmTransportBinding, VyrmTransportGate,
+    VyrmTransportOperation, VyrmTransportTrust, ZoneId, CLUSTER_CONTRACT_VERSION,
 };
 use vyrm_core::{
     ObjectReference, RuntimeCommit, RuntimeMutation, RuntimeRecordSchema, RuntimeSchemaRegistry,
@@ -37,6 +37,7 @@ struct TestNode {
     _directory: TempDir,
     raft: VyrmRaft,
     server: JoinHandle<()>,
+    telemetry: VyrmRaftTlsServer,
     objects: LocalObjectStore,
     state_machine: VyrmRaftStateMachine,
 }
@@ -155,6 +156,7 @@ fn mutual_tls_transport_replicates_and_denies_identity_confusion() {
                 project_scope.clone(),
             )
             .unwrap();
+            let telemetry = tls_server.clone();
             let listener = listeners.remove(&id).unwrap();
             let server = tokio::spawn(async move {
                 tls_server.serve(listener).await.unwrap();
@@ -165,6 +167,7 @@ fn mutual_tls_transport_replicates_and_denies_identity_confusion() {
                     _directory: directory,
                     raft,
                     server,
+                    telemetry,
                     objects,
                     state_machine,
                 },
@@ -703,6 +706,29 @@ fn mutual_tls_transport_replicates_and_denies_identity_confusion() {
             denied.is_err(),
             "authenticated node-3 must not send a Raft vote claiming node-1"
         );
+
+        let telemetry = running[&2].telemetry.telemetry_snapshot(u64::MAX).unwrap();
+        assert!(telemetry.accepted_connections > 0);
+        assert!(telemetry.denied_connections >= 2);
+        assert!(telemetry
+            .identities
+            .contains_key(&NodeId::new("node-1").unwrap()));
+        assert!(
+            telemetry.operations[&VyrmTransportOperation::Append].allowed > 0
+                || telemetry.operations[&VyrmTransportOperation::Snapshot].allowed > 0
+        );
+        assert_eq!(
+            telemetry.operations[&VyrmTransportOperation::RuntimeCommit].denied,
+            0,
+            "the foreign runtime commit was denied on node one, not node two"
+        );
+        let node_one_telemetry = running[&1].telemetry.telemetry_snapshot(u64::MAX).unwrap();
+        assert!(node_one_telemetry.operations[&VyrmTransportOperation::RuntimeCommit].allowed > 0);
+        assert!(node_one_telemetry.operations[&VyrmTransportOperation::RuntimeCommit].denied > 0);
+        let encoded = serde_json::to_vec(&node_one_telemetry).unwrap();
+        assert!(!encoded
+            .windows(64)
+            .any(|window| window == &artifact_bytes[..64]));
 
         for node in running.values() {
             node.raft.shutdown().await.unwrap();

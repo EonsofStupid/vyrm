@@ -128,6 +128,37 @@ fn source_runtime(
 }
 
 #[test]
+fn receiver_telemetry_rejects_prestart_observation_and_counts_invalid_requests() {
+    let root = tempfile::tempdir().unwrap();
+    let receiver = ArtifactTransferReceiver::open_with_policy_at(
+        LocalObjectStore::open(root.path().join("target-telemetry-boundary")).unwrap(),
+        ArtifactTransferSessionPolicy::default(),
+        100,
+    )
+    .unwrap();
+    assert!(receiver.telemetry_snapshot(99).is_err());
+    let invalid = ArtifactTransferRpc {
+        contract_version: 0,
+        operation: ArtifactTransferOperation::Complete {
+            manifest_digest: "00".repeat(32),
+            completed_at: 100,
+        },
+    };
+    assert!(receiver
+        .handle_at(
+            &NodeId::new("node:a").unwrap(),
+            &NodeId::new("node:b").unwrap(),
+            invalid,
+            100,
+        )
+        .is_err());
+    let telemetry = receiver.telemetry_snapshot(101).unwrap();
+    assert_eq!(telemetry.complete_requests, 1);
+    assert_eq!(telemetry.denied, 1);
+    assert_eq!(telemetry.failed, 0);
+}
+
+#[test]
 fn manifest_streams_each_digest_once_and_retry_reuses_verified_target_bytes() {
     let root = tempfile::tempdir().unwrap();
     let bytes = vec![0xa5; 512 * 1024 + 31];
@@ -389,7 +420,8 @@ fn session_admission_enforces_count_and_reserved_byte_quotas_then_gc_reclaims_st
     let second = manifest_for(root.path(), "quota-second", b"abcdefgh");
     let target = LocalObjectStore::open(root.path().join("target-quota")).unwrap();
     let receiver =
-        ArtifactTransferReceiver::open_with_policy(target, policy(1, 12, 10, 100, 10)).unwrap();
+        ArtifactTransferReceiver::open_with_policy_at(target, policy(1, 12, 10, 100, 10), 90)
+            .unwrap();
 
     receiver
         .handle_at(
@@ -425,9 +457,10 @@ fn session_admission_enforces_count_and_reserved_byte_quotas_then_gc_reclaims_st
         )
         .unwrap();
 
-    let byte_limited = ArtifactTransferReceiver::open_with_policy(
+    let byte_limited = ArtifactTransferReceiver::open_with_policy_at(
         LocalObjectStore::open(root.path().join("target-byte-quota")).unwrap(),
         policy(2, 12, 1_000, 1_000, 10),
+        190,
     )
     .unwrap();
     byte_limited
@@ -448,6 +481,10 @@ fn session_admission_enforces_count_and_reserved_byte_quotas_then_gc_reclaims_st
         .unwrap_err()
         .to_string()
         .contains("reserved-byte quota"));
+    let telemetry = byte_limited.telemetry_snapshot(202).unwrap();
+    assert_eq!(telemetry.quota_denials, 1);
+    assert_eq!(telemetry.failed, 1);
+    assert_eq!(telemetry.inventory.active_sessions, 1);
 }
 
 #[test]
@@ -456,9 +493,12 @@ fn completed_receipts_are_idempotent_until_bounded_retention_gc() {
     let bytes = b"receipt retention bytes";
     let manifest = manifest_for(root.path(), "receipt", bytes);
     let target = LocalObjectStore::open(root.path().join("target-receipt")).unwrap();
-    let receiver =
-        ArtifactTransferReceiver::open_with_policy(target.clone(), policy(2, 1_024, 100, 10, 2))
-            .unwrap();
+    let receiver = ArtifactTransferReceiver::open_with_policy_at(
+        target.clone(),
+        policy(2, 1_024, 100, 10, 2),
+        90,
+    )
+    .unwrap();
     receiver
         .handle_at(
             &manifest.plan.source,
@@ -504,10 +544,19 @@ fn completed_receipts_are_idempotent_until_bounded_retention_gc() {
             .unwrap(),
         completed
     );
+    let before_gc = receiver.telemetry_snapshot(105).unwrap();
+    assert_eq!(before_gc.begin_requests, 1);
+    assert_eq!(before_gc.chunk_requests, 1);
+    assert_eq!(before_gc.complete_requests, 2);
+    assert_eq!(before_gc.completed_responses, 2);
+    assert_eq!(before_gc.completed_receipt_replays, 1);
     let report = receiver.collect_garbage(112).unwrap();
     assert_eq!(report.removed_completed, 1);
     assert_eq!(report.remaining.retained_receipts, 0);
     assert_eq!(target.get(&manifest.objects[0]).unwrap(), bytes);
+    let after_gc = receiver.telemetry_snapshot(113).unwrap();
+    assert_eq!(after_gc.gc_removed_completed, 1);
+    assert_eq!(after_gc.inventory.retained_receipts, 0);
 }
 
 #[test]
@@ -526,7 +575,8 @@ fn restart_recovers_inventory_and_distinct_sessions_accept_chunks_concurrently()
         .unwrap();
     let session_policy = policy(4, 1_024 * 1_024, 60_000, 60_000, 4);
     let receiver =
-        ArtifactTransferReceiver::open_with_policy(target.clone(), session_policy.clone()).unwrap();
+        ArtifactTransferReceiver::open_with_policy_at(target.clone(), session_policy.clone(), now)
+            .unwrap();
     for manifest in [&first, &second] {
         receiver
             .handle_at(
@@ -538,13 +588,17 @@ fn restart_recovers_inventory_and_distinct_sessions_accept_chunks_concurrently()
             .unwrap();
     }
     let restarted =
-        ArtifactTransferReceiver::open_with_policy(target.clone(), session_policy).unwrap();
+        ArtifactTransferReceiver::open_with_policy_at(target.clone(), session_policy, now + 1)
+            .unwrap();
     let inventory = restarted.session_inventory(now + 1).unwrap();
     assert_eq!(inventory.active_sessions, 2);
     assert_eq!(
         inventory.reserved_bytes,
         (first_bytes.len() + second_bytes.len()) as u64
     );
+    let restarted_telemetry = restarted.telemetry_snapshot(now + 1).unwrap();
+    assert_eq!(restarted_telemetry.begin_requests, 0);
+    assert_eq!(restarted_telemetry.inventory.active_sessions, 2);
 
     let barrier = Arc::new(Barrier::new(3));
     let jobs = [
@@ -583,6 +637,9 @@ fn restart_recovers_inventory_and_distinct_sessions_accept_chunks_concurrently()
     }
     assert_eq!(target.get(&first.objects[0]).unwrap(), first_bytes);
     assert_eq!(target.get(&second.objects[0]).unwrap(), second_bytes);
+    let telemetry = restarted.telemetry_snapshot(now + 3).unwrap();
+    assert_eq!(telemetry.chunk_requests, 2);
+    assert_eq!(telemetry.accepted_chunks, 2);
 }
 
 #[cfg(unix)]

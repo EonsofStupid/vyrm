@@ -10,7 +10,8 @@ use crate::{
     ArtifactTransferReceipt, ArtifactTransferReceiver, ArtifactTransferRpc,
     ArtifactTransferRpcResult, ClusterError, ClusterId, NodeId, Result as ClusterResult, ShardId,
     VyrmRaftCommand, VyrmRaftNode, VyrmRaftStateMachine, VyrmRaftTypeConfig,
-    ARTIFACT_TRANSFER_CHUNK_MAX_BYTES,
+    VyrmTransportAdmissionPolicy, VyrmTransportOperation, VyrmTransportOutcome,
+    VyrmTransportTelemetry, VyrmTransportTelemetrySnapshot, ARTIFACT_TRANSFER_CHUNK_MAX_BYTES,
 };
 use openraft::error::{
     ClientWriteError, Fatal, InstallSnapshotError, NetworkError, RPCError, RaftError, RemoteError,
@@ -960,6 +961,7 @@ pub struct VyrmRaftTlsServer {
     reloader: Option<VyrmTlsReloader>,
     artifacts: Option<ArtifactTransferReceiver>,
     project_scope: Option<ScopeId>,
+    telemetry: VyrmTransportTelemetry,
 }
 
 impl VyrmRaftTlsServer {
@@ -980,6 +982,8 @@ impl VyrmRaftTlsServer {
         gate: VyrmTransportGate,
     ) -> ClusterResult<Self> {
         binding.validate()?;
+        let telemetry =
+            VyrmTransportTelemetry::new(VyrmTransportAdmissionPolicy::default(), now_millis())?;
         Ok(Self {
             binding,
             trust,
@@ -990,6 +994,7 @@ impl VyrmRaftTlsServer {
             reloader: None,
             artifacts: None,
             project_scope: None,
+            telemetry,
         })
     }
 
@@ -1007,6 +1012,8 @@ impl VyrmRaftTlsServer {
         }
         let server = credentials.server_config()?;
         binding.validate()?;
+        let telemetry =
+            VyrmTransportTelemetry::new(VyrmTransportAdmissionPolicy::default(), now_millis())?;
         Ok(Self {
             binding,
             trust,
@@ -1017,6 +1024,7 @@ impl VyrmRaftTlsServer {
             reloader: Some(credentials),
             artifacts: None,
             project_scope: None,
+            telemetry,
         })
     }
 
@@ -1033,6 +1041,23 @@ impl VyrmRaftTlsServer {
         server.artifacts = Some(artifacts);
         server.project_scope = Some(project_scope);
         Ok(server)
+    }
+
+    pub fn with_admission_policy(
+        mut self,
+        policy: VyrmTransportAdmissionPolicy,
+    ) -> ClusterResult<Self> {
+        policy.validate()?;
+        self.admission = Arc::new(Semaphore::new(policy.max_global_in_flight));
+        self.telemetry = VyrmTransportTelemetry::new(policy, now_millis())?;
+        Ok(self)
+    }
+
+    pub fn telemetry_snapshot(
+        &self,
+        observed_at: u64,
+    ) -> ClusterResult<VyrmTransportTelemetrySnapshot> {
+        self.telemetry.snapshot(observed_at)
     }
 
     pub async fn serve(self, listener: TcpListener) -> io::Result<()> {
@@ -1056,6 +1081,7 @@ impl VyrmRaftTlsServer {
 
     pub async fn serve_connection(&self, stream: TcpStream) -> io::Result<()> {
         if !self.gate.is_enabled() {
+            let _ = self.telemetry.reject_connection(0);
             return Err(io::Error::new(
                 io::ErrorKind::ConnectionRefused,
                 "local Raft transport is disabled",
@@ -1069,25 +1095,80 @@ impl VyrmRaftTlsServer {
             .map_err(|error| io::Error::other(error.to_string()))?
             .map(TlsAcceptor::from)
             .unwrap_or_else(|| self.acceptor.clone());
-        let mut stream = acceptor.accept(stream).await?;
-        let peer = certificate_spiffe_id(stream.get_ref().1.peer_certificates())?;
-        let envelope: WireEnvelope = read_frame(&mut stream).await?;
-        envelope.validate(&self.binding, &self.trust, &peer)?;
+        let mut stream = match acceptor.accept(stream).await {
+            Ok(stream) => stream,
+            Err(error) => {
+                let _ = self.telemetry.reject_connection(0);
+                return Err(error);
+            }
+        };
+        let peer = match certificate_spiffe_id(stream.get_ref().1.peer_certificates()) {
+            Ok(peer) => peer,
+            Err(error) => {
+                let _ = self.telemetry.reject_connection(0);
+                return Err(error);
+            }
+        };
+        let (envelope, request_bytes): (WireEnvelope, u64) =
+            match read_frame_with_len(&mut stream).await {
+                Ok(envelope) => envelope,
+                Err(error) => {
+                    let _ = self.telemetry.reject_connection(0);
+                    return Err(error);
+                }
+            };
+        if let Err(error) = envelope.validate(&self.binding, &self.trust, &peer) {
+            let _ = self.telemetry.reject_connection(request_bytes);
+            return Err(error);
+        }
+        self.telemetry
+            .accept_connection(request_bytes)
+            .map_err(invalid_data)?;
+        let operation = envelope.request.operation();
+        let admission = self
+            .telemetry
+            .admit(
+                &envelope.source_canonical_id,
+                operation,
+                request_bytes,
+                now_millis(),
+            )
+            .map_err(invalid_data)?;
         let source = envelope.source_canonical_id.clone();
-        let response = match envelope.request {
+        let (response, outcome) = match envelope.request {
             WireRequest::Append(request) => {
-                WireResponse::Append(self.raft.append_entries(request).await)
+                let response = self.raft.append_entries(request).await;
+                let outcome = result_outcome(&response);
+                (WireResponse::Append(response), outcome)
             }
             WireRequest::Snapshot(request) => {
-                WireResponse::Snapshot(self.raft.install_snapshot(request).await)
+                let response = self.raft.install_snapshot(request).await;
+                let outcome = result_outcome(&response);
+                (WireResponse::Snapshot(response), outcome)
             }
-            WireRequest::Vote(request) => WireResponse::Vote(self.raft.vote(request).await),
-            WireRequest::Artifact(request) => WireResponse::Artifact(match &self.artifacts {
-                Some(receiver) => receiver
-                    .handle(&source, &self.binding.canonical_node_id, request)
-                    .map_err(|error| error.to_string()),
-                None => Err("artifact transport is not configured on this node".into()),
-            }),
+            WireRequest::Vote(request) => {
+                let response = self.raft.vote(request).await;
+                let outcome = result_outcome(&response);
+                (WireResponse::Vote(response), outcome)
+            }
+            WireRequest::Artifact(request) => {
+                let (response, outcome) = match &self.artifacts {
+                    Some(receiver) => {
+                        match receiver.handle(&source, &self.binding.canonical_node_id, request) {
+                            Ok(response) => (Ok(response), VyrmTransportOutcome::Allowed),
+                            Err(error @ (ClusterError::Invalid(_) | ClusterError::Denied(_))) => {
+                                (Err(error.to_string()), VyrmTransportOutcome::Denied)
+                            }
+                            Err(error) => (Err(error.to_string()), VyrmTransportOutcome::Failed),
+                        }
+                    }
+                    None => (
+                        Err("artifact transport is not configured on this node".into()),
+                        VyrmTransportOutcome::Failed,
+                    ),
+                };
+                (WireResponse::Artifact(response), outcome)
+            }
             WireRequest::RuntimeCommit(command) => {
                 let result = (|| {
                     command.validate().map_err(|error| error.to_string())?;
@@ -1106,17 +1187,27 @@ impl VyrmRaftTlsServer {
                     }
                     Ok(())
                 })();
-                WireResponse::RuntimeCommit(match result {
+                let response = match result {
                     Ok(()) => self
                         .raft
                         .client_write(*command)
                         .await
                         .map_err(ConsensusCommitWireError::Raft),
                     Err(error) => Err(ConsensusCommitWireError::Denied(error)),
-                })
+                };
+                let outcome = match &response {
+                    Ok(response) if response.data.accepted => VyrmTransportOutcome::Allowed,
+                    Ok(_) => VyrmTransportOutcome::Denied,
+                    Err(ConsensusCommitWireError::Denied(_)) => VyrmTransportOutcome::Denied,
+                    Err(ConsensusCommitWireError::Raft(_)) => VyrmTransportOutcome::Failed,
+                };
+                (WireResponse::RuntimeCommit(response), outcome)
             }
         };
-        write_frame(&mut stream, &response).await
+        let response_bytes = write_frame(&mut stream, &response).await?;
+        admission
+            .finish(outcome, response_bytes)
+            .map_err(invalid_data)
     }
 }
 
@@ -1215,6 +1306,16 @@ enum WireRequest {
 }
 
 impl WireRequest {
+    fn operation(&self) -> VyrmTransportOperation {
+        match self {
+            Self::Append(_) => VyrmTransportOperation::Append,
+            Self::Snapshot(_) => VyrmTransportOperation::Snapshot,
+            Self::Vote(_) => VyrmTransportOperation::Vote,
+            Self::Artifact(_) => VyrmTransportOperation::Artifact,
+            Self::RuntimeCommit(_) => VyrmTransportOperation::RuntimeCommit,
+        }
+    }
+
     fn source_raft_id(&self) -> Option<u64> {
         match self {
             Self::Append(request) => request.vote.leader_id().voted_for(),
@@ -1343,10 +1444,18 @@ fn wire_digest<T: Serialize>(value: &T) -> ClusterResult<String> {
         .map_err(|error| ClusterError::Invalid(format!("transport encoding failed: {error}")))
 }
 
+fn result_outcome<T, E>(result: &std::result::Result<T, E>) -> VyrmTransportOutcome {
+    if result.is_ok() {
+        VyrmTransportOutcome::Allowed
+    } else {
+        VyrmTransportOutcome::Failed
+    }
+}
+
 async fn write_frame<W: AsyncWrite + Unpin, T: Serialize>(
     writer: &mut W,
     value: &T,
-) -> io::Result<()> {
+) -> io::Result<u64> {
     let bytes = serde_json::to_vec(value).map_err(invalid_data)?;
     if bytes.is_empty() || bytes.len() > VYRM_RAFT_MAX_RPC_FRAME_BYTES {
         return Err(invalid_data("transport frame exceeds its bounded size"));
@@ -1355,19 +1464,28 @@ async fn write_frame<W: AsyncWrite + Unpin, T: Serialize>(
         .write_all(&(bytes.len() as u64).to_be_bytes())
         .await?;
     writer.write_all(&bytes).await?;
-    writer.flush().await
+    writer.flush().await?;
+    Ok(bytes.len() as u64)
 }
 
 async fn read_frame<R: AsyncRead + Unpin, T: for<'de> Deserialize<'de>>(
     reader: &mut R,
 ) -> io::Result<T> {
+    read_frame_with_len(reader).await.map(|(value, _)| value)
+}
+
+async fn read_frame_with_len<R: AsyncRead + Unpin, T: for<'de> Deserialize<'de>>(
+    reader: &mut R,
+) -> io::Result<(T, u64)> {
     let length = reader.read_u64().await?;
     if length == 0 || length > VYRM_RAFT_MAX_RPC_FRAME_BYTES as u64 {
         return Err(invalid_data("transport frame length is outside its bound"));
     }
     let mut bytes = vec![0; length as usize];
     reader.read_exact(&mut bytes).await?;
-    serde_json::from_slice(&bytes).map_err(invalid_data)
+    serde_json::from_slice(&bytes)
+        .map(|value| (value, length))
+        .map_err(invalid_data)
 }
 
 #[allow(clippy::result_large_err)]

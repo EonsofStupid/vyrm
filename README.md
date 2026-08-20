@@ -87,7 +87,13 @@ Vyrm provides:
   denial, hot leaf and trust-root rotation, CRL revocation, stale restart denial,
   corrupt-pointer refusal, and bounded file-backed snapshot transfer with
   crash-orphan cleanup and disk-resident immutable segment v3 with bounded
-  shared-cache telemetry (automatic workload issuance and production clustering
+  shared-cache telemetry. Transport telemetry v1 adds reset-explicit
+  per-operation/per-identity decisions, byte/latency/in-flight accounting,
+  configurable global and identity rate bounds, and a golden JSON contract;
+  node control v3 exposes it beside artifact-session and consensus-trace health
+  for the configured project. A typed Raft timing policy replaces fragile
+  library development defaults with per-project heartbeat/election bounds
+  (automatic workload issuance, retained exporters, and production clustering
   remain gated);
 - grounded replica-artifact hydration for project-scoped vector/index bytes:
   typed manifests bind source/target, placement epoch, shard snapshot, exact

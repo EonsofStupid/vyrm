@@ -65,9 +65,16 @@ not roadmap language.
   SPIFFE-style URI identity, static Raft-id/canonical-id authorization,
   cluster/shard/source/target and request-digest binding, Raft-vote-source
   binding, 16 MiB pre-allocation frame limits, OpenRaft hard TTLs, 256-RPC
-  admission, and a 30-second ingress lifetime fail closed. A four-node loopback
-  run covers election, replication, post-purge snapshot catch-up, certificate
-  impersonation denial, and authenticated vote-source forgery denial. The
+  admission, and a 30-second ingress lifetime fail closed. Transport telemetry
+  v1 freezes allowed/denied/failed counts, bytes, latency, current/peak
+  concurrency, connection denials, and bounded per-identity rate windows.
+  Configurable global/identity admission is enforced before dispatch; the
+  version-3 supervisor status returns transport-ingress, artifact-session, and
+  consensus-trace health with explicit process-reset timestamps. Typed Raft
+  timing defaults use 250 ms heartbeats and a 1--2 second election window
+  instead of OpenRaft's scheduler-sensitive development defaults. A four-node
+  loopback run covers election, replication, post-purge snapshot catch-up,
+  certificate impersonation denial, and authenticated vote-source forgery denial. The
   feature also ships a real `vyrm-cluster-node` process boundary with a bounded,
   versioned, request-correlated JSON-lines supervisor protocol over inherited
   stdin/stdout. A four-process black-box run proves abrupt voter restart and
@@ -86,7 +93,7 @@ not roadmap language.
   set, and then completes partition/reconciliation/snapshot recovery. This is a
   file-fed supervisor contract; SPIFFE Workload API streaming, automatic
   issuance, durable supervisor generation, independent hosts/hardware faults,
-  production observability, and Multi-AZ deployment remain unclaimed.
+  retained telemetry exporters/alerts, and Multi-AZ deployment remain unclaimed.
   OpenRaft snapshots are now seekable files rather than `Cursor<Vec<u8>>`:
   bundle export, receive, install, local object publication, verification, and
   durable reopen avoid whole-bundle allocation; writes are hard-capped at 1 GiB;
@@ -129,7 +136,9 @@ not roadmap language.
   idempotent retry, activation ordering, restart, and preservation of local
   votes. Durable cluster/storage trace trees record only control evidence and
   transfer counters, with equal normalized results across Memory, Fjall, and
-  native engines. S3-compatible semantics exist, but that synchronous adapter
+  native engines. Restart-reconstructed receiver telemetry separately exposes
+  inventory, quotas, receipt replay, GC, denials, failures, and overflow without
+  object bytes. S3-compatible semantics exist, but that synchronous adapter
   currently materializes one object; multipart/resumable cross-host transport
   and independent-host evidence remain open.
 - A persisted, revisioned schema registry now governs typed runtime records,
@@ -420,8 +429,10 @@ artifact even on failure.
   projection stamp fields survive persisted link serialization. Schema
   migration, concurrency, initialization, denial, observer safety, secret
   non-persistence, causal visualization, crash recovery, and Memory/Fjall/
-  native parity are tested. Storage-write/cluster coverage, OTLP translation,
-  persistent trace histories/regression budgets, cross-node artifact-catalog
+  native parity are tested. Cluster transport/artifact/trace health is now
+  available through project-node status, while a Connectome cluster lens,
+  storage-write coverage, OTLP translation, persistent trace
+  histories/regression budgets, cross-node artifact-catalog
   replication, and full pgvector promotion remain open. See
   `docs/runtime-tracing-operator-knowledge.md`.
 

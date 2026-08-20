@@ -20,6 +20,7 @@ mod node_runtime;
 #[cfg(feature = "openraft-adapter")]
 mod openraft_adapter;
 mod sim;
+mod telemetry;
 #[cfg(feature = "openraft-transport")]
 mod transport;
 
@@ -32,5 +33,6 @@ pub use node_runtime::*;
 #[cfg(feature = "openraft-adapter")]
 pub use openraft_adapter::*;
 pub use sim::*;
+pub use telemetry::*;
 #[cfg(feature = "openraft-transport")]
 pub use transport::*;

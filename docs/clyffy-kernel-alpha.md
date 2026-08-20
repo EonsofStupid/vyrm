@@ -167,10 +167,13 @@ measured local results, never universal superiority.
    now route bounded causal trace commits through the current Raft leader and
    prove identical voter/learner trace state after purge and failover. Receiver
    admission, durable inventory reconstruction, stale-session/receipt GC, and
-   distinct-session concurrency are bounded and tested. Independent-host and
-   hardware chaos, larger retained closure workloads, automatic SPIFFE
-   issuance/streaming, durable supervisor generation, production telemetry,
-   and Multi-AZ evidence remain open.
+   distinct-session concurrency are bounded and tested. Identity-scoped/global
+   transport admission, bounded Raft timing, and reset-explicit transport,
+   artifact-session, and consensus-trace telemetry now ship through project
+   node status.
+   Independent-host and hardware chaos, larger retained closure workloads,
+   automatic SPIFFE issuance/streaming, durable supervisor generation,
+   retained telemetry export/alerting, and Multi-AZ evidence remain open.
 8. **Local gate complete:** declared package workflows now bind preflight,
    pre-tool freshness/authorization, and post-tool atomic evidence across the
    shared hook/MCP handler. A durable cross-process authorization lease remains

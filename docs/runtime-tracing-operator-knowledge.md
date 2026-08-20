@@ -6,9 +6,11 @@ provider/tool-envelope, causal-analysis, and data-class export slices
 implemented. Cluster artifact transfer now has a typed observation port and a
 consensus-backed, project-scoped trace route in the real node runtime. The
 portable operator boundary and first live pgvector functional gate are
-implemented; production TLS/failure/scale
-promotion remains pending alongside storage-write, broader cluster operations,
-OTLP, and retained-regression coverage.
+implemented; production TLS/failure/scale promotion remains pending alongside
+storage-write, broader cluster operations, OTLP, and retained-regression
+coverage. Reset-explicit cluster transport, artifact-session, and
+consensus-trace health now accompanies project-node status without being
+mislabeled as canonical trace truth.
 Repository state was verified 2026-08-20.
 
 ## Why this is a kernel feature
