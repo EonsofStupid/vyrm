@@ -1,10 +1,11 @@
 # vyrm — Connectome runtime substrate
 
 The product architecture is **Automaton → LFG → Connectome**. Automaton owns
-conversation/provider orchestration, LFG constructs and routes just-in-time
-context, and Connectome owns persistent runtime intelligence and its developer
-workbench. This repository is **Vyrm**, the persistence and lifecycle substrate
-being evolved inside Connectome; it is not a fourth peer product.
+conversation/provider orchestration; LFG owns context encoding, just-in-time
+compilation, and routing; Connectome owns persistent runtime intelligence and
+its developer workbench. This repository is **Vyrm**, the persistence and
+lifecycle substrate being evolved inside Connectome; it is not a fourth peer
+product.
 
 The system makes operational reasoning observable and enforceable without
 claiming access to a model's hidden chain-of-thought. It records goals, plans,
@@ -37,8 +38,10 @@ Vyrm provides:
   separate durable start and finish events so crashes remain visible;
 - observer-safe query, storage-read, vector-plan/search, projection-publication,
   and embedding-inference/commit trace trees; native reads include bounded
-  manifest/memtable/segment/cache/block deltas, while raw queries, parameters,
-  vectors, filters, and embedding source bytes remain outside persisted traces;
+  manifest/memtable/segment/cache/block deltas plus configured mutable-state
+  limits and automatic-flush/backpressure deltas, while raw queries,
+  parameters, vectors, filters, and embedding source bytes remain outside
+  persisted traces;
 - authoritative per-project vector artifact catalogs: exact, compact-dense, and
   HNSW bytes are content-addressed first, then their strict catalog record and
   verified object reference commit atomically through `vyrmDS`; restart
@@ -48,8 +51,9 @@ Vyrm provides:
   incomplete, summary, and invalid lifecycles from the authoritative log,
   identifies a non-double-counted measured critical-path candidate, and joins
   real provider/tool envelopes by digest without retaining their content;
-- a versioned project-scoped operator-knowledge port for external systems such
-  as pgvector: exact model/tenant/config binding, snapshot and stable-revision
+- a versioned project-scoped shared operator-knowledge port for external
+  systems such as PostgreSQL/pgvector: exact model/tenant/config binding,
+  snapshot and stable-revision
   evidence, explicit vector-kind and path-specific metric capabilities,
   exact/HNSW/IVFFlat controls and fallback, parameterized SQL shapes, and
   idempotent vector-outbox work without a cross-store ACID claim;
@@ -306,10 +310,11 @@ reproduce the native engine's first strict local equal-or-better pass. That
 checked-in five-trial workload has native ahead in write/read throughput,
 write/read p95, maintained recovery, steady RSS, and disk while preserving
 correctness. A nine-trial small-batch/standard/read-heavy/sustained matrix also
-passes every cell. These are scoped append/replay M3 results, not a general
-database-superiority claim. A separate 20,000-operation physical differential
-now proves put/overwrite/delete behavior across reopen and compaction against
-both Fjall and an independent ordered-map oracle.
+passes every cell. A three-trial 70,000-operation extension also passes and is
+now part of the scheduled remote matrix. These are scoped append/replay M3
+results, not a general database-superiority claim. A separate 20,000-operation
+physical differential now proves put/overwrite/delete behavior across reopen
+and compaction against both Fjall and an independent ordered-map oracle.
 The canonical `PersistentEngine` now creates native stores for missing paths and
 reopens them by their authenticated `CURRENT` marker. CLI, `vyrmd`, and
 Connectome use that selector. Existing non-native directories remain on the

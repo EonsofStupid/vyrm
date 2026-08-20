@@ -16,8 +16,9 @@ mod wal;
 
 pub use batch::{Mutation, WriteBatch, BATCH_FORMAT_VERSION};
 pub use database::{
-    CompactionBoundary, CompactionOutcome, Database, FailureMode, FlushBoundary,
-    GarbageCollectionReport, Snapshot, SnapshotInstallBoundary,
+    CompactionBoundary, CompactionOutcome, Database, DatabaseOptions, FailureMode, FlushBoundary,
+    GarbageCollectionReport, MaintenancePolicy, MaintenanceStats, Snapshot,
+    SnapshotInstallBoundary, DEFAULT_MEMTABLE_MAX_VERSIONS, DEFAULT_WAL_PAYLOAD_MAX_BYTES,
 };
 pub use error::{Error, Result};
 pub use manifest::{

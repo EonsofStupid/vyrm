@@ -62,6 +62,20 @@ struct BackendResult {
     maintenance_peak_rss_kib: Option<u64>,
     disk_bytes: u64,
     semantic_sequence: u64,
+    native_maintenance: Option<MaintenanceEvidence>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct MaintenanceEvidence {
+    wal_payload_bytes: u64,
+    wal_payload_max_bytes: u64,
+    memtable_versions: u64,
+    memtable_max_versions: u64,
+    memtable_bytes: u64,
+    automatic_flushes: u64,
+    write_stalls: u64,
+    failed_flushes: u64,
+    oversized_batches: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -395,12 +409,33 @@ fn run_fjall(path: &Path, config: &Config) -> Result<BackendResult, String> {
         maintenance_peak_rss_kib: None,
         disk_bytes: directory_bytes(path)?,
         semantic_sequence: probe.semantic_sequence,
+        native_maintenance: None,
     })
 }
 
 fn run_native(path: &Path, config: &Config) -> Result<BackendResult, String> {
     let store = NativeEngine::open(path).map_err(|error| error.to_string())?;
     let (write_samples, write_elapsed) = write_workload(&store, config)?;
+    let physical = store
+        .physical_store_evidence()
+        .map_err(|error| error.to_string())?;
+    let native_maintenance = Some(MaintenanceEvidence {
+        wal_payload_bytes: required(physical.wal_payload_bytes, "WAL payload bytes")?,
+        wal_payload_max_bytes: required(physical.wal_payload_max_bytes, "WAL payload byte limit")?,
+        memtable_versions: required(physical.memtable_versions, "memtable versions")?,
+        memtable_max_versions: required(physical.memtable_max_versions, "memtable version limit")?,
+        memtable_bytes: required(physical.memtable_bytes, "memtable bytes")?,
+        automatic_flushes: required(physical.automatic_flushes, "automatic flushes")?,
+        write_stalls: required(
+            physical.maintenance_write_stalls,
+            "maintenance write stalls",
+        )?,
+        failed_flushes: required(
+            physical.failed_maintenance_flushes,
+            "failed maintenance flushes",
+        )?,
+        oversized_batches: required(physical.oversized_batches, "oversized batches")?,
+    });
     let write_peak_rss_kib = peak_rss_kib();
     drop(store);
     let recovery_started = Instant::now();
@@ -432,7 +467,12 @@ fn run_native(path: &Path, config: &Config) -> Result<BackendResult, String> {
         maintenance_peak_rss_kib,
         disk_bytes: directory_bytes(path)?,
         semantic_sequence: probe.semantic_sequence,
+        native_maintenance,
     })
+}
+
+fn required(value: Option<u64>, name: &str) -> Result<u64, String> {
+    value.ok_or_else(|| format!("native physical evidence omitted {name}"))
 }
 
 fn write_workload(
@@ -579,7 +619,37 @@ fn aggregate(backend: &str, trials: &[BackendResult]) -> BackendResult {
         ),
         disk_bytes: median_u64(trials.iter().map(|trial| trial.disk_bytes).collect()),
         semantic_sequence: median_u64(trials.iter().map(|trial| trial.semantic_sequence).collect()),
+        native_maintenance: aggregate_maintenance(
+            trials
+                .iter()
+                .filter_map(|trial| trial.native_maintenance.as_ref())
+                .collect(),
+        ),
     }
+}
+
+fn aggregate_maintenance(values: Vec<&MaintenanceEvidence>) -> Option<MaintenanceEvidence> {
+    (!values.is_empty()).then(|| MaintenanceEvidence {
+        wal_payload_bytes: median_u64(values.iter().map(|value| value.wal_payload_bytes).collect()),
+        wal_payload_max_bytes: median_u64(
+            values
+                .iter()
+                .map(|value| value.wal_payload_max_bytes)
+                .collect(),
+        ),
+        memtable_versions: median_u64(values.iter().map(|value| value.memtable_versions).collect()),
+        memtable_max_versions: median_u64(
+            values
+                .iter()
+                .map(|value| value.memtable_max_versions)
+                .collect(),
+        ),
+        memtable_bytes: median_u64(values.iter().map(|value| value.memtable_bytes).collect()),
+        automatic_flushes: median_u64(values.iter().map(|value| value.automatic_flushes).collect()),
+        write_stalls: median_u64(values.iter().map(|value| value.write_stalls).collect()),
+        failed_flushes: median_u64(values.iter().map(|value| value.failed_flushes).collect()),
+        oversized_batches: median_u64(values.iter().map(|value| value.oversized_batches).collect()),
+    })
 }
 
 fn aggregate_latency(trials: Vec<&Latency>) -> Latency {

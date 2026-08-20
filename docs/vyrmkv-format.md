@@ -7,6 +7,17 @@ compatibility.
 The format is pre-release. Any format change before alpha must increment its
 explicit version and update the checked-in vectors; readers never guess.
 
+The active mutable layer is bounded by configurable encoded-WAL-payload and
+memtable-version limits (64 MiB and 524,288 versions by default). Before
+admitting a batch that would cross either limit, the single writer synchronously
+publishes the existing WAL-backed memtable through the normal crash-ordered
+flush path. This is
+intentional backpressure: the new batch is not appended until maintenance
+succeeds. One atomic batch is never split; a batch larger than a configured
+limit remains one WAL frame and is reported as oversized. Maintenance counters
+are operational evidence and reset on reopen; WAL, segment, manifest, and
+`CURRENT` remain the canonical persistence truth.
+
 Runtime entry points use `PersistentEngine`: a missing path creates this native
 format, and an authenticated `CURRENT` pointer selects it on reopen. An existing
 directory without that marker remains on the Fjall compatibility adapter. The

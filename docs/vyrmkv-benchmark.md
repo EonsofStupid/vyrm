@@ -1,6 +1,6 @@
 # vyrmKV promotion benchmark
 
-Status: strict local M3 four-profile matrix, physical mixed-mutation soak, and
+Status: strict local M3 promotion matrix, physical mixed-mutation soak, and
 safe backend migration rehearsal pass; remote performance repetition remains.
 
 The benchmark runs Fjall and native `vyrmKV` in separate fresh child processes.
@@ -10,7 +10,8 @@ second fresh probe process measures cold reopen, maintained reads, and steady
 peak RSS so write-time allocations do not contaminate the steady-state result.
 Each child verifies the full semantic sequence and first/last claim after cold
 reopen. Native additionally reports uncompacted recovery, compaction/GC
-maintenance, maintained recovery, and maintenance peak RSS. The parent
+maintenance, maintained recovery, maintenance peak RSS, active WAL/memtable
+bounds, and automatic-flush/backpressure counters. The parent
 alternates backend order, reports medians, and retains every raw trial.
 
 Run the checked-in workload:
@@ -81,9 +82,19 @@ Raw evidence:
 - [`standard`](../eval/results/2026-08-19-vyrmkv-standard.json)
 - [`read-heavy`](../eval/results/2026-08-19-vyrmkv-read-heavy.json)
 - [`sustained`](../eval/results/2026-08-19-vyrmkv-sustained.json)
+- [`extended`](../eval/results/2026-08-20-vyrmkv-extended.json)
 
-The scheduled/manual workflow runs the same four profiles with
-`--require-promotion` and preserves one artifact per profile. This matrix spans
+The three-trial extended cell raises the corpus to 70,000 operations while
+retaining the sustained batch/read shape. Native recorded 47,729,952 encoded
+WAL payload bytes and 140,547 memtable versions under its 64 MiB/524,288-version
+limits, with zero automatic flushes, stalls, failures, or oversized batches.
+It passed at 1.214× write throughput, 1.289× read throughput, 0.853× write p95,
+0.771× read p95, 0.269× recovery, 0.673× steady RSS, and 0.317× disk. This proves
+the larger bounded steady cell, not threshold-crossing burst performance.
+
+The scheduled/manual workflow runs the original four profiles plus a 70,000-
+operation extended profile with `--require-promotion` and preserves one
+artifact per profile. This matrix spans
 corpus size, batch size, read count, and range width. It still uses an append
 then bounded-replay claim corpus; update/delete mixtures, long-duration soak,
 and long-duration/remote repetition remain separate gates before Fjall code

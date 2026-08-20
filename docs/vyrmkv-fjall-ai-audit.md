@@ -97,9 +97,18 @@ can expose regressions across machines.
 
 1. **Complete:** memtable-first single/multi-get with MVCC/cache-traffic proof
    and an isolated hot-control-set comparison.
-2. Add bounded native memtable/WAL thresholds, explicit backpressure, automatic
-   flush, and observability; compare burst latency and acknowledged-write
-   durability against Fjall.
+2. **Complete locally:** configurable encoded-WAL-payload and memtable-version
+   thresholds synchronously flush the existing WAL-backed memtable before
+   admitting a batch that would cross either bound. Atomic batches are never
+   split; a single oversized batch is accepted as one durable WAL frame,
+   retained for the next synchronous
+   flush, and counted explicitly. Native physical evidence exposes the limits
+   and process-local automatic-flush, write-stall, failure, and oversized-batch
+   counters. Admission uses cached O(1) version cardinality and the encoded WAL
+   payload length already produced for the write; it never rescans the live
+   memtable or batch. Crash recovery across the segment/continuation-WAL
+   boundary is covered. Retain threshold-crossing burst latency and remote
+   sustained evidence as promotion gates.
 3. Add authenticated per-segment negative filters only after point-miss and
    multi-get fan-out baselines; freeze the format and false-positive policy.
 4. Replace full-materialization, all-to-one compaction with bounded leveled

@@ -9,10 +9,13 @@ It is intentionally release-gated rather than calendar-gated.
 The canonical chain remains **Automaton → LFG → Connectome**:
 
 - Automaton brokers provider sessions and subscription-backed AI surfaces.
-- LFG parses and composes just-in-time context.
+- LFG owns context encoding and compiles/routes just-in-time context.
 - Connectome records, explains, visualizes, and enforces runtime intelligence.
 - Vyrm is Connectome's embeddable kernel: contracts, persistence, query and
   execution, projections, lifecycle policy, and evidence.
+- PostgreSQL/pgvector is project-scoped shared operator knowledge behind the
+  external adapter; it is neither Vyrm's canonical persistence nor LFG's JIT
+  compiler.
 - Clyffy will package those capabilities into installable per-platform and
   umbrella deployments. It consumes versioned Vyrm interfaces; it does not
   fork Vyrm internals into a second implementation.

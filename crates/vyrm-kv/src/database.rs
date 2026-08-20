@@ -12,6 +12,72 @@ use std::sync::Arc;
 
 const WAL_DIRECTORY: &str = "wal";
 const SEGMENT_DIRECTORY: &str = "segments";
+pub const DEFAULT_WAL_PAYLOAD_MAX_BYTES: usize = 64 * 1024 * 1024;
+pub const DEFAULT_MEMTABLE_MAX_VERSIONS: usize = 524_288;
+
+/// Synchronous write-path maintenance limits. Crossing either limit stalls the
+/// next writer while the existing WAL-backed memtable is published. This keeps
+/// recovery work and resident mutable state bounded without acknowledging a
+/// write whose maintenance publication failed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MaintenancePolicy {
+    pub wal_payload_max_bytes: usize,
+    pub memtable_max_versions: usize,
+}
+
+impl Default for MaintenancePolicy {
+    fn default() -> Self {
+        Self {
+            wal_payload_max_bytes: DEFAULT_WAL_PAYLOAD_MAX_BYTES,
+            memtable_max_versions: DEFAULT_MEMTABLE_MAX_VERSIONS,
+        }
+    }
+}
+
+impl MaintenancePolicy {
+    fn validate(self) -> Result<Self> {
+        if self.wal_payload_max_bytes == 0 || self.memtable_max_versions == 0 {
+            return Err(Error::InvalidConfiguration(
+                "WAL payload and memtable version limits must be greater than zero".into(),
+            ));
+        }
+        Ok(self)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DatabaseOptions {
+    pub block_cache_bytes: usize,
+    pub maintenance: MaintenancePolicy,
+}
+
+impl Default for DatabaseOptions {
+    fn default() -> Self {
+        Self {
+            block_cache_bytes: crate::DEFAULT_BLOCK_CACHE_BYTES,
+            maintenance: MaintenancePolicy::default(),
+        }
+    }
+}
+
+impl DatabaseOptions {
+    fn validate(self) -> Result<Self> {
+        self.maintenance.validate()?;
+        Ok(self)
+    }
+}
+
+/// Process-local maintenance counters. Canonical state lives in the WAL,
+/// segments, and manifests; these counters intentionally reset on reopen.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MaintenanceStats {
+    pub automatic_flushes: u64,
+    pub write_stalls: u64,
+    pub failed_flushes: u64,
+    pub oversized_batches: u64,
+    pub peak_wal_payload_bytes: usize,
+    pub peak_memtable_versions: usize,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Snapshot {
@@ -116,14 +182,28 @@ pub struct Database {
     memtable: Memtable,
     segments: Vec<Segment>,
     block_cache: SharedBlockCache,
+    maintenance: MaintenancePolicy,
+    maintenance_stats: MaintenanceStats,
+    wal_payload_bytes: usize,
 }
 
 impl Database {
     pub fn create(root: &Path) -> Result<Self> {
-        Self::create_with_block_cache(root, crate::DEFAULT_BLOCK_CACHE_BYTES)
+        Self::create_with_options(root, DatabaseOptions::default())
     }
 
     pub fn create_with_block_cache(root: &Path, block_cache_bytes: usize) -> Result<Self> {
+        Self::create_with_options(
+            root,
+            DatabaseOptions {
+                block_cache_bytes,
+                ..DatabaseOptions::default()
+            },
+        )
+    }
+
+    pub fn create_with_options(root: &Path, options: DatabaseOptions) -> Result<Self> {
+        let options = options.validate()?;
         if root.exists() {
             if !root.is_dir() || std::fs::read_dir(root)?.next().is_some() {
                 return Err(Error::InvalidManifest(
@@ -146,20 +226,34 @@ impl Database {
             wal,
             memtable: Memtable::default(),
             segments: Vec::new(),
-            block_cache: new_block_cache(block_cache_bytes),
+            block_cache: new_block_cache(options.block_cache_bytes),
+            maintenance: options.maintenance,
+            maintenance_stats: MaintenanceStats::default(),
+            wal_payload_bytes: 0,
         })
     }
 
     pub fn open(root: &Path) -> Result<Self> {
-        Self::open_with_block_cache(root, crate::DEFAULT_BLOCK_CACHE_BYTES)
+        Self::open_with_options(root, DatabaseOptions::default())
     }
 
     pub fn open_with_block_cache(root: &Path, block_cache_bytes: usize) -> Result<Self> {
+        Self::open_with_options(
+            root,
+            DatabaseOptions {
+                block_cache_bytes,
+                ..DatabaseOptions::default()
+            },
+        )
+    }
+
+    pub fn open_with_options(root: &Path, options: DatabaseOptions) -> Result<Self> {
+        let options = options.validate()?;
         let manifests = ManifestStore::open(root)?;
         let (_, manifest) = manifests
             .current()?
             .ok_or_else(|| Error::InvalidManifest("database has no CURRENT manifest".into()))?;
-        let block_cache = new_block_cache(block_cache_bytes);
+        let block_cache = new_block_cache(options.block_cache_bytes);
         let mut segments = Vec::with_capacity(manifest.segments.len());
         for expected in &manifest.segments {
             let mut segment = Segment::open_with_cache(
@@ -183,6 +277,14 @@ impl Database {
             return Err(Error::TornTail { offset });
         }
         let memtable = Memtable::recover_from(&recovery.batches, manifest.durable_sequence)?;
+        let wal_payload_bytes = recovery.batches.iter().fold(0usize, |bytes, batch| {
+            bytes.saturating_add(batch.payload.len())
+        });
+        let maintenance_stats = MaintenanceStats {
+            peak_wal_payload_bytes: wal_payload_bytes,
+            peak_memtable_versions: memtable.version_count(),
+            ..MaintenanceStats::default()
+        };
         let wal = WalWriter::open_at(&path, manifest.wal_start_sequence)?;
         Ok(Self {
             root: root.to_owned(),
@@ -192,6 +294,9 @@ impl Database {
             memtable,
             segments,
             block_cache,
+            maintenance: options.maintenance,
+            maintenance_stats,
+            wal_payload_bytes,
         })
     }
 
@@ -211,11 +316,14 @@ impl Database {
 
     pub fn write(&mut self, batch: &WriteBatch, durability: Durability) -> Result<AppendReceipt> {
         let payload = batch.encode()?;
+        self.prepare_write(batch, payload.len())?;
         let receipt = self
             .wal
             .append_encoded_write_batch(batch, &payload, durability)?;
         self.memtable
             .apply_write_batch(batch, receipt.first_sequence, receipt.last_sequence)?;
+        self.wal_payload_bytes = self.wal_payload_bytes.saturating_add(payload.len());
+        self.record_memtable_peak();
         Ok(receipt)
     }
 
@@ -228,6 +336,7 @@ impl Database {
         durability: Durability,
     ) -> Result<AppendReceipt> {
         let payload = batch.encode()?;
+        self.prepare_write(&batch, payload.len())?;
         let receipt = self
             .wal
             .append_encoded_write_batch(&batch, &payload, durability)?;
@@ -236,7 +345,52 @@ impl Database {
             receipt.first_sequence,
             receipt.last_sequence,
         )?;
+        self.wal_payload_bytes = self.wal_payload_bytes.saturating_add(payload.len());
+        self.record_memtable_peak();
         Ok(receipt)
+    }
+
+    fn prepare_write(&mut self, batch: &WriteBatch, payload_bytes: usize) -> Result<()> {
+        let projected_bytes = self.wal_payload_bytes.saturating_add(payload_bytes);
+        let projected_versions = self.memtable.version_count().saturating_add(batch.len());
+        let active = self.memtable.version_count() != 0;
+        if active
+            && (projected_bytes > self.maintenance.wal_payload_max_bytes
+                || projected_versions > self.maintenance.memtable_max_versions)
+        {
+            self.maintenance_stats.write_stalls =
+                self.maintenance_stats.write_stalls.saturating_add(1);
+            match self.flush_memtable(self.manifest.created_at) {
+                Ok(Some(_)) => {
+                    self.maintenance_stats.automatic_flushes =
+                        self.maintenance_stats.automatic_flushes.saturating_add(1);
+                }
+                Ok(None) => {}
+                Err(error) => {
+                    self.maintenance_stats.failed_flushes =
+                        self.maintenance_stats.failed_flushes.saturating_add(1);
+                    return Err(error);
+                }
+            }
+        }
+        if payload_bytes > self.maintenance.wal_payload_max_bytes
+            || batch.len() > self.maintenance.memtable_max_versions
+        {
+            self.maintenance_stats.oversized_batches =
+                self.maintenance_stats.oversized_batches.saturating_add(1);
+        }
+        Ok(())
+    }
+
+    fn record_memtable_peak(&mut self) {
+        self.maintenance_stats.peak_wal_payload_bytes = self
+            .maintenance_stats
+            .peak_wal_payload_bytes
+            .max(self.wal_payload_bytes);
+        self.maintenance_stats.peak_memtable_versions = self
+            .maintenance_stats
+            .peak_memtable_versions
+            .max(self.memtable.version_count());
     }
 
     pub fn sync(&mut self) -> Result<u64> {
@@ -312,6 +466,7 @@ impl Database {
         self.manifests.publish(&next, Some(&self.manifest.digest))?;
         self.wal = successor;
         self.memtable = Memtable::at_sequence(sequence);
+        self.wal_payload_bytes = 0;
         self.segments.push(segment);
         self.manifest = next.clone();
         inject_failure(failure, FlushBoundary::ManifestPublished)?;
@@ -493,6 +648,7 @@ impl Database {
         self.manifests.publish(&manifest, Some(&previous))?;
         self.wal = successor;
         self.memtable = Memtable::at_sequence(source_sequence);
+        self.wal_payload_bytes = 0;
         self.segments = imported;
         self.manifest = manifest.clone();
         inject_snapshot_install_failure(failure, SnapshotInstallBoundary::ManifestPublished)?;
@@ -574,6 +730,7 @@ impl Database {
         self.manifests.publish(&manifest, Some(&previous))?;
         self.wal = successor;
         self.memtable = Memtable::at_sequence(source_sequence);
+        self.wal_payload_bytes = 0;
         self.segments = imported;
         self.manifest = manifest.clone();
         inject_snapshot_install_failure(failure, SnapshotInstallBoundary::ManifestPublished)?;
@@ -866,6 +1023,18 @@ impl Database {
 
     pub fn memtable(&self) -> &Memtable {
         &self.memtable
+    }
+
+    pub fn maintenance_policy(&self) -> MaintenancePolicy {
+        self.maintenance
+    }
+
+    pub fn maintenance_stats(&self) -> MaintenanceStats {
+        self.maintenance_stats
+    }
+
+    pub fn wal_payload_bytes(&self) -> usize {
+        self.wal_payload_bytes
     }
 
     /// Current shared immutable-block residency and effectiveness counters.

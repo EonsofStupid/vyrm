@@ -14,6 +14,7 @@ pub struct VersionedValue {
 pub struct Memtable {
     versions: BTreeMap<Vec<u8>, Vec<VersionedValue>>,
     maximum_sequence: u64,
+    version_count: usize,
     approximate_bytes: usize,
 }
 
@@ -42,6 +43,7 @@ impl Memtable {
         maximum_sequence: u64,
     ) -> Result<Self> {
         let mut approximate_bytes = 0usize;
+        let mut version_count = 0usize;
         for (key, values) in &versions {
             if key.is_empty() || values.is_empty() {
                 return Err(Error::InvalidSegment(
@@ -64,21 +66,21 @@ impl Memtable {
                     .saturating_add(value.value.as_ref().map_or(0, Vec::len))
                     .saturating_add(std::mem::size_of::<VersionedValue>());
             }
+            version_count = version_count
+                .checked_add(values.len())
+                .ok_or_else(|| Error::InvalidSegment("compacted version count overflow".into()))?;
         }
         Ok(Self {
             versions,
             maximum_sequence,
+            version_count,
             approximate_bytes,
         })
     }
 
     pub fn apply(&mut self, recovered: &RecoveredBatch) -> Result<()> {
         let batch = WriteBatch::decode(&recovered.payload)?;
-        self.apply_write_batch(
-            &batch,
-            recovered.first_sequence,
-            recovered.last_sequence,
-        )
+        self.apply_write_batch(&batch, recovered.first_sequence, recovered.last_sequence)
     }
 
     pub(crate) fn apply_write_batch(
@@ -103,6 +105,10 @@ impl Memtable {
                 self.maximum_sequence
             )));
         }
+        let next_version_count = self
+            .version_count
+            .checked_add(batch.len())
+            .ok_or_else(|| Error::InvalidBatch("memtable version count overflow".into()))?;
         for (index, operation) in batch.operations.iter().enumerate() {
             let sequence = first_sequence + index as u64;
             let (key, value) = match operation {
@@ -120,6 +126,7 @@ impl Memtable {
                 .push(VersionedValue { sequence, value });
         }
         self.maximum_sequence = last_sequence;
+        self.version_count = next_version_count;
         Ok(())
     }
 
@@ -142,6 +149,10 @@ impl Memtable {
                 batch.len(), self.maximum_sequence
             )));
         }
+        let next_version_count = self
+            .version_count
+            .checked_add(batch.len())
+            .ok_or_else(|| Error::InvalidBatch("memtable version count overflow".into()))?;
         for (index, operation) in batch.operations.into_iter().enumerate() {
             let sequence = first_sequence + index as u64;
             let (key, value) = match operation {
@@ -159,6 +170,7 @@ impl Memtable {
                 .push(VersionedValue { sequence, value });
         }
         self.maximum_sequence = last_sequence;
+        self.version_count = next_version_count;
         Ok(())
     }
 
@@ -205,7 +217,7 @@ impl Memtable {
     }
 
     pub fn version_count(&self) -> usize {
-        self.versions.values().map(Vec::len).sum()
+        self.version_count
     }
 
     pub fn approximate_bytes(&self) -> usize {

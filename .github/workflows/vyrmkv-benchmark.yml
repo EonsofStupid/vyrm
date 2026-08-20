@@ -36,6 +36,11 @@ jobs:
             batch_size: 128
             reads: 2048
             read_width: 64
+          - profile: extended
+            operations: 70000
+            batch_size: 128
+            reads: 2048
+            read_width: 64
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable

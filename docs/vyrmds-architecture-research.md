@@ -571,8 +571,10 @@ equal-or-better policy are frozen in `docs/vyrmkv-benchmark.md`. Disk-resident
 segment-v3 blocks, optimized SHA-256, streaming immutable reads, self-serving
 native sequence values, and fresh steady-state probes moved every measured cell
 green while preserving correctness. The local M3 gap is closed; a nine-trial
-small-batch/standard/read-heavy/sustained matrix also passes. Next reproduce it
-under remote CI. The local mixed update/delete gate now passes 20,000 operations
+small-batch/standard/read-heavy/sustained matrix also passes. A three-trial
+70,000-operation extension now also passes locally with bounded mutable-state
+admission enabled; the scheduled workflow retains it as a fifth profile. Next
+reproduce the complete matrix under remote CI. The local mixed update/delete gate now passes 20,000 operations
 with 10 reopens and 8 compactions against Fjall and an independent model. The
 existing-store rehearsal copies all 18 canonical keyspaces through an
 authenticated streaming archive, verifies invisible native staging, resumes at

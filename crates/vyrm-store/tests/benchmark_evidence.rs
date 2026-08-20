@@ -89,6 +89,7 @@ fn checked_in_native_promotion_matrix_is_structurally_valid_and_green() {
             2_048,
             64,
         ),
+        ("2026-08-20-vyrmkv-extended.json", 3, 70_000, 128, 2_048, 64),
     ] {
         assert_passing_evidence(
             &format!("{root}{name}"),
@@ -99,4 +100,22 @@ fn checked_in_native_promotion_matrix_is_structurally_valid_and_green() {
             width,
         );
     }
+
+    let extended: serde_json::Value = serde_json::from_slice(
+        &std::fs::read(format!("{root}2026-08-20-vyrmkv-extended.json")).unwrap(),
+    )
+    .unwrap();
+    let maintenance = &extended["native"]["native_maintenance"];
+    assert_eq!(maintenance["automatic_flushes"], 0);
+    assert_eq!(maintenance["write_stalls"], 0);
+    assert_eq!(maintenance["failed_flushes"], 0);
+    assert_eq!(maintenance["oversized_batches"], 0);
+    assert!(
+        maintenance["wal_payload_bytes"].as_u64().unwrap()
+            < maintenance["wal_payload_max_bytes"].as_u64().unwrap()
+    );
+    assert!(
+        maintenance["memtable_versions"].as_u64().unwrap()
+            < maintenance["memtable_max_versions"].as_u64().unwrap()
+    );
 }

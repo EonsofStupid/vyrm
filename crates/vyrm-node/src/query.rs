@@ -572,6 +572,45 @@ fn physical_storage_attributes(
                 after.memtable_versions,
             );
             insert_counter(&mut attributes, "memtable_bytes", after.memtable_bytes);
+            insert_counter(
+                &mut attributes,
+                "memtable_max_versions",
+                after.memtable_max_versions,
+            );
+            insert_counter(
+                &mut attributes,
+                "wal_payload_bytes",
+                after.wal_payload_bytes,
+            );
+            insert_counter(
+                &mut attributes,
+                "wal_payload_max_bytes",
+                after.wal_payload_max_bytes,
+            );
+            insert_delta(
+                &mut attributes,
+                "automatic_flushes_delta",
+                before.automatic_flushes,
+                after.automatic_flushes,
+            );
+            insert_delta(
+                &mut attributes,
+                "maintenance_write_stalls_delta",
+                before.maintenance_write_stalls,
+                after.maintenance_write_stalls,
+            );
+            insert_delta(
+                &mut attributes,
+                "failed_maintenance_flushes_delta",
+                before.failed_maintenance_flushes,
+                after.failed_maintenance_flushes,
+            );
+            insert_delta(
+                &mut attributes,
+                "oversized_batches_delta",
+                before.oversized_batches,
+                after.oversized_batches,
+            );
             insert_counter(&mut attributes, "segment_count", after.segment_count);
             insert_counter(&mut attributes, "segment_bytes", after.segment_bytes);
             insert_counter(

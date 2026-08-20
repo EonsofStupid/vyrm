@@ -8,7 +8,6 @@ use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
-use vyrm_core::digest;
 
 pub const SEGMENT_FORMAT_VERSION: u16 = 3;
 pub const DEFAULT_BLOCK_CACHE_BYTES: usize = 4 * 1024 * 1024;
@@ -240,8 +239,7 @@ impl Segment {
         table: &Memtable,
         cache: SharedBlockCache,
     ) -> Result<(Self, PathBuf)> {
-        let bytes = encode_v3(table)?;
-        let digest = digest::sha256_hex(&bytes[..bytes.len() - FOOTER_BYTES]);
+        let (bytes, digest) = encode_v3(table)?;
         let path = directory.join(format!("{digest}.seg"));
         std::fs::create_dir_all(directory)?;
         if path.exists() {
@@ -792,7 +790,7 @@ impl BlockCache {
     }
 }
 
-fn encode_v3(table: &Memtable) -> Result<Vec<u8>> {
+fn encode_v3(table: &Memtable) -> Result<(Vec<u8>, String)> {
     if table.version_count() == 0 {
         return invalid("cannot write an empty segment");
     }
@@ -811,9 +809,9 @@ fn encode_v3(table: &Memtable) -> Result<Vec<u8>> {
     let mut total_record_bytes = 0u64;
     for (key, versions) in table.all_versions() {
         for version in versions {
-            let record = encode_record(key, version)?;
+            let record_bytes = record_size(key, version)?;
             if !current.is_empty()
-                && current.len().saturating_add(record.len()) > SEGMENT_BLOCK_TARGET_BYTES
+                && current.len().saturating_add(record_bytes) > SEGMENT_BLOCK_TARGET_BYTES
             {
                 blocks.push((
                     std::mem::take(&mut current),
@@ -824,9 +822,9 @@ fn encode_v3(table: &Memtable) -> Result<Vec<u8>> {
                 current_entries = 0;
             }
             total_record_bytes = total_record_bytes
-                .checked_add(record.len() as u64)
+                .checked_add(record_bytes as u64)
                 .ok_or_else(|| Error::InvalidSegment("record bytes overflow".into()))?;
-            current.extend_from_slice(&record);
+            append_record(&mut current, key, version);
             current_entries += 1;
             current_last_key = key.to_vec();
         }
@@ -842,7 +840,7 @@ fn encode_v3(table: &Memtable) -> Result<Vec<u8>> {
     for (records, block_entries, last_key) in blocks {
         let compressed = compress_prepend_size(&records);
         let offset = output.len() as u64;
-        let block_digest = digest::sha256(&compressed);
+        let block_digest = sha256(&compressed);
         output.extend_from_slice(&compressed);
         descriptors.push(BlockDescriptor {
             offset,
@@ -881,14 +879,13 @@ fn encode_v3(table: &Memtable) -> Result<Vec<u8>> {
     if output.len() as u64 > MAX_SEGMENT_BYTES - FOOTER_BYTES as u64 {
         return invalid("encoded segment exceeds the 1 GiB safety limit");
     }
-    let checksum = digest::sha256_hex(&output);
+    let checksum = sha256_hex(&output);
     output.extend_from_slice(checksum.as_bytes());
-    Ok(output)
+    Ok((output, checksum))
 }
 
-fn encode_record(key: &[u8], version: &VersionedValue) -> Result<Vec<u8>> {
+fn record_size(key: &[u8], version: &VersionedValue) -> Result<usize> {
     let value = version.value.as_deref().unwrap_or_default();
-    let kind = if version.value.is_some() { 1 } else { 2 };
     let size = RECORD_HEADER_BYTES
         .checked_add(key.len())
         .and_then(|size| size.checked_add(value.len()))
@@ -900,15 +897,18 @@ fn encode_record(key: &[u8], version: &VersionedValue) -> Result<Vec<u8>> {
     {
         return invalid("record exceeds the segment key/value contract");
     }
-    let mut record = Vec::with_capacity(size);
-    record.push(kind);
-    record.extend_from_slice(&[0, 0, 0]);
-    record.extend_from_slice(&(key.len() as u32).to_be_bytes());
-    record.extend_from_slice(&(value.len() as u32).to_be_bytes());
-    record.extend_from_slice(&version.sequence.to_be_bytes());
-    record.extend_from_slice(key);
-    record.extend_from_slice(value);
-    Ok(record)
+    Ok(size)
+}
+
+fn append_record(output: &mut Vec<u8>, key: &[u8], version: &VersionedValue) {
+    let value = version.value.as_deref().unwrap_or_default();
+    output.push(if version.value.is_some() { 1 } else { 2 });
+    output.extend_from_slice(&[0, 0, 0]);
+    output.extend_from_slice(&(key.len() as u32).to_be_bytes());
+    output.extend_from_slice(&(value.len() as u32).to_be_bytes());
+    output.extend_from_slice(&version.sequence.to_be_bytes());
+    output.extend_from_slice(key);
+    output.extend_from_slice(value);
 }
 
 fn decode_v3_file(path: &Path, physical_bytes: u64, cache: SharedBlockCache) -> Result<Segment> {
@@ -930,7 +930,7 @@ fn decode_v3_bytes(bytes: Vec<u8>, cache: SharedBlockCache) -> Result<Segment> {
     let content_end = bytes.len() - FOOTER_BYTES;
     let expected = std::str::from_utf8(&bytes[content_end..])
         .map_err(|_| Error::InvalidSegment("segment footer is not ASCII".into()))?;
-    let actual = digest::sha256_hex(&bytes[..content_end]);
+    let actual = sha256_hex(&bytes[..content_end]);
     if expected != actual {
         return invalid("segment content checksum does not match");
     }
@@ -951,7 +951,7 @@ fn validate_v3_slice(bytes: &[u8]) -> Result<SegmentDescriptor> {
     let content_end = bytes.len() - FOOTER_BYTES;
     let expected = std::str::from_utf8(&bytes[content_end..])
         .map_err(|_| Error::InvalidSegment("segment footer is not ASCII".into()))?;
-    let actual = digest::sha256_hex(&bytes[..content_end]);
+    let actual = sha256_hex(&bytes[..content_end]);
     if expected != actual {
         return invalid("segment content checksum does not match");
     }
@@ -965,7 +965,7 @@ fn verify_file_digest(path: &Path, physical_bytes: u64) -> Result<String> {
         .checked_sub(FOOTER_BYTES as u64)
         .ok_or_else(|| Error::InvalidSegment("segment has no checksum footer".into()))?;
     let mut file = File::open(path)?;
-    let mut hasher = digest::Sha256::new();
+    let mut hasher = ring::digest::Context::new(&ring::digest::SHA256);
     let mut buffer = vec![0u8; COPY_BUFFER_BYTES];
     let mut remaining = content_bytes;
     while remaining != 0 {
@@ -978,7 +978,7 @@ fn verify_file_digest(path: &Path, physical_bytes: u64) -> Result<String> {
     file.read_exact(&mut footer)?;
     let expected = std::str::from_utf8(&footer)
         .map_err(|_| Error::InvalidSegment("segment footer is not ASCII".into()))?;
-    let actual = hasher.finalize_hex();
+    let actual = hex_digest(hasher.finish().as_ref());
     if expected != actual {
         return invalid("segment content checksum does not match");
     }
@@ -1261,6 +1261,24 @@ fn encode_sha256_hex(digest: [u8; 32]) -> [u8; 64] {
     encoded
 }
 
+fn sha256(bytes: &[u8]) -> [u8; 32] {
+    ring::digest::digest(&ring::digest::SHA256, bytes)
+        .as_ref()
+        .try_into()
+        .expect("SHA-256 output is 32 bytes")
+}
+
+fn sha256_hex(bytes: &[u8]) -> String {
+    hex_digest(&sha256(bytes))
+}
+
+fn hex_digest(digest: &[u8]) -> String {
+    String::from_utf8(
+        encode_sha256_hex(digest.try_into().expect("SHA-256 output is 32 bytes")).to_vec(),
+    )
+    .expect("hex digest is ASCII")
+}
+
 fn decode_sha256_hex(encoded: &[u8]) -> Result<[u8; 32]> {
     if encoded.len() != 64 {
         return invalid("v3 block digest has the wrong length");
@@ -1320,7 +1338,7 @@ fn decode_legacy(bytes: Vec<u8>) -> Result<Segment> {
     let physical_content_end = bytes.len() - FOOTER_BYTES;
     let expected = std::str::from_utf8(&bytes[physical_content_end..])
         .map_err(|_| Error::InvalidSegment("segment footer is not ASCII".into()))?;
-    let actual = digest::sha256_hex(&bytes[..physical_content_end]);
+    let actual = sha256_hex(&bytes[..physical_content_end]);
     if expected != actual {
         return invalid("segment content checksum does not match");
     }

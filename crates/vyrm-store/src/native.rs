@@ -22,8 +22,8 @@ use vyrm_core::{
     RuntimeRelation, RuntimeSchemaRegistry, ScopeId, SnapshotHandle, SnapshotId, Subject,
 };
 use vyrm_kv::{
-    CompactionOutcome, Database, GarbageCollectionReport, Manifest, Mutation, Snapshot,
-    SnapshotBundleFile, WriteBatch,
+    CompactionOutcome, Database, DatabaseOptions, GarbageCollectionReport, Manifest, Mutation,
+    Snapshot, SnapshotBundleFile, WriteBatch,
 };
 
 const RUNTIME_CHECKPOINT_PREFIX: &str = "runtime-";
@@ -39,6 +39,12 @@ impl NativeEngine {
     /// An existing but invalid directory fails closed rather than being
     /// silently reinitialized.
     pub fn open(path: &Path) -> Result<Self> {
+        Self::open_with_options(path, DatabaseOptions::default())
+    }
+
+    /// Opens with explicit native cache and mutable-state bounds. Persistent
+    /// format identity is unchanged; these are process-local operating limits.
+    pub fn open_with_options(path: &Path, options: DatabaseOptions) -> Result<Self> {
         if !path.exists() {
             if let Some(parent) = path.parent() {
                 std::fs::create_dir_all(parent)
@@ -52,9 +58,9 @@ impl NativeEngine {
                 .next()
                 .is_none();
         let mut database = if !path.exists() || empty {
-            Database::create(path)?
+            Database::create_with_options(path, options)?
         } else {
-            Database::open(path)?
+            Database::open_with_options(path, options)?
         };
         reconcile_runtime_checkpoints(&mut database, None, 0)?;
         let path = database.root().to_owned();
@@ -273,6 +279,8 @@ impl Engine for NativeEngine {
         let database = self.lock()?;
         let manifest = database.manifest();
         let cache = database.block_cache_stats();
+        let maintenance = database.maintenance_policy();
+        let maintenance_stats = database.maintenance_stats();
         Ok(PhysicalStoreEvidence {
             backend: "vyrmkv_native".into(),
             evidence_level: "native_counters".into(),
@@ -281,6 +289,13 @@ impl Engine for NativeEngine {
             durable_sequence: Some(manifest.durable_sequence),
             memtable_versions: Some(database.memtable().version_count() as u64),
             memtable_bytes: Some(database.memtable().approximate_bytes() as u64),
+            memtable_max_versions: Some(maintenance.memtable_max_versions as u64),
+            wal_payload_bytes: Some(database.wal_payload_bytes() as u64),
+            wal_payload_max_bytes: Some(maintenance.wal_payload_max_bytes as u64),
+            automatic_flushes: Some(maintenance_stats.automatic_flushes),
+            maintenance_write_stalls: Some(maintenance_stats.write_stalls),
+            failed_maintenance_flushes: Some(maintenance_stats.failed_flushes),
+            oversized_batches: Some(maintenance_stats.oversized_batches),
             segment_count: Some(manifest.segments.len() as u64),
             segment_bytes: Some(manifest.segments.iter().map(|segment| segment.bytes).sum()),
             cache_capacity_bytes: Some(cache.capacity_bytes as u64),
