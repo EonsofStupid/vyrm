@@ -90,8 +90,11 @@ Vyrm provides:
   shared-cache telemetry. Transport telemetry v1 adds reset-explicit
   per-operation/per-identity decisions, byte/latency/in-flight accounting,
   configurable global and identity rate bounds, and a golden JSON contract;
-  node control v3 exposes it beside artifact-session and consensus-trace health
-  for the configured project. A typed Raft timing policy replaces fragile
+  node control v4 binds it beside artifact-session and consensus-trace health
+  to the configured project, cluster, shard, Raft id, and canonical node id.
+  Connectome can validate and retain imported statuses as immutable per-node
+  hash chains with restart-aware deltas, alerts, runtime cursors, and audit
+  evidence. A typed Raft timing policy replaces fragile
   library development defaults with per-project heartbeat/election bounds
   (automatic workload issuance, retained exporters, and production clustering
   remain gated);
@@ -138,7 +141,7 @@ The workbench has no authentication. Keep remote binding on a trusted network
 or tunnel the loopback address over SSH. Frontier runners remain disabled
 unless `--enable-runners` is also explicit.
 
-Connectome provides eleven lenses:
+Connectome provides twelve lenses:
 
 | Lens | Purpose |
 |---|---|
@@ -146,6 +149,7 @@ Connectome provides eleven lenses:
 | Temporal stream | Freeze and scrub persisted mutations across instance scopes with their change and audit evidence |
 | Schema | Inspect the persisted type, property, endpoint, uniqueness, and cardinality contract |
 | Query lab | Parse, bind, explain, and execute exact bitemporal `vyrmQL` reads |
+| Cluster | Freeze, rewind, and inspect validated project-node observations, topology, restart boundaries, deltas, alerts, and raw audit evidence |
 | Overview | Runtime health, freshness, grounding, and active work |
 | Causal traces | Parent/child span lifecycles, incomplete work, measured bottleneck candidates, exact cursors, and control-only JSON export |
 | Graph | Selection-centered claim, evidence, run, flight, and source topology |
@@ -167,6 +171,8 @@ The local API also exposes the authoritative persistence layer:
 | `GET /api/runtime/query?scope=...&ql=...` | Parse, bind, explain, and execute an exact bitemporal `vyrmQL` query |
 | `GET /api/runtime/graph?scope=...&valid_at=T&cursor=N` | Freeze one scoped typed graph at valid time and transaction cursor |
 | `GET /api/runtime/diff?scope=...&from=A&to=B&valid_at=T` | Inspect exact scoped structural change between cursors |
+| `GET /api/cluster/history?limit=N` | Read bounded retained cluster observations plus the per-node baseline anchors needed for exact topology reconstruction |
+| `POST /api/cluster/samples` | Validate and commit one control-v4 project-node status as an immutable, source-digested observation |
 | `POST /api/demos/prompt-strength` | Persist a deterministic weak/strong trace pair for temporal playback |
 
 The Query Lab and its GET endpoint remain read-only inspection. When the query
@@ -192,9 +198,12 @@ independent telemetry store. It attaches the full mutation and available
 hash-chained audit envelope. The lanes describe persisted logical mutations;
 search, embedding, and storage lanes now include their persisted runtime spans.
 The Causal traces lens rebuilds parent/child lifecycle state and exposes exact
-event/audit coordinates. Armed prompt flights add a durable provider root,
-digest-only observable-envelope annotations, and tool-envelope children. They
-do not imply per-operation physical WAL micro-events, cluster coverage,
+event/audit coordinates. The separate Cluster lens visualizes explicitly
+ingested node-status observations; it never upgrades process counters into
+consensus truth, and bounded history carries a pre-window anchor per node so
+rewind does not silently erase quiet nodes. Armed prompt flights add a durable
+provider root, digest-only observable-envelope annotations, and tool-envelope children. They
+do not imply per-operation physical WAL micro-events, automatic node polling,
 unpersisted activity, or private model chain-of-thought.
 
 At the Rust port today, `MemoryEngine` and the transitional Fjall adapter expose

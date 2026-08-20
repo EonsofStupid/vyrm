@@ -229,6 +229,9 @@ fn snapshot_exposes_runtime_objects_without_mutating_the_store() {
     assert_eq!(snapshot.health.snapshot_leases, 1);
     assert_eq!(snapshot.health.retention_pins, 1);
     assert_eq!(snapshot.health.oldest_retained_cursor, Some(18));
+    assert_eq!(snapshot.cluster.project_scope, binding.manifest.id);
+    assert_eq!(snapshot.cluster.total_samples, 0);
+    assert!(snapshot.cluster.samples.is_empty());
     let retention = connectome_ui::runtime_retention(&store, 10).unwrap();
     assert_eq!(retention.snapshots, vec![lease.clone()]);
     assert_eq!(retention.pins[0].snapshot_id, lease.id);

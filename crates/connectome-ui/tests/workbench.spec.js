@@ -2,6 +2,82 @@ import { test, expect } from '@playwright/test';
 
 const baseURL = process.env.CONNECTOME_URL || 'http://127.0.0.1:4387';
 
+function clusterStatus(project, observedAt, denied = 0) {
+  const metrics = (attempted = 0, allowed = 0, deniedCount = 0) => ({
+    attempted, allowed, denied: deniedCount, failed: 0, current_in_flight: 0,
+    peak_in_flight: attempted ? 1 : 0, request_bytes: attempted * 96,
+    response_bytes: attempted * 32, total_duration_micros: attempted * 250,
+    max_duration_micros: attempted ? 250 : 0,
+  });
+  const operations = {
+    append: metrics(), snapshot: metrics(), vote: metrics(), artifact: metrics(),
+    runtime_commit: metrics(denied, 0, denied),
+  };
+  return {
+    project_scope: project,
+    cluster: 'cluster:workbench',
+    shard: 3,
+    raft_node_id: 1,
+    canonical_node_id: 'node:workbench-one',
+    current_term: 4,
+    current_leader: 1,
+    last_log_index: 22,
+    last_applied_index: 22,
+    snapshot_index: 20,
+    purged_index: 20,
+    state: 'leader',
+    credentials: { generation: 1, leaf_digest: 'ab'.repeat(32) },
+    telemetry: {
+      observed_at: observedAt,
+      transport_ingress: {
+        contract_version: 1,
+        started_at: 100,
+        observed_at: observedAt,
+        policy: {
+          max_global_in_flight: 256,
+          max_identity_in_flight: 64,
+          max_identity_requests_per_window: 4096,
+          window_millis: 1000,
+          max_tracked_identities: 1024,
+        },
+        operations,
+        identities: {},
+        current_in_flight: 0,
+        peak_in_flight: denied ? 1 : 0,
+        accepted_connections: denied,
+        denied_connections: 0,
+        connection_request_bytes: denied * 96,
+        overflowed: false,
+      },
+      artifacts: {
+        contract_version: 1,
+        started_at: 100,
+        observed_at: observedAt,
+        policy: {
+          max_active_sessions: 64,
+          max_reserved_bytes: 68719476736,
+          stale_incomplete_after_millis: 86400000,
+          completed_receipt_retention_millis: 604800000,
+          max_retained_receipts: 4096,
+        },
+        inventory: { active_sessions: 0, reserved_bytes: 0, partial_bytes: 0, retained_receipts: 0 },
+        begin_requests: 0, chunk_requests: 0, complete_requests: 0,
+        begin_responses: 0, accepted_chunks: 0, completed_responses: 0,
+        completed_receipt_replays: 0, denied: 0, failed: 0, quota_denials: 0,
+        gc_runs: 0, gc_removed_incomplete: 0, gc_removed_completed: 0,
+        gc_reclaimed_partial_bytes: 0, overflowed: false,
+      },
+      consensus_traces: {
+        started_at: 100,
+        observed_at: observedAt,
+        prepared_observations: 0, chunk_observations: 0, completed_observations: 0,
+        failed_observations: 0, commit_acknowledgements: 0, cursor_conflicts: 0,
+        leader_changes: 0, leader_unavailable: 0, denied: 0, failed: 0, overflowed: false,
+      },
+    },
+  };
+}
+
 test('developer lenses remain navigable and inspectable', async ({ page }) => {
   await page.goto(baseURL);
   await expect(page.getByRole('heading', { name: 'Runtime overview' })).toBeVisible();
@@ -77,6 +153,31 @@ test('global temporal evidence can be frozen rewound and inspected', async ({ pa
   await expect(page.getByTitle('Play or freeze stream')).toContainText('Resume time');
   await page.getByRole('button', { name: 'Inspect mutation + audit' }).click();
   await expect(page.locator('#inspector-body')).toContainText('runtime mutation');
+  await expect(page.locator('#inspector-body')).toContainText('Audit digest');
+});
+
+test('retained cluster observations can be frozen rewound and inspected', async ({ page, request }) => {
+  const snapshot = await (await request.get(`${baseURL}/api/snapshot`)).json();
+  const first = await request.post(`${baseURL}/api/cluster/samples`, {
+    data: { status: clusterStatus(snapshot.instance.id, 110, 0) },
+  });
+  expect(first.status()).toBe(201);
+  const second = await request.post(`${baseURL}/api/cluster/samples`, {
+    data: { status: clusterStatus(snapshot.instance.id, 120, 1) },
+  });
+  expect(second.status()).toBe(201);
+
+  await page.goto(`${baseURL}/#cluster`);
+  await expect(page.getByRole('heading', { name: 'Cluster flight recorder' })).toBeVisible();
+  await expect(page.locator('.cluster-node')).toHaveCount(1);
+  await expect(page.locator('.cluster-frame')).toHaveCount(2);
+  await expect(page.locator('.cluster-alert')).toContainText('transport denied');
+  await page.locator('.cluster-frame').first().click();
+  await expect(page.getByTitle('Play or freeze cluster history')).toContainText('Resume time');
+  await expect(page.locator('.cluster-clear')).toContainText('No derived alert');
+  await page.getByTitle('Latest cluster sample').click();
+  await page.getByRole('button', { name: 'Inspect raw status + audit' }).click();
+  await expect(page.locator('#inspector-body')).toContainText('retained cluster observation');
   await expect(page.locator('#inspector-body')).toContainText('Audit digest');
 });
 

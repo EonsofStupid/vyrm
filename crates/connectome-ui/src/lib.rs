@@ -1,7 +1,13 @@
 //! Local API and embedded frontend for the connectome workbench.
 
+mod cluster;
 mod flight;
 
+pub use cluster::{
+    cluster_history, ClusterAlert, ClusterAlertSeverity, ClusterHistoryView, ClusterNodeView,
+    ClusterTelemetryDelta, ClusterTelemetryRecorder, ClusterTelemetrySample,
+    ClusterTelemetrySampleView, RecordClusterTelemetry,
+};
 pub use flight::{
     ContextMode, Flight, FlightEvent, FlightMetrics, FlightStatus, LaunchFlight, ReasoningProfile,
 };
@@ -13,6 +19,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tiny_http::{Header, Method, Request, Response, Server, StatusCode};
+use vyrm_cluster::VYRM_NODE_MAX_CONTROL_LINE_BYTES;
 use vyrm_core::{
     resolve_as_of, AuditEnvelope, Claim, ClaimSource, ReasoningEvent, ReasoningPayload,
     RetentionPin, RuntimeGraphSnapshot, RuntimeMutation, RuntimeSchemaRegistry, RuntimeValue,
@@ -40,6 +47,7 @@ pub struct Snapshot {
     pub flights: Vec<Flight>,
     pub temporal_events: Vec<TemporalEventView>,
     pub traces: TraceExportView,
+    pub cluster: ClusterHistoryView,
     pub vector_artifacts: Vec<VectorArtifactCatalogEntry>,
     pub schema: Option<RuntimeSchemaRegistry>,
     pub capabilities: CapabilitiesView,
@@ -313,6 +321,7 @@ pub fn snapshot(
     let flights = flight::stored_flights(store)?;
     let temporal_events = temporal_events(store, 512)?;
     let traces = runtime_traces(store, &binding.manifest.id, 512, &["control"])?;
+    let cluster = cluster::cluster_history(store, binding, 256)?;
     let instance_scope = ScopeId::new(binding.manifest.id.clone())?;
     let vector_artifacts = vyrm_node::vector_artifact_catalog_entries(store, &instance_scope)?;
     let graph = build_graph(
@@ -374,6 +383,7 @@ pub fn snapshot(
         flights,
         temporal_events,
         traces,
+        cluster,
         vector_artifacts,
         schema,
         capabilities: CapabilitiesView {
@@ -1215,6 +1225,10 @@ pub fn serve(
         binding.clone(),
         runners_enabled,
     ));
+    let cluster_recorder = Arc::new(cluster::ClusterTelemetryRecorder::new(
+        Arc::clone(&store),
+        binding.clone(),
+    ));
     eprintln!(
         "connectome: http://{bind} [{}] runners={}",
         binding.manifest.id,
@@ -1225,7 +1239,13 @@ pub fn serve(
         }
     );
     for request in server.incoming_requests() {
-        respond(request, store.as_ref(), &binding, &recorder);
+        respond(
+            request,
+            store.as_ref(),
+            &binding,
+            &recorder,
+            &cluster_recorder,
+        );
     }
     Ok(())
 }
@@ -1235,6 +1255,7 @@ fn respond(
     store: &PersistentEngine,
     binding: &InstanceBinding,
     recorder: &Arc<flight::FlightRecorder>,
+    cluster_recorder: &Arc<cluster::ClusterTelemetryRecorder>,
 ) {
     let url = request.url().to_owned();
     let (path, query) = url.split_once('?').unwrap_or((&url, ""));
@@ -1268,10 +1289,38 @@ fn respond(
         let _ = request.respond(response);
         return;
     }
+    if request.method() == &Method::Post && path == "/api/cluster/samples" {
+        let mut bytes = Vec::new();
+        let parsed = request
+            .as_reader()
+            .take((VYRM_NODE_MAX_CONTROL_LINE_BYTES + 1) as u64)
+            .read_to_end(&mut bytes)
+            .map_err(|error| error.to_string())
+            .and_then(|_| {
+                if bytes.len() > VYRM_NODE_MAX_CONTROL_LINE_BYTES {
+                    Err("cluster telemetry request exceeds 1 MiB".into())
+                } else {
+                    serde_json::from_slice::<RecordClusterTelemetry>(&bytes)
+                        .map_err(|error| format!("invalid cluster telemetry request: {error}"))
+                }
+            });
+        let response = match parsed {
+            Ok(sample) => match cluster_recorder.record(sample, now()) {
+                Ok(sample) => json_response(StatusCode(201), &sample),
+                Err(error) => json_response(
+                    StatusCode(400),
+                    &serde_json::json!({"error":error.to_string()}),
+                ),
+            },
+            Err(error) => json_response(StatusCode(400), &serde_json::json!({"error":error})),
+        };
+        let _ = request.respond(response);
+        return;
+    }
     if request.method() != &Method::Get && request.method() != &Method::Head {
         let _ = request.respond(json_response(
             StatusCode(405),
-            &serde_json::json!({"error":"connectome workbench is read-only except for explicit prompt flights"}),
+            &serde_json::json!({"error":"connectome workbench is read-only except for explicit prompt flights and validated cluster observations"}),
         ));
         return;
     }
@@ -1311,6 +1360,21 @@ fn respond(
                 &serde_json::json!({"error":error.to_string()}),
             ),
         },
+        "/api/cluster/history" => {
+            let params = query_params(query);
+            let limit = params
+                .get("limit")
+                .and_then(|value| value.parse().ok())
+                .unwrap_or(256usize)
+                .clamp(1, 4_096);
+            match cluster_recorder.history(limit) {
+                Ok(history) => json_response(StatusCode(200), &history),
+                Err(error) => json_response(
+                    StatusCode(500),
+                    &serde_json::json!({"error":error.to_string()}),
+                ),
+            }
+        }
         "/api/changes" => {
             let params = query_params(query);
             let after = params

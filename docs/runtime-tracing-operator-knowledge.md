@@ -9,8 +9,11 @@ portable operator boundary and first live pgvector functional gate are
 implemented; production TLS/failure/scale promotion remains pending alongside
 storage-write, broader cluster operations, OTLP, and retained-regression
 coverage. Reset-explicit cluster transport, artifact-session, and
-consensus-trace health now accompanies project-node status without being
-mislabeled as canonical trace truth.
+consensus-trace health now accompanies control-v4 project-node status.
+Connectome's explicit ingestion path validates and retains those observations
+as per-node hash chains with runtime/audit coordinates, restart-aware deltas,
+alerts, and bounded-window topology anchors without mislabeling process
+counters as canonical trace truth. Automatic collection/export remains open.
 Repository state was verified 2026-08-20.
 
 ## Why this is a kernel feature

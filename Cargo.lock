@@ -488,6 +488,7 @@ dependencies = [
  "serde_json",
  "tempfile",
  "tiny_http",
+ "vyrm-cluster",
  "vyrm-core",
  "vyrm-mx",
  "vyrm-node",

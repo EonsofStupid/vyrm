@@ -106,6 +106,24 @@ pub struct ArtifactTransferTelemetrySnapshot {
     pub overflowed: bool,
 }
 
+impl ArtifactTransferTelemetrySnapshot {
+    pub fn validate(&self) -> Result<()> {
+        self.policy.validate()?;
+        if self.contract_version != ARTIFACT_TRANSFER_TELEMETRY_VERSION
+            || self.started_at > self.observed_at
+            || self.inventory.active_sessions > self.policy.max_active_sessions
+            || self.inventory.reserved_bytes > self.policy.max_reserved_bytes
+            || self.inventory.partial_bytes > self.inventory.reserved_bytes
+            || self.inventory.retained_receipts > self.policy.max_retained_receipts
+        {
+            return Err(ClusterError::Invalid(
+                "artifact transfer telemetry is outside its bounded contract".into(),
+            ));
+        }
+        Ok(())
+    }
+}
+
 #[derive(Debug)]
 struct ArtifactTransferTelemetryState {
     started_at: u64,

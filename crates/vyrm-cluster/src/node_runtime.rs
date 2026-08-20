@@ -33,7 +33,7 @@ use tokio::net::TcpListener;
 use vyrm_core::{RuntimeCommit, ScopeId};
 
 pub const VYRM_NODE_CONFIG_VERSION: u16 = 2;
-pub const VYRM_NODE_CONTROL_VERSION: u16 = 3;
+pub const VYRM_NODE_CONTROL_VERSION: u16 = 4;
 pub const VYRM_NODE_MAX_CONFIG_BYTES: u64 = 1024 * 1024;
 pub const VYRM_NODE_MAX_CONTROL_LINE_BYTES: usize = 1024 * 1024;
 const LEARNER_CATCH_UP_TIMEOUT: Duration = Duration::from_secs(10);
@@ -486,7 +486,10 @@ impl VyrmNodeRequest {
 #[serde(deny_unknown_fields)]
 pub struct VyrmNodeStatus {
     pub project_scope: ScopeId,
+    pub cluster: ClusterId,
+    pub shard: ShardId,
     pub raft_node_id: u64,
+    pub canonical_node_id: NodeId,
     pub current_term: u64,
     pub current_leader: Option<u64>,
     pub last_log_index: Option<u64>,
@@ -505,6 +508,57 @@ pub struct VyrmNodeTelemetrySnapshot {
     pub transport_ingress: VyrmTransportTelemetrySnapshot,
     pub artifacts: crate::ArtifactTransferTelemetrySnapshot,
     pub consensus_traces: VyrmConsensusTraceTelemetrySnapshot,
+}
+
+impl VyrmConsensusTraceTelemetrySnapshot {
+    pub fn validate(&self) -> ClusterResult<()> {
+        if self.started_at > self.observed_at {
+            return Err(ClusterError::Invalid(
+                "consensus trace telemetry observation predates its process".into(),
+            ));
+        }
+        Ok(())
+    }
+}
+
+impl VyrmNodeTelemetrySnapshot {
+    pub fn validate(&self) -> ClusterResult<()> {
+        if self.transport_ingress.observed_at != self.observed_at
+            || self.artifacts.observed_at != self.observed_at
+            || self.consensus_traces.observed_at != self.observed_at
+        {
+            return Err(ClusterError::Invalid(
+                "node telemetry sections do not share one observation time".into(),
+            ));
+        }
+        self.transport_ingress.validate()?;
+        self.artifacts.validate()?;
+        self.consensus_traces.validate()
+    }
+}
+
+impl VyrmNodeStatus {
+    pub fn validate(&self) -> ClusterResult<()> {
+        if self.raft_node_id == 0
+            || self.state.trim().is_empty()
+            || self.state.len() > 64
+            || self.credentials.generation == 0
+            || self.credentials.leaf_digest.len() != 64
+            || !self
+                .credentials
+                .leaf_digest
+                .bytes()
+                .all(|byte| byte.is_ascii_hexdigit())
+            || self.last_applied_index > self.last_log_index
+            || self.purged_index > self.last_log_index
+            || self.snapshot_index > self.last_log_index
+        {
+            return Err(ClusterError::Invalid(
+                "node status is outside its bounded contract".into(),
+            ));
+        }
+        self.telemetry.validate()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -985,7 +1039,11 @@ fn node_status(
     let observed_at = node_now_millis();
     Ok(VyrmNodeStatus {
         project_scope: config.project_scope.clone(),
+        cluster: config.cluster.clone(),
+        shard: config.shard,
         raft_node_id: metrics.id,
+        canonical_node_id: NodeId::new(config.nodes[&config.raft_node_id].canonical_id.clone())
+            .map_err(|error| error.to_string())?,
         current_term: metrics.current_term,
         current_leader: metrics.current_leader,
         last_log_index: metrics.last_log_index,

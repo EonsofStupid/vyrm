@@ -430,8 +430,11 @@ artifact even on failure.
   migration, concurrency, initialization, denial, observer safety, secret
   non-persistence, causal visualization, crash recovery, and Memory/Fjall/
   native parity are tested. Cluster transport/artifact/trace health is now
-  available through project-node status, while a Connectome cluster lens,
-  storage-write coverage, OTLP translation, persistent trace
+  available through control-v4 project-node status. Connectome validates and
+  retains explicitly submitted statuses as immutable per-node hash chains,
+  derives restart-aware deltas and alerts, preserves bounded-window topology
+  anchors, and provides freeze/rewind/raw-audit inspection. Automatic node
+  collection/export, storage-write coverage, OTLP translation, persistent trace
   histories/regression budgets, cross-node artifact-catalog
   replication, and full pgvector promotion remain open. See
   `docs/runtime-tracing-operator-knowledge.md`.

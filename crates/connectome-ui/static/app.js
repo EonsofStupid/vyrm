@@ -1,7 +1,7 @@
 (() => {
   'use strict';
 
-  const views = new Set(['overview', 'flight', 'stream', 'traces', 'graph', 'schema', 'query', 'runs', 'claims', 'routes', 'activity']);
+  const views = new Set(['overview', 'flight', 'stream', 'traces', 'cluster', 'graph', 'schema', 'query', 'runs', 'claims', 'routes', 'activity']);
   const initialView = location.hash.slice(1);
   const promptPresets = {
     weak: 'Make this better.',
@@ -34,6 +34,11 @@
     streamTimer: null,
     traceId: null,
     traceSpanId: null,
+    clusterCursor: null,
+    clusterPlaying: false,
+    clusterSpeed: 1,
+    clusterDirection: 1,
+    clusterTimer: null,
     refreshTimer: null,
     promptDraft: promptPresets.strong,
     flightSettings: { context: 'pruned', provider: 'codex', budget: 1500, acceptance: '', reasoning: 'default' },
@@ -125,6 +130,7 @@
     $('#flight-count').textContent = data.flights.length;
     $('#stream-count').textContent = data.temporal_events.length;
     $('#trace-count').textContent = data.traces?.traces?.length || 0;
+    $('#cluster-count').textContent = data.cluster?.nodes?.length || 0;
     $('#claim-count').textContent = data.claims.length;
     $('#file-count').textContent = data.files.length;
     $('#schema-count').textContent = data.schema
@@ -137,7 +143,7 @@
   function render() {
     if (!state.data) return;
     updateChrome();
-    const renderers = { overview: renderOverview, flight: renderFlight, stream: renderStream, traces: renderTraces, graph: renderGraph, schema: renderSchema, query: renderQuery, runs: renderRuns, claims: renderClaims, routes: renderRoutes, activity: renderActivity };
+    const renderers = { overview: renderOverview, flight: renderFlight, stream: renderStream, traces: renderTraces, cluster: renderCluster, graph: renderGraph, schema: renderSchema, query: renderQuery, runs: renderRuns, claims: renderClaims, routes: renderRoutes, activity: renderActivity };
     (renderers[state.view] || renderOverview)();
     renderInspector();
   }
@@ -824,6 +830,154 @@
     });
   }
 
+  function renderCluster() {
+    const history = state.data.cluster || { baseline_samples: [], samples: [], nodes: [], alerts: [], total_samples: 0 };
+    const samples = history.samples || [];
+    if (!samples.length) {
+      clearTimeout(state.clusterTimer);
+      state.clusterPlaying = false;
+      $('#main').innerHTML = pageHead('Cluster flight recorder', 'Retained project-node observations with exact cluster, shard, process-reset, runtime cursor, and audit coordinates.')
+        + empty('No retained node observations', 'Import a validated control-v4 node status through POST /api/cluster/samples. Live process counters are never presented as history until that observation is hash-linked and committed.');
+      return;
+    }
+    let index = state.clusterCursor == null
+      ? samples.length - 1
+      : samples.findIndex((sample) => sample.digest === state.clusterCursor);
+    if (index < 0) index = samples.length - 1;
+    const sample = samples[index];
+    state.clusterCursor = sample.digest;
+    const visibleNodes = clusterNodesAt(history.baseline_samples || [], samples, index);
+    const delta = sample.delta || {};
+    const alertTone = sample.alerts.some((alert) => alert.severity === 'critical') ? 'error'
+      : sample.alerts.some((alert) => alert.severity === 'warning') ? 'attention' : 'ready';
+    const operationTotal = Number(delta.transport_allowed || 0) + Number(delta.transport_denied || 0) + Number(delta.transport_failed || 0);
+    $('#main').innerHTML = pageHead(
+      'Cluster flight recorder',
+      'Freeze, rewind, and compare retained node observations. Every value resolves to a validated status digest, runtime cursor, commit, and hash-chained audit.',
+      `<span class="badge ${alertTone}">${sample.process_reset ? 'process reset' : `${sample.alerts.length} alert(s)`}</span>`,
+    ) + `
+      <section class="cluster-summary-strip">
+        <div><span>NODES AT CURSOR</span><strong>${human(visibleNodes.length)}</strong><small>${escapeHtml(sample.status.cluster)} · shard ${human(sample.status.shard)}</small></div>
+        <div><span>RPC OUTCOMES Δ</span><strong>${human(operationTotal)}</strong><small>${human(delta.transport_denied || 0)} denied · ${human(delta.transport_failed || 0)} failed</small></div>
+        <div><span>ARTIFACTS Δ</span><strong>${human(delta.artifact_completed || 0)}</strong><small>${formatBytes(delta.artifact_gc_reclaimed_bytes || 0)} reclaimed</small></div>
+        <div><span>TRACE COMMITS Δ</span><strong>${human(delta.trace_commit_acknowledgements || 0)}</strong><small>${human(delta.trace_cursor_conflicts || 0)} cursor conflicts</small></div>
+      </section>
+      <section class="cluster-shell">
+        <div class="cluster-controls" aria-label="Cluster history playback">
+          <button type="button" id="cluster-start" class="transport-button" title="First cluster sample">⏮ First</button>
+          <button type="button" id="cluster-rewind" class="transport-button" title="Rewind cluster samples">◀ Rewind</button>
+          <button type="button" id="cluster-play" class="play-button" title="Play or freeze cluster history">${state.clusterPlaying ? 'Freeze time' : 'Resume time'}</button>
+          <button type="button" id="cluster-forward" class="transport-button" title="Fast-forward cluster samples">Forward ▶</button>
+          <button type="button" id="cluster-end" class="transport-button" title="Latest cluster sample">Latest ⏭</button>
+          <input id="cluster-scrub" type="range" min="0" max="${samples.length - 1}" value="${index}" aria-label="Cluster history cursor">
+          <select id="cluster-speed" aria-label="Cluster playback speed"><option value="1" ${state.clusterSpeed === 1 ? 'selected' : ''}>1×</option><option value="2" ${state.clusterSpeed === 2 ? 'selected' : ''}>2×</option><option value="4" ${state.clusterSpeed === 4 ? 'selected' : ''}>4×</option><option value="8" ${state.clusterSpeed === 8 ? 'selected' : ''}>8×</option></select>
+          <span class="cluster-clock">sample ${index + 1}/${samples.length} · runtime cursor ${human(sample.cursor)}</span>
+        </div>
+        <div class="cluster-topology" role="group" aria-label="Cluster topology at selected sample">
+          <header><span>TOPOLOGY AT CURSOR ${human(sample.cursor)}</span><b>${escapeHtml(new Date(sample.status.telemetry.observed_at).toLocaleString())}</b></header>
+          <div class="cluster-node-grid">${visibleNodes.map((node) => clusterNode(node, sample.digest)).join('')}</div>
+        </div>
+        <article class="cluster-event-detail ${alertTone}">
+          <header><div><span class="eyebrow">FROZEN NODE OBSERVATION · SEQUENCE ${human(sample.sequence)}</span><h2>${escapeHtml(sample.status.canonical_node_id)}</h2></div><div class="event-clock"><strong>${escapeHtml(sample.status.state)}</strong><span>term ${human(sample.status.current_term)} · leader ${sample.status.current_leader ?? 'none'}</span></div></header>
+          <div class="event-data-strip"><div><span>applied / log</span><strong>${human(sample.status.last_applied_index ?? 0)} / ${human(sample.status.last_log_index ?? 0)}</strong></div><div><span>request bytes Δ</span><strong>${formatBytes(delta.transport_request_bytes || 0)}</strong></div><div><span>response bytes Δ</span><strong>${formatBytes(delta.transport_response_bytes || 0)}</strong></div><div><span>work duration Δ</span><strong>${formatMicros(delta.transport_duration_micros || 0)}</strong></div></div>
+          <div class="cluster-alert-list">${sample.alerts.length ? sample.alerts.map((alert) => `<div class="cluster-alert ${escapeHtml(alert.severity)}"><b>${escapeHtml(alert.code.replaceAll('_', ' '))}</b><span>${human(alert.value)}</span><p>${escapeHtml(alert.detail)}</p></div>`).join('') : '<div class="cluster-clear">No derived alert in this observation interval.</div>'}</div>
+          <footer><span>status ${escapeHtml(sample.source_status_digest.slice(0, 14))}…</span><span>previous ${sample.previous_sample_digest ? `${escapeHtml(sample.previous_sample_digest.slice(0, 14))}…` : 'chain origin'}</span><button type="button" id="inspect-cluster-sample">Inspect raw status + audit</button></footer>
+        </article>
+        <div class="cluster-filmstrip" aria-label="Retained cluster observation timeline">${samples.map((item, sampleIndex) => `<button type="button" class="cluster-frame ${sampleIndex === index ? 'active' : ''} ${item.process_reset ? 'reset' : ''}" data-cluster-sample="${sampleIndex}"><span>#${human(item.sequence)}</span><i class="${clusterSampleTone(item)}"></i><b>${escapeHtml(item.status.canonical_node_id)}</b><small>c${human(item.cursor)} · ${item.alerts.length} alert(s)</small></button>`).join('')}</div>
+      </section>`;
+    bindClusterControls(samples, index);
+  }
+
+  function clusterNodesAt(baseline, samples, index) {
+    const latest = new Map(baseline.map((sample) => [sample.node_key, sample]));
+    samples.slice(0, index + 1).forEach((sample) => latest.set(sample.node_key, sample));
+    return [...latest.values()].sort((left, right) => left.status.shard - right.status.shard || left.status.raft_node_id - right.status.raft_node_id);
+  }
+
+  function clusterNode(sample, selectedDigest) {
+    const status = sample.status;
+    const lag = Math.max(0, Number(status.last_log_index || 0) - Number(status.last_applied_index || 0));
+    const leader = status.current_leader === status.raft_node_id;
+    return `<button type="button" class="cluster-node ${leader ? 'leader' : ''} ${sample.digest === selectedDigest ? 'selected' : ''}" data-cluster-digest="${escapeHtml(sample.digest)}"><span class="cluster-node-orbit ${sample.alerts.some((alert) => alert.severity === 'critical' || alert.severity === 'warning') ? 'attention' : ''}"></span><strong>${escapeHtml(status.canonical_node_id)}</strong><code>raft ${human(status.raft_node_id)} · shard ${human(status.shard)}</code><small>${leader ? 'LEADER' : `leader → ${status.current_leader ?? 'none'}`} · lag ${human(lag)}</small></button>`;
+  }
+
+  function clusterSampleTone(sample) {
+    if (sample.alerts.some((alert) => alert.severity === 'critical')) return 'critical';
+    if (sample.alerts.some((alert) => alert.severity === 'warning')) return 'warning';
+    return sample.process_reset ? 'reset' : 'healthy';
+  }
+
+  function bindClusterControls(samples, index) {
+    $('#cluster-start')?.addEventListener('click', () => freezeClusterAt(samples, 0));
+    $('#cluster-end')?.addEventListener('click', () => freezeClusterAt(samples, samples.length - 1));
+    $('#cluster-rewind')?.addEventListener('click', () => playCluster(-1));
+    $('#cluster-forward')?.addEventListener('click', () => playCluster(1));
+    $('#cluster-play')?.addEventListener('click', () => {
+      state.clusterPlaying = !state.clusterPlaying;
+      renderCluster();
+      scheduleClusterStep();
+    });
+    $('#cluster-scrub')?.addEventListener('input', (event) => freezeClusterAt(samples, Number(event.target.value)));
+    $('#cluster-speed')?.addEventListener('change', (event) => { state.clusterSpeed = Number(event.target.value); scheduleClusterStep(); });
+    $$('[data-cluster-sample]').forEach((button) => button.addEventListener('click', () => freezeClusterAt(samples, Number(button.dataset.clusterSample))));
+    $$('[data-cluster-digest]').forEach((button) => button.addEventListener('click', () => {
+      const target = samples.findIndex((sample) => sample.digest === button.dataset.clusterDigest);
+      if (target >= 0) freezeClusterAt(samples, target);
+      else select(`cluster-sample:${button.dataset.clusterDigest}`);
+    }));
+    $('#inspect-cluster-sample')?.addEventListener('click', () => select(`cluster-sample:${samples[index].digest}`));
+    scheduleClusterStep();
+  }
+
+  function freezeClusterAt(samples, index) {
+    state.clusterPlaying = false;
+    state.clusterCursor = samples[Math.max(0, Math.min(samples.length - 1, index))].digest;
+    clearTimeout(state.clusterTimer);
+    renderCluster();
+  }
+
+  function playCluster(direction) {
+    state.clusterPlaying = true;
+    const samples = state.data.cluster?.samples || [];
+    const current = samples.findIndex((sample) => sample.digest === state.clusterCursor);
+    if (direction < 0 && current <= 0) state.clusterCursor = samples.at(-1)?.digest || null;
+    if (direction > 0 && current >= samples.length - 1) state.clusterCursor = samples[0]?.digest || null;
+    state.clusterDirection = direction;
+    renderCluster();
+    scheduleClusterStep();
+  }
+
+  function scheduleClusterStep() {
+    clearTimeout(state.clusterTimer);
+    if (!state.clusterPlaying || state.view !== 'cluster') return;
+    state.clusterTimer = setTimeout(() => {
+      const samples = state.data.cluster?.samples || [];
+      const current = samples.findIndex((sample) => sample.digest === state.clusterCursor);
+      const next = current + (state.clusterDirection || 1);
+      if (next >= 0 && next < samples.length) {
+        state.clusterCursor = samples[next].digest;
+        renderCluster();
+      } else {
+        state.clusterPlaying = false;
+        renderCluster();
+      }
+    }, 850 / state.clusterSpeed);
+  }
+
+  function formatBytes(value) {
+    const bytes = Number(value || 0);
+    if (bytes < 1024) return `${human(bytes)} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KiB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MiB`;
+  }
+
+  function formatMicros(value) {
+    const micros = Number(value || 0);
+    if (micros < 1000) return `${human(micros)} µs`;
+    if (micros < 1000000) return `${(micros / 1000).toFixed(1)} ms`;
+    return `${(micros / 1000000).toFixed(2)} s`;
+  }
+
   function renderGraph() {
     const kinds = ['subject', 'claim', 'run', 'event', 'evidence', 'file', 'invocation', 'flight', 'flight_event'];
     $('#main').innerHTML = pageHead('Runtime graph', 'Traverse local evidence neighborhoods by default. Switch to global only when orientation matters more than detail.') + `
@@ -983,6 +1137,7 @@
     if (id.startsWith('file:')) return state.data.files.find((item) => `file:${item.path}` === id) || state.data.graph.nodes.find((item) => item.id === id);
     if (id.startsWith('invocation:')) return state.data.invocations.find((item) => `invocation:${item.ordinal}` === id);
     if (id.startsWith('runtime-change:')) return state.data.temporal_events.find((item) => `runtime-change:${item.cursor}` === id);
+    if (id.startsWith('cluster-sample:')) return [...(state.data.cluster?.baseline_samples || []), ...(state.data.cluster?.samples || [])].find((item) => `cluster-sample:${item.digest}` === id) || null;
     if (id.startsWith('flight-event:')) {
       const [, , flightId, ordinal] = id.match(/^(flight-event):(.*):(\d+)$/) || [];
       const flight = state.data.flights.find((item) => item.id === flightId);
@@ -1006,6 +1161,7 @@
     if (object.events) return [['Type', 'reasoning run'], ['Run', object.id], ['State', object.state], ['Complete', object.complete], ['Transitions', object.events.length]];
     if (object.payload) return [['Type', 'reasoning event'], ['Transition', object.payload.kind], ['Run', object.run_id], ['Ordinal', object.ordinal], ['Actor', object.actor], ['Digest', object.digest, 'digest'], ['Summary', eventSummary(object)]];
     if (object.command) return [['Type', 'invocation'], ['Command', object.command], ['Ordinal', object.ordinal], ['Trigger', object.trigger], ['Outcome', object.outcome], ['Duration', `${object.duration_ms} ms`], ['Detail', object.detail || '—']];
+    if (object.node_key && object.source_status_digest) return [['Type', 'retained cluster observation'], ['Node', object.status.canonical_node_id], ['Cluster / shard', `${object.status.cluster} / ${object.status.shard}`], ['Sample sequence', object.sequence], ['Runtime cursor', object.cursor], ['Process reset', object.process_reset], ['Status digest', object.source_status_digest, 'digest'], ['Sample digest', object.digest, 'digest'], ['Previous sample', object.previous_sample_digest || 'chain origin', 'digest'], ['Commit', object.commit_id], ['Audit digest', object.audit_digest || 'missing', 'digest'], ['Alerts', object.alerts.length]];
     if (object.commit_id && object.cursor != null) return [['Type', 'runtime mutation'], ['Cursor', object.cursor], ['Family', object.family], ['Action', object.action], ['Scope', object.scope], ['Actor', object.actor], ['Commit', object.commit_id], ['Change digest', object.digest, 'digest'], ['Audit digest', object.audit?.digest || 'missing', 'digest'], ['Detail', object.detail]];
     if (object.stage && object.kind) return [['Type', 'prompt flight event'], ['Stage', object.stage], ['Kind', object.kind], ['Ordinal', object.ordinal], ['Elapsed', `${object.elapsed_ms} ms`], ['Label', object.label], ['Detail', object.detail]];
     if (object.path) return [['Type', 'indexed file'], ['Path', object.path], ['Language', object.language], ['Lines', object.lines], ['Symbols', object.symbols], ['Terms', object.terms]];
@@ -1064,6 +1220,7 @@
     if (key === 'q') navigate('query');
     if (key === 'f') navigate('flight');
     if (key === 't') navigate('stream');
+    if (key === 'k') navigate('cluster');
     if (key === 'r') navigate('runs');
     if (key === 'c') navigate('claims');
     if (key === 'a') navigate('activity');

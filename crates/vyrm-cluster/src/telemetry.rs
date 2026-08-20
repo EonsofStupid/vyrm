@@ -23,7 +23,7 @@ pub enum VyrmTransportOperation {
 }
 
 impl VyrmTransportOperation {
-    const ALL: [Self; 5] = [
+    pub const ALL: [Self; 5] = [
         Self::Append,
         Self::Snapshot,
         Self::Vote,
@@ -121,6 +121,120 @@ pub struct VyrmTransportTelemetrySnapshot {
     pub denied_connections: u64,
     pub connection_request_bytes: u64,
     pub overflowed: bool,
+}
+
+impl VyrmTransportOperationMetrics {
+    fn validate(&self, overflowed: bool) -> Result<()> {
+        if self.current_in_flight > self.peak_in_flight {
+            return Err(ClusterError::Invalid(
+                "transport telemetry current work exceeds its recorded peak".into(),
+            ));
+        }
+        if !overflowed {
+            let classified = self
+                .allowed
+                .checked_add(self.denied)
+                .and_then(|value| value.checked_add(self.failed))
+                .and_then(|value| value.checked_add(self.current_in_flight))
+                .ok_or_else(|| {
+                    ClusterError::Invalid(
+                        "transport telemetry classification total overflowed".into(),
+                    )
+                })?;
+            if classified != self.attempted {
+                return Err(ClusterError::Invalid(
+                    "transport telemetry attempts are not completely classified".into(),
+                ));
+            }
+        }
+        Ok(())
+    }
+}
+
+impl VyrmTransportTelemetrySnapshot {
+    pub fn validate(&self) -> Result<()> {
+        if self.contract_version != VYRM_CLUSTER_TELEMETRY_VERSION
+            || self.started_at > self.observed_at
+            || self.identities.len() > self.policy.max_tracked_identities
+            || self.current_in_flight > self.peak_in_flight
+            || self.peak_in_flight > self.policy.max_global_in_flight as u64
+        {
+            return Err(ClusterError::Invalid(
+                "transport telemetry snapshot is outside its bounded contract".into(),
+            ));
+        }
+        self.policy.validate()?;
+        if self.operations.keys().copied().collect::<Vec<_>>()
+            != VyrmTransportOperation::ALL.to_vec()
+        {
+            return Err(ClusterError::Invalid(
+                "transport telemetry does not contain the canonical operation set".into(),
+            ));
+        }
+        for metrics in self.operations.values() {
+            metrics.validate(self.overflowed)?;
+            if metrics.peak_in_flight > self.policy.max_global_in_flight as u64 {
+                return Err(ClusterError::Invalid(
+                    "transport operation peak exceeds the global admission bound".into(),
+                ));
+            }
+        }
+        for identity in self.identities.values() {
+            if identity.operations.keys().copied().collect::<Vec<_>>()
+                != VyrmTransportOperation::ALL.to_vec()
+                || identity.rate_window_started_at < self.started_at
+                || identity.rate_window_started_at > self.observed_at
+                || identity.requests_in_rate_window > self.policy.max_identity_requests_per_window
+                || identity.current_in_flight > identity.peak_in_flight
+                || identity.peak_in_flight > self.policy.max_identity_in_flight as u64
+            {
+                return Err(ClusterError::Invalid(
+                    "transport identity telemetry is outside its bounded contract".into(),
+                ));
+            }
+            let mut current = 0u64;
+            for metrics in identity.operations.values() {
+                metrics.validate(self.overflowed)?;
+                if metrics.peak_in_flight > self.policy.max_identity_in_flight as u64 {
+                    return Err(ClusterError::Invalid(
+                        "transport identity operation peak exceeds its admission bound".into(),
+                    ));
+                }
+                current = current
+                    .checked_add(metrics.current_in_flight)
+                    .ok_or_else(|| {
+                        ClusterError::Invalid(
+                            "transport identity in-flight total overflowed".into(),
+                        )
+                    })?;
+            }
+            if current != identity.current_in_flight {
+                return Err(ClusterError::Invalid(
+                    "transport identity in-flight total is inconsistent".into(),
+                ));
+            }
+        }
+        if !self.overflowed {
+            let operation_current = self.operations.values().try_fold(0u64, |total, metrics| {
+                total.checked_add(metrics.current_in_flight).ok_or_else(|| {
+                    ClusterError::Invalid("transport operation in-flight total overflowed".into())
+                })
+            })?;
+            let identity_current = self.identities.values().try_fold(0u64, |total, metrics| {
+                total.checked_add(metrics.current_in_flight).ok_or_else(|| {
+                    ClusterError::Invalid("transport identity in-flight total overflowed".into())
+                })
+            })?;
+            if operation_current != self.current_in_flight
+                || identity_current != self.current_in_flight
+            {
+                return Err(ClusterError::Invalid(
+                    "transport global in-flight total is inconsistent".into(),
+                ));
+            }
+        }
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone)]

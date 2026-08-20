@@ -235,6 +235,7 @@ fn transport_telemetry_v1_fixture_round_trips_and_denies_shape_drift() {
         vyrm_cluster::VYRM_CLUSTER_TELEMETRY_VERSION
     );
     snapshot.policy.validate().unwrap();
+    snapshot.validate().unwrap();
     assert_eq!(
         serde_json::to_value(&snapshot).unwrap(),
         serde_json::from_str::<serde_json::Value>(fixture).unwrap()

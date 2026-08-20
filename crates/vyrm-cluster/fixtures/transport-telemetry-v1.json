@@ -73,7 +73,68 @@
   },
   "identities": {
     "node-1": {
-      "operations": {},
+      "operations": {
+        "append": {
+          "attempted": 2,
+          "allowed": 1,
+          "denied": 1,
+          "failed": 0,
+          "current_in_flight": 0,
+          "peak_in_flight": 1,
+          "request_bytes": 128,
+          "response_bytes": 64,
+          "total_duration_micros": 25,
+          "max_duration_micros": 25
+        },
+        "snapshot": {
+          "attempted": 0,
+          "allowed": 0,
+          "denied": 0,
+          "failed": 0,
+          "current_in_flight": 0,
+          "peak_in_flight": 0,
+          "request_bytes": 0,
+          "response_bytes": 0,
+          "total_duration_micros": 0,
+          "max_duration_micros": 0
+        },
+        "vote": {
+          "attempted": 0,
+          "allowed": 0,
+          "denied": 0,
+          "failed": 0,
+          "current_in_flight": 0,
+          "peak_in_flight": 0,
+          "request_bytes": 0,
+          "response_bytes": 0,
+          "total_duration_micros": 0,
+          "max_duration_micros": 0
+        },
+        "artifact": {
+          "attempted": 0,
+          "allowed": 0,
+          "denied": 0,
+          "failed": 0,
+          "current_in_flight": 0,
+          "peak_in_flight": 0,
+          "request_bytes": 0,
+          "response_bytes": 0,
+          "total_duration_micros": 0,
+          "max_duration_micros": 0
+        },
+        "runtime_commit": {
+          "attempted": 0,
+          "allowed": 0,
+          "denied": 0,
+          "failed": 0,
+          "current_in_flight": 0,
+          "peak_in_flight": 0,
+          "request_bytes": 0,
+          "response_bytes": 0,
+          "total_duration_micros": 0,
+          "max_duration_micros": 0
+        }
+      },
       "current_in_flight": 0,
       "peak_in_flight": 1,
       "rate_window_started_at": 100,

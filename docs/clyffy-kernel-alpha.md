@@ -173,7 +173,8 @@ measured local results, never universal superiority.
    node status.
    Independent-host and hardware chaos, larger retained closure workloads,
    automatic SPIFFE issuance/streaming, durable supervisor generation,
-   retained telemetry export/alerting, and Multi-AZ evidence remain open.
+   automatic telemetry collection/export and Multi-AZ evidence remain open;
+   Connectome now retains and replays explicitly submitted control-v4 status.
 8. **Local gate complete:** declared package workflows now bind preflight,
    pre-tool freshness/authorization, and post-tool atomic evidence across the
    shared hook/MCP handler. A durable cross-process authorization lease remains

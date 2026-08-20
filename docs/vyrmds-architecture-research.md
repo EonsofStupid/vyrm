@@ -500,9 +500,11 @@ a real vector artifact after purge. Cross-shard writes still fail closed.
 Receiver quota/GC, concurrent-session scheduling, cluster-consensus trace
 persistence, identity-scoped transport admission, and reset-explicit node
 telemetry now have executable restart/failover/privacy evidence.
-Independent-host faults, automatic workload identity, retained telemetry
-export/alerting, retained large-closure soak, and real Multi-AZ operations remain
-open, so M7 is not closed. See
+Connectome now validates explicit control-v4 status submissions and retains
+them as audited, per-node hash chains with reset-aware deltas and alerts.
+Independent-host faults, automatic workload identity, automatic telemetry
+collection/export, retained large-closure soak, and real Multi-AZ operations
+remain open, so M7 is not closed. See
 `vyrm-cluster-m7.md`.
 
 Acceptance: deterministic simulation/model checking; partition, delay,
@@ -534,8 +536,11 @@ provider/tool-envelope coverage are now implemented. Local artifact-catalog
 publication is also authoritative: immutable exact/compact/HNSW bytes, a typed
 catalog record, and a verified object reference cross one `vyrmDS` transaction;
 restart reconstruction rejects gaps and mismatches. Project-node status now
-exposes typed transport-ingress, artifact-session, and consensus-trace health; a
-Connectome cluster lens, cross-node catalog replication, OTLP translation, and
+exposes typed transport-ingress, artifact-session, and consensus-trace health.
+The Connectome cluster lens reconstructs retained topology from validated
+observations, including bounded-window anchors, and supports freeze, rewind,
+forward playback, derived alerts, and raw status/commit/audit inspection.
+Automatic collection, cross-node catalog replication, OTLP translation, and
 the remaining pgvector production gates stay open.
 
 The portable operator-knowledge prerequisite is now implemented separately from

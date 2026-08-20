@@ -387,7 +387,11 @@ fn independent_processes_recover_fail_over_snapshot_and_reject_corruption() {
     );
 
     let learner_status = node4.status();
+    learner_status.validate().unwrap();
     assert_eq!(learner_status.project_scope, project_scope());
+    assert_eq!(learner_status.cluster, fixture.cluster);
+    assert_eq!(learner_status.shard, SHARD);
+    assert_eq!(learner_status.canonical_node_id.as_str(), "process-node-4");
     assert_eq!(
         learner_status.telemetry.observed_at,
         learner_status.telemetry.transport_ingress.observed_at
