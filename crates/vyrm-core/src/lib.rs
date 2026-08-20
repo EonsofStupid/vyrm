@@ -42,6 +42,7 @@ pub mod reference;
 pub mod runtime;
 pub mod schema;
 pub mod temporal;
+pub mod trace;
 
 pub use claim::{supersede, Claim, Millis, Producer, PromotionState, Tier};
 pub use data::{
@@ -69,3 +70,7 @@ pub use schema::{
     RuntimeSchemaRegistry, RuntimeValueType,
 };
 pub use temporal::{changed_since, resolve_as_of, ClaimReader, ClaimSource};
+pub use trace::{
+    RuntimeTraceEvent, TraceDataClass, TraceDomain, TraceId, TraceLink, TraceOutcome, TracePhase,
+    SpanId, RUNTIME_TRACE_CONTRACT_VERSION, RUNTIME_TRACE_EVENT_TYPE,
+};

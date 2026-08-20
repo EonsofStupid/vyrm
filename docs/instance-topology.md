@@ -33,6 +33,19 @@ projections to that platform while retaining the shared runtime invariants.
 6. Umbrella membership is explicit and scoped; adding a member is an operator
    decision.
 7. Platform-specific extensions sit above stable storage and lifecycle ports.
+8. External project knowledge such as pgvector is bound to an explicit member,
+   model space, adapter configuration, and source revision. It never becomes an
+   implicit cross-instance read or a claimed cross-database ACID transaction.
+
+## Operator knowledge
+
+An instance may project or query operator-authored project knowledge through a
+capability adapter. pgvector is the first planned compatibility target for
+existing Postgres estates. Vyrm remains authoritative for reasoning, policy,
+audit, trace, graph, projection freshness, and adapter decisions; Postgres owns
+its rows and transaction history. An idempotent outbox coordinates writes and a
+persisted trace link records the exact project and external source revision.
+See [`runtime-tracing-operator-knowledge.md`](runtime-tracing-operator-knowledge.md).
 
 ## Upstream capability adoption
 

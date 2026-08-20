@@ -72,6 +72,8 @@ Vyrm becomes a firm local alpha only when all of these are machine-verifiable:
 | Search | Exact dense/sparse/multivector oracle; ANN recall/latency/memory matrix; filtered update/delete/reopen/compaction soak |
 | Lifecycle | Claude hooks and MCP/daemon runtimes produce the same decisions and audit fields; package workflow policies deny stale or unverified mutations |
 | Workbench | Freeze/rewind/forward renders only persisted events and links every value to cursor, snapshot, manifest, plan, and projection generation |
+| Runtime tracing | Start/annotation/finish events correlate reasoning, query, plan, storage, projection, model/tool, cluster, and adapter work; incomplete spans survive crash and export obeys data-class retention |
+| Operator knowledge | A project-scoped pgvector adapter proves exact/filtered-ANN parity, model/revision freshness, tenant denial, and idempotent outbox retry without claiming cross-store ACID |
 | Release | Reproducible artifacts, signed update manifest, forward/rollback migration rehearsal, SBOM/provenance, compatibility matrix, and benchmark regression budgets |
 
 Cluster/Multi-AZ is a separate deployment gate. A local alpha must not claim

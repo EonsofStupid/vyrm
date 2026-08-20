@@ -30,6 +30,9 @@ Vyrm provides:
   lifecycle events, vectors, series samples, geospatial values, and verified
   object references;
 - one hash-chained global runtime cursor with resumable, scope-filtered replay;
+- bounded persisted runtime traces with W3C-width identities and typed links to
+  reasoning runs, cursors, read stamps, snapshots, plans, projections,
+  workflows, providers, and external operator-knowledge revisions;
 - optimistic concurrency that rejects stale writers instead of losing updates;
 - content-addressed read stamps, persisted snapshot leases, and replay that is
   bounded to the exact captured cursor/hash/schema state;
@@ -195,7 +198,7 @@ measurement contract.
 
 | Crate | Responsibility |
 |---|---|
-| `vyrm-core` | Claim, reasoning, typed runtime graph, traversal, and differential contracts; serde-only boundary |
+| `vyrm-core` | Claim, reasoning, typed runtime graph, durable trace, traversal, and differential contracts; serde-only boundary |
 | `vyrm-store` | `vyrmDS` coordination plus native `vyrmKV`, transitional Fjall, and memory adapters; unified atomic commits, content-addressed objects, outbox/audit, sequences, projections |
 | `vyrm-graph` | Parsing, incremental freshness, grounding, source routing |
 | `vyrm-node` | Runtime lifecycle, instance binding, policy, append-only reasoning composition |
@@ -267,6 +270,9 @@ statistically significant model-performance claim.
 - [`PLAN.md`](PLAN.md) — historical execution journal and measured decisions
 - [`docs/clyffy-kernel-alpha.md`](docs/clyffy-kernel-alpha.md) — release gates,
   lifecycle naming, deployment tiers, competitive proof, and clean Clyffy handoff
+- [`docs/runtime-tracing-operator-knowledge.md`](docs/runtime-tracing-operator-knowledge.md)
+  — persisted trace contract, HelixDB comparison, per-project operator surface,
+  and the non-authoritative pgvector knowledge-adapter boundary
 - [`docs/vyrmds-architecture-research.md`](docs/vyrmds-architecture-research.md)
   — pinned upstream research, target data-runtime boundaries, and gated build
   sequence for `vyrmQL`/`vyrmMX`/`vyrmDS`/native `vyrmKV`

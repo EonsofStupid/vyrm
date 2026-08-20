@@ -1118,3 +1118,21 @@ These apply to every step and are not restated per step.
    `cargo tree` (§5).
 5. Terminology follows §1.2. The banned-synonym column is enforceable by grep and
    SHOULD be checked before each commit.
+
+## 2026-08-20 continuation: durable tracing and operator knowledge
+
+- **Complete:** freeze the dependency-free `RuntimeTraceEvent` contract with
+  W3C-width identity, lifecycle validation, bounded attributes, data classes,
+  and typed causal links. Serialize through ordinary runtime events and prove
+  Memory/Fjall/native parity.
+- **Next:** install the trace schema through project initialization, then emit
+  it across lifecycle, `vyrmQL`, `vyrmMX`, VyrmKV, projection/vector/embedding,
+  provider/tool, and cluster boundaries. Connectome must distinguish complete
+  logical evidence from sampled physical detail.
+- **Then:** implement a project-scoped pgvector operator-knowledge adapter with
+  captured source revision, exact/model-space oracle, filtered ANN controls,
+  stale denial/fallback, and idempotent outbox. It is not a second canonical
+  store and cannot claim a cross-Vyrm/Postgres transaction.
+- **Competitive gate:** publish direct HelixDB fixtures only after the same
+  project `init → run → query → inspect`, dynamic query/SDK parity, index
+  lifecycle, and trace-completeness surfaces exist.

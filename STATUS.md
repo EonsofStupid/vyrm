@@ -324,6 +324,16 @@ artifact even on failure.
   streaming compaction, and the full mixed AI matrix remain open. See
   `docs/vyrmkv-fjall-ai-audit.md`.
 
+- The first persisted runtime-tracing contract is now implemented in the
+  serde-only kernel. It uses W3C-width trace/span IDs, immutable
+  start/annotation/finish phases, bounded typed attributes, data classes, and
+  exact causal links for runtime/read/plan/projection/workflow/provider and
+  external operator-knowledge coordinates. Trace events enter the ordinary
+  scoped, hash-chained runtime log; a Memory/Fjall/native differential proves
+  identical serialized mutations. Full subsystem emission, Connectome causal
+  rendering, export, retention enforcement, and the pgvector adapter remain
+  open. See `docs/runtime-tracing-operator-knowledge.md`.
+
 ## Product and instance boundary
 
 The product chain is **Automaton → LFG → Connectome**. Vyrm is Connectome's
