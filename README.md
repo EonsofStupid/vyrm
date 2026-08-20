@@ -39,6 +39,11 @@ Vyrm provides:
   and embedding-inference/commit trace trees; native reads include bounded
   manifest/memtable/segment/cache/block deltas, while raw queries, parameters,
   vectors, filters, and embedding source bytes remain outside persisted traces;
+- a versioned project-scoped operator-knowledge port for external systems such
+  as pgvector: exact model/tenant/config binding, snapshot and stable-revision
+  evidence, explicit vector-kind and path-specific metric capabilities,
+  exact/HNSW/IVFFlat controls and fallback, parameterized SQL shapes, and
+  idempotent vector-outbox work without a cross-store ACID claim;
 - optimistic concurrency that rejects stale writers instead of losing updates;
 - content-addressed read stamps, persisted snapshot leases, and replay that is
   bounded to the exact captured cursor/hash/schema state;
@@ -224,6 +229,7 @@ measurement contract.
 |---|---|
 | `vyrm-core` | Claim, reasoning, typed runtime graph, durable trace, traversal, and differential contracts; serde-only boundary |
 | `vyrm-store` | `vyrmDS` coordination plus native `vyrmKV`, transitional Fjall, and memory adapters; unified atomic commits, content-addressed objects, outbox/audit, sequences, projections |
+| `vyrm-operator` | External operator-knowledge contracts, exact reference adapter, pgvector SQL planning, and idempotent outbox synchronization |
 | `vyrm-graph` | Parsing, incremental freshness, grounding, source routing |
 | `vyrm-node` | Runtime lifecycle, instance binding, policy, append-only reasoning composition |
 | `vyrm-cli` | Operator surface |

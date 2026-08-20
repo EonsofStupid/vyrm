@@ -14,6 +14,7 @@ vyrm-mx = { path = "../vyrm-mx" }
 vyrm-store = { path = "../vyrm-store" }
 vyrm-vector = { path = "../vyrm-vector" }
 vyrm-embed = { path = "../vyrm-embed" }
+vyrm-operator = { path = "../vyrm-operator" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tracing = { workspace = true }

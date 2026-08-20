@@ -212,7 +212,26 @@ not roadmap language.
   Three-engine parity, failure/denial, privacy, native reopen, and audited
   Connectome search/embedding/storage lane tests are green. Provider/tool and
   cluster spans, richer causal rendering, persistent vector artifact catalogs,
-  and the project-scoped pgvector adapter remain open.
+  and the live project-scoped pgvector transport remain open.
+- The portable operator-knowledge gate is now executable in `vyrm-operator`.
+  One immutable binding fixes instance/member, Vyrm scope, adapter/config,
+  external source/relation/tenant, model space, dimensions, and projection
+  generation. Search requests expose exact/HNSW/IVFFlat and iterative-scan
+  controls plus a required Vyrm cursor; stale/future projections fail closed.
+  Results must return bounded identities, finite scores, the sealed controls
+  and actual path, plan/index digests, a PostgreSQL-snapshot digest, catalog
+  identity, and an optional stable project revision. WAL LSN remains supporting
+  evidence rather
+  than being misrepresented as the query snapshot. The pgvector SQL builder
+  quotes validated identifiers and keeps vector, tenant, and limit as query
+  parameters. Vyrm vector outbox work becomes a content-addressed external work
+  identity; the reference writer proves retry returns the same revision without
+  reapplying payload. Traced search/sync, foreign-project and stale-revision
+  denial, payload substitution, privacy, Memory/Fjall/native parity, native
+  reopen, and Connectome search-lane tests are green. A live PostgreSQL client,
+  TLS/authentication, control-table migration, exact/ANN endpoint differential,
+  and update/delete/restart certification remain open and no live pgvector
+  performance claim is made.
 - M3 native storage has passed its first strict local promotion baseline in the
   standalone `vyrm-kv` crate. WAL v1
   now has frozen CRC32C file/frame formats, atomic batch sequence ranges,
@@ -362,7 +381,7 @@ artifact even on failure.
   denial, observer safety, secret non-persistence, visual projection, crash
   recovery, and Memory/Fjall/native parity are tested. Storage/projection/
   vector/embedding/provider/cluster emission, causal rendering, export,
-  retention enforcement, and the pgvector adapter remain open. See
+  retention enforcement, and the live pgvector transport remain open. See
   `docs/runtime-tracing-operator-knowledge.md`.
 
 ## Product and instance boundary

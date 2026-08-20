@@ -22,6 +22,7 @@ pub mod hook;
 pub mod data_plane;
 pub mod init;
 pub mod instance;
+pub mod operator_knowledge;
 pub mod policy;
 pub mod preflight;
 pub mod query;
@@ -40,6 +41,10 @@ pub use data_plane::{
 pub use init::{init, InitReport, STORE_DIR};
 pub use instance::{
     InstanceBinding, InstanceManifest, InstanceMode, INSTANCE_FILE, INSTANCE_FORMAT,
+};
+pub use operator_knowledge::{
+    execute_traced_operator_search, execute_traced_operator_sync, TracedOperatorSearch,
+    TracedOperatorSync,
 };
 pub use policy::{evaluate_tool, ContractDifferential, ToolPolicy};
 pub use preflight::{preflight, Preflight};

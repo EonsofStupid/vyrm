@@ -180,6 +180,13 @@ fn snapshot_exposes_runtime_objects_without_mutating_the_store() {
             "vyrmkv.runtime_read",
             75,
         ),
+        (
+            b"connectome-operator-trace".as_slice(),
+            "adapter:test",
+            TraceDomain::Adapter,
+            "operator.knowledge.search",
+            625,
+        ),
     ] {
         let identity = vyrm_node::TraceIdentity::derive(&[seed]).unwrap();
         vyrm_node::record_runtime_trace(
@@ -217,11 +224,11 @@ fn snapshot_exposes_runtime_objects_without_mutating_the_store() {
     assert_eq!(snapshot.instance.mode, "dedicated");
     assert_eq!(snapshot.health.storage_backend, "vyrmkv_native");
     assert_eq!(snapshot.health.current_claims, 2);
-    assert_eq!(snapshot.health.runtime_cursor, 17);
+    assert_eq!(snapshot.health.runtime_cursor, 18);
     assert_eq!(snapshot.health.schema_revision, Some(2));
     assert_eq!(snapshot.health.snapshot_leases, 1);
     assert_eq!(snapshot.health.retention_pins, 1);
-    assert_eq!(snapshot.health.oldest_retained_cursor, Some(17));
+    assert_eq!(snapshot.health.oldest_retained_cursor, Some(18));
     let retention = connectome_ui::runtime_retention(&store, 10).unwrap();
     assert_eq!(retention.snapshots, vec![lease.clone()]);
     assert_eq!(retention.pins[0].snapshot_id, lease.id);
@@ -274,6 +281,7 @@ fn snapshot_exposes_runtime_objects_without_mutating_the_store() {
         ("vector.search", "search", "search; ok; 375 µs"),
         ("embedding.run", "search", "embedding; ok; 500 µs"),
         ("vyrmkv.runtime_read", "storage", "storage; ok; 75 µs"),
+        ("operator.knowledge.search", "search", "adapter; ok; 625 µs"),
     ] {
         let event = snapshot
             .temporal_events

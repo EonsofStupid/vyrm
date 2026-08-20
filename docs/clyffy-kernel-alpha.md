@@ -176,5 +176,12 @@ measured local results, never universal superiority.
    runtime spans now feed those lanes with three-engine and native-reopen proof.
    Causal-tree/critical-path rendering, provider/cluster span coverage,
    cursor-delta transport, and controlled provider evaluations remain open.
-10. Cut the Vyrm alpha manifest; only then scaffold the separate Clyffy master
+10. **Portable operator-knowledge gate complete:** versioned project/member,
+    source/relation/tenant, model, snapshot/revision, path/control, result, and
+    idempotent outbox contracts now have an exact reference adapter, safe
+    pgvector SQL plan, durable search/sync spans, three-engine denial/privacy
+    proof, native reopen, and Connectome visibility. Live PostgreSQL transport,
+    control-table migration, endpoint exact/ANN parity, TLS, and restart/update/
+    delete evidence remain required before the pgvector row can be promoted.
+11. Cut the Vyrm alpha manifest; only then scaffold the separate Clyffy master
    repository and its signed tier/update system.

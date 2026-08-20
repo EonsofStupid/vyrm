@@ -2,8 +2,10 @@
 
 Status: contract, conflict-safe recorder, instance bootstrap, lifecycle, query,
 native-storage-read, projection-publication, vector-search, and embedding-commit
-slices implemented. Provider, tool-execution, cluster, export, and the pgvector
-adapter remain pending. Repository state was verified 2026-08-20.
+slices implemented. The portable operator-knowledge/search/sync boundary is
+implemented; live pgvector transport certification remains pending alongside
+provider, tool-execution, cluster, and export coverage. Repository state was
+verified 2026-08-20.
 
 ## Why this is a kernel feature
 
@@ -146,8 +148,9 @@ vyrm query                   # dynamic typed query plus durable causal evidence
 ```
 
 `init`, runtime/workbench, and the traced `query` surface are implemented today.
-The `run`, `trace`, and adapter methods above remain target operator surfaces,
-not shipped commands.
+The `run`, `trace`, and adapter commands above remain target operator surfaces,
+not shipped CLI commands. The underlying typed operator-knowledge Rust port is
+now implemented in `vyrm-operator`.
 
 ## pgvector is an operator-knowledge adapter
 
@@ -156,23 +159,38 @@ code-derived knowledge, notes, incidents, or application rows in Postgres. It
 does not replace Vyrm's authoritative reasoning, policy, cursor, audit, graph,
 or native search state.
 
-The adapter contract is:
+The executable adapter contract is:
 
 1. Bind one explicit Vyrm scope to one Postgres database/schema/table or
    partition and immutable adapter-config digest.
-2. Capture a source revision (for example a Postgres LSN plus catalog/index
-   identity) before searching.
+2. Execute the search in one external snapshot and bind its snapshot digest,
+   database/relation/catalog identity, and optional stable project revision.
+   WAL LSN is supporting evidence, not a substitute for snapshot visibility.
 3. Bind every vector to exact embedding provenance/model space and every query
-   to project/tenant filters.
+   to project/tenant filters. Seal the minimum required Vyrm source cursor;
+   deny a stale projection or one newer than the query's captured read stamp.
 4. Return result identities, distances, source revision, chosen exact/HNSW/
    IVFFlat path, scan controls, and observed latency—not unbounded row payloads.
 5. Commit or reference an `OperatorKnowledge` trace link and projection stamp.
 6. Deny, fall back, or label stale when the source revision/config/model binding
    no longer matches policy.
-7. Synchronize Vyrm-originated work through an idempotent outbox. Never claim a
-   single ACID transaction spans VyrmKV and Postgres.
+7. Synchronize Vyrm-originated work through a content-addressed idempotent
+   outbox identity. A retry after an ambiguous finish returns the same external
+   revision without applying the payload again. Never claim a single ACID
+   transaction spans VyrmKV and Postgres.
 
-The official [pgvector repository](https://github.com/pgvector/pgvector)
+`vyrm-operator` now freezes these portable shapes in checked-in JSON, provides
+a deterministic exact-search adapter over Vyrm's vector oracle, validates both
+sides of every adapter call—including the applied scan controls and projection
+freshness—and declares vector-kind plus path-specific metric capabilities so an
+unsupported cross-product fails closed. It builds quoted/parameterized pgvector
+query shapes for exact, HNSW, and IVFFlat operation. `vyrm-node` adds paired
+durable search/execute and sync/apply spans with `OperatorKnowledge` and projection
+links. The reference writer proves idempotent replay. This is an executable
+port and conformance oracle, not yet a claim that a live PostgreSQL connection,
+catalog inspector, revision-control table, or TLS deployment has passed.
+
+The official [pgvector v0.8.6 repository](https://github.com/pgvector/pgvector/tree/v0.8.6)
 documents that exact search is the default; HNSW and IVFFlat trade recall for
 speed; approximate filtering is applied after index scanning; iterative scans
 can recover filtered result count within explicit tuple/probe/memory bounds;
@@ -227,7 +245,10 @@ superiority claim.
    durable-event lane classification is complete; the richer analysis is open.
 5. OTLP/JSON export round-trips without changing Vyrm identity or leaking
    content outside policy.
-6. pgvector adapter passes project-isolation, exact-oracle, filtered ANN,
-   model-space, stale-revision, delete/update, restart, and outbox retry tests.
+6. Portable operator contract, exact oracle, project/model/revision denial,
+   safe SQL planning, traced execution, and outbox retry — complete. Live
+   pgvector passes project isolation, repeatable-read/catalog capture,
+   exact-versus-filtered-ANN, model-space, stale-revision, delete/update,
+   restart, and authenticated transport tests — open.
 7. HelixDB/Vyrm fixtures publish correctness, task outcome, recall, throughput,
    p50/p95/p99, RSS/disk, startup/recovery, trace completeness, and raw trials.

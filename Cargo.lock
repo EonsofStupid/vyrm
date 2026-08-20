@@ -2769,8 +2769,20 @@ dependencies = [
  "vyrm-embed",
  "vyrm-graph",
  "vyrm-mx",
+ "vyrm-operator",
  "vyrm-ql",
  "vyrm-store",
+ "vyrm-vector",
+]
+
+[[package]]
+name = "vyrm-operator"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "tempfile",
+ "vyrm-core",
  "vyrm-vector",
 ]
 

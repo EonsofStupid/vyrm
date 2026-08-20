@@ -47,6 +47,13 @@ its rows and transaction history. An idempotent outbox coordinates writes and a
 persisted trace link records the exact project and external source revision.
 See [`runtime-tracing-operator-knowledge.md`](runtime-tracing-operator-knowledge.md).
 
+The portable boundary is now executable in `vyrm-operator`: immutable
+project/member and source/tenant/model bindings, snapshot/catalog/stable-revision
+evidence, exact/HNSW/IVFFlat controls, bounded results, safe pgvector SQL shapes,
+and idempotent vector-outbox work. A live PostgreSQL connection and deployment
+still require repeatable-read capture, catalog inspection, project revision
+control, TLS/authentication, and endpoint differentials before promotion.
+
 ## Upstream capability adoption
 
 SurrealDB and Qdrant are postponed inputs to capability work. When resumed,

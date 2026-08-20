@@ -1153,10 +1153,21 @@ These apply to every step and are not restated per step.
   then make Connectome distinguish complete logical evidence from bounded
   physical detail and derive causal trees and critical paths. Persisted vector
   artifact catalog publication also remains open.
-- **Then:** implement a project-scoped pgvector operator-knowledge adapter with
-  captured source revision, exact/model-space oracle, filtered ANN controls,
-  stale denial/fallback, and idempotent outbox. It is not a second canonical
-  store and cannot claim a cross-Vyrm/Postgres transaction.
+- **Complete at the portable operator-knowledge gate:** `vyrm-operator` freezes
+  project/member/config/source/relation/tenant/model bindings, PostgreSQL
+  snapshot plus optional stable-revision evidence, exact/HNSW/IVFFlat controls,
+  explicit fallback, bounded result identities, safe parameterized pgvector SQL
+  shapes, and content-addressed vector-outbox work. Node execution emits paired
+  adapter spans and typed `OperatorKnowledge` links. The idempotency oracle
+  proves a retry returns the same external revision without applying payload a
+  second time. Three-engine, foreign-project, stale-revision, payload,
+  privacy, native-reopen, and Connectome tests are green. This is not a second
+  canonical store and does not claim a cross-Vyrm/Postgres transaction.
+- **Next operator gate:** implement and certify the live PostgreSQL transport,
+  repeatable-read snapshot capture, catalog/plan inspection, stable project
+  revision/control tables, exact-versus-ANN differential, update/delete/restart,
+  and authenticated TLS deployment against pgvector. The portable gate does
+  not substitute for that endpoint evidence.
 - **Competitive gate:** publish direct HelixDB fixtures only after the same
   project `init → run → query → inspect`, dynamic query/SDK parity, index
   lifecycle, and trace-completeness surfaces exist.

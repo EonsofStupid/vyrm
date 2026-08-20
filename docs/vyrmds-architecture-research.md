@@ -519,6 +519,16 @@ Connectome proves these audited events reach search and storage lanes. Rich
 causal analysis, provider/cluster coverage, persistent artifact-catalog
 publication, OTLP export, and pgvector remain promotion gates.
 
+The portable operator-knowledge prerequisite is now implemented separately from
+live endpoint certification. `vyrm-operator` binds project/member, external
+source/relation/tenant, model space, Vyrm projection, snapshot/catalog evidence,
+optional stable revision, exact/HNSW/IVFFlat controls, results, and idempotent
+vector-outbox work. WAL LSN is explicitly supporting evidence rather than a
+query snapshot. A reference exact adapter and writer prove semantic validation
+and retry-once behavior; node spans and Connectome expose the bounded evidence.
+Live PostgreSQL repeatable-read/catalog capture, revision-control tables,
+filtered ANN differentials, TLS, and update/delete/restart tests remain open.
+
 ## Immediate next implementation slice
 
 M2 is closed and the first M3 storage lifecycle is implemented beside—not

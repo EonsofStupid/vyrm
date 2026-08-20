@@ -415,9 +415,9 @@ fn describe_mutation(mutation: &RuntimeMutation) -> (&'static str, String, Strin
                 "reasoning" => "reasoning",
                 "lifecycle" | "tool" => "workflow",
                 "query" | "planning" => "routing",
-                "projection" | "search" | "embedding" => "search",
+                "projection" | "search" | "embedding" | "adapter" => "search",
                 "model" => "model",
-                "storage" | "adapter" | "cluster" => "storage",
+                "storage" | "cluster" => "storage",
                 _ => "storage",
             };
             let phase =
