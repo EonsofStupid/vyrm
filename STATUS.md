@@ -93,9 +93,11 @@ not roadmap language.
   ephemeral files clean up on drop/restart; and ambiguous spool entries fail
   closed. Crash/storage-full export boundaries, corruption/truncation, durable
   cache reopen, post-purge catch-up, and a >16 MiB bundle/≤16 MiB incremental
-  RSS Linux regression are green. VyrmKV's decoded immutable segments remain
-  resident, so this is bounded transfer overhead rather than a high-volume
-  disk-resident engine claim.
+  RSS Linux regression are green. VyrmKV segment v3 now keeps immutable files
+  disk-resident, validates/decodes independent 4 KiB blocks, and shares a
+  configurable bounded LRU across a database. A 20 MiB Linux reopen/read
+  regression with a 4 MiB cache stays within 16 MiB RSS growth and proves
+  eviction; this closes the former resident-segment qualification.
   Placement epochs are now explicit replicated `placement_transition`
   operations: initialization must be epoch 1, advances must be exact successors,
   and declared voter canonical ids/zones must equal the applied OpenRaft
@@ -211,16 +213,18 @@ not roadmap language.
   reconcile manifest checkpoints; GC deletes only manifests, segments, and
   WALs unreachable from `CURRENT` or a checkpoint. Deterministic crash and
   storage-full injection covers each flush and compaction durability boundary,
-  followed by reopen and continued writes. Segment v2 adds authenticated LZ4
-  block compression with explicit v1 read compatibility; sparse immutable
-  indexes replace decoded ordered maps and exact MVCC streaming remains under a
-  Memtable differential. The five-trial isolated Fjall/native baseline verifies
-  correctness and now passes every equal-or-better cell: native is 10.4% ahead
-  on write throughput, 1.3% ahead on bounded replay throughput, has lower
-  write/read p95 and maintained recovery, uses 9.4% less steady RSS, and 86.0%
+  followed by reopen and continued writes. Segment v3 adds independently
+  authenticated LZ4 blocks, a bounded footer index, runtime tamper denial, and
+  database-wide cache telemetry; explicit v1/v2 readers preserve compatibility,
+  and exact MVCC streaming remains under a Memtable differential. The five-trial
+  isolated Fjall/native baseline verifies
+  correctness and now passes every equal-or-better cell: native is 9.1% ahead
+  on write throughput and 67.3% ahead on bounded replay throughput, has lower
+  write/read p95 and maintained recovery, uses 15.9% less steady RSS, and 69.0%
   less disk for this workload. A follow-on nine-trial matrix also passes all
-  cells for small-batch, standard, read-heavy, and sustained profiles after the
-  sparse index stopped cloning keys. This is still scoped append/replay evidence
+  cells for small-batch, standard, read-heavy, and sustained profiles after
+  native sequence values became self-serving and one-segment scans became
+  streaming. This is still scoped append/replay evidence
   awaiting remote reproduction, mixed update/delete soak, and migration
   rehearsal—not a universal database claim.
   Native now also persists access/removal evidence and the invocation/

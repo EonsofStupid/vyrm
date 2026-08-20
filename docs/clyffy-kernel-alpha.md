@@ -156,7 +156,7 @@ measured local results, never universal superiority.
    two-root overlap and old-root retirement. Snapshot build/receive/install and
    local object publication are now file-backed, hard-capped, crash-cleaned,
    and regression-gated against whole-bundle RSS growth. Independent-host and
-   hardware chaos, disk-resident immutable segments, automatic SPIFFE
+   hardware chaos, broader disk-resident segment workloads, automatic SPIFFE
    issuance/streaming, durable supervisor generation, production telemetry,
    and Multi-AZ evidence remain open.
 8. Bind declared package workflows to preflight/pre-tool/post-tool policy.

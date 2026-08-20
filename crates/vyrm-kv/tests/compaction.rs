@@ -50,21 +50,39 @@ fn compaction_retains_only_versions_visible_to_protected_snapshots() {
     assert_eq!(outcome.input_versions, 5);
     assert_eq!(outcome.output_versions, 5);
     assert_eq!(outcome.protected_sequences, vec![2, 4, 5]);
-    assert_eq!(database.get(b"key", first), Some(b"v1".as_slice()));
-    assert_eq!(database.get(b"key", second), Some(b"v2".as_slice()));
-    assert_eq!(database.get(b"key", current), Some(b"v3".as_slice()));
     assert_eq!(
-        database.get(b"removed", first),
+        database.get(b"key", first).unwrap().as_deref(),
+        Some(b"v1".as_slice())
+    );
+    assert_eq!(
+        database.get(b"key", second).unwrap().as_deref(),
+        Some(b"v2".as_slice())
+    );
+    assert_eq!(
+        database.get(b"key", current).unwrap().as_deref(),
+        Some(b"v3".as_slice())
+    );
+    assert_eq!(
+        database.get(b"removed", first).unwrap().as_deref(),
         Some(b"present".as_slice())
     );
-    assert_eq!(database.get(b"removed", second), None);
+    assert_eq!(database.get(b"removed", second).unwrap().as_deref(), None);
 
     drop(database);
     let reopened = Database::open(&root).unwrap();
-    assert_eq!(reopened.get(b"key", first), Some(b"v1".as_slice()));
-    assert_eq!(reopened.get(b"key", second), Some(b"v2".as_slice()));
-    assert_eq!(reopened.get(b"key", current), Some(b"v3".as_slice()));
-    assert_eq!(reopened.get(b"removed", second), None);
+    assert_eq!(
+        reopened.get(b"key", first).unwrap().as_deref(),
+        Some(b"v1".as_slice())
+    );
+    assert_eq!(
+        reopened.get(b"key", second).unwrap().as_deref(),
+        Some(b"v2".as_slice())
+    );
+    assert_eq!(
+        reopened.get(b"key", current).unwrap().as_deref(),
+        Some(b"v3".as_slice())
+    );
+    assert_eq!(reopened.get(b"removed", second).unwrap().as_deref(), None);
 }
 
 #[test]
@@ -91,9 +109,12 @@ fn compaction_prunes_unprotected_history_and_obsolete_tombstones() {
 
     let outcome = database.compact(&[], 30).unwrap().unwrap();
     assert_eq!(outcome.output_versions, 1);
-    assert_eq!(database.get(b"key", old), None);
-    assert_eq!(database.get(b"key", current), Some(b"new".as_slice()));
-    assert_eq!(database.get(b"gone", current), None);
+    assert_eq!(database.get(b"key", old).unwrap().as_deref(), None);
+    assert_eq!(
+        database.get(b"key", current).unwrap().as_deref(),
+        Some(b"new".as_slice())
+    );
+    assert_eq!(database.get(b"gone", current).unwrap().as_deref(), None);
     assert_eq!(database.manifest().segments[0].entries, 1);
 }
 
@@ -118,10 +139,15 @@ fn garbage_collection_preserves_current_and_checkpoint_reachability() {
 
     let first = database.garbage_collect().unwrap();
     assert!(first.retained_manifests.contains(&checkpoint.manifest));
-    assert!(first.retained_manifests.contains(&database.manifest().digest));
+    assert!(first
+        .retained_manifests
+        .contains(&database.manifest().digest));
     assert!(first.retained_segments.contains(&first_segment));
     assert!(first.retained_segments.contains(&current_segment));
-    assert!(root.join("segments").join(format!("{first_segment}.seg")).exists());
+    assert!(root
+        .join("segments")
+        .join(format!("{first_segment}.seg"))
+        .exists());
     assert!(root
         .join("segments")
         .join(format!("{current_segment}.seg"))
@@ -130,11 +156,16 @@ fn garbage_collection_preserves_current_and_checkpoint_reachability() {
 
     assert!(database.release_checkpoint("keep-first").unwrap());
     let second = database.garbage_collect().unwrap();
-    assert!(second.removed_segments.contains(&format!("{first_segment}.seg")));
+    assert!(second
+        .removed_segments
+        .contains(&format!("{first_segment}.seg")));
     assert!(second
         .removed_manifests
         .contains(&format!("{}.json", checkpoint.manifest)));
-    assert!(!root.join("segments").join(format!("{first_segment}.seg")).exists());
+    assert!(!root
+        .join("segments")
+        .join(format!("{first_segment}.seg"))
+        .exists());
     assert!(root
         .join("segments")
         .join(format!("{current_segment}.seg"))

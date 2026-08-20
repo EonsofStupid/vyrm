@@ -584,8 +584,11 @@ fn ensure_adapter_database(
     initial: Option<Mutation>,
 ) -> ClusterResult<()> {
     let snapshot = database.snapshot();
-    if let Some(bytes) = database.get(config_key, snapshot) {
-        let actual: AdapterConfig = serde_json::from_slice(bytes)
+    if let Some(bytes) = database
+        .get(config_key, snapshot)
+        .map_err(|error| ClusterError::Unavailable(error.to_string()))?
+    {
+        let actual: AdapterConfig = serde_json::from_slice(&bytes)
             .map_err(|error| ClusterError::Denied(error.to_string()))?;
         if actual != expected {
             return Err(ClusterError::Denied(
@@ -593,7 +596,10 @@ fn ensure_adapter_database(
             ));
         }
         if expected.domain == AdapterDomain::CanonicalState
-            && database.get(KEY_STATE, snapshot).is_none()
+            && database
+                .get(KEY_STATE, snapshot)
+                .map_err(|error| ClusterError::Unavailable(error.to_string()))?
+                .is_none()
         {
             return Err(ClusterError::Denied(
                 "canonical Raft state database has no state-machine record".into(),
@@ -628,7 +634,7 @@ impl RaftLogReader<VyrmRaftTypeConfig> for VyrmRaftLogStore {
             LOG_PREFIX,
             prefix_end(LOG_PREFIX).as_deref(),
             database.snapshot(),
-        );
+        ).map_err(|error| storage_error(ErrorSubject::Logs, ErrorVerb::Read, error.to_string()))?;
         let mut entries = Vec::new();
         for (key, value) in rows {
             let index = decode_log_key(&key)?;
@@ -673,7 +679,8 @@ impl RaftLogStorage<VyrmRaftTypeConfig> for VyrmRaftLogStore {
             lock_database(&self.local_database, ErrorSubject::Vote, ErrorVerb::Write)?;
         let current: Option<Vote<u64>> = database
             .get(KEY_VOTE, database.snapshot())
-            .map(|bytes| decode_json(bytes, ErrorSubject::Vote, ErrorVerb::Read))
+            .map_err(|error| storage_error(ErrorSubject::Vote, ErrorVerb::Read, error.to_string()))?
+            .map(|bytes| decode_json(&bytes, ErrorSubject::Vote, ErrorVerb::Read))
             .transpose()?;
         if current
             .as_ref()
@@ -1105,7 +1112,8 @@ fn read_state_from_database(
 ) -> std::result::Result<StateMachineData, StorageError<u64>> {
     database
         .get(KEY_STATE, database.snapshot())
-        .map(|bytes| decode_json(bytes, ErrorSubject::StateMachine, ErrorVerb::Read))
+        .map_err(|error| storage_error(ErrorSubject::StateMachine, ErrorVerb::Read, error.to_string()))?
+        .map(|bytes| decode_json(&bytes, ErrorSubject::StateMachine, ErrorVerb::Read))
         .transpose()?
         .ok_or_else(|| {
             storage_error(
@@ -1462,7 +1470,7 @@ fn log_delete_operations<R: RangeBounds<u64> + Clone + Debug + Send>(
         LOG_PREFIX,
         prefix_end(LOG_PREFIX).as_deref(),
         database.snapshot(),
-    );
+    ).map_err(|error| storage_error(ErrorSubject::Logs, ErrorVerb::Read, error.to_string()))?;
     rows.into_iter()
         .filter_map(|(key, _)| match decode_log_key(&key) {
             Ok(index) if range_contains(&range, index) => Some(Ok(Mutation::Delete { key })),
@@ -1490,7 +1498,8 @@ fn read_json<T: DeserializeOwned>(
     let database = lock_database(database, subject.clone(), ErrorVerb::Read)?;
     database
         .get(key, database.snapshot())
-        .map(|bytes| decode_json(bytes, subject, ErrorVerb::Read))
+        .map_err(|error| storage_error(subject.clone(), ErrorVerb::Read, error.to_string()))?
+        .map(|bytes| decode_json(&bytes, subject, ErrorVerb::Read))
         .transpose()
 }
 

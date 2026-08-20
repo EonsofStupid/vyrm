@@ -41,7 +41,10 @@ fn every_compaction_boundary_recovers_after_crash_and_storage_full() {
             drop(database);
 
             let mut recovered = Database::open(&root).unwrap();
-            assert_eq!(recovered.get(b"key", snapshot), Some(b"new".as_slice()));
+            assert_eq!(
+                recovered.get(b"key", snapshot).unwrap().as_deref(),
+                Some(b"new".as_slice())
+            );
             let published = boundary == CompactionBoundary::ManifestPublished;
             assert_eq!(
                 recovered.manifest().generation,
@@ -54,7 +57,10 @@ fn every_compaction_boundary_recovers_after_crash_and_storage_full() {
             drop(recovered);
 
             let reopened = Database::open(&root).unwrap();
-            assert_eq!(reopened.get(b"key", snapshot), Some(b"new".as_slice()));
+            assert_eq!(
+                reopened.get(b"key", snapshot).unwrap().as_deref(),
+                Some(b"new".as_slice())
+            );
         }
     }
 }
@@ -86,12 +92,15 @@ fn every_flush_boundary_recovers_after_crash_and_storage_full() {
 
             let mut recovered = Database::open(&root).unwrap();
             assert_eq!(
-                recovered.get(b"alpha", snapshot),
+                recovered.get(b"alpha", snapshot).unwrap().as_deref(),
                 Some(b"one".as_slice()),
                 "lost value for {mode:?} at {boundary:?}"
             );
             let published = boundary == FlushBoundary::ManifestPublished;
-            assert_eq!(recovered.manifest().generation, if published { 2 } else { 1 });
+            assert_eq!(
+                recovered.manifest().generation,
+                if published { 2 } else { 1 }
+            );
 
             if !published {
                 recovered.flush_memtable(20).unwrap();
@@ -101,12 +110,21 @@ fn every_flush_boundary_recovers_after_crash_and_storage_full() {
                 .write(&put("beta", "two"), Durability::Authoritative)
                 .unwrap();
             let current = recovered.snapshot();
-            assert_eq!(recovered.get(b"beta", current), Some(b"two".as_slice()));
+            assert_eq!(
+                recovered.get(b"beta", current).unwrap().as_deref(),
+                Some(b"two".as_slice())
+            );
             drop(recovered);
 
             let reopened = Database::open(&root).unwrap();
-            assert_eq!(reopened.get(b"alpha", snapshot), Some(b"one".as_slice()));
-            assert_eq!(reopened.get(b"beta", current), Some(b"two".as_slice()));
+            assert_eq!(
+                reopened.get(b"alpha", snapshot).unwrap().as_deref(),
+                Some(b"one".as_slice())
+            );
+            assert_eq!(
+                reopened.get(b"beta", current).unwrap().as_deref(),
+                Some(b"two".as_slice())
+            );
         }
     }
 }

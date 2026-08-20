@@ -2,7 +2,8 @@
 
 Status: M3 local promotion baseline passes. WAL, atomic-batch, manifest,
 checkpoint, and physical snapshot-bundle formats are version 1; new immutable
-segments are version 2 and the reader retains explicit version-1 compatibility.
+segments are version 3 and the reader retains explicit version-1/version-2
+compatibility.
 The format is pre-release. Any format change before alpha must increment its
 explicit version and update the checked-in vectors; readers never guess.
 
@@ -92,20 +93,33 @@ sequence range, entry count, and byte count. Duplicate identities, inverted
 ranges, empty segments, and segments newer than the manifest's durable sequence
 fail closed.
 
-Immutable segment v2 stores a fixed 48-byte `VYRSEG02` header, an LZ4 block with
-a prepended decompressed-size field, and a lowercase ASCII SHA-256 footer over
-the physical header and compressed body. Its header declares version, length,
-compression flags, entry count, sequence range, and uncompressed record bytes.
-The decoder bounds decompressed bytes to 1 GiB, requires the LZ4 prefix to equal
-the authenticated declared size, then validates the canonical record stream.
-Unknown flags, corrupt compressed bodies, invalid ordering, and trailing bytes
-fail closed. Version-1 `VYRSEG01` uncompressed segments remain readable through
-an explicit decoder branch; writers emit only version 2.
+Immutable segment v3 stores a fixed 64-byte `VYRSEG03` header, independently
+compressed LZ4 record blocks, a bounded `VYRIX003` footer index, and a lowercase
+ASCII SHA-256 footer over every preceding physical byte. The header declares
+the entry/sequence range, total uncompressed record bytes, index offset, block
+count, and the canonical 4 KiB query target. A record is never split: the one-record
+oversize exception is bounded by the 1 MiB key plus 8 MiB value contract.
 
-After validation, the reader retains canonical record bytes plus a sparse index
-of byte ranges into that same buffer rather than cloning index keys or
-materializing every immutable key/version in another ordered map. Point, range,
-snapshot, and compaction iteration stream exact MVCC records.
+Each index entry declares physical offset/length, decoded length, entry count,
+last key, and SHA-256 of the compressed bytes. Offsets must exactly cover the
+data region, last keys are non-decreasing so one key may span blocks, and the
+index is capped at 64 MiB. Open streams the outer digest with a 64 KiB buffer,
+then decodes and validates one block at a time. Runtime reads recheck the block
+digest with optimized SHA-256 over the raw 32-byte expected digest before LZ4
+decode, so post-open file mutation fails closed without allocating hex strings. Unknown
+flags, length/count disagreement, invalid ordering, corrupt compression, gaps,
+overlap, and trailing bytes are denied.
+
+Point reads return owned values and load only candidate blocks. A single
+immutable segment reduces ordered MVCC groups directly into range results;
+multi-segment reads retain the general version merge. Snapshot and compaction
+traversal process blocks sequentially. All immutable
+segments in one `Database` share a decoded-block LRU: 4 MiB by default,
+configurable at create/open, with capacity/resident/entry/hit/miss/eviction
+counters exposed by `block_cache_stats`. A block larger than the configured
+cache is decoded for its caller but never retained. Version-1 `VYRSEG01`
+uncompressed and version-2 `VYRSEG02` single-block files remain readable through
+explicit legacy branches; writers emit only version 3.
 Put/tombstone records retain every version needed for an older snapshot. Files
 are named by their physical-content digest, written to a unique temporary,
 synced, atomically renamed, and followed by a directory sync. Reusing an
@@ -163,10 +177,9 @@ continuation are executable tests in `tests/snapshot_bundle.rs`.
 `create_new`, synchronized before use, and removes partial output on ordinary
 failure. Deterministic crash/storage-full injection covers header-written,
 segment-written, and file-synced boundaries. The Linux memory regression uses
-a bundle larger than 16 MiB and caps incremental export RSS at 16 MiB. The
-native engine still decodes installed immutable segments into resident memory;
-the bound applies to snapshot-envelope overhead, not the full query-engine
-footprint.
+a bundle larger than 16 MiB and caps incremental export RSS at 16 MiB. A second
+Linux process regression opens and reads 20 MiB of immutable segments with a
+4 MiB shared cache, requires eviction, and caps RSS growth at 16 MiB.
 
 OpenRaft adapter v4 consumes this exact contract for canonical-state transfer.
 It inspects the authenticated state/domain records before installation, then
@@ -218,5 +231,7 @@ the exact v1 bytes and published `123456789` check value. The tests also cover
 ordered replay, reopen/continuation, invalid batches, partial headers, partial
 payloads, complete checksum corruption, unknown versions, explicit repair, and
 repair/recovery idempotency. Segment tests cover sparse-reader/Memtable point,
-range, and MVCC differentials, v1 backward reads, authenticated-length mismatch,
-compressed-body corruption, checksum failure, and truncation.
+range, and MVCC differentials, v1/v2 backward reads, same-key versions spanning
+blocks, cache bounds/eviction, authenticated-length mismatch, post-open block
+tampering, compressed-body corruption, checksum failure, truncation, and Linux
+RSS bounds.

@@ -1,3 +1,4 @@
+use crate::segment::{block_cache_stats, new_block_cache, SharedBlockCache};
 use crate::{
     recover_from, AppendReceipt, Checkpoint, Durability, Error, Manifest, ManifestStore, Memtable,
     Result, Segment, SnapshotBundle, SnapshotBundleFile, SnapshotExportBoundary, SnapshotSegment,
@@ -7,6 +8,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs::File;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 const WAL_DIRECTORY: &str = "wal";
 const SEGMENT_DIRECTORY: &str = "segments";
@@ -113,10 +115,15 @@ pub struct Database {
     wal: WalWriter,
     memtable: Memtable,
     segments: Vec<Segment>,
+    block_cache: SharedBlockCache,
 }
 
 impl Database {
     pub fn create(root: &Path) -> Result<Self> {
+        Self::create_with_block_cache(root, crate::DEFAULT_BLOCK_CACHE_BYTES)
+    }
+
+    pub fn create_with_block_cache(root: &Path, block_cache_bytes: usize) -> Result<Self> {
         if root.exists() {
             if !root.is_dir() || std::fs::read_dir(root)?.next().is_some() {
                 return Err(Error::InvalidManifest(
@@ -139,20 +146,27 @@ impl Database {
             wal,
             memtable: Memtable::default(),
             segments: Vec::new(),
+            block_cache: new_block_cache(block_cache_bytes),
         })
     }
 
     pub fn open(root: &Path) -> Result<Self> {
+        Self::open_with_block_cache(root, crate::DEFAULT_BLOCK_CACHE_BYTES)
+    }
+
+    pub fn open_with_block_cache(root: &Path, block_cache_bytes: usize) -> Result<Self> {
         let manifests = ManifestStore::open(root)?;
         let (_, manifest) = manifests
             .current()?
             .ok_or_else(|| Error::InvalidManifest("database has no CURRENT manifest".into()))?;
+        let block_cache = new_block_cache(block_cache_bytes);
         let mut segments = Vec::with_capacity(manifest.segments.len());
         for expected in &manifest.segments {
-            let mut segment = Segment::open(
+            let mut segment = Segment::open_with_cache(
                 &root
                     .join(SEGMENT_DIRECTORY)
                     .join(format!("{}.seg", expected.id)),
+                Arc::clone(&block_cache),
             )?;
             segment.descriptor.level = expected.level;
             if &segment.descriptor != expected {
@@ -177,6 +191,7 @@ impl Database {
             wal,
             memtable,
             segments,
+            block_cache,
         })
     }
 
@@ -258,8 +273,11 @@ impl Database {
         }
         let sequence = self.wal.sync()?;
         inject_failure(failure, FlushBoundary::WalSynced)?;
-        let (segment, _) =
-            Segment::write_from_memtable(&self.root.join(SEGMENT_DIRECTORY), &self.memtable)?;
+        let (segment, _) = Segment::write_from_memtable_with_cache(
+            &self.root.join(SEGMENT_DIRECTORY),
+            &self.memtable,
+            Arc::clone(&self.block_cache),
+        )?;
         inject_failure(failure, FlushBoundary::SegmentSynced)?;
         let next_sequence = sequence
             .checked_add(1)
@@ -433,10 +451,11 @@ impl Database {
         let mut imported = Vec::with_capacity(bundle.source_manifest.segments.len());
         for (index, descriptor) in bundle.descriptors().enumerate() {
             let bytes = bundle.segment_bytes(index)?;
-            imported.push(Segment::install_snapshot_bytes(
+            imported.push(Segment::install_snapshot_bytes_with_cache(
                 &segment_directory,
                 descriptor,
                 &bytes,
+                Arc::clone(&self.block_cache),
             )?);
         }
         inject_snapshot_install_failure(failure, SnapshotInstallBoundary::SegmentsSynced)?;
@@ -513,10 +532,11 @@ impl Database {
         let segment_directory = self.root.join(SEGMENT_DIRECTORY);
         let mut imported = Vec::with_capacity(bundle.segments.len());
         for bundled in &bundle.segments {
-            imported.push(Segment::install_snapshot_bytes(
+            imported.push(Segment::install_snapshot_bytes_with_cache(
                 &segment_directory,
                 &bundled.descriptor,
                 &bundled.bytes,
+                Arc::clone(&self.block_cache),
             )?);
         }
         inject_snapshot_install_failure(failure, SnapshotInstallBoundary::SegmentsSynced)?;
@@ -602,7 +622,7 @@ impl Database {
 
         let mut merged = BTreeMap::<Vec<u8>, BTreeMap<u64, Option<Vec<u8>>>>::new();
         for segment in &self.segments {
-            for (key, versions) in segment.all_versions() {
+            for (key, versions) in segment.all_versions()? {
                 let target = merged.entry(key).or_default();
                 for version in versions {
                     match target.get(&version.sequence) {
@@ -649,8 +669,11 @@ impl Database {
         let mut compacted_segments = Vec::new();
         if !retained.is_empty() {
             let table = Memtable::from_versions(retained, durable)?;
-            let (mut segment, _) =
-                Segment::write_from_memtable(&self.root.join(SEGMENT_DIRECTORY), &table)?;
+            let (mut segment, _) = Segment::write_from_memtable_with_cache(
+                &self.root.join(SEGMENT_DIRECTORY),
+                &table,
+                Arc::clone(&self.block_cache),
+            )?;
             segment.descriptor.level = self
                 .segments
                 .iter()
@@ -738,11 +761,11 @@ impl Database {
         Ok(report)
     }
 
-    pub fn get(&self, key: &[u8], snapshot: Snapshot) -> Option<&[u8]> {
+    pub fn get(&self, key: &[u8], snapshot: Snapshot) -> Result<Option<Vec<u8>>> {
         let mut best_sequence = 0;
         let mut best_value = None;
         for segment in &self.segments {
-            if let Some(version) = segment.get_version(key, snapshot.sequence) {
+            if let Some(version) = segment.get_version(key, snapshot.sequence)? {
                 if version.sequence > best_sequence {
                     best_sequence = version.sequence;
                     best_value = version.value;
@@ -751,10 +774,45 @@ impl Database {
         }
         if let Some(version) = self.memtable.get_version(key, snapshot.sequence) {
             if version.sequence > best_sequence {
-                best_value = version.value.as_deref();
+                best_value = version.value.clone();
             }
         }
-        best_value
+        Ok(best_value)
+    }
+
+    pub fn get_many(&self, keys: &[Vec<u8>], snapshot: Snapshot) -> Result<Vec<Option<Vec<u8>>>> {
+        if self.segments.len() == 1 && self.memtable.version_count() == 0 {
+            return Ok(self.segments[0]
+                .get_versions(keys, snapshot.sequence)?
+                .into_iter()
+                .map(|version| version.and_then(|version| version.value))
+                .collect());
+        }
+        let mut best_sequences = vec![0u64; keys.len()];
+        let mut values = vec![None; keys.len()];
+        for segment in &self.segments {
+            for (index, version) in segment
+                .get_versions(keys, snapshot.sequence)?
+                .into_iter()
+                .enumerate()
+            {
+                if let Some(version) = version {
+                    if version.sequence > best_sequences[index] {
+                        best_sequences[index] = version.sequence;
+                        values[index] = version.value;
+                    }
+                }
+            }
+        }
+        for (index, key) in keys.iter().enumerate() {
+            if let Some(version) = self.memtable.get_version(key, snapshot.sequence) {
+                if version.sequence > best_sequences[index] {
+                    best_sequences[index] = version.sequence;
+                    values[index] = version.value.clone();
+                }
+            }
+        }
+        Ok(values)
     }
 
     pub fn scan(
@@ -762,14 +820,22 @@ impl Database {
         start: &[u8],
         end: Option<&[u8]>,
         snapshot: Snapshot,
-    ) -> Vec<(Vec<u8>, Vec<u8>)> {
+    ) -> Result<Vec<(Vec<u8>, Vec<u8>)>> {
+        if self.segments.len() == 1 && self.memtable.version_count() == 0 {
+            return self.segments[0].scan(start, end, snapshot.sequence);
+        }
         let mut visible = BTreeMap::<Vec<u8>, VersionedValue>::new();
-        for (key, version) in self
-            .segments
-            .iter()
-            .flat_map(|segment| segment.visible_versions(snapshot.sequence))
-            .chain(self.memtable.visible_versions(snapshot.sequence))
-        {
+        for segment in &self.segments {
+            for (key, version) in segment.visible_from(start, end, snapshot.sequence)? {
+                if visible
+                    .get(&key)
+                    .is_none_or(|current| version.sequence > current.sequence)
+                {
+                    visible.insert(key, version);
+                }
+            }
+        }
+        for (key, version) in self.memtable.visible_versions(snapshot.sequence) {
             if key.as_slice() < start || end.is_some_and(|end| key.as_slice() >= end) {
                 continue;
             }
@@ -780,14 +846,19 @@ impl Database {
                 visible.insert(key, version);
             }
         }
-        visible
+        Ok(visible
             .into_iter()
             .filter_map(|(key, version)| version.value.map(|value| (key, value)))
-            .collect()
+            .collect())
     }
 
     pub fn memtable(&self) -> &Memtable {
         &self.memtable
+    }
+
+    /// Current shared immutable-block residency and effectiveness counters.
+    pub fn block_cache_stats(&self) -> crate::BlockCacheStats {
+        block_cache_stats(&self.block_cache)
     }
 }
 

@@ -26,6 +26,7 @@ use vyrm_kv::{
 };
 
 const RUNTIME_CHECKPOINT_PREFIX: &str = "runtime-";
+const NATIVE_SEQUENCE_VALUE_MAGIC: &[u8; 8] = b"VYRNSI01";
 
 pub struct NativeEngine {
     path: PathBuf,
@@ -97,7 +98,7 @@ impl NativeEngine {
         let database = self.lock()?;
         let snapshot = database.snapshot();
         let mut tallies = BTreeMap::<(String, String), Tally>::new();
-        for (stored_key, _) in scan_space(&database, snapshot, keyspaces::CLAIMS, &[]) {
+        for (stored_key, _) in scan_space(&database, snapshot, keyspaces::CLAIMS, &[])? {
             let (subject, predicate) =
                 key::parse_claim_key(strip_space(keyspaces::CLAIMS, &stored_key)?)?;
             tallies
@@ -110,7 +111,7 @@ impl NativeEngine {
             snapshot,
             keyspaces::ACCESS,
             &key::access_bound(since),
-        ) {
+        )? {
             let (at, reader, subject, predicate) =
                 key::parse_access_key(strip_space(keyspaces::ACCESS, &stored_key)?)?;
             if at > evaluated_at {
@@ -132,7 +133,7 @@ impl NativeEngine {
     /// approximate count because that is all its keyspace API promises.
     pub fn access_count(&self) -> Result<usize> {
         let database = self.lock()?;
-        Ok(scan_space(&database, database.snapshot(), keyspaces::ACCESS, &[]).len())
+        Ok(scan_space(&database, database.snapshot(), keyspaces::ACCESS, &[])?.len())
     }
 
     /// Persists one authoritative operator invocation and its ordinal in one
@@ -174,7 +175,7 @@ impl NativeEngine {
         let mut database = self.lock()?;
         let snapshot = database.snapshot();
         let mut found = None;
-        for (stored_key, value) in scan_space(&database, snapshot, keyspaces::INVOCATIONS, &[]) {
+        for (stored_key, value) in scan_space(&database, snapshot, keyspaces::INVOCATIONS, &[])? {
             let record: Invocation = serde_json::from_slice(&value)?;
             if record.ordinal == ordinal {
                 found = Some((
@@ -214,7 +215,7 @@ impl NativeEngine {
             database.snapshot(),
             keyspaces::INVOCATIONS,
             &invocation::invocation_bound(since),
-        )
+        )?
         .into_iter()
         .map(|(_, value)| serde_json::from_slice(&value).map_err(Error::from))
         .collect()
@@ -292,17 +293,18 @@ impl Engine for NativeEngine {
                 claim.valid_from,
                 claim.tx_time,
             );
+            let encoded_claim = serde_json::to_vec(claim)?;
             put(
                 &mut operations,
                 keyspaces::SEQUENCE_INDEX,
                 &key::sequence_key(sequence),
-                claim_key.clone(),
+                encode_native_sequence_value(&encoded_claim),
             );
             put(
                 &mut operations,
                 keyspaces::CLAIMS,
                 &claim_key,
-                serde_json::to_vec(claim)?,
+                encoded_claim,
             );
         }
         put_sequence(&mut operations, keyspaces::SEQUENCE_WATERMARK, sequence);
@@ -335,23 +337,33 @@ impl Engine for NativeEngine {
         if from >= last {
             return Ok(Vec::new());
         }
-        let mut claims = Vec::new();
-        for sequence in from.saturating_add(1)..=last {
-            let claim_key = get(
-                &database,
-                snapshot,
-                keyspaces::SEQUENCE_INDEX,
-                &key::sequence_key(sequence),
-            )
-            .ok_or_else(|| {
-                Error::Substrate(format!(
-                    "native sequence index is missing sequence {sequence}"
-                ))
-            })?;
-            let encoded =
-                get(&database, snapshot, keyspaces::CLAIMS, &claim_key).ok_or_else(|| {
+        let start = storage_key(
+            keyspaces::SEQUENCE_INDEX,
+            &key::sequence_key(from.saturating_add(1)),
+        );
+        let inclusive_end = storage_key(keyspaces::SEQUENCE_INDEX, &key::sequence_key(last));
+        let end = prefix_end(&inclusive_end)
+            .ok_or_else(|| Error::Substrate("native sequence range has no upper bound".into()))?;
+        let index = database.scan(&start, Some(&end), snapshot)?;
+        let expected = usize::try_from(last - from)
+            .map_err(|_| Error::Substrate("native sequence range exceeds usize".into()))?;
+        if index.len() != expected {
+            return Err(Error::Substrate(format!(
+                "native sequence index returned {} rows for expected interval ({from}, {last}]",
+                index.len()
+            )));
+        }
+        let mut claims = Vec::with_capacity(index.len());
+        for (_, sequence_value) in index {
+            if let Some(encoded) = decode_native_sequence_value(&sequence_value)? {
+                claims.push(serde_json::from_slice(encoded)?);
+                continue;
+            }
+            let encoded = database
+                .get(&storage_key(keyspaces::CLAIMS, &sequence_value), snapshot)?
+                .ok_or_else(|| {
                     Error::Substrate(format!(
-                        "native sequence index references an absent claim at {sequence}"
+                        "native sequence index references an absent claim in ({from}, {last}]"
                     ))
                 })?;
             claims.push(serde_json::from_slice(&encoded)?);
@@ -363,7 +375,7 @@ impl Engine for NativeEngine {
         let database = self.lock()?;
         let snapshot = database.snapshot();
         let mut subjects = Vec::new();
-        for (stored_key, _) in scan_space(&database, snapshot, keyspaces::CLAIMS, &[]) {
+        for (stored_key, _) in scan_space(&database, snapshot, keyspaces::CLAIMS, &[])? {
             let claim_key = strip_space(keyspaces::CLAIMS, &stored_key)?;
             let (subject, _) = key::parse_claim_key(claim_key)?;
             if subjects
@@ -400,12 +412,12 @@ impl Engine for NativeEngine {
 
     fn get_projection(&self, name: &str) -> Result<Option<Vec<u8>>> {
         let database = self.lock()?;
-        Ok(get(
+        get(
             &database,
             database.snapshot(),
             keyspaces::PROJECTIONS,
             name.as_bytes(),
-        ))
+        )
     }
 
     fn put_projection_with(&self, name: &str, bytes: &[u8], durability: Durability) -> Result<()> {
@@ -527,7 +539,7 @@ impl Engine for NativeEngine {
     fn release_runtime_snapshot(&self, id: &SnapshotId) -> Result<bool> {
         let mut database = self.lock()?;
         let key = storage_key(keyspaces::RUNTIME_SNAPSHOTS, id.as_str().as_bytes());
-        if database.get(&key, database.snapshot()).is_none() {
+        if database.get(&key, database.snapshot())?.is_none() {
             return Ok(false);
         }
         write(
@@ -542,7 +554,7 @@ impl Engine for NativeEngine {
     fn runtime_snapshots(&self, now: Millis) -> Result<Vec<SnapshotHandle>> {
         let database = self.lock()?;
         let snapshot = database.snapshot();
-        let mut handles = scan_space(&database, snapshot, keyspaces::RUNTIME_SNAPSHOTS, &[])
+        let mut handles = scan_space(&database, snapshot, keyspaces::RUNTIME_SNAPSHOTS, &[])?
             .into_iter()
             .map(|(_, bytes)| serde_json::from_slice::<SnapshotHandle>(&bytes).map_err(Error::from))
             .collect::<Result<Vec<_>>>()?;
@@ -613,7 +625,7 @@ impl Engine for NativeEngine {
             .checked_add(1)
             .ok_or(Error::SequenceOverflow)?
             .to_be_bytes();
-        scan_space_from(&database, snapshot, keyspaces::RUNTIME_OUTBOX, &start)
+        scan_space_from(&database, snapshot, keyspaces::RUNTIME_OUTBOX, &start)?
             .into_iter()
             .take(limit)
             .map(|(_, bytes)| {
@@ -647,6 +659,23 @@ impl Engine for NativeEngine {
             commit_id.as_bytes(),
         )
     }
+}
+
+fn encode_native_sequence_value(encoded_claim: &[u8]) -> Vec<u8> {
+    let mut value = Vec::with_capacity(NATIVE_SEQUENCE_VALUE_MAGIC.len() + encoded_claim.len());
+    value.extend_from_slice(NATIVE_SEQUENCE_VALUE_MAGIC);
+    value.extend_from_slice(encoded_claim);
+    value
+}
+
+fn decode_native_sequence_value(value: &[u8]) -> Result<Option<&[u8]>> {
+    let Some(encoded) = value.strip_prefix(NATIVE_SEQUENCE_VALUE_MAGIC) else {
+        return Ok(None);
+    };
+    if encoded.is_empty() {
+        return Err(Error::Substrate("empty native sequence envelope".into()));
+    }
+    Ok(Some(encoded))
 }
 
 /// A validated native runtime transaction that has not yet crossed the WAL
@@ -780,7 +809,7 @@ pub fn prepare_native_runtime_commit(
                     snapshot,
                     keyspaces::RUNTIME_RECORDS,
                     &runtime_identity_key(&commit.scope, reference),
-                )
+                )?
                 .is_none()
             {
                 return Err(Error::DanglingRuntimeReference(format!(
@@ -804,7 +833,7 @@ pub fn prepare_native_runtime_commit(
         snapshot,
         keyspaces::META,
         keyspaces::RUNTIME_LAST_DIGEST,
-    )
+    )?
     .map(String::from_utf8)
     .transpose()
     .map_err(|error| Error::CorruptWatermark(error.to_string()))?
@@ -814,7 +843,7 @@ pub fn prepare_native_runtime_commit(
         snapshot,
         keyspaces::META,
         keyspaces::RUNTIME_LAST_AUDIT_DIGEST,
-    )
+    )?
     .map(String::from_utf8)
     .transpose()
     .map_err(|error| Error::CorruptWatermark(error.to_string()))?
@@ -1005,7 +1034,7 @@ fn scan_claims(database: &Database, prefix: Vec<u8>, from: Vec<u8>) -> Result<Ve
     let end = prefix_end(&full_prefix)
         .ok_or_else(|| Error::Substrate("native claim prefix has no upper bound".into()))?;
     database
-        .scan(&start, Some(&end), snapshot)
+        .scan(&start, Some(&end), snapshot)?
         .into_iter()
         .map(|(_, value)| serde_json::from_slice(&value).map_err(Error::from))
         .collect()
@@ -1036,7 +1065,7 @@ fn reconcile_runtime_checkpoints(
     at: Millis,
 ) -> Result<()> {
     let snapshot = database.snapshot();
-    let handles = scan_space(database, snapshot, keyspaces::RUNTIME_SNAPSHOTS, &[])
+    let handles = scan_space(database, snapshot, keyspaces::RUNTIME_SNAPSHOTS, &[])?
         .into_iter()
         .map(|(_, bytes)| serde_json::from_slice::<SnapshotHandle>(&bytes).map_err(Error::from))
         .collect::<Result<Vec<_>>>()?;
@@ -1090,7 +1119,7 @@ fn native_read_stamp(
         snapshot,
         keyspaces::META,
         keyspaces::RUNTIME_LAST_DIGEST,
-    )
+    )?
     .map(String::from_utf8)
     .transpose()
     .map_err(|error| Error::CorruptWatermark(error.to_string()))?
@@ -1239,7 +1268,7 @@ fn native_values_for_scope<T: DeserializeOwned>(
 ) -> Result<Vec<T>> {
     let mut prefix = scope.as_str().as_bytes().to_vec();
     prefix.push(0);
-    scan_space(database, snapshot, space, &prefix)
+    scan_space(database, snapshot, space, &prefix)?
         .into_iter()
         .map(|(_, value)| serde_json::from_slice(&value).map_err(Error::from))
         .collect()
@@ -1285,7 +1314,7 @@ fn put_sequence(operations: &mut Vec<Mutation>, key: &[u8], sequence: u64) {
 }
 
 fn read_sequence(database: &Database, snapshot: Snapshot, key: &[u8]) -> Result<u64> {
-    get(database, snapshot, keyspaces::META, key)
+    get(database, snapshot, keyspaces::META, key)?
         .as_deref()
         .map(decode_sequence)
         .transpose()
@@ -1299,10 +1328,15 @@ fn decode_sequence(value: &[u8]) -> Result<u64> {
         .map_err(|error| Error::CorruptWatermark(error.to_string()))
 }
 
-fn get(database: &Database, snapshot: Snapshot, space: &str, key: &[u8]) -> Option<Vec<u8>> {
+fn get(
+    database: &Database,
+    snapshot: Snapshot,
+    space: &str,
+    key: &[u8],
+) -> Result<Option<Vec<u8>>> {
     database
         .get(&storage_key(space, key), snapshot)
-        .map(<[u8]>::to_vec)
+        .map_err(Error::from)
 }
 
 fn get_json<T: DeserializeOwned>(
@@ -1311,7 +1345,7 @@ fn get_json<T: DeserializeOwned>(
     space: &str,
     key: &[u8],
 ) -> Result<Option<T>> {
-    get(database, snapshot, space, key)
+    get(database, snapshot, space, key)?
         .map(|bytes| serde_json::from_slice(&bytes).map_err(Error::from))
         .transpose()
 }
@@ -1321,10 +1355,12 @@ fn scan_space(
     snapshot: Snapshot,
     space: &str,
     prefix: &[u8],
-) -> Vec<(Vec<u8>, Vec<u8>)> {
+) -> Result<Vec<(Vec<u8>, Vec<u8>)>> {
     let start = storage_key(space, prefix);
     let end = prefix_end(&start);
-    database.scan(&start, end.as_deref(), snapshot)
+    database
+        .scan(&start, end.as_deref(), snapshot)
+        .map_err(Error::from)
 }
 
 fn scan_space_from(
@@ -1332,10 +1368,12 @@ fn scan_space_from(
     snapshot: Snapshot,
     space: &str,
     from: &[u8],
-) -> Vec<(Vec<u8>, Vec<u8>)> {
+) -> Result<Vec<(Vec<u8>, Vec<u8>)>> {
     let start = storage_key(space, from);
     let end = prefix_end(&storage_key(space, &[]));
-    database.scan(&start, end.as_deref(), snapshot)
+    database
+        .scan(&start, end.as_deref(), snapshot)
+        .map_err(Error::from)
 }
 
 fn storage_key(space: &str, key: &[u8]) -> Vec<u8> {
@@ -1363,4 +1401,82 @@ fn prefix_end(prefix: &[u8]) -> Option<Vec<u8>> {
         }
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use vyrm_core::Producer;
+
+    fn claim() -> Claim {
+        Claim::new(
+            vyrm_core::Subject::new("legacy-subject").unwrap(),
+            vyrm_core::Predicate::new("legacy-predicate").unwrap(),
+            "legacy-value",
+            10,
+            11,
+            Producer {
+                actor: "native-test".into(),
+                on_behalf_of: None,
+                session: None,
+            },
+        )
+    }
+
+    #[test]
+    fn native_sequence_envelope_is_strict_and_canonical() {
+        let claim = claim();
+        let claim_key = key::claim_key(
+            &claim.subject,
+            &claim.predicate,
+            claim.valid_from,
+            claim.tx_time,
+        );
+        let encoded = serde_json::to_vec(&claim).unwrap();
+        let envelope = encode_native_sequence_value(&encoded);
+        assert_eq!(
+            decode_native_sequence_value(&envelope).unwrap(),
+            Some(encoded.as_slice())
+        );
+        assert_eq!(decode_native_sequence_value(&claim_key).unwrap(), None);
+        assert!(decode_native_sequence_value(NATIVE_SEQUENCE_VALUE_MAGIC).is_err());
+    }
+
+    #[test]
+    fn native_replay_reads_legacy_key_only_sequence_values() {
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path().join("legacy-native");
+        let claim = claim();
+        let claim_key = key::claim_key(
+            &claim.subject,
+            &claim.predicate,
+            claim.valid_from,
+            claim.tx_time,
+        );
+        let mut database = Database::create(&root).unwrap();
+        database
+            .write_owned(
+                WriteBatch::new(vec![
+                    Mutation::Put {
+                        key: storage_key(keyspaces::SEQUENCE_INDEX, &key::sequence_key(1)),
+                        value: claim_key.clone(),
+                    },
+                    Mutation::Put {
+                        key: storage_key(keyspaces::CLAIMS, &claim_key),
+                        value: serde_json::to_vec(&claim).unwrap(),
+                    },
+                    Mutation::Put {
+                        key: storage_key(keyspaces::META, keyspaces::SEQUENCE_WATERMARK),
+                        value: b"1".to_vec(),
+                    },
+                ])
+                .unwrap(),
+                vyrm_kv::Durability::Authoritative,
+            )
+            .unwrap();
+        drop(database);
+
+        let engine = NativeEngine::open(&root).unwrap();
+        assert_eq!(Engine::claims_in_range(&engine, 0, 1).unwrap(), vec![claim]);
+    }
 }

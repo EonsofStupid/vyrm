@@ -258,7 +258,12 @@ NOT incur that cost.
 The sequence index maps an append sequence to the claim key written at that
 sequence, and is what makes §8.2 and §8.4 answerable. Its entry MUST be written
 in the transaction that writes the claim, so that the index cannot diverge from
-the watermark under termination.
+the watermark under termination. Native Vyrm values additionally carry the
+canonical claim bytes in a versioned `VYRNSI01` envelope. The typed bytes
+deterministically define the claim key, so a bounded replay needs one contiguous
+range scan without storing that identity twice.
+Legacy native key-only values remain readable through an explicit compatibility
+branch; the Fjall adapter retains its key-only representation.
 
 Fjall persists writes across keyspaces in a single database-level journal, so
 writes requiring mutual atomicity retain it across durability classes.

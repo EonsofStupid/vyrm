@@ -24,7 +24,10 @@ pub use manifest::{
     Checkpoint, CurrentPointer, Manifest, ManifestStore, SegmentDescriptor, MANIFEST_FORMAT_VERSION,
 };
 pub use memtable::{Memtable, VersionedValue};
-pub use segment::{Segment, SEGMENT_FORMAT_VERSION};
+pub use segment::{
+    BlockCacheStats, Segment, DEFAULT_BLOCK_CACHE_BYTES, SEGMENT_BLOCK_TARGET_BYTES,
+    SEGMENT_FORMAT_VERSION,
+};
 pub use snapshot_bundle::{
     SnapshotBundle, SnapshotBundleFile, SnapshotExportBoundary, SnapshotSegment,
     SNAPSHOT_BUNDLE_FORMAT_VERSION, SNAPSHOT_BUNDLE_MAX_BYTES,

@@ -319,14 +319,13 @@ impl SnapshotBundleFile {
             let segment = self.validated_segment(index)?;
             for (key_index, key) in keys.iter().enumerate() {
                 if let Some(version) =
-                    segment.get_version(key, self.source_manifest.durable_sequence)
+                    segment.get_version(key, self.source_manifest.durable_sequence)?
                 {
                     if selected[key_index]
                         .as_ref()
                         .is_none_or(|(sequence, _)| version.sequence > *sequence)
                     {
-                        selected[key_index] =
-                            Some((version.sequence, version.value.map(<[u8]>::to_vec)));
+                        selected[key_index] = Some((version.sequence, version.value));
                     }
                 }
             }
@@ -361,7 +360,7 @@ impl SnapshotBundleFile {
             .segments
             .get(index)
             .ok_or_else(|| Error::InvalidManifest("snapshot segment index is invalid".into()))?;
-        Segment::validate_snapshot_bytes(&segment.descriptor, &self.segment_bytes(index)?)
+        Segment::validate_snapshot_owned(&segment.descriptor, self.segment_bytes(index)?)
     }
 }
 
@@ -445,14 +444,13 @@ impl SnapshotBundle {
         for segment in &segments {
             for (index, key) in keys.iter().enumerate() {
                 if let Some(version) =
-                    segment.get_version(key, self.source_manifest.durable_sequence)
+                    segment.get_version(key, self.source_manifest.durable_sequence)?
                 {
                     if selected[index]
                         .as_ref()
                         .is_none_or(|(sequence, _)| version.sequence > *sequence)
                     {
-                        selected[index] =
-                            Some((version.sequence, version.value.map(<[u8]>::to_vec)));
+                        selected[index] = Some((version.sequence, version.value));
                     }
                 }
             }

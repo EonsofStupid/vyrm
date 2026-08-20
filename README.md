@@ -59,8 +59,9 @@ Vyrm provides:
   reconciliation, post-purge learner snapshot catch-up, identity confusion
   denial, hot leaf and trust-root rotation, CRL revocation, stale restart denial,
   corrupt-pointer refusal, and bounded file-backed snapshot transfer with
-  crash-orphan cleanup (automatic workload issuance, disk-resident immutable
-  segments, and production clustering remain gated);
+  crash-orphan cleanup and disk-resident immutable segment v3 with bounded
+  shared-cache telemetry (automatic workload issuance and production clustering
+  remain gated);
 - identical lifecycle semantics through hooks, CLI, and MCP;
 - isolated per-platform instances with explicit store/root binding.
 

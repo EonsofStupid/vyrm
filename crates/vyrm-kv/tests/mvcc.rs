@@ -165,15 +165,97 @@ fn database_snapshots_are_repeatable_across_writes_and_reopen() {
         )
         .unwrap();
     let current = database.snapshot();
-    assert_eq!(database.get(b"key", old), Some(b"old".as_slice()));
-    assert_eq!(database.get(b"key", current), Some(b"new".as_slice()));
+    assert_eq!(
+        database.get(b"key", old).unwrap().as_deref(),
+        Some(b"old".as_slice())
+    );
+    assert_eq!(
+        database.get(b"key", current).unwrap().as_deref(),
+        Some(b"new".as_slice())
+    );
     assert_eq!(database.sync().unwrap(), current.sequence);
     drop(database);
 
     let reopened = Database::open(&root).unwrap();
     assert_eq!(reopened.snapshot(), current);
-    assert_eq!(reopened.get(b"key", old), Some(b"old".as_slice()));
-    assert_eq!(reopened.get(b"key", current), Some(b"new".as_slice()));
+    assert_eq!(
+        reopened.get(b"key", old).unwrap().as_deref(),
+        Some(b"old".as_slice())
+    );
+    assert_eq!(
+        reopened.get(b"key", current).unwrap().as_deref(),
+        Some(b"new".as_slice())
+    );
+}
+
+#[test]
+fn batch_point_reads_match_individual_reads_across_segments_memtable_and_snapshots() {
+    let parent = tempfile::tempdir().unwrap();
+    let root = parent.path().join("native");
+    let mut database = Database::create(&root).unwrap();
+    database
+        .write(
+            &WriteBatch::new(vec![
+                Mutation::Put {
+                    key: b"alpha".to_vec(),
+                    value: b"alpha-old".to_vec(),
+                },
+                Mutation::Put {
+                    key: b"beta".to_vec(),
+                    value: b"beta-old".to_vec(),
+                },
+            ])
+            .unwrap(),
+            Durability::Authoritative,
+        )
+        .unwrap();
+    let old = database.snapshot();
+    database.flush_memtable(old.sequence).unwrap();
+    database
+        .write(
+            &WriteBatch::new(vec![
+                Mutation::Delete {
+                    key: b"alpha".to_vec(),
+                },
+                Mutation::Put {
+                    key: b"beta".to_vec(),
+                    value: b"beta-new".to_vec(),
+                },
+                Mutation::Put {
+                    key: b"gamma".to_vec(),
+                    value: b"gamma-new".to_vec(),
+                },
+            ])
+            .unwrap(),
+            Durability::Buffered,
+        )
+        .unwrap();
+    let current = database.snapshot();
+    let keys = vec![
+        b"gamma".to_vec(),
+        b"alpha".to_vec(),
+        b"missing".to_vec(),
+        b"beta".to_vec(),
+        b"beta".to_vec(),
+    ];
+
+    for snapshot in [old, current] {
+        let expected = keys
+            .iter()
+            .map(|key| database.get(key, snapshot).unwrap())
+            .collect::<Vec<_>>();
+        assert_eq!(database.get_many(&keys, snapshot).unwrap(), expected);
+    }
+
+    database.flush_memtable(current.sequence).unwrap();
+    database.compact(&[], current.sequence).unwrap();
+    for snapshot in [old, current] {
+        let expected = keys
+            .iter()
+            .map(|key| database.get(key, snapshot).unwrap())
+            .collect::<Vec<_>>();
+        assert_eq!(database.get_many(&keys, snapshot).unwrap(), expected);
+    }
 }
 
 #[test]
@@ -211,9 +293,12 @@ fn flush_rotates_wal_publishes_manifest_and_preserves_old_snapshots() {
         )
         .unwrap();
     let second_snapshot = database.snapshot();
-    assert_eq!(database.get(b"key", first_snapshot), Some(b"v1".as_slice()));
     assert_eq!(
-        database.get(b"key", second_snapshot),
+        database.get(b"key", first_snapshot).unwrap().as_deref(),
+        Some(b"v1".as_slice())
+    );
+    assert_eq!(
+        database.get(b"key", second_snapshot).unwrap().as_deref(),
         Some(b"v2".as_slice())
     );
     let second_manifest = database.flush_memtable(11).unwrap().unwrap();
@@ -227,9 +312,12 @@ fn flush_rotates_wal_publishes_manifest_and_preserves_old_snapshots() {
     let reopened = Database::open(&root).unwrap();
     assert_eq!(reopened.manifest(), &second_manifest);
     assert_eq!(reopened.snapshot(), second_snapshot);
-    assert_eq!(reopened.get(b"key", first_snapshot), Some(b"v1".as_slice()));
     assert_eq!(
-        reopened.get(b"key", second_snapshot),
+        reopened.get(b"key", first_snapshot).unwrap().as_deref(),
+        Some(b"v1".as_slice())
+    );
+    assert_eq!(
+        reopened.get(b"key", second_snapshot).unwrap().as_deref(),
         Some(b"v2".as_slice())
     );
     assert_eq!(reopened.checkpoints().unwrap().len(), 1);

@@ -2737,6 +2737,7 @@ version = "0.1.0"
 dependencies = [
  "crc32c",
  "lz4_flex 0.14.0",
+ "ring",
  "serde",
  "serde_json",
  "tempfile",

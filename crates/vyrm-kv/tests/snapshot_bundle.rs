@@ -29,8 +29,14 @@ fn file_backed_bundle_preserves_wire_bytes_and_installs() {
     let mut target = Database::create(target_directory.path()).unwrap();
     target.install_snapshot_file(&reopened, 5).unwrap();
     let snapshot = target.snapshot();
-    assert_eq!(target.get(b"alpha", snapshot), Some(b"one".as_slice()));
-    assert_eq!(target.get(b"omega", snapshot), Some(b"last".as_slice()));
+    assert_eq!(
+        target.get(b"alpha", snapshot).unwrap().as_deref(),
+        Some(b"one".as_slice())
+    );
+    assert_eq!(
+        target.get(b"omega", snapshot).unwrap().as_deref(),
+        Some(b"last".as_slice())
+    );
 
     let mut corrupt = expected;
     let middle = corrupt.len() / 2;
@@ -65,7 +71,10 @@ fn partial_file_exports_are_removed_at_every_durable_boundary() {
             assert!(matches!(error, Error::InjectedFailure { .. }));
             assert!(!path.exists(), "failed export must not retain a spool");
             assert_eq!(
-                database.get(b"truth", database.snapshot()),
+                database
+                    .get(b"truth", database.snapshot())
+                    .unwrap()
+                    .as_deref(),
                 Some(b"survives export failure".as_slice())
             );
         }
@@ -106,14 +115,18 @@ fn physical_snapshot_bundle_round_trips_installs_atomically_and_continues_writes
         "an unchanged physical snapshot must be byte-identical"
     );
     let encoded = bundle.encode().unwrap();
-    let actual_hex = encoded
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect::<String>();
-    let expected_hex = include_str!("../fixtures/snapshot-bundle-v1.hex")
+    let legacy_hex = include_str!("../fixtures/snapshot-bundle-v1.hex")
         .split_whitespace()
         .collect::<String>();
-    assert_eq!(actual_hex, expected_hex, "snapshot v1 wire bytes changed");
+    let legacy_bytes = legacy_hex
+        .as_bytes()
+        .chunks_exact(2)
+        .map(|pair| u8::from_str_radix(std::str::from_utf8(pair).unwrap(), 16).unwrap())
+        .collect::<Vec<_>>();
+    let legacy = SnapshotBundle::decode(&legacy_bytes).unwrap();
+    assert_eq!(legacy.get(b"alpha").unwrap(), Some(b"one".to_vec()));
+    assert_eq!(legacy.get(b"beta").unwrap(), None);
+    assert_eq!(legacy.get(b"gamma").unwrap(), Some(b"three".to_vec()));
     let decoded = SnapshotBundle::decode(&encoded).unwrap();
     assert_eq!(decoded, bundle);
     assert_eq!(decoded.encode().unwrap(), encoded);
@@ -137,10 +150,19 @@ fn physical_snapshot_bundle_round_trips_installs_atomically_and_continues_writes
     assert_eq!(installed.wal_start_sequence, 5);
     let snapshot = target.snapshot();
     assert_eq!(snapshot.sequence, 4);
-    assert_eq!(target.get(b"alpha", snapshot), Some(b"one".as_slice()));
-    assert_eq!(target.get(b"beta", snapshot), None);
-    assert_eq!(target.get(b"gamma", snapshot), Some(b"three".as_slice()));
-    assert_eq!(target.get(b"target-only", snapshot), None);
+    assert_eq!(
+        target.get(b"alpha", snapshot).unwrap().as_deref(),
+        Some(b"one".as_slice())
+    );
+    assert_eq!(target.get(b"beta", snapshot).unwrap().as_deref(), None);
+    assert_eq!(
+        target.get(b"gamma", snapshot).unwrap().as_deref(),
+        Some(b"three".as_slice())
+    );
+    assert_eq!(
+        target.get(b"target-only", snapshot).unwrap().as_deref(),
+        None
+    );
     assert_eq!(
         target.install_snapshot_bundle(&decoded, 21).unwrap(),
         installed,
@@ -163,9 +185,18 @@ fn physical_snapshot_bundle_round_trips_installs_atomically_and_continues_writes
     let reopened = Database::open(target_directory.path()).unwrap();
     let snapshot = reopened.snapshot();
     assert_eq!(snapshot.sequence, 5);
-    assert_eq!(reopened.get(b"alpha", snapshot), Some(b"one".as_slice()));
-    assert_eq!(reopened.get(b"delta", snapshot), Some(b"four".as_slice()));
-    assert_eq!(reopened.get(b"target-only", snapshot), None);
+    assert_eq!(
+        reopened.get(b"alpha", snapshot).unwrap().as_deref(),
+        Some(b"one".as_slice())
+    );
+    assert_eq!(
+        reopened.get(b"delta", snapshot).unwrap().as_deref(),
+        Some(b"four".as_slice())
+    );
+    assert_eq!(
+        reopened.get(b"target-only", snapshot).unwrap().as_deref(),
+        None
+    );
 }
 
 #[test]
@@ -263,8 +294,14 @@ fn every_memory_and_file_install_boundary_recovers_after_crash_and_storage_full(
                 }
                 let snapshot = recovered.snapshot();
                 assert_eq!(snapshot.sequence, 2);
-                assert_eq!(recovered.get(b"truth", snapshot), Some(b"one".as_slice()));
-                assert_eq!(recovered.get(b"more", snapshot), Some(b"two".as_slice()));
+                assert_eq!(
+                    recovered.get(b"truth", snapshot).unwrap().as_deref(),
+                    Some(b"one".as_slice())
+                );
+                assert_eq!(
+                    recovered.get(b"more", snapshot).unwrap().as_deref(),
+                    Some(b"two".as_slice())
+                );
             }
         }
     }

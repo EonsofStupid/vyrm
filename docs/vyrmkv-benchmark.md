@@ -28,20 +28,23 @@ not a universal database claim. Its medians and ratios are:
 
 | Metric | Fjall | Native | Native versus Fjall |
 |---|---:|---:|---:|
-| Authoritative write throughput | 68,946 ops/s | 76,132 ops/s | 1.104× |
-| Authoritative write p95 | 1,181,103 ns | 907,860 ns | 0.769× |
-| Bounded replay throughput | 12,932 ops/s | 13,096 ops/s | 1.013× |
-| Bounded replay p95 | 86,969 ns | 85,851 ns | 0.987× |
-| Maintained cold recovery | 15,055,831 ns | 4,522,076 ns | 0.300× |
-| Steady probe peak RSS | 7,340 KiB | 6,652 KiB | 0.906× |
-| Disk footprint | 983,868 bytes | 137,906 bytes | 0.140× |
+| Authoritative write throughput | 70,763 ops/s | 77,179 ops/s | 1.091× |
+| Authoritative write p95 | 1,004,964 ns | 967,986 ns | 0.963× |
+| Bounded replay throughput | 13,149 ops/s | 21,992 ops/s | 1.673× |
+| Bounded replay p95 | 85,244 ns | 53,005 ns | 0.622× |
+| Maintained cold recovery | 17,243,799 ns | 4,666,742 ns | 0.271× |
+| Steady probe peak RSS | 7,664 KiB | 6,444 KiB | 0.841× |
+| Disk footprint | 994,930 bytes | 308,900 bytes | 0.310× |
 
 Correctness passed for every trial. The checked-in policy requires correctness
 and equal-or-better native results in every measured dimension; this evidence
-passes with no failed cells. Segment-v2 LZ4 block compression accounts for the
-large disk change. Sparse block-backed reads avoid decoding immutable contents
-into a second ordered map, and the fresh-probe design measures that maintained
-representation rather than writer high-water memory.
+passes with no failed cells. Segment-v3 LZ4 blocks and the bounded 4 MiB cache
+account for the disk/residency result. Native `VYRNSI01` sequence values carry
+canonical claim bytes, so replay is one contiguous range rather than an index
+scan followed by point reads. The one-segment path streams ordered MVCC groups
+without rebuilding a second ordered map, while optimized SHA-256 retains
+post-open block authentication on cache misses. The fresh-probe design measures
+that maintained representation rather than writer high-water memory.
 
 This closes the first local performance gap, not the entire replacement case.
 Fjall remains as a compatibility oracle while the scheduled and manually
@@ -61,15 +64,16 @@ the single maximum and is not valid promotion evidence.
 
 | Profile | Operations / batch | Reads / width | Write throughput | Read throughput | Write p95 | Read p95 | Recovery | RSS | Disk | Verdict |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|
-| Small-batch | 2,048 / 16 | 1,024 / 16 | 1.025× | 1.039× | 0.988× | 0.942× | 0.288× | 0.875× | 0.139× | Pass |
-| Standard | 2,048 / 64 | 1,024 / 32 | 1.147× | 1.055× | 0.900× | 0.945× | 0.293× | 0.881× | 0.140× | Pass |
-| Read-heavy | 4,096 / 64 | 4,096 / 64 | 1.177× | 1.034× | 0.872× | 0.958× | 0.320× | 0.921× | 0.141× | Pass |
-| Sustained | 16,384 / 128 | 2,048 / 64 | 1.257× | 1.019× | 0.835× | 0.967× | 0.367× | 0.974× | 0.139× | Pass |
+| Small-batch | 2,048 / 16 | 1,024 / 16 | 1.039× | 1.661× | 0.982× | 0.604× | 0.264× | 0.860× | 0.308× | Pass |
+| Standard | 2,048 / 64 | 1,024 / 32 | 1.159× | 1.622× | 0.892× | 0.646× | 0.272× | 0.841× | 0.310× | Pass |
+| Read-heavy | 4,096 / 64 | 4,096 / 64 | 1.096× | 1.670× | 0.912× | 0.600× | 0.304× | 0.882× | 0.314× | Pass |
+| Sustained | 16,384 / 128 | 2,048 / 64 | 1.177× | 1.178× | 0.882× | 0.855× | 0.331× | 0.843× | 0.317× | Pass |
 
 Throughput ratios above 1 favor native; latency, RSS, and disk ratios below 1
-favor native. All cells preserve semantic correctness. The sustained RSS margin
-came from storing sparse-index key ranges into the canonical segment buffer
-instead of cloning thousands of heap keys.
+favor native. All cells preserve semantic correctness. The sustained result is
+the combined effect of disk-resident blocks, compact `u32` record offsets, the
+strict generation-based LRU, streaming one-segment scans, and self-serving
+native sequence values; no benchmark threshold was relaxed.
 
 Raw evidence:
 

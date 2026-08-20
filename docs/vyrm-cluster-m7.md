@@ -123,16 +123,18 @@ segment at a time before native VyrmKV opens the installed image.
 OpenRaft's default chunk transport then reads the seekable file in bounded
 chunks; Vyrm's JSON/TLS envelope retains its independent 16 MiB frame bound.
 
-Executable evidence includes byte identity with the checked-in bundle-v1
-fixture, corrupt/truncated denial, idempotent install and durable-cache reopen,
+Executable evidence includes deterministic current bundle bytes plus backward
+read compatibility with the checked-in bundle-v1/segment-v2 fixture,
+corrupt/truncated denial, idempotent install and durable-cache reopen,
 post-purge learner catch-up in both in-process and four-process runs, 1 GiB
 write refusal before I/O, abandoned-spool restart cleanup, and crash/storage-full
 injection after header write, segment write, and file sync. A Linux regression
 fixture exports a bundle larger than 16 MiB while requiring incremental RSS
 growth to remain at or below 16 MiB. This proves snapshot overhead is not
-proportional to the whole bundle for that fixture. It does **not** make VyrmKV's
-current decoded immutable segments disk-resident; the installed database image
-still has its separately measured resident-engine cost.
+proportional to the whole bundle for that fixture. Segment v3 separately keeps
+the installed immutable image disk-resident behind a database-wide bounded
+decoded-block cache; transfer and query residency therefore have separate
+executable RSS bounds.
 
 ## Authenticated transport v1
 
@@ -336,18 +338,19 @@ commit, or metadata-shard reshard cutover.
 Application state currently proves ordered identity/CAS/digest semantics and
 now atomically dispatches canonical `RuntimeCommit` transactions into native
 VyrmKV and transfers that runtime state in file-backed Raft snapshots. The
-native engine still retains decoded immutable segments in memory; snapshot
-streaming removes whole-bundle transfer copies, not that resident-engine limit.
+native segment v3 separately bounds query residency with independently verified
+blocks and a shared cache, while snapshot streaming bounds transfer copies.
 Its synchronous mutex, prefix scans, and JSON protocol state are
 correctness-first test implementations, not production throughput or footprint
 claims. Commands are
-limited to 1 MiB and physical snapshot envelopes to 1 GiB until a compact RPC
-codec and disk-resident segment path land.
+limited to 1 MiB and physical snapshot envelopes to 1 GiB. The compact RPC
+codec remains open; the disk-resident segment path is executable, while broader
+mixed-workload and hardware reproduction remain promotion gates.
 
 The next M7 slice must extend the passing one-host process matrix to independent
 hosts and real network/disk fault mechanisms, connect the passing credential
 state machine to an attested Workload API source, and retain production
 telemetry. File-backed, bounded-memory snapshot creation/receipt is now closed
-for the scoped fixture, but disk-resident segment/query execution and larger
-retained soak evidence are still required before high-volume cluster claims.
+for the scoped fixture, but larger retained segment/query soak evidence is still
+required before high-volume cluster claims.
 Only that evidence can advance a Multi-AZ claim.
