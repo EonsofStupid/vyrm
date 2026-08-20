@@ -409,6 +409,11 @@ while an ungrounded projection was rejected. Memory/Fjall/native, typed/text,
 and direct graph API differentials are green. Connectome's Query Lab renders the
 same plan contract beside its rows. The reference path deliberately contains
 no ANN, embedding, network, or GPU behavior; those remain gated to M5.
+The explicit CLI `query` command and MCP `vyrm_query` tool now wrap this same
+path in durable parent/child query, parse/bind, planning, and execution spans.
+They capture the read stamp before the first trace mutation so `KNOWN HEAD` is
+observer-safe, and persist only query/parameter digests plus plan, budget, and
+result evidence. The Connectome GET lens remains read-only.
 
 ### M3 — native `vyrmKV`
 

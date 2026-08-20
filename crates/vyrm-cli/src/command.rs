@@ -5,7 +5,9 @@
 //! through a parallel test-only entry point.
 
 use clap::{Parser, Subcommand};
-use vyrm_core::{Claim, ClaimReader, Millis, Predicate, Producer, Reader, RecallQuery, Subject};
+use vyrm_core::{
+    digest, Claim, ClaimReader, Millis, Predicate, Producer, Reader, RecallQuery, ScopeId, Subject,
+};
 use vyrm_store::{
     Effectiveness, Engine, GroundingReport, Outcome, PersistentEngine, RecallOutcome, Trigger,
 };
@@ -189,6 +191,30 @@ pub enum Command {
         #[arg(long, default_value = ".")]
         root: std::path::PathBuf,
     },
+    /// Execute one explicit, durably traced vyrmQL query. Raw query and
+    /// parameter values are returned but never persisted as trace attributes.
+    Query {
+        /// Project root used to prove this database belongs to one instance.
+        #[arg(long, default_value = ".")]
+        root: std::path::PathBuf,
+        /// One concrete runtime scope. Cross-scope queries are not implicit.
+        #[arg(long, default_value = "instance:default")]
+        scope: String,
+        /// vyrmQL source text.
+        #[arg(long)]
+        ql: String,
+        /// Scalar binder value as NAME=JSON. Repeatable.
+        #[arg(long = "parameter")]
+        parameters: Vec<String>,
+        #[arg(long, default_value_t = 100_000)]
+        max_scanned_changes: usize,
+        #[arg(long, default_value_t = 10_000)]
+        max_rows: usize,
+        #[arg(long, default_value_t = 8 * 1024 * 1024)]
+        max_output_bytes: usize,
+        #[arg(long, default_value_t = 256)]
+        max_batch_rows: usize,
+    },
     /// Record or inspect the typed operational reasoning contract.
     Reasoning {
         #[command(subcommand)]
@@ -270,6 +296,7 @@ impl Command {
             Command::Preflight { .. } => "preflight",
             Command::Hook { .. } => "hook",
             Command::Init { .. } => "init",
+            Command::Query { .. } => "query",
             Command::Reasoning { action: ReasoningAction::Record { .. } } => "reasoning-record",
             Command::Reasoning { action: ReasoningAction::Show { .. } } => "reasoning-show",
             Command::Harness { action: HarnessAction::Audit { .. } } => "harness-audit",
@@ -359,6 +386,29 @@ impl Command {
             Command::Init { harness, root } => {
                 vec![format!("harness={harness}"), format!("root={}", root.display())]
             }
+            Command::Query {
+                root,
+                scope,
+                ql,
+                parameters,
+                max_scanned_changes,
+                max_rows,
+                max_output_bytes,
+                max_batch_rows,
+            } => vec![
+                format!("root={}", root.display()),
+                format!("scope={scope}"),
+                format!("query_digest={}", digest::sha256_hex(ql.as_bytes())),
+                format!(
+                    "parameter_input_digest={}",
+                    digest::sha256_hex(parameters.join("\0").as_bytes())
+                ),
+                format!("parameter_count={}", parameters.len()),
+                format!("max_scanned_changes={max_scanned_changes}"),
+                format!("max_rows={max_rows}"),
+                format!("max_output_bytes={max_output_bytes}"),
+                format!("max_batch_rows={max_batch_rows}"),
+            ],
             Command::Reasoning { action: ReasoningAction::Record { run, actor, payload } } => {
                 vec![format!("run={run}"), format!("actor={actor}"), format!("payload={payload}")]
             }
@@ -559,6 +609,64 @@ pub fn execute(store: &PersistentEngine, command: &Command, reader: &Reader, now
             });
         }
 
+        Command::Query {
+            root,
+            scope,
+            ql,
+            parameters,
+            max_scanned_changes,
+            max_rows,
+            max_output_bytes,
+            max_batch_rows,
+        } => {
+            verify_instance_store(store, root)?;
+            let scope = ScopeId::new(scope.clone())?;
+            let parameter_json = query_parameter_object(parameters)?;
+            let parameters = vyrm_node::query_parameters_from_json(&parameter_json)?;
+            let budget = vyrm_node::ExecutionBudget {
+                max_scanned_changes: *max_scanned_changes,
+                max_rows: *max_rows,
+                max_output_bytes: *max_output_bytes,
+                max_batch_rows: *max_batch_rows,
+            };
+            let result = vyrm_node::execute_traced_query(
+                store,
+                scope,
+                ql,
+                &parameters,
+                &budget,
+                reader.as_str(),
+                now,
+            )?;
+            let text = if json {
+                serde_json::to_string_pretty(&result)?
+            } else {
+                let mut lines = vec![format!(
+                    "plan {} read={} rows={} scanned={} bytes={} truncated={}",
+                    result.plan.digest,
+                    result.execution.known_at_cursor,
+                    result.execution.returned_rows,
+                    result.execution.scanned_changes,
+                    result.execution.output_bytes,
+                    result.execution.truncated,
+                )];
+                for row in result
+                    .execution
+                    .batches
+                    .iter()
+                    .flat_map(|batch| &batch.rows)
+                {
+                    lines.push(serde_json::to_string(row)?);
+                }
+                lines.join("\n")
+            };
+            return Ok(Execution {
+                text,
+                effectiveness: None,
+                detail: Some(format!("plan={}", result.plan.digest)),
+            });
+        }
+
         Command::Ledger { since } => {
             let records: Vec<_> = store
                 .invocations_since(*since)?
@@ -604,6 +712,7 @@ pub fn execute(store: &PersistentEngine, command: &Command, reader: &Reader, now
         | Command::Ledger { .. }
         | Command::Preflight { .. }
         | Command::Hook { .. }
+        | Command::Query { .. }
         | Command::Storage { .. } => {
             unreachable!("handled above with an early return")
         }
@@ -960,6 +1069,25 @@ fn verify_instance_store(
     binding.require_runtime_ready()?;
     binding.verify_store_path(store.path())?;
     Ok(())
+}
+
+fn query_parameter_object(
+    parameters: &[String],
+) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
+    let mut object = serde_json::Map::new();
+    for parameter in parameters {
+        let (name, encoded) = parameter
+            .split_once('=')
+            .ok_or("query parameter must use NAME=JSON")?;
+        if name.trim().is_empty() {
+            return Err("query parameter name must not be empty".into());
+        }
+        if object.contains_key(name) {
+            return Err(format!("query parameter {name:?} was supplied more than once").into());
+        }
+        object.insert(name.to_owned(), serde_json::from_str(encoded)?);
+    }
+    Ok(serde_json::Value::Object(object))
 }
 
 /// Maps an execution result onto the recorded outcome.

@@ -1132,10 +1132,18 @@ These apply to every step and are not restated per step.
   domains into its temporal lanes. Schema repair, concurrent writers,
   initialization, denial, native reopen, visual projection, and all three
   engines have executable coverage.
-- **Next:** emit the contract across `vyrmQL`, `vyrmMX`, VyrmKV,
-  projection/vector/embedding, provider/tool, and cluster boundaries.
-  Connectome must then distinguish complete logical evidence from sampled
-  physical detail and derive causal trees and critical paths.
+- **Complete:** promote the explicit `vyrmQL`/`vyrmMX` operator path. CLI
+  `query` and MCP `vyrm_query` capture a pre-observability read stamp, then
+  persist a parent query span plus paired parse/bind, planning, and execution
+  spans. Plans link their digest and selected/rejected paths; execution records
+  budgets and bounded result metrics; parse errors and budget denials close the
+  causal tree without persisting raw query or parameter values. Connectome's
+  GET Query Lab stays read-only. Observer-effect, privacy, failure, visual, and
+  Memory/Fjall/native differentials are green.
+- **Next:** emit the contract across VyrmKV, projection/vector/embedding,
+  provider/tool, and cluster boundaries. Connectome must then distinguish
+  complete logical evidence from sampled physical detail and derive causal
+  trees and critical paths.
 - **Then:** implement a project-scoped pgvector operator-knowledge adapter with
   captured source revision, exact/model-space oracle, filtered ANN controls,
   stale denial/fallback, and idempotent outbox. It is not a second canonical

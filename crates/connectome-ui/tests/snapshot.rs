@@ -137,6 +137,27 @@ fn snapshot_exposes_runtime_objects_without_mutating_the_store() {
         .unwrap(),
     )
     .unwrap();
+    let plan_identity = vyrm_node::TraceIdentity::derive(&[b"connectome-planning-trace"]).unwrap();
+    vyrm_node::record_runtime_trace(
+        &store,
+        &ScopeId::new(vyrm_node::REASONING_SCOPE).unwrap(),
+        "query:test",
+        RuntimeTraceEvent::finish(
+            plan_identity.trace_id,
+            plan_identity.span_id,
+            None,
+            TraceDomain::Planning,
+            "vyrmmx.plan",
+            10,
+            125,
+            TraceOutcome::Ok,
+            TraceDataClass::Control,
+            Vec::new(),
+            RuntimeProperties::new(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
     let lease = store
         .open_runtime_snapshot(
             &vyrm_core::ScopeId::new("instance:default").unwrap(),
@@ -151,11 +172,11 @@ fn snapshot_exposes_runtime_objects_without_mutating_the_store() {
     assert_eq!(snapshot.instance.mode, "dedicated");
     assert_eq!(snapshot.health.storage_backend, "vyrmkv_native");
     assert_eq!(snapshot.health.current_claims, 2);
-    assert_eq!(snapshot.health.runtime_cursor, 13);
+    assert_eq!(snapshot.health.runtime_cursor, 14);
     assert_eq!(snapshot.health.schema_revision, Some(2));
     assert_eq!(snapshot.health.snapshot_leases, 1);
     assert_eq!(snapshot.health.retention_pins, 1);
-    assert_eq!(snapshot.health.oldest_retained_cursor, Some(13));
+    assert_eq!(snapshot.health.oldest_retained_cursor, Some(14));
     let retention = connectome_ui::runtime_retention(&store, 10).unwrap();
     assert_eq!(retention.snapshots, vec![lease.clone()]);
     assert_eq!(retention.pins[0].snapshot_id, lease.id);
@@ -196,6 +217,14 @@ fn snapshot_exposes_runtime_objects_without_mutating_the_store() {
     assert_eq!(trace_event.family, "workflow");
     assert_eq!(trace_event.label, "lifecycle.pre-tool-use");
     assert_eq!(trace_event.detail, "lifecycle; ok; 250 µs");
+    let plan_trace = snapshot
+        .temporal_events
+        .iter()
+        .find(|event| event.label == "vyrmmx.plan")
+        .expect("durable planning trace is visible in the temporal stream");
+    assert_eq!(plan_trace.family, "routing");
+    assert_eq!(plan_trace.action, "trace_finish");
+    assert_eq!(plan_trace.detail, "planning; ok; 125 µs");
     assert_eq!(
         store.sequence().unwrap(),
         before,

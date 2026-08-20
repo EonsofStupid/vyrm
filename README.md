@@ -124,6 +124,22 @@ The local API also exposes the authoritative persistence layer:
 | `GET /api/runtime/diff?scope=...&from=A&to=B&valid_at=T` | Inspect exact scoped structural change between cursors |
 | `POST /api/demos/prompt-strength` | Persist a deterministic weak/strong trace pair for temporal playback |
 
+The Query Lab and its GET endpoint remain read-only inspection. When the query
+itself should become optimization evidence, use the explicit project-bound
+operator path (also exposed as MCP tool `vyrm_query`):
+
+```bash
+cargo run -p vyrm-cli -- \
+  --db .vyrm/store --json query --root . \
+  --scope instance:default \
+  --ql 'FROM event:runtime_trace AT VALID 18446744073709551615 KNOWN HEAD PROJECT name, phase EXPLAIN CONTRACT'
+```
+
+That path captures `KNOWN HEAD` before observability writes, then persists one
+parent query span and child parse/bind, planning, and execution spans. Query and
+parameter content remains caller-visible but trace and invocation state retain
+only digests, counts, budgets, plan/read coordinates, and result metrics.
+
 The temporal stream is a read-only projection of the newest 512 authoritative
 runtime mutations in the snapshot (up to 4,096 through the event API), not an
 independent telemetry store. It attaches the full mutation and available

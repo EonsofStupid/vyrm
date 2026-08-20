@@ -23,6 +23,7 @@ pub mod init;
 pub mod instance;
 pub mod policy;
 pub mod preflight;
+pub mod query;
 pub mod reasoning;
 pub mod registry;
 pub mod routing;
@@ -37,13 +38,19 @@ pub use instance::{
 };
 pub use policy::{evaluate_tool, ContractDifferential, ToolPolicy};
 pub use preflight::{preflight, Preflight};
+pub use query::{
+    execute_traced_query, query_parameters_from_json, ExecutionBudget, Parameters,
+    TracedQueryExecution,
+};
 pub use reasoning::{
     active_reasoning_run, reasoning_run, reasoning_runs, record_reasoning, REASONING_SCOPE,
 };
 pub use registry::{Harness, Registry, Verification, VERIFICATION_TTL_MS};
 pub use routing::{ensure_routing_fresh, load_routing, reset_routing, RoutingReady};
 pub use stack::{detect, package_run_event, PackageManager, PackageRunEvent, StackProfile};
-pub use trace::{install_runtime_trace_contract, record_runtime_trace, TraceIdentity};
+pub use trace::{
+    install_runtime_trace_contract, record_runtime_trace, DurableTraceSpan, TraceIdentity,
+};
 pub use workflow::{
     resolve_package_command, VerificationPolicy, WorkflowAuthorization, WorkflowCatalog,
     WorkflowDecision, WorkflowDifferential, WorkflowManifest, WorkflowObservation,

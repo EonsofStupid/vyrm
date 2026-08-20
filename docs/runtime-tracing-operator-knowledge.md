@@ -1,8 +1,9 @@
 # Runtime tracing and operator-knowledge boundary
 
-Status: contract, conflict-safe recorder, instance bootstrap, and lifecycle
-slice implemented; wider execution coverage and the pgvector adapter remain
-pending. Research and repository state were verified 2026-08-20.
+Status: contract, conflict-safe recorder, instance bootstrap, lifecycle, and
+explicit query/planner/executor slices implemented; wider subsystem coverage
+and the pgvector adapter remain pending. Research and repository state were
+verified 2026-08-20.
 
 ## Why this is a kernel feature
 
@@ -35,6 +36,23 @@ before dispatch and a separate finish afterward. Denials are explicit outcomes;
 input is represented by digest and byte count rather than persisted raw content.
 If the process dies between the commits, native reopen exposes the unmatched
 start as an incomplete span.
+
+Explicit query execution now uses the same consumable durable-span helper. The
+operator captures an immutable scope `ReadStamp` before writing a root
+`query.run` start, and `Catalog::capture_at` binds against that stamp after the
+live head advances. `KNOWN HEAD` therefore means the head the caller observed,
+not a head contaminated by trace events. Child `vyrmql.parse_bind`,
+`vyrmmx.plan`, and `vyrmmx.execute` spans link to the root and the exact read;
+plan/execution spans also link the physical-plan digest. Finishes record source
+family/type, schema revision, selected and rejected paths, budgets, scan/row/
+batch/byte counts, truncation, or a bounded error class and digest. Budget
+refusal is a denial rather than an apparent execution failure.
+
+The explicit surfaces are CLI `vyrm query` and MCP `vyrm_query`. Connectome's
+GET Query Lab deliberately remains a read-only lens. Raw query text and
+parameter values are returned to the caller but are represented in durable
+trace and invocation state only by content digests, counts, and public plan
+coordinates.
 
 Connectome's existing authoritative Temporal stream classifies these durable
 events into its reasoning, workflow, routing, search, model, and storage lanes.
@@ -104,11 +122,11 @@ vyrm run                     # start the local daemon/workbench for that instanc
 vyrm trace status|tail       # inspect durable coverage, lag, drops, retention
 vyrm adapter inspect         # show capabilities and exact external revision
 vyrm adapter verify          # differential/freshness/tenant-isolation checks
-vyrm query|explain           # one dynamic typed query path over the same planner
+vyrm query                   # dynamic typed query plus durable causal evidence
 ```
 
-Only the existing `init`, runtime/workbench, and query/explain foundations are
-implemented today. The trace methods above describe the next operator surface,
+`init`, runtime/workbench, and the traced `query` surface are implemented today.
+The `run`, `trace`, and adapter methods above remain target operator surfaces,
 not shipped commands.
 
 ## pgvector is an operator-knowledge adapter
@@ -176,8 +194,11 @@ superiority claim.
    instances remains open; their first recorded trace repairs the schema
    atomically.
 3. Lifecycle emits paired start/finish evidence, records denials, and preserves
-   incomplete spans across native reopen — complete. Query, plan, storage,
-   projection, vector, embedding, provider, and cluster emission remain open.
+   incomplete spans across native reopen — complete. Explicit query parse/bind,
+   planning, and execution emit a parent/child tree linked to the pre-trace read
+   stamp and plan digest, including error and budget-denial finishes — complete.
+   Storage, projection, vector, embedding, provider, and cluster emission remain
+   open.
 4. Connectome renders causal trace trees, critical path, fan-out, cache/IO/token
    mass, stale/fallback decisions, and sampled-versus-complete status. Basic
    durable-event lane classification is complete; the richer analysis is open.

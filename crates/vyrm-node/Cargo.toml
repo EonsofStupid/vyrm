@@ -9,6 +9,8 @@ description = "vyrm runtime experience: preflight, harness hooks, stack profiles
 [dependencies]
 vyrm-core = { path = "../vyrm-core" }
 vyrm-graph = { path = "../vyrm-graph" }
+vyrm-ql = { path = "../vyrm-ql" }
+vyrm-mx = { path = "../vyrm-mx" }
 vyrm-store = { path = "../vyrm-store" }
 serde = { workspace = true }
 serde_json = { workspace = true }

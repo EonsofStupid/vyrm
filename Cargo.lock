@@ -2767,6 +2767,8 @@ dependencies = [
  "tracing",
  "vyrm-core",
  "vyrm-graph",
+ "vyrm-mx",
+ "vyrm-ql",
  "vyrm-store",
 ]
 

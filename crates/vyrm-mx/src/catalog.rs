@@ -19,6 +19,16 @@ pub struct Catalog {
 impl Catalog {
     pub fn capture<E: Engine>(engine: &E, scope: &ScopeId) -> Result<Self> {
         let read = engine.runtime_read_stamp(scope)?;
+        Self::capture_at(engine, read)
+    }
+
+    /// Captures schema history against a caller-owned immutable read stamp.
+    /// This is the observer-safe path for instrumented execution: telemetry
+    /// may advance the live head after `read` is captured without changing
+    /// what `KNOWN HEAD` meant to the query.
+    pub fn capture_at<E: Engine>(engine: &E, read: ReadStamp) -> Result<Self> {
+        read.validate()
+            .map_err(|error| Error::Catalog(error.to_string()))?;
         let limit = usize::try_from(read.commit_cursor).map_err(|_| {
             Error::Catalog("read cursor exceeds this platform's address space".into())
         })?;

@@ -191,8 +191,14 @@ not roadmap language.
   resource/authorization contract, and selected/rejected access paths. Its
   exact stamped-log executor returns deterministic bounded batches for records,
   relations, events, and claims with Memory/Fjall/native/direct-graph
-  differentials.
-  Connectome's Query Lab exposes this evidence and result together.
+  differentials. Connectome's Query Lab exposes this evidence and result
+  together without mutating on GET. The explicit CLI `query` command and MCP
+  `vyrm_query` tool capture the immutable read stamp before tracing, then emit
+  a causal parent plus paired parse/bind, plan, and execution spans. Successful,
+  parse-failed, and budget-denied trees record digests, candidates, budgets,
+  plan/read coordinates, and result counts without persisting raw query or
+  parameter values. Observer-effect and Memory/Fjall/native parity tests are
+  green.
 - M3 native storage has passed its first strict local promotion baseline in the
   standalone `vyrm-kv` crate. WAL v1
   now has frozen CRC32C file/frame formats, atomic batch sequence ranges,
@@ -334,12 +340,16 @@ artifact even on failure.
   contract and a bounded initialization annotation. Hooks and the shared MCP
   lifecycle path durably write start before dispatch and finish afterward,
   including explicit denial outcomes; an interrupted native span remains
-  incomplete after reopen. Connectome classifies the events into its existing
-  semantic lanes. Schema migration, concurrency, initialization, denial,
-  visual projection, crash recovery, and Memory/Fjall/native parity are tested.
-  Query/plan/storage/projection/vector/embedding/provider/cluster emission,
-  causal rendering, export, retention enforcement, and the pgvector adapter
-  remain open. See `docs/runtime-tracing-operator-knowledge.md`.
+  incomplete after reopen. The explicit query surface adds observer-safe parent
+  and child spans for parse/bind, planning, and exact execution; the shared
+  consumable span helper now enforces the same finish semantics for lifecycle
+  and queries. Connectome classifies lifecycle and query/planning events into
+  its existing semantic lanes. Schema migration, concurrency, initialization,
+  denial, observer safety, secret non-persistence, visual projection, crash
+  recovery, and Memory/Fjall/native parity are tested. Storage/projection/
+  vector/embedding/provider/cluster emission, causal rendering, export,
+  retention enforcement, and the pgvector adapter remain open. See
+  `docs/runtime-tracing-operator-knowledge.md`.
 
 ## Product and instance boundary
 
