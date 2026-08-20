@@ -133,6 +133,15 @@ disagree, `SPEC.md` is authoritative and this document is wrong.
 > second telemetry truth. These are persisted logical mutations, not physical
 > WAL micro-events or inferred private model reasoning. Snapshot-to-delta
 > transport and controlled frontier-provider evaluation remain open.
+> **Fjall/AI physical audit (2026-08-20).** The pinned Fjall 3.1.8 source and
+> current upstream were compared to native `vyrm-kv`. Fjall remains ahead in
+> generic background maintenance, backpressure, leveled compaction, filters,
+> per-keyspace tuning, and concurrency. Vyrm's first justified specialization
+> now resolves current hot memtable point reads and multi-gets before immutable
+> blocks while preserving historical MVCC fallback. A cache-traffic regression
+> and isolated hot-control benchmark are green; the local five-trial cell is
+> 2.261× Fjall throughput and 0.379× Fjall p95. This is not a general database
+> claim. See `docs/vyrmkv-fjall-ai-audit.md` for the ordered remaining gates.
 > The product handoff, canonical package-event grammar, alpha release gates,
 > deployment/update tiers, and separate SurrealDB/Qdrant proof protocols are
 > frozen in `docs/clyffy-kernel-alpha.md`.

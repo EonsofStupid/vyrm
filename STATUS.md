@@ -313,6 +313,17 @@ artifact even on failure.
   commits the safe observation, temporal claim, runtime outcome, and audit.
   A durable cross-process authorization lease remains open.
 
+- A fresh exact-source audit confirms Fjall 3.1.8 remains only the compatibility
+  engine and migration/differential oracle; native `vyrm-kv` owns its physical
+  formats and recovery. The first AI-specific optimization resolves current
+  hot memtable point reads and multi-gets before immutable blocks. Its MVCC test
+  proves zero segment-cache traffic for current overwrites/tombstones and exact
+  historical fallback. A five-trial 8,192-cold/128-hot local profile measured
+  2.261× Fjall throughput and 0.379× Fjall p95, narrowly scoped to current hot
+  point reads. Automatic bounded maintenance, negative filters, leveled
+  streaming compaction, and the full mixed AI matrix remain open. See
+  `docs/vyrmkv-fjall-ai-audit.md`.
+
 ## Product and instance boundary
 
 The product chain is **Automaton → LFG → Connectome**. Vyrm is Connectome's

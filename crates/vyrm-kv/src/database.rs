@@ -762,6 +762,13 @@ impl Database {
     }
 
     pub fn get(&self, key: &[u8], snapshot: Snapshot) -> Result<Option<Vec<u8>>> {
+        // The active memtable always contains sequences newer than every
+        // published segment. A visible value (including a tombstone) is
+        // therefore authoritative for this snapshot and lets hot runtime keys
+        // avoid immutable-block I/O entirely.
+        if let Some(version) = self.memtable.get_version(key, snapshot.sequence) {
+            return Ok(version.value.clone());
+        }
         let mut best_sequence = 0;
         let mut best_value = None;
         for segment in &self.segments {
@@ -772,43 +779,48 @@ impl Database {
                 }
             }
         }
-        if let Some(version) = self.memtable.get_version(key, snapshot.sequence) {
-            if version.sequence > best_sequence {
-                best_value = version.value.clone();
-            }
-        }
         Ok(best_value)
     }
 
     pub fn get_many(&self, keys: &[Vec<u8>], snapshot: Snapshot) -> Result<Vec<Option<Vec<u8>>>> {
-        if self.segments.len() == 1 && self.memtable.version_count() == 0 {
-            return Ok(self.segments[0]
-                .get_versions(keys, snapshot.sequence)?
-                .into_iter()
-                .map(|version| version.and_then(|version| version.value))
-                .collect());
-        }
-        let mut best_sequences = vec![0u64; keys.len()];
         let mut values = vec![None; keys.len()];
+        let mut unresolved = Vec::with_capacity(keys.len());
+        for (index, key) in keys.iter().enumerate() {
+            if let Some(version) = self.memtable.get_version(key, snapshot.sequence) {
+                values[index] = version.value.clone();
+            } else {
+                unresolved.push(index);
+            }
+        }
+        if unresolved.is_empty() {
+            return Ok(values);
+        }
+        let unresolved_keys = unresolved
+            .iter()
+            .map(|index| keys[*index].as_slice())
+            .collect::<Vec<_>>();
+        if self.segments.len() == 1 && self.memtable.version_count() == 0 {
+            for (position, version) in self.segments[0]
+                .get_versions(&unresolved_keys, snapshot.sequence)?
+                .into_iter()
+                .enumerate()
+            {
+                values[unresolved[position]] = version.and_then(|version| version.value);
+            }
+            return Ok(values);
+        }
+        let mut best_sequences = vec![0u64; unresolved.len()];
         for segment in &self.segments {
-            for (index, version) in segment
-                .get_versions(keys, snapshot.sequence)?
+            for (position, version) in segment
+                .get_versions(&unresolved_keys, snapshot.sequence)?
                 .into_iter()
                 .enumerate()
             {
                 if let Some(version) = version {
-                    if version.sequence > best_sequences[index] {
-                        best_sequences[index] = version.sequence;
-                        values[index] = version.value;
+                    if version.sequence > best_sequences[position] {
+                        best_sequences[position] = version.sequence;
+                        values[unresolved[position]] = version.value;
                     }
-                }
-            }
-        }
-        for (index, key) in keys.iter().enumerate() {
-            if let Some(version) = self.memtable.get_version(key, snapshot.sequence) {
-                if version.sequence > best_sequences[index] {
-                    best_sequences[index] = version.sequence;
-                    values[index] = version.value.clone();
                 }
             }
         }

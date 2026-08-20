@@ -287,6 +287,8 @@ statistically significant model-performance claim.
   recovery, manifest, and authenticated physical snapshot-bundle contracts
 - [`docs/vyrmkv-benchmark.md`](docs/vyrmkv-benchmark.md) — isolated
   Fjall/native methodology, baseline, and promotion verdict
+- [`docs/vyrmkv-fjall-ai-audit.md`](docs/vyrmkv-fjall-ai-audit.md) — exact
+  Fjall/native boundary, AI-specific physical opportunities, and hot-set proof
 - [`eval/results/2026-08-18-summary.json`](eval/results/2026-08-18-summary.json)
   — retained evaluation evidence
 

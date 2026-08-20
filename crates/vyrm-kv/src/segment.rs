@@ -422,22 +422,22 @@ impl Segment {
 
     pub(crate) fn get_versions(
         &self,
-        keys: &[Vec<u8>],
+        keys: &[&[u8]],
         read_sequence: u64,
     ) -> Result<Vec<Option<SegmentVersion>>> {
         let mut output = vec![None; keys.len()];
         let mut order = (0..keys.len()).collect::<Vec<_>>();
-        order.sort_by(|left, right| keys[*left].cmp(&keys[*right]).then(left.cmp(right)));
+        order.sort_by(|left, right| keys[*left].cmp(keys[*right]).then(left.cmp(right)));
         match &self.storage {
             SegmentStorage::Legacy { .. } => {
                 for index in order {
-                    output[index] = self.get_version(&keys[index], read_sequence)?;
+                    output[index] = self.get_version(keys[index], read_sequence)?;
                 }
             }
             SegmentStorage::Blocked { blocks, .. } => {
                 let mut loaded: Option<(usize, Arc<DecodedBlock>)> = None;
                 for index in order {
-                    let key = keys[index].as_slice();
+                    let key = keys[index];
                     if key < self.descriptor.first_key.as_slice()
                         || key > self.descriptor.last_key.as_slice()
                         || read_sequence < self.descriptor.minimum_sequence

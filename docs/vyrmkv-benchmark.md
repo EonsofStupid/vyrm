@@ -110,3 +110,14 @@ post-cutover native writes. See [`vyrmkv-migration.md`](vyrmkv-migration.md).
 This is a physical ordered-key/value deletion result. It does not claim a typed
 runtime entity-deletion contract, which must define relation and projection
 effects before it can be added safely.
+
+## AI-runtime profiles
+
+The append/replay matrix is not representative of all frontier-runtime access.
+The first dedicated profile publishes a cold immutable corpus, overwrites a
+small control set in the active memtable, and measures verified current point
+reads in isolated Fjall/native processes. The design audit, local five-trial
+result, exact command, and remaining miss/history/compaction matrix are in
+[`vyrmkv-fjall-ai-audit.md`](vyrmkv-fjall-ai-audit.md). Its versioned JSON
+retains raw hot-set evidence separately from the scheduled general promotion
+artifact; the new profile does not broaden the existing promotion claim.

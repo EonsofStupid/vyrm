@@ -259,6 +259,90 @@ fn batch_point_reads_match_individual_reads_across_segments_memtable_and_snapsho
 }
 
 #[test]
+fn hot_memtable_point_reads_bypass_immutable_blocks_without_changing_mvcc_results() {
+    let parent = tempfile::tempdir().unwrap();
+    let root = parent.path().join("native");
+    let mut database = Database::create_with_block_cache(&root, 64 * 1024).unwrap();
+    database
+        .write_owned(
+            WriteBatch::new(vec![
+                Mutation::Put {
+                    key: b"hot:status".to_vec(),
+                    value: b"old".to_vec(),
+                },
+                Mutation::Put {
+                    key: b"hot:lease".to_vec(),
+                    value: b"active".to_vec(),
+                },
+                Mutation::Put {
+                    key: b"hot:route".to_vec(),
+                    value: b"generation-1".to_vec(),
+                },
+            ])
+            .unwrap(),
+            Durability::Authoritative,
+        )
+        .unwrap();
+    let historical = database.snapshot();
+    database.flush_memtable(1).unwrap();
+    database
+        .write_owned(
+            WriteBatch::new(vec![
+                Mutation::Put {
+                    key: b"hot:status".to_vec(),
+                    value: b"ready".to_vec(),
+                },
+                Mutation::Delete {
+                    key: b"hot:lease".to_vec(),
+                },
+                Mutation::Put {
+                    key: b"hot:route".to_vec(),
+                    value: b"generation-2".to_vec(),
+                },
+            ])
+            .unwrap(),
+            Durability::Buffered,
+        )
+        .unwrap();
+    let current = database.snapshot();
+    let keys = vec![
+        b"hot:status".to_vec(),
+        b"hot:lease".to_vec(),
+        b"hot:route".to_vec(),
+        b"hot:status".to_vec(),
+    ];
+
+    let before = database.block_cache_stats();
+    assert_eq!(
+        database.get(b"hot:status", current).unwrap(),
+        Some(b"ready".to_vec())
+    );
+    assert_eq!(database.get(b"hot:lease", current).unwrap(), None);
+    assert_eq!(
+        database.get_many(&keys, current).unwrap(),
+        vec![
+            Some(b"ready".to_vec()),
+            None,
+            Some(b"generation-2".to_vec()),
+            Some(b"ready".to_vec()),
+        ]
+    );
+    let after_hot_reads = database.block_cache_stats();
+    assert_eq!(after_hot_reads.misses, before.misses);
+    assert_eq!(after_hot_reads.hits, before.hits);
+
+    assert_eq!(
+        database.get(b"hot:status", historical).unwrap(),
+        Some(b"old".to_vec())
+    );
+    assert_eq!(
+        database.get(b"hot:lease", historical).unwrap(),
+        Some(b"active".to_vec())
+    );
+    assert!(database.block_cache_stats().misses > after_hot_reads.misses);
+}
+
+#[test]
 fn flush_rotates_wal_publishes_manifest_and_preserves_old_snapshots() {
     let parent = tempfile::tempdir().unwrap();
     let root = parent.path().join("native");
