@@ -54,6 +54,17 @@ pub struct ObjectInventory {
 
 pub trait ImmutableObjectStore: Send + Sync {
     fn put(&self, bytes: &[u8]) -> Result<VerifiedObject>;
+    /// Opens a verified object for bounded-memory transfer. Implementations
+    /// must authenticate digest and length before returning the reader.
+    fn open_verified(&self, reference: &ObjectReference) -> Result<Box<dyn Read + Send>>;
+    /// Consumes exactly one declared content address. Extra, truncated, or
+    /// substituted bytes fail before the object becomes addressable.
+    fn put_verified_stream(
+        &self,
+        expected_sha256: &str,
+        expected_length: u64,
+        reader: &mut dyn Read,
+    ) -> Result<VerifiedObject>;
     fn verify(&self, sha256: &str) -> Result<VerifiedObject>;
     fn get(&self, reference: &ObjectReference) -> Result<Vec<u8>>;
     fn inventory(&self, reachable: &BTreeSet<String>) -> Result<ObjectInventory>;
@@ -81,6 +92,86 @@ impl LocalObjectStore {
 
     pub fn put(&self, bytes: &[u8]) -> Result<VerifiedObject> {
         self.put_with_hook(bytes, |_| Ok(()))
+    }
+
+    pub fn open_verified(&self, reference: &ObjectReference) -> Result<Box<dyn Read + Send>> {
+        let path = self.verified_path(reference)?;
+        Ok(Box::new(File::open(path)?))
+    }
+
+    /// Streams a known content address through the same stage/sync/publish
+    /// boundary as ordinary local objects without materializing the payload.
+    pub fn put_verified_stream(
+        &self,
+        expected_sha256: &str,
+        expected_length: u64,
+        reader: &mut dyn Read,
+    ) -> Result<VerifiedObject> {
+        let key = ObjectReference::canonical_key(expected_sha256).map_err(Error::from)?;
+        let stage_name = format!(
+            "{}-{}-transfer",
+            std::process::id(),
+            STAGE_ORDINAL.fetch_add(1, Ordering::Relaxed)
+        );
+        let stage_path = self.root.join("staging").join(stage_name);
+        let mut stage = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&stage_path)?;
+        let staged = (|| -> Result<()> {
+            let mut hasher = digest::Sha256::new();
+            let mut length = 0u64;
+            let mut buffer = [0u8; 64 * 1024];
+            loop {
+                let read = reader.read(&mut buffer)?;
+                if read == 0 {
+                    break;
+                }
+                length = length
+                    .checked_add(read as u64)
+                    .ok_or_else(|| Error::Object("object length overflowed u64".into()))?;
+                if length > expected_length {
+                    return Err(Error::ObjectLengthMismatch {
+                        expected: expected_length,
+                        actual: length,
+                    });
+                }
+                hasher.update(&buffer[..read]);
+                stage.write_all(&buffer[..read])?;
+            }
+            if length != expected_length {
+                return Err(Error::ObjectLengthMismatch {
+                    expected: expected_length,
+                    actual: length,
+                });
+            }
+            let actual = hasher.finalize_hex();
+            if actual != expected_sha256 {
+                return Err(Error::ObjectCorrupt {
+                    expected: expected_sha256.to_owned(),
+                    actual,
+                });
+            }
+            stage.sync_all()?;
+            sync_directory(self.root.join("staging"))?;
+            Ok(())
+        })();
+        if let Err(error) = staged {
+            drop(stage);
+            let _ = fs::remove_file(&stage_path);
+            return Err(error);
+        }
+        drop(stage);
+        let final_path = self.root.join(key);
+        self.publish_stage(&stage_path, &final_path, expected_sha256)?;
+        let verified = self.verify(expected_sha256)?;
+        if verified.length != expected_length {
+            return Err(Error::ObjectLengthMismatch {
+                expected: expected_length,
+                actual: verified.length,
+            });
+        }
+        Ok(verified)
     }
 
     /// Publishes one immutable file without materializing it as a `Vec`.
@@ -364,6 +455,19 @@ impl ImmutableObjectStore for LocalObjectStore {
         LocalObjectStore::put(self, bytes)
     }
 
+    fn open_verified(&self, reference: &ObjectReference) -> Result<Box<dyn Read + Send>> {
+        LocalObjectStore::open_verified(self, reference)
+    }
+
+    fn put_verified_stream(
+        &self,
+        expected_sha256: &str,
+        expected_length: u64,
+        reader: &mut dyn Read,
+    ) -> Result<VerifiedObject> {
+        LocalObjectStore::put_verified_stream(self, expected_sha256, expected_length, reader)
+    }
+
     fn verify(&self, sha256: &str) -> Result<VerifiedObject> {
         LocalObjectStore::verify(self, sha256)
     }
@@ -440,6 +544,38 @@ mod tests {
             store.verified_path(&reference).unwrap(),
             store.root().join(&streamed.receipt.key)
         );
+    }
+
+    #[test]
+    fn verified_stream_is_bounded_content_addressed_and_fail_closed() {
+        let directory = tempdir().unwrap();
+        let store = LocalObjectStore::open(directory.path()).unwrap();
+        let bytes = vec![0x3c; 192 * 1024 + 9];
+        let sha256 = digest::sha256_hex(&bytes);
+        let mut reader = std::io::Cursor::new(bytes.clone());
+        let streamed = store
+            .put_verified_stream(&sha256, bytes.len() as u64, &mut reader)
+            .unwrap();
+        assert_eq!(streamed, store.put(&bytes).unwrap());
+
+        let wrong = "11".repeat(32);
+        let mut substituted = std::io::Cursor::new(bytes.clone());
+        assert!(matches!(
+            store.put_verified_stream(&wrong, bytes.len() as u64, &mut substituted),
+            Err(Error::ObjectCorrupt { .. })
+        ));
+        assert!(matches!(store.verify(&wrong), Err(Error::ObjectMissing(_))));
+
+        let mut truncated = std::io::Cursor::new(&bytes[..bytes.len() - 1]);
+        assert!(matches!(
+            store.put_verified_stream(&sha256, bytes.len() as u64, &mut truncated),
+            Err(Error::ObjectLengthMismatch { .. })
+        ));
+        assert!(store
+            .inventory(&BTreeSet::new())
+            .unwrap()
+            .staging_files
+            .is_empty());
     }
 
     #[test]

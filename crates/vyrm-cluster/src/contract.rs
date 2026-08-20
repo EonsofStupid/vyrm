@@ -2,7 +2,9 @@ use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
-use vyrm_core::digest::sha256_hex;
+use vyrm_core::{
+    digest::sha256_hex, ObjectReceipt, ObjectReference, ReadStamp, RuntimeRef, ScopeId,
+};
 
 pub const CLUSTER_CONTRACT_VERSION: u16 = 1;
 pub const METADATA_SHARD_ID: ShardId = ShardId(0);
@@ -401,6 +403,242 @@ pub struct ReplicaTransferPlan {
     pub wal_from_exclusive: u64,
     pub wal_through_inclusive: u64,
     pub artifact_digests: BTreeSet<String>,
+}
+
+/// Exact immutable-object closure required to make one project scope serveable
+/// after the grounded canonical snapshot is installed. Artifact bytes remain
+/// outside the Raft/VyrmKV snapshot, while this manifest binds their transfer
+/// to that snapshot and the exact scoped runtime read that named them.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ArtifactTransferManifest {
+    pub contract_version: u16,
+    pub plan: ReplicaTransferPlan,
+    pub scope: ScopeId,
+    pub read: ReadStamp,
+    pub objects: Vec<ObjectReference>,
+    pub manifest_digest: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ArtifactReplicaObjectReceipt {
+    pub reference: RuntimeRef,
+    pub sha256: String,
+    pub length: u64,
+    pub target: ObjectReceipt,
+    pub transferred: bool,
+}
+
+/// Target-local residency evidence. It never rewrites the source publication
+/// receipt embedded in canonical runtime truth.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ArtifactTransferReceipt {
+    pub contract_version: u16,
+    pub manifest_digest: String,
+    pub source: NodeId,
+    pub target: NodeId,
+    pub objects: Vec<ArtifactReplicaObjectReceipt>,
+    pub transferred_objects: u64,
+    pub transferred_bytes: u64,
+    pub completed_at: u64,
+    pub receipt_digest: String,
+}
+
+impl ArtifactTransferManifest {
+    pub fn new(
+        plan: ReplicaTransferPlan,
+        scope: ScopeId,
+        read: ReadStamp,
+        mut objects: Vec<ObjectReference>,
+    ) -> Result<Self> {
+        objects.sort_by(|left, right| left.reference.cmp(&right.reference));
+        let mut manifest = Self {
+            contract_version: CLUSTER_CONTRACT_VERSION,
+            plan,
+            scope,
+            read,
+            objects,
+            manifest_digest: String::new(),
+        };
+        manifest.validate_components()?;
+        manifest.manifest_digest = sha256_hex(&manifest.identity_bytes()?);
+        Ok(manifest)
+    }
+
+    pub fn validate(&self) -> Result<()> {
+        self.validate_components()?;
+        if self.manifest_digest != sha256_hex(&self.identity_bytes()?) {
+            return Err(ClusterError::Invalid(
+                "artifact transfer manifest digest differs from its fields".into(),
+            ));
+        }
+        Ok(())
+    }
+
+    fn validate_components(&self) -> Result<()> {
+        self.plan.validate()?;
+        self.read
+            .validate()
+            .map_err(|error| ClusterError::Invalid(error.to_string()))?;
+        if self.contract_version != CLUSTER_CONTRACT_VERSION || self.read.scope != self.scope {
+            return Err(ClusterError::Invalid(
+                "artifact manifest version, scope, or read binding is invalid".into(),
+            ));
+        }
+        if self.objects.len() > 1_000_000 {
+            return Err(ClusterError::Invalid(
+                "artifact manifest object limit exceeded".into(),
+            ));
+        }
+        let mut references = BTreeSet::new();
+        let mut digests = BTreeSet::new();
+        let mut previous = None;
+        for object in &self.objects {
+            object
+                .validate()
+                .map_err(|error| ClusterError::Invalid(error.to_string()))?;
+            if previous
+                .as_ref()
+                .is_some_and(|value| value >= &object.reference)
+                || !references.insert(object.reference.clone())
+            {
+                return Err(ClusterError::Invalid(
+                    "artifact manifest objects must have unique canonical ordering".into(),
+                ));
+            }
+            previous = Some(object.reference.clone());
+            digests.insert(object.sha256.clone());
+        }
+        if digests != self.plan.artifact_digests {
+            return Err(ClusterError::Invalid(
+                "artifact manifest objects differ from the replica transfer plan".into(),
+            ));
+        }
+        Ok(())
+    }
+
+    fn identity_bytes(&self) -> Result<Vec<u8>> {
+        serde_json::to_vec(&(
+            self.contract_version,
+            &self.plan,
+            &self.scope,
+            &self.read,
+            &self.objects,
+        ))
+        .map_err(|error| ClusterError::Invalid(format!("artifact manifest encode failed: {error}")))
+    }
+}
+
+impl ArtifactTransferReceipt {
+    pub fn new(
+        manifest: &ArtifactTransferManifest,
+        objects: Vec<ArtifactReplicaObjectReceipt>,
+        completed_at: u64,
+    ) -> Result<Self> {
+        let transferred_objects = objects.iter().filter(|object| object.transferred).count() as u64;
+        let transferred_bytes = objects
+            .iter()
+            .filter(|object| object.transferred)
+            .try_fold(0u64, |total, object| total.checked_add(object.length))
+            .ok_or_else(|| {
+                ClusterError::Invalid("artifact transfer byte count overflowed".into())
+            })?;
+        let mut receipt = Self {
+            contract_version: CLUSTER_CONTRACT_VERSION,
+            manifest_digest: manifest.manifest_digest.clone(),
+            source: manifest.plan.source.clone(),
+            target: manifest.plan.target.clone(),
+            objects,
+            transferred_objects,
+            transferred_bytes,
+            completed_at,
+            receipt_digest: String::new(),
+        };
+        receipt.validate_components(manifest)?;
+        receipt.receipt_digest = sha256_hex(&receipt.identity_bytes()?);
+        Ok(receipt)
+    }
+
+    pub fn validate(&self, manifest: &ArtifactTransferManifest) -> Result<()> {
+        self.validate_components(manifest)?;
+        if self.receipt_digest != sha256_hex(&self.identity_bytes()?) {
+            return Err(ClusterError::Invalid(
+                "artifact transfer receipt digest differs from its fields".into(),
+            ));
+        }
+        Ok(())
+    }
+
+    fn validate_components(&self, manifest: &ArtifactTransferManifest) -> Result<()> {
+        manifest.validate()?;
+        if self.contract_version != CLUSTER_CONTRACT_VERSION
+            || self.manifest_digest != manifest.manifest_digest
+            || self.source != manifest.plan.source
+            || self.target != manifest.plan.target
+            || self.objects.len() != manifest.objects.len()
+        {
+            return Err(ClusterError::Invalid(
+                "artifact transfer receipt identity differs from its manifest".into(),
+            ));
+        }
+        let mut transferred_objects = 0u64;
+        let mut transferred_bytes = 0u64;
+        for (receipt, object) in self.objects.iter().zip(&manifest.objects) {
+            let target_reference = ObjectReference {
+                reference: receipt.reference.clone(),
+                subject: object.subject.clone(),
+                sha256: receipt.sha256.clone(),
+                length: receipt.length,
+                media_type: object.media_type.clone(),
+                receipt: receipt.target.clone(),
+                properties: object.properties.clone(),
+            };
+            target_reference
+                .validate()
+                .map_err(|error| ClusterError::Invalid(error.to_string()))?;
+            if receipt.reference != object.reference
+                || receipt.sha256 != object.sha256
+                || receipt.length != object.length
+            {
+                return Err(ClusterError::Invalid(
+                    "artifact object receipt differs from its manifest object".into(),
+                ));
+            }
+            if receipt.transferred {
+                transferred_objects += 1;
+                transferred_bytes =
+                    transferred_bytes
+                        .checked_add(receipt.length)
+                        .ok_or_else(|| {
+                            ClusterError::Invalid("artifact transfer byte count overflowed".into())
+                        })?;
+            }
+        }
+        if transferred_objects != self.transferred_objects
+            || transferred_bytes != self.transferred_bytes
+        {
+            return Err(ClusterError::Invalid(
+                "artifact transfer receipt counters differ from its objects".into(),
+            ));
+        }
+        Ok(())
+    }
+
+    fn identity_bytes(&self) -> Result<Vec<u8>> {
+        serde_json::to_vec(&(
+            self.contract_version,
+            &self.manifest_digest,
+            &self.source,
+            &self.target,
+            &self.objects,
+            self.transferred_objects,
+            self.transferred_bytes,
+            self.completed_at,
+        ))
+        .map_err(|error| ClusterError::Invalid(format!("artifact receipt encode failed: {error}")))
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

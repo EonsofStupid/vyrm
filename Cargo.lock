@@ -3253,6 +3253,7 @@ dependencies = [
  "tempfile",
  "toml",
  "tracing",
+ "vyrm-cluster",
  "vyrm-core",
  "vyrm-embed",
  "vyrm-graph",

@@ -329,6 +329,45 @@ The model-check tests enumerate both possible first-follower quorum paths
 crossed with every single disk loss in a three-voter/three-zone placement. They
 also enumerate leader-minority partitions and require no acknowledgement.
 
+## Immutable artifact closure and activation ordering
+
+Canonical runtime snapshots contain `ObjectReference` values but intentionally
+do not embed potentially large vector/index artifact bytes in the Raft log or
+VyrmKV bundle. Replica recovery therefore uses a separate, versioned
+`ArtifactTransferManifest` bound to one shard, placement epoch, grounded Raft
+snapshot, exact project `ReadStamp`, source/target pair, sorted reference list,
+and digest set. Its completion receipt retains target-local object-store
+evidence without rewriting the source receipt in canonical truth.
+
+The local object path streams through a fixed 64 KiB buffer, enforces the exact
+declared length while reading, verifies SHA-256 before publication, transfers
+duplicate content once, and reuses already verified target bytes on retry. A
+failed transfer emits no completion receipt and can leave only harmless
+content-addressed bytes that are not yet reachable from canonical state.
+
+OpenRaft snapshot installation orders the operation as authenticate snapshot,
+validate metadata/state binding, derive the exact scoped object closure from
+the snapshot's latest visible `runtime_objects` values, compare it with the
+manifest, hydrate and verify every object, then activate canonical state. A
+self-consistent manifest that omits an object is therefore denied before both
+transfer and activation. Missing/corrupt source bytes, corrupt target content,
+substitution, length/digest mismatch, and stale/forged snapshot bindings fail
+closed. The success path survives reopen while preserving the target's local
+vote and Raft history.
+
+`vyrm-node` wraps transfer in a durable `cluster.artifact_transfer` root span
+and `object.replicate` storage child. It records only manifest/receipt digests,
+route/snapshot identities, reference counts, and physical byte counters—not
+object content. Normalized causal traces are differential-tested across Memory,
+Fjall, and native engines and are already consumable by Connectome's generic
+causal/temporal inspection surfaces.
+
+The synchronous S3-compatible port has the same verify-before-publish
+semantics, but currently materializes one object because its transport contract
+does not expose multipart streaming. Cross-host chunking, resume, flow control,
+remote cancellation, and independent-machine chaos remain required before
+calling this production artifact replication.
+
 ## What is not yet claimed
 
 This gate still does not contain dynamic membership discovery, automatic

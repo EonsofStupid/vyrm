@@ -1,5 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 use vyrm_cluster::*;
+use vyrm_core::{ObjectReceipt, ObjectReference, ReadStamp, RuntimeRef, ScopeId};
 
 fn node(value: &str) -> NodeId {
     NodeId::new(value).unwrap()
@@ -118,6 +119,70 @@ fn transfer_is_grounded_snapshot_plus_contiguous_wal_delta() {
     let mut gap = plan;
     gap.wal_from_exclusive = 9;
     assert!(gap.validate().is_err());
+}
+
+#[test]
+fn artifact_manifest_binds_project_read_plan_objects_and_receipt() {
+    let scope = ScopeId::new("instance:cluster-artifacts").unwrap();
+    let bytes = b"artifact";
+    let sha256 = vyrm_core::digest::sha256_hex(bytes);
+    let object = ObjectReference::for_bytes(
+        "artifact:one",
+        Some(RuntimeRef::new("document", "one").unwrap()),
+        "application/octet-stream",
+        bytes,
+        ObjectReceipt {
+            backend: "source".into(),
+            key: ObjectReference::canonical_key(&sha256).unwrap(),
+            version: Some("1".into()),
+            etag: Some(sha256.clone()),
+        },
+    )
+    .unwrap();
+    let plan = ReplicaTransferPlan {
+        contract_version: CLUSTER_CONTRACT_VERSION,
+        shard: ShardId(3),
+        placement_epoch: 2,
+        source: node("a"),
+        target: node("d"),
+        grounded_snapshot: ShardReadStamp {
+            placement_epoch: 2,
+            ..stamp(10, 'a')
+        },
+        wal_from_exclusive: 10,
+        wal_through_inclusive: 10,
+        artifact_digests: BTreeSet::from([sha256.clone()]),
+    };
+    let read = ReadStamp::new(scope.clone(), None, 0, 4, Some("44".repeat(32))).unwrap();
+    let manifest = ArtifactTransferManifest::new(plan, scope, read, vec![object.clone()]).unwrap();
+    manifest.validate().unwrap();
+
+    let target = ObjectReceipt {
+        backend: "target".into(),
+        key: ObjectReference::canonical_key(&sha256).unwrap(),
+        version: None,
+        etag: Some(sha256.clone()),
+    };
+    let receipt = ArtifactTransferReceipt::new(
+        &manifest,
+        vec![ArtifactReplicaObjectReceipt {
+            reference: object.reference,
+            sha256,
+            length: bytes.len() as u64,
+            target,
+            transferred: true,
+        }],
+        20,
+    )
+    .unwrap();
+    receipt.validate(&manifest).unwrap();
+
+    let mut tampered = manifest.clone();
+    tampered.objects[0].media_type = "application/substituted".into();
+    assert!(tampered.validate().is_err());
+    let mut tampered_receipt = receipt;
+    tampered_receipt.transferred_bytes += 1;
+    assert!(tampered_receipt.validate(&manifest).is_err());
 }
 
 #[test]

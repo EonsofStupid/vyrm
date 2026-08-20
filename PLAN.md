@@ -289,6 +289,23 @@ disagree, `SPEC.md` is authoritative and this document is wrong.
 > while independent-host faults, automatic workload issuance, and Multi-AZ
 > evidence remain open.
 
+> **M7 artifact-closure overlay (2026-08-20).** Immutable vector/index bytes
+> remain outside the Raft log and VyrmKV snapshot, but their canonical
+> `ObjectReference` values remain inside runtime truth. A typed transfer
+> manifest now binds one project read to the shard, placement epoch, grounded
+> snapshot, source/target, sorted references, and exact digest set. Verified
+> local streaming is bounded and content-addressed, transfers a duplicate
+> digest once, supports idempotent retry, and leaves only unreachable content
+> on partial failure. Before snapshot activation, the target independently
+> prefix-scans the authenticated physical bundle and requires its scoped
+> `runtime_objects` closure to equal the manifest exactly. Missing/corrupt
+> source bytes, target corruption, manifest substitution, incomplete closure,
+> and forged snapshot bindings deny activation. A causal cluster root plus
+> storage child trace records private transfer evidence identically across
+> Memory, Fjall, and native trace engines. Real cross-host object transport,
+> S3 multipart streaming, resumable chunks, backpressure, and production
+> telemetry remain open.
+
 ## 1 · Grounding result
 
 State recomputed from source on 2026-08-10 and differenced against the

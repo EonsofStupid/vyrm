@@ -16,13 +16,14 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard};
 use vyrm_core::{
-    key, projection_family, AuditEnvelope, Claim, ClaimSource, Millis, Predicate, ProjectionWork,
-    ReadStamp, Reader, RetentionPin, RuntimeChange, RuntimeChangePage, RuntimeCommit,
-    RuntimeCommitOutcome, RuntimeMutation, RuntimeRecord, RuntimeRef, RuntimeRelation,
-    RuntimeSchemaRegistry, ScopeId, SnapshotHandle, SnapshotId, Subject,
+    key, projection_family, AuditEnvelope, Claim, ClaimSource, Millis, ObjectReference, Predicate,
+    ProjectionWork, ReadStamp, Reader, RetentionPin, RuntimeChange, RuntimeChangePage,
+    RuntimeCommit, RuntimeCommitOutcome, RuntimeMutation, RuntimeRecord, RuntimeRef,
+    RuntimeRelation, RuntimeSchemaRegistry, ScopeId, SnapshotHandle, SnapshotId, Subject,
 };
 use vyrm_kv::{
-    CompactionOutcome, Database, GarbageCollectionReport, Manifest, Mutation, Snapshot, WriteBatch,
+    CompactionOutcome, Database, GarbageCollectionReport, Manifest, Mutation, Snapshot,
+    SnapshotBundleFile, WriteBatch,
 };
 
 const RUNTIME_CHECKPOINT_PREFIX: &str = "runtime-";
@@ -1300,6 +1301,50 @@ fn native_values_for_scope<T: DeserializeOwned>(
         .collect()
 }
 
+/// Reads the exact immutable-object closure for one scope from an authenticated
+/// physical snapshot before that snapshot is installed on a replica.
+pub fn native_snapshot_object_references(
+    bundle: &SnapshotBundleFile,
+    scope: &ScopeId,
+) -> Result<Vec<ObjectReference>> {
+    let start = storage_key(keyspaces::RUNTIME_OBJECTS, &[]);
+    let end = prefix_end(&start);
+    let values = bundle.scan(&start, end.as_deref()).map_err(Error::from)?;
+    if values.len() > 1_000_000 {
+        return Err(Error::Substrate(
+            "native snapshot object-reference limit exceeded".into(),
+        ));
+    }
+    let mut objects = values
+        .into_iter()
+        .map(|(stored_key, value)| {
+            let object: ObjectReference = serde_json::from_slice(&value)?;
+            object.validate()?;
+            let expected = storage_key(
+                keyspaces::RUNTIME_OBJECTS,
+                &runtime_identity_key(scope, &object.reference),
+            );
+            if stored_key != expected {
+                return Err(Error::Substrate(
+                    "native snapshot object key/value identity or project scope differs from the transfer"
+                        .into(),
+                ));
+            }
+            Ok(object)
+        })
+        .collect::<Result<Vec<_>>>()?;
+    objects.sort_by(|left, right| left.reference.cmp(&right.reference));
+    if objects
+        .windows(2)
+        .any(|pair| pair[0].reference >= pair[1].reference)
+    {
+        return Err(Error::Substrate(
+            "native snapshot contains duplicate object references".into(),
+        ));
+    }
+    Ok(objects)
+}
+
 fn runtime_identity_key(scope: &ScopeId, reference: &RuntimeRef) -> Vec<u8> {
     let mut key = Vec::with_capacity(
         scope.as_str().len() + reference.kind.as_str().len() + reference.id.as_str().len() + 2,
@@ -1432,7 +1477,7 @@ fn prefix_end(prefix: &[u8]) -> Option<Vec<u8>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use vyrm_core::Producer;
+    use vyrm_core::{ObjectReceipt, Producer};
 
     fn claim() -> Claim {
         Claim::new(
@@ -1504,5 +1549,59 @@ mod tests {
 
         let engine = NativeEngine::open(&root).unwrap();
         assert_eq!(Engine::claims_in_range(&engine, 0, 1).unwrap(), vec![claim]);
+    }
+
+    #[test]
+    fn snapshot_object_closure_denies_foreign_project_references() {
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path().join("multi-project-native");
+        let mut database = Database::create(&root).unwrap();
+        let first_scope = ScopeId::new("project:first").unwrap();
+        let second_scope = ScopeId::new("project:second").unwrap();
+        let object = |id: &str, bytes: &[u8]| {
+            let sha256 = vyrm_core::digest::sha256_hex(bytes);
+            ObjectReference::for_bytes(
+                id,
+                None,
+                "application/octet-stream",
+                bytes,
+                ObjectReceipt {
+                    backend: "fixture".into(),
+                    key: ObjectReference::canonical_key(&sha256).unwrap(),
+                    version: None,
+                    etag: None,
+                },
+            )
+            .unwrap()
+        };
+        let first = object("first:bytes", b"first");
+        let second = object("second:bytes", b"second");
+        database
+            .write_owned(
+                WriteBatch::new(vec![
+                    Mutation::Put {
+                        key: storage_key(
+                            keyspaces::RUNTIME_OBJECTS,
+                            &runtime_identity_key(&first_scope, &first.reference),
+                        ),
+                        value: serde_json::to_vec(&first).unwrap(),
+                    },
+                    Mutation::Put {
+                        key: storage_key(
+                            keyspaces::RUNTIME_OBJECTS,
+                            &runtime_identity_key(&second_scope, &second.reference),
+                        ),
+                        value: serde_json::to_vec(&second).unwrap(),
+                    },
+                ])
+                .unwrap(),
+                vyrm_kv::Durability::Authoritative,
+            )
+            .unwrap();
+        let spool = directory.path().join("multi-project.snapshot");
+        let bundle = database.export_snapshot_file(1, &spool).unwrap();
+
+        let error = native_snapshot_object_references(&bundle, &first_scope).unwrap_err();
+        assert!(error.to_string().contains("project scope"));
     }
 }

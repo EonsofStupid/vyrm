@@ -18,6 +18,7 @@
 //! model's discipline. Writes ride Buffered durability and never block the
 //! turn; recall is the only synchronous path.
 
+pub mod cluster_transfer;
 pub mod data_plane;
 pub mod hook;
 pub mod init;
@@ -34,6 +35,7 @@ pub mod trace;
 pub mod vector_catalog;
 pub mod workflow;
 
+pub use cluster_transfer::execute_traced_artifact_transfer;
 pub use data_plane::{
     execute_traced_embedding, execute_traced_vector_search, TracedEmbeddingExecution,
     TracedVectorSearch,

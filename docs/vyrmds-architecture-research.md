@@ -488,9 +488,15 @@ hardware/model evidence rather than being inferred from the adapter tests. See
 
 The first protocol/simulation slice landed on 2026-08-19. `vyrm-cluster`
 provides canonical contracts and a deterministic single-term/per-shard quorum
-model covering all listed fault classes. Cross-shard writes fail closed. This
-does not yet implement elections, reconfiguration, networking, or production
-consensus and therefore does not close M7. See `vyrm-cluster-m7.md`.
+model covering all listed fault classes. Feature-gated OpenRaft storage,
+authenticated TCP transport, process isolation, physical snapshot transfer,
+credential rotation/revocation, and pre-activation immutable artifact hydration
+now provide executable one-host evidence. Artifact manifests are independently
+checked against the authenticated snapshot's exact project-scoped object
+closure rather than trusted as source assertions. Cross-shard writes still
+fail closed. Independent-host faults, automatic workload identity, resumable
+remote object transfer, production telemetry, and real Multi-AZ operations
+remain open, so M7 is not closed. See `vyrm-cluster-m7.md`.
 
 Acceptance: deterministic simulation/model checking; partition, delay,
 duplication, reorder, crash, clock-skew, and disk-loss scenarios; linearizable

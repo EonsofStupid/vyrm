@@ -10,7 +10,10 @@
 // generic threshold, so adapter helpers preserve that required type too.
 #![allow(clippy::result_large_err)]
 
-use crate::{ClusterError, Result as ClusterResult, ShardId, ShardPlacement};
+use crate::{
+    transfer_artifacts, ArtifactTransferManifest, ArtifactTransferReceipt, ClusterError,
+    Result as ClusterResult, ShardId, ShardPlacement,
+};
 use openraft::storage::{RaftLogStorage, RaftStateMachine};
 use openraft::{
     Entry, EntryPayload, ErrorSubject, ErrorVerb, LogId, LogState, RaftLogReader,
@@ -33,8 +36,8 @@ use vyrm_kv::{
     Database, Durability, Mutation, SnapshotBundleFile, WriteBatch, SNAPSHOT_BUNDLE_MAX_BYTES,
 };
 use vyrm_store::{
-    native_runtime_commit_outcome, prepare_native_runtime_commit, Error as StoreError,
-    LocalObjectStore,
+    native_runtime_commit_outcome, native_snapshot_object_references,
+    prepare_native_runtime_commit, Error as StoreError, LocalObjectStore,
 };
 
 const ADAPTER_FORMAT_VERSION: u16 = 4;
@@ -630,11 +633,15 @@ impl RaftLogReader<VyrmRaftTypeConfig> for VyrmRaftLogStore {
         range: RB,
     ) -> std::result::Result<Vec<VyrmRaftEntry>, StorageError<u64>> {
         let database = lock_database(&self.local_database, ErrorSubject::Logs, ErrorVerb::Read)?;
-        let rows = database.scan(
-            LOG_PREFIX,
-            prefix_end(LOG_PREFIX).as_deref(),
-            database.snapshot(),
-        ).map_err(|error| storage_error(ErrorSubject::Logs, ErrorVerb::Read, error.to_string()))?;
+        let rows = database
+            .scan(
+                LOG_PREFIX,
+                prefix_end(LOG_PREFIX).as_deref(),
+                database.snapshot(),
+            )
+            .map_err(|error| {
+                storage_error(ErrorSubject::Logs, ErrorVerb::Read, error.to_string())
+            })?;
         let mut entries = Vec::new();
         for (key, value) in rows {
             let index = decode_log_key(&key)?;
@@ -1006,6 +1013,81 @@ impl RaftStateMachine<VyrmRaftTypeConfig> for VyrmRaftStateMachine {
 }
 
 impl VyrmRaftStateMachine {
+    /// Hydrates the immutable object closure before activating its canonical
+    /// snapshot. A failed snapshot install may leave content-addressed orphans,
+    /// but the supported path never exposes canonical references first and
+    /// hopes their bytes arrive later.
+    pub async fn install_snapshot_with_artifacts<S, T>(
+        &mut self,
+        meta: &SnapshotMeta<u64, VyrmRaftNode>,
+        snapshot: Box<VyrmSnapshotData>,
+        source: &S,
+        target: &T,
+        manifest: &ArtifactTransferManifest,
+        completed_at: u64,
+    ) -> std::result::Result<ArtifactTransferReceipt, StorageError<u64>>
+    where
+        S: vyrm_store::ImmutableObjectStore,
+        T: vyrm_store::ImmutableObjectStore,
+    {
+        let subject = ErrorSubject::Snapshot(Some(meta.signature()));
+        snapshot
+            .sync_all()
+            .await
+            .map_err(|error| storage_error(subject.clone(), ErrorVerb::Write, error.to_string()))?;
+        let bundle = SnapshotBundleFile::open(snapshot.path())
+            .map_err(|error| storage_error(subject.clone(), ErrorVerb::Read, error.to_string()))?;
+        let state = state_from_snapshot_file(&bundle, self.shard, subject.clone())?;
+        let snapshot_index = meta.last_log_id.map_or(0, |log_id| log_id.index);
+        manifest
+            .validate()
+            .map_err(|error| storage_error(subject.clone(), ErrorVerb::Write, error.to_string()))?;
+        let snapshot_objects = native_snapshot_object_references(&bundle, &manifest.scope)
+            .map_err(|error| storage_error(subject.clone(), ErrorVerb::Read, error.to_string()))?;
+        if state.last_applied != meta.last_log_id
+            || state.last_membership != meta.last_membership
+            || meta.snapshot_id != expected_snapshot_file_id(&state, &bundle)
+            || manifest.plan.shard != self.shard
+            || manifest.plan.grounded_snapshot.commit_index != snapshot_index
+            || manifest.plan.grounded_snapshot.state_digest != state.state_digest
+            || manifest.plan.wal_from_exclusive != snapshot_index
+            || manifest.objects != snapshot_objects
+        {
+            return Err(storage_error(
+                subject,
+                ErrorVerb::Write,
+                "artifact manifest does not bind the exact canonical snapshot state",
+            ));
+        }
+        let receipt =
+            transfer_artifacts(source, target, manifest, completed_at).map_err(|error| {
+                storage_error(
+                    ErrorSubject::Snapshot(Some(meta.signature())),
+                    ErrorVerb::Write,
+                    error.to_string(),
+                )
+            })?;
+        for object in &manifest.objects {
+            let verified = target.verify(&object.sha256).map_err(|error| {
+                storage_error(
+                    ErrorSubject::Snapshot(Some(meta.signature())),
+                    ErrorVerb::Read,
+                    error.to_string(),
+                )
+            })?;
+            if verified.length != object.length {
+                return Err(storage_error(
+                    ErrorSubject::Snapshot(Some(meta.signature())),
+                    ErrorVerb::Read,
+                    "installed artifact object length differs from its manifest",
+                ));
+            }
+        }
+        <Self as RaftStateMachine<VyrmRaftTypeConfig>>::install_snapshot(self, meta, snapshot)
+            .await?;
+        Ok(receipt)
+    }
+
     fn read_state(&self) -> std::result::Result<StateMachineData, StorageError<u64>> {
         let database = lock_database(
             &self.state_database,
@@ -1112,7 +1194,13 @@ fn read_state_from_database(
 ) -> std::result::Result<StateMachineData, StorageError<u64>> {
     database
         .get(KEY_STATE, database.snapshot())
-        .map_err(|error| storage_error(ErrorSubject::StateMachine, ErrorVerb::Read, error.to_string()))?
+        .map_err(|error| {
+            storage_error(
+                ErrorSubject::StateMachine,
+                ErrorVerb::Read,
+                error.to_string(),
+            )
+        })?
         .map(|bytes| decode_json(&bytes, ErrorSubject::StateMachine, ErrorVerb::Read))
         .transpose()?
         .ok_or_else(|| {
@@ -1466,11 +1554,13 @@ fn log_delete_operations<R: RangeBounds<u64> + Clone + Debug + Send>(
     range: R,
 ) -> std::result::Result<Vec<Mutation>, StorageError<u64>> {
     let database = lock_database(database, ErrorSubject::Logs, ErrorVerb::Read)?;
-    let rows = database.scan(
-        LOG_PREFIX,
-        prefix_end(LOG_PREFIX).as_deref(),
-        database.snapshot(),
-    ).map_err(|error| storage_error(ErrorSubject::Logs, ErrorVerb::Read, error.to_string()))?;
+    let rows = database
+        .scan(
+            LOG_PREFIX,
+            prefix_end(LOG_PREFIX).as_deref(),
+            database.snapshot(),
+        )
+        .map_err(|error| storage_error(ErrorSubject::Logs, ErrorVerb::Read, error.to_string()))?;
     rows.into_iter()
         .filter_map(|(key, _)| match decode_log_key(&key) {
             Ok(index) if range_contains(&range, index) => Some(Ok(Mutation::Delete { key })),

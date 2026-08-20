@@ -10,6 +10,7 @@ use crate::{
     Result, VerifiedObject,
 };
 use std::collections::BTreeSet;
+use std::io::{Cursor, Read};
 use vyrm_core::{digest, ObjectReceipt, ObjectReference};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -70,6 +71,42 @@ impl<C: S3ObjectClient> S3CompatibleObjectStore<C> {
             });
         }
         Ok(verified)
+    }
+
+    pub fn open_verified(&self, reference: &ObjectReference) -> Result<Box<dyn Read + Send>> {
+        Ok(Box::new(Cursor::new(self.get(reference)?)))
+    }
+
+    /// The current synchronous S3 transport exposes whole-object PUT, so this
+    /// compatibility adapter validates the stream before materializing that
+    /// required request body. Multipart streaming belongs behind a future S3
+    /// transport capability, not in the portable object contract.
+    pub fn put_verified_stream(
+        &self,
+        expected_sha256: &str,
+        expected_length: u64,
+        reader: &mut dyn Read,
+    ) -> Result<VerifiedObject> {
+        ObjectReference::canonical_key(expected_sha256).map_err(Error::from)?;
+        let limit = expected_length
+            .checked_add(1)
+            .ok_or_else(|| Error::Object("object length overflowed u64".into()))?;
+        let mut bytes = Vec::new();
+        reader.take(limit).read_to_end(&mut bytes)?;
+        if bytes.len() as u64 != expected_length {
+            return Err(Error::ObjectLengthMismatch {
+                expected: expected_length,
+                actual: bytes.len() as u64,
+            });
+        }
+        let actual = digest::sha256_hex(&bytes);
+        if actual != expected_sha256 {
+            return Err(Error::ObjectCorrupt {
+                expected: expected_sha256.to_owned(),
+                actual,
+            });
+        }
+        self.put(&bytes)
     }
 
     pub fn verify(&self, sha256: &str) -> Result<VerifiedObject> {
@@ -184,6 +221,19 @@ impl<C: S3ObjectClient> S3CompatibleObjectStore<C> {
 impl<C: S3ObjectClient> ImmutableObjectStore for S3CompatibleObjectStore<C> {
     fn put(&self, bytes: &[u8]) -> Result<VerifiedObject> {
         S3CompatibleObjectStore::put(self, bytes)
+    }
+
+    fn open_verified(&self, reference: &ObjectReference) -> Result<Box<dyn Read + Send>> {
+        S3CompatibleObjectStore::open_verified(self, reference)
+    }
+
+    fn put_verified_stream(
+        &self,
+        expected_sha256: &str,
+        expected_length: u64,
+        reader: &mut dyn Read,
+    ) -> Result<VerifiedObject> {
+        S3CompatibleObjectStore::put_verified_stream(self, expected_sha256, expected_length, reader)
     }
 
     fn verify(&self, sha256: &str) -> Result<VerifiedObject> {

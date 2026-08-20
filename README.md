@@ -89,6 +89,14 @@ Vyrm provides:
   crash-orphan cleanup and disk-resident immutable segment v3 with bounded
   shared-cache telemetry (automatic workload issuance and production clustering
   remain gated);
+- grounded replica-artifact hydration for project-scoped vector/index bytes:
+  typed manifests bind source/target, placement epoch, shard snapshot, exact
+  runtime read, sorted object references, and digest closure; bounded local
+  streaming verifies both endpoints, reuses duplicate content, and completes
+  before OpenRaft snapshot activation. The target independently scans the
+  authenticated VyrmKV snapshot and denies incomplete or substituted manifests.
+  Cluster/storage trace spans expose transfer counts, bytes, and receipt
+  identities without persisting object content;
 - identical lifecycle semantics through hooks, CLI, and MCP;
 - isolated per-platform instances with explicit store/root binding.
 

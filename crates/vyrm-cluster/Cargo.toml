@@ -8,7 +8,8 @@ description = "Canonical Multi-AZ contracts and deterministic failure simulation
 
 [features]
 default = []
-openraft-adapter = ["dep:openraft", "dep:vyrm-kv", "dep:vyrm-store"]
+object-transfer = ["dep:vyrm-store"]
+openraft-adapter = ["dep:openraft", "dep:vyrm-kv", "object-transfer"]
 openraft-transport = [
     "openraft-adapter",
     "dep:rustls",

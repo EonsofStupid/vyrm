@@ -48,8 +48,8 @@ pub use migration::{
     rollback_fjall_migration, MigrationFault, MigrationInventory, MigrationPhase, MigrationReport,
 };
 pub use native::{
-    native_runtime_commit_outcome, prepare_native_runtime_commit, NativeEngine,
-    NativeRuntimeCommitPlan,
+    native_runtime_commit_outcome, native_snapshot_object_references,
+    prepare_native_runtime_commit, NativeEngine, NativeRuntimeCommitPlan,
 };
 pub use object::{
     ImmutableObjectStore, LocalObjectStore, ObjectInventory, ObjectInventoryEntry,

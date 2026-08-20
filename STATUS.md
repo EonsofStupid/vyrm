@@ -116,6 +116,22 @@ not roadmap language.
   corrupt denial, idempotency, continued-write, and crash/storage-full matrices
   are green. Adapter v4 consumes this closure for OpenRaft snapshot build and
   installation while retaining source and target node-local Raft history.
+- M7 replica recovery now includes the immutable object closure named by
+  canonical runtime truth. `ArtifactTransferManifest` binds the project read,
+  shard/epoch, grounded snapshot, source/target, sorted `ObjectReference`
+  inventory, and exact digest set. The local adapter streams with fixed-size
+  buffers, verifies length and SHA-256 at both ends, deduplicates physical
+  content, and makes retries no-copy when the target already verifies. The
+  OpenRaft integration hydrates before state activation and independently
+  scans the authenticated snapshot's scoped `runtime_objects` keyspace, so a
+  self-consistent but incomplete manifest is denied. Tests cover missing and
+  corrupt sources, target corruption, substitution, incomplete closure,
+  idempotent retry, activation ordering, restart, and preservation of local
+  votes. Durable cluster/storage trace trees record only control evidence and
+  transfer counters, with equal normalized results across Memory, Fjall, and
+  native engines. S3-compatible semantics exist, but that synchronous adapter
+  currently materializes one object; multipart/resumable cross-host transport
+  and independent-host evidence remain open.
 - A persisted, revisioned schema registry now governs typed runtime records,
   relations, and events. Unknown types and properties fail closed; property
   value types, required fields, event subjects, legal edge endpoints, temporal

@@ -1,5 +1,6 @@
 use crate::{Error, Manifest, Result, Segment, SegmentDescriptor};
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use std::fs::{File, OpenOptions};
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
@@ -333,6 +334,32 @@ impl SnapshotBundleFile {
         Ok(selected
             .into_iter()
             .map(|version| version.and_then(|(_, value)| value))
+            .collect())
+    }
+
+    /// Scans the latest visible values in one authenticated key range without
+    /// installing the snapshot. Newer segment versions win and tombstones
+    /// suppress older values exactly as they do in an opened database.
+    pub fn scan(&self, start: &[u8], end: Option<&[u8]>) -> Result<Vec<(Vec<u8>, Vec<u8>)>> {
+        let mut visible = BTreeMap::new();
+        for index in 0..self.segments.len() {
+            let segment = self.validated_segment(index)?;
+            for (key, version) in
+                segment.visible_from(start, end, self.source_manifest.durable_sequence)?
+            {
+                if visible
+                    .get(&key)
+                    .is_none_or(|current: &crate::VersionedValue| {
+                        version.sequence > current.sequence
+                    })
+                {
+                    visible.insert(key, version);
+                }
+            }
+        }
+        Ok(visible
+            .into_iter()
+            .filter_map(|(key, version)| version.value.map(|value| (key, value)))
             .collect())
     }
 

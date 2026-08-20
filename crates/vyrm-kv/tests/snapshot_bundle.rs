@@ -22,6 +22,10 @@ fn file_backed_bundle_preserves_wire_bytes_and_installs() {
         file.get_many(&[b"alpha", b"missing"]).unwrap(),
         vec![Some(b"one".to_vec()), None]
     );
+    assert_eq!(
+        file.scan(b"alpha", Some(b"omega".as_slice())).unwrap(),
+        vec![(b"alpha".to_vec(), b"one".to_vec())]
+    );
 
     let reopened = SnapshotBundleFile::open(&spool).unwrap();
     assert_eq!(reopened.digest, file.digest);
