@@ -493,10 +493,13 @@ authenticated TCP transport, process isolation, physical snapshot transfer,
 credential rotation/revocation, and pre-activation immutable artifact hydration
 now provide executable one-host evidence. Artifact manifests are independently
 checked against the authenticated snapshot's exact project-scoped object
-closure rather than trusted as source assertions. Cross-shard writes still
-fail closed. Independent-host faults, automatic workload identity, resumable
-remote object transfer, production telemetry, and real Multi-AZ operations
-remain open, so M7 is not closed. See `vyrm-cluster-m7.md`.
+closure rather than trusted as source assertions. The remote path now uses
+bounded authenticated chunks, fsynced exact-offset resume, idempotent receipts,
+and typed transfer observations before activation; the four-process test moves
+a real vector artifact after purge. Cross-shard writes still fail closed.
+Independent-host faults, automatic workload identity, session quota/GC,
+cluster-consensus trace persistence, production telemetry, and real Multi-AZ
+operations remain open, so M7 is not closed. See `vyrm-cluster-m7.md`.
 
 Acceptance: deterministic simulation/model checking; partition, delay,
 duplication, reorder, crash, clock-skew, and disk-loss scenarios; linearizable

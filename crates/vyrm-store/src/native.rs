@@ -1307,9 +1307,84 @@ pub fn native_snapshot_object_references(
     bundle: &SnapshotBundleFile,
     scope: &ScopeId,
 ) -> Result<Vec<ObjectReference>> {
+    native_snapshot_artifact_view(bundle, scope).map(|(_, objects)| objects)
+}
+
+/// Reads the exact project read stamp and immutable-object closure directly
+/// from an authenticated physical snapshot.
+pub fn native_snapshot_artifact_view(
+    bundle: &SnapshotBundleFile,
+    scope: &ScopeId,
+) -> Result<(ReadStamp, Vec<ObjectReference>)> {
+    let cursor_key = storage_key(keyspaces::META, keyspaces::RUNTIME_CURSOR);
+    let digest_key = storage_key(keyspaces::META, keyspaces::RUNTIME_LAST_DIGEST);
+    let schema_key = storage_key(keyspaces::RUNTIME_SCHEMAS, scope.as_str().as_bytes());
+    let values = bundle
+        .get_many(&[&cursor_key, &digest_key, &schema_key])
+        .map_err(Error::from)?;
+    let commit_cursor = values[0]
+        .as_deref()
+        .map(decode_sequence)
+        .transpose()?
+        .unwrap_or_default();
+    let head_digest = values[1]
+        .clone()
+        .map(String::from_utf8)
+        .transpose()
+        .map_err(|error| Error::CorruptWatermark(error.to_string()))?
+        .filter(|digest| !digest.is_empty());
+    let schema_revision = values[2]
+        .as_deref()
+        .map(serde_json::from_slice::<RuntimeSchemaRegistry>)
+        .transpose()?
+        .map(|schema| schema.revision);
+    let read = ReadStamp::new(
+        scope.clone(),
+        schema_revision,
+        0,
+        commit_cursor,
+        head_digest,
+    )?;
+    let objects = native_snapshot_objects(bundle, Some(scope))?;
+    Ok((read, objects))
+}
+
+/// Reads the project artifact view from a live native database snapshot. This
+/// is used by the cluster adapter without reopening a second database handle.
+pub fn native_database_artifact_view(
+    database: &Database,
+    scope: &ScopeId,
+) -> Result<(ReadStamp, Vec<ObjectReference>)> {
+    let snapshot = database.snapshot();
+    let read = native_read_stamp(database, snapshot, scope)?;
+    let rows = scan_space(database, snapshot, keyspaces::RUNTIME_OBJECTS, &[])?;
+    let objects = decode_snapshot_objects(rows, Some(scope))?;
+    Ok((read, objects))
+}
+
+/// Reads every immutable reference in a physical snapshot. Unlike the
+/// project-specific transfer view, this permits multiple scopes and is the
+/// final target-side activation gate.
+pub fn native_snapshot_all_object_references(
+    bundle: &SnapshotBundleFile,
+) -> Result<Vec<ObjectReference>> {
+    native_snapshot_objects(bundle, None)
+}
+
+fn native_snapshot_objects(
+    bundle: &SnapshotBundleFile,
+    required_scope: Option<&ScopeId>,
+) -> Result<Vec<ObjectReference>> {
     let start = storage_key(keyspaces::RUNTIME_OBJECTS, &[]);
     let end = prefix_end(&start);
     let values = bundle.scan(&start, end.as_deref()).map_err(Error::from)?;
+    decode_snapshot_objects(values, required_scope)
+}
+
+fn decode_snapshot_objects(
+    values: Vec<(Vec<u8>, Vec<u8>)>,
+    required_scope: Option<&ScopeId>,
+) -> Result<Vec<ObjectReference>> {
     if values.len() > 1_000_000 {
         return Err(Error::Substrate(
             "native snapshot object-reference limit exceeded".into(),
@@ -1320,13 +1395,25 @@ pub fn native_snapshot_object_references(
         .map(|(stored_key, value)| {
             let object: ObjectReference = serde_json::from_slice(&value)?;
             object.validate()?;
+            let logical = strip_space(keyspaces::RUNTIME_OBJECTS, &stored_key)?;
+            let split = logical.iter().position(|byte| *byte == 0).ok_or_else(|| {
+                Error::Substrate("native snapshot object key has no scope boundary".into())
+            })?;
+            let encoded_scope = std::str::from_utf8(&logical[..split])
+                .map_err(|error| Error::Substrate(error.to_string()))?;
+            let encoded_scope = ScopeId::new(encoded_scope)?;
+            if required_scope.is_some_and(|scope| scope != &encoded_scope) {
+                return Err(Error::Substrate(
+                    "native snapshot object project scope differs from the transfer".into(),
+                ));
+            }
             let expected = storage_key(
                 keyspaces::RUNTIME_OBJECTS,
-                &runtime_identity_key(scope, &object.reference),
+                &runtime_identity_key(&encoded_scope, &object.reference),
             );
             if stored_key != expected {
                 return Err(Error::Substrate(
-                    "native snapshot object key/value identity or project scope differs from the transfer"
+                    "native snapshot object key/value identity differs from its canonical reference"
                         .into(),
                 ));
             }
@@ -1334,9 +1421,10 @@ pub fn native_snapshot_object_references(
         })
         .collect::<Result<Vec<_>>>()?;
     objects.sort_by(|left, right| left.reference.cmp(&right.reference));
-    if objects
-        .windows(2)
-        .any(|pair| pair[0].reference >= pair[1].reference)
+    if required_scope.is_some()
+        && objects
+            .windows(2)
+            .any(|pair| pair[0].reference >= pair[1].reference)
     {
         return Err(Error::Substrate(
             "native snapshot contains duplicate object references".into(),

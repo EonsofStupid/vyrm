@@ -176,6 +176,36 @@ fn artifact_manifest_binds_project_read_plan_objects_and_receipt() {
     )
     .unwrap();
     receipt.validate(&manifest).unwrap();
+    ArtifactTransferObservation::prepared(&manifest, 1, 18)
+        .unwrap()
+        .validate()
+        .unwrap();
+    ArtifactTransferObservation::progress(
+        &manifest,
+        1,
+        19,
+        &ArtifactObjectProgress {
+            sha256: manifest.objects[0].sha256.clone(),
+            expected_length: manifest.objects[0].length,
+            next_offset: manifest.objects[0].length,
+            complete: true,
+        },
+    )
+    .unwrap()
+    .validate()
+    .unwrap();
+    let completed =
+        ArtifactTransferObservation::completed(&manifest, 1, 20, 1_000, &receipt).unwrap();
+    completed.validate().unwrap();
+    let failed =
+        ArtifactTransferObservation::failed(&manifest, 2, 21, 500, "secret failure").unwrap();
+    assert_eq!(
+        failed.error_digest,
+        Some(vyrm_core::digest::sha256_hex(b"secret failure"))
+    );
+    assert!(!serde_json::to_string(&failed)
+        .unwrap()
+        .contains("secret failure"));
 
     let mut tampered = manifest.clone();
     tampered.objects[0].media_type = "application/substituted".into();

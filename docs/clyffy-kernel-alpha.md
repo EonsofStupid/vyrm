@@ -160,10 +160,14 @@ measured local results, never universal superiority.
    and corrupt-pointer restart denial on one host. A real-TCP matrix also passes
    two-root overlap and old-root retirement. Snapshot build/receive/install and
    local object publication are now file-backed, hard-capped, crash-cleaned,
-   and regression-gated against whole-bundle RSS growth. Independent-host and
-   hardware chaos, broader disk-resident segment workloads, automatic SPIFFE
-   issuance/streaming, durable supervisor generation, production telemetry,
-   and Multi-AZ evidence remain open.
+   and regression-gated against whole-bundle RSS growth. Project-scoped vector
+   artifacts now cross the real mTLS/process learner path through durable
+   resumable sessions before activation; the target independently verifies the
+   snapshot's complete object closure. Typed fail-closed transfer observations
+   have a durable causal-trace adapter. Independent-host and hardware chaos,
+   larger retained closure workloads, session quota/GC, clustered trace-commit
+   wiring, automatic SPIFFE issuance/streaming, durable supervisor generation,
+   production telemetry, and Multi-AZ evidence remain open.
 8. **Local gate complete:** declared package workflows now bind preflight,
    pre-tool freshness/authorization, and post-tool atomic evidence across the
    shared hook/MCP handler. A durable cross-process authorization lease remains

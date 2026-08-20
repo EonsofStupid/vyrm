@@ -6,18 +6,22 @@
 //! retry, ordering, duplicate, and chunked-snapshot semantics.
 
 use crate::{
-    ClusterError, ClusterId, NodeId, Result as ClusterResult, ShardId, VyrmRaftNode,
-    VyrmRaftTypeConfig,
+    ArtifactTransferManifest, ArtifactTransferObservation, ArtifactTransferObserver,
+    ArtifactTransferReceipt, ArtifactTransferReceiver, ArtifactTransferRpc,
+    ArtifactTransferRpcResult, ClusterError, ClusterId, NodeId, Result as ClusterResult, ShardId,
+    VyrmRaftNode, VyrmRaftStateMachine, VyrmRaftTypeConfig, ARTIFACT_TRANSFER_CHUNK_MAX_BYTES,
 };
 use openraft::error::{
-    InstallSnapshotError, RPCError, RaftError, RemoteError, Timeout, Unreachable,
+    Fatal, InstallSnapshotError, NetworkError, RPCError, RaftError, RemoteError, ReplicationClosed,
+    StreamingError, Timeout, Unreachable,
 };
+use openraft::network::snapshot_transport::{Chunked, SnapshotTransport};
 use openraft::network::{RPCOption, RPCTypes, RaftNetwork, RaftNetworkFactory};
 use openraft::raft::{
     AppendEntriesRequest, AppendEntriesResponse, InstallSnapshotRequest, InstallSnapshotResponse,
-    VoteRequest, VoteResponse,
+    SnapshotResponse, VoteRequest, VoteResponse,
 };
-use openraft::Raft;
+use openraft::{OptionalSend, Raft, Snapshot, Vote};
 use rustls::client::WebPkiServerVerifier;
 use rustls::pki_types::{CertificateDer, CertificateRevocationListDer, PrivateKeyDer, ServerName};
 use rustls::server::WebPkiClientVerifier;
@@ -25,15 +29,18 @@ use rustls::{ClientConfig, RootCertStore, ServerConfig};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
+use std::future::Future;
 use std::io;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, RwLock};
-use std::time::Duration;
-use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncSeekExt, AsyncWrite, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::Semaphore;
 use tokio_rustls::{TlsAcceptor, TlsConnector};
 use vyrm_core::digest::sha256_hex;
+use vyrm_core::ScopeId;
+use vyrm_store::LocalObjectStore;
 use x509_parser::extensions::GeneralName;
 use x509_parser::prelude::{FromDer, X509Certificate};
 
@@ -41,6 +48,15 @@ pub const VYRM_RAFT_TRANSPORT_VERSION: u16 = 1;
 pub const VYRM_RAFT_MAX_RPC_FRAME_BYTES: usize = 16 * 1024 * 1024;
 pub const VYRM_RAFT_MAX_IN_FLIGHT_RPCS: usize = 256;
 pub const VYRM_RAFT_SERVER_RPC_TIMEOUT: Duration = Duration::from_secs(30);
+pub const VYRM_ARTIFACT_RPC_TIMEOUT: Duration = Duration::from_secs(30);
+
+fn now_millis() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis()
+        .min(u128::from(u64::MAX)) as u64
+}
 
 type VyrmRaft = Raft<VyrmRaftTypeConfig>;
 type AppendResult = std::result::Result<AppendEntriesResponse<u64>, RaftError<u64>>;
@@ -307,6 +323,26 @@ pub struct VyrmRaftNetworkFactory {
     connector: TlsConnector,
     gate: VyrmTransportGate,
     reloader: Option<VyrmTlsReloader>,
+    artifact_source: Option<VyrmArtifactSource>,
+}
+
+#[derive(Clone)]
+struct VyrmArtifactSource {
+    state_machine: VyrmRaftStateMachine,
+    objects: LocalObjectStore,
+    scope: ScopeId,
+    observer: Option<Arc<dyn ArtifactTransferObserver>>,
+}
+
+fn observe_artifact(
+    source: &VyrmArtifactSource,
+    observation: ArtifactTransferObservation,
+) -> ClusterResult<()> {
+    observation.validate()?;
+    match &source.observer {
+        Some(observer) => observer.observe(observation),
+        None => Ok(()),
+    }
 }
 
 impl VyrmRaftNetworkFactory {
@@ -325,6 +361,7 @@ impl VyrmRaftNetworkFactory {
             connector: TlsConnector::from(client),
             gate,
             reloader: None,
+            artifact_source: None,
         })
     }
 
@@ -345,7 +382,33 @@ impl VyrmRaftNetworkFactory {
             connector: TlsConnector::from(client),
             gate,
             reloader: Some(credentials),
+            artifact_source: None,
         })
+    }
+
+    pub fn new_reloadable_with_artifacts(
+        binding: VyrmTransportBinding,
+        credentials: VyrmTlsReloader,
+        gate: VyrmTransportGate,
+        state_machine: VyrmRaftStateMachine,
+        objects: LocalObjectStore,
+        scope: ScopeId,
+    ) -> ClusterResult<Self> {
+        let mut factory = Self::new_reloadable(binding, credentials, gate)?;
+        factory.artifact_source = Some(VyrmArtifactSource {
+            state_machine,
+            objects,
+            scope,
+            observer: None,
+        });
+        Ok(factory)
+    }
+
+    pub fn with_artifact_observer(mut self, observer: Arc<dyn ArtifactTransferObserver>) -> Self {
+        if let Some(source) = &mut self.artifact_source {
+            source.observer = Some(observer);
+        }
+        self
     }
 }
 
@@ -356,6 +419,9 @@ pub struct VyrmRaftNetworkClient {
     connector: TlsConnector,
     gate: VyrmTransportGate,
     reloader: Option<VyrmTlsReloader>,
+    artifact_source: Option<VyrmArtifactSource>,
+    hydrated_snapshot: Option<String>,
+    artifact_attempt: u64,
 }
 
 impl RaftNetworkFactory<VyrmRaftTypeConfig> for VyrmRaftNetworkFactory {
@@ -369,6 +435,9 @@ impl RaftNetworkFactory<VyrmRaftTypeConfig> for VyrmRaftNetworkFactory {
             connector: self.connector.clone(),
             gate: self.gate.clone(),
             reloader: self.reloader.clone(),
+            artifact_source: self.artifact_source.clone(),
+            hydrated_snapshot: None,
+            artifact_attempt: 0,
         }
     }
 }
@@ -405,6 +474,18 @@ impl RaftNetwork<VyrmRaftTypeConfig> for VyrmRaftNetworkClient {
         InstallSnapshotResponse<u64>,
         RPCError<u64, VyrmRaftNode, RaftError<u64, InstallSnapshotError>>,
     > {
+        if self.artifact_source.is_some()
+            && (request.offset == 0
+                || self.hydrated_snapshot.as_deref() != Some(&request.meta.snapshot_id))
+        {
+            let attempt = self
+                .next_artifact_attempt()
+                .map_err(|error| unreachable(error.to_string()))?;
+            self.hydrate_snapshot_artifacts(&request.meta, attempt)
+                .await
+                .map_err(|error| unreachable(error.to_string()))?;
+            self.hydrated_snapshot = Some(request.meta.snapshot_id.clone());
+        }
         match self
             .call_with_timeout(
                 WireRequest::Snapshot(request),
@@ -439,9 +520,252 @@ impl RaftNetwork<VyrmRaftTypeConfig> for VyrmRaftNetworkClient {
             )),
         }
     }
+
+    async fn full_snapshot(
+        &mut self,
+        vote: Vote<u64>,
+        snapshot: Snapshot<VyrmRaftTypeConfig>,
+        cancel: impl Future<Output = ReplicationClosed> + OptionalSend + 'static,
+        option: RPCOption,
+    ) -> std::result::Result<SnapshotResponse<u64>, StreamingError<VyrmRaftTypeConfig, Fatal<u64>>>
+    {
+        let mut cancel = Box::pin(cancel);
+        if self.artifact_source.is_some() {
+            let attempt = self
+                .next_artifact_attempt()
+                .map_err(|error| NetworkError::new(&io::Error::other(error.to_string())))?;
+            tokio::select! {
+                closed = cancel.as_mut() => return Err(closed.into()),
+                hydrated = self.hydrate_snapshot_artifacts(&snapshot.meta, attempt) => {
+                    if let Err(error) = hydrated {
+                        let error = io::Error::other(error.to_string());
+                        return Err(NetworkError::new(&error).into());
+                    }
+                }
+            }
+            self.hydrated_snapshot = Some(snapshot.meta.snapshot_id.clone());
+        }
+        Chunked::send_snapshot(self, vote, snapshot, cancel, option).await
+    }
 }
 
 impl VyrmRaftNetworkClient {
+    fn next_artifact_attempt(&mut self) -> ClusterResult<u64> {
+        self.artifact_attempt = self.artifact_attempt.checked_add(1).ok_or_else(|| {
+            ClusterError::Unavailable("artifact transfer attempt counter overflowed".into())
+        })?;
+        Ok(self.artifact_attempt)
+    }
+
+    async fn hydrate_snapshot_artifacts(
+        &self,
+        meta: &openraft::SnapshotMeta<u64, VyrmRaftNode>,
+        attempt: u64,
+    ) -> ClusterResult<()> {
+        let Some(source) = self.artifact_source.clone() else {
+            return Ok(());
+        };
+        let state_machine = source.state_machine.clone();
+        let meta = meta.clone();
+        let scope = source.scope.clone();
+        let source_id = self.source.canonical_node_id.clone();
+        let target_id = NodeId::new(self.target.canonical_id.clone())?;
+        let manifest = tokio::task::spawn_blocking(move || {
+            state_machine
+                .artifact_manifest_for_cached_snapshot(&meta, &scope, source_id, target_id)
+                .map_err(|error| ClusterError::Unavailable(error.to_string()))
+        })
+        .await
+        .map_err(|error| ClusterError::Unavailable(format!("artifact manifest task: {error}")))??;
+        let Some(manifest) = manifest else {
+            return Ok(());
+        };
+        observe_artifact(
+            &source,
+            ArtifactTransferObservation::prepared(&manifest, attempt, now_millis())?,
+        )?;
+        let started = Instant::now();
+        match self
+            .transfer_artifact_manifest(&source, &manifest, attempt)
+            .await
+        {
+            Ok(receipt) => observe_artifact(
+                &source,
+                ArtifactTransferObservation::completed(
+                    &manifest,
+                    attempt,
+                    now_millis(),
+                    started.elapsed().as_micros().min(u128::from(u64::MAX)) as u64,
+                    &receipt,
+                )?,
+            ),
+            Err(error) => {
+                let rendered = error.to_string();
+                let observation = ArtifactTransferObservation::failed(
+                    &manifest,
+                    attempt,
+                    now_millis(),
+                    started.elapsed().as_micros().min(u128::from(u64::MAX)) as u64,
+                    &rendered,
+                )?;
+                if let Err(observer_error) = observe_artifact(&source, observation) {
+                    return Err(ClusterError::Unavailable(format!(
+                        "{rendered}; artifact failure observation: {observer_error}"
+                    )));
+                }
+                Err(error)
+            }
+        }
+    }
+
+    async fn transfer_artifact_manifest(
+        &self,
+        source: &VyrmArtifactSource,
+        manifest: &ArtifactTransferManifest,
+        attempt: u64,
+    ) -> ClusterResult<ArtifactTransferReceipt> {
+        manifest.validate()?;
+        let progress = self
+            .call_artifact(ArtifactTransferRpc::begin(manifest.clone())?)
+            .await?;
+        let ArtifactTransferRpcResult::Progress {
+            manifest_digest,
+            objects,
+        } = progress
+        else {
+            return Err(ClusterError::Unavailable(
+                "artifact begin response had the wrong result kind".into(),
+            ));
+        };
+        if manifest_digest != manifest.manifest_digest {
+            return Err(ClusterError::Denied(
+                "artifact begin response changed the manifest digest".into(),
+            ));
+        }
+        let mut progress = objects
+            .into_iter()
+            .map(|object| (object.sha256.clone(), object))
+            .collect::<BTreeMap<_, _>>();
+        let distinct = manifest
+            .objects
+            .iter()
+            .map(|object| (object.sha256.clone(), object.clone()))
+            .collect::<BTreeMap<_, _>>();
+        if progress.len() != distinct.len()
+            || progress.keys().ne(distinct.keys())
+            || progress.iter().any(|(digest, state)| {
+                state.expected_length != distinct[digest].length
+                    || state.next_offset > state.expected_length
+                    || state.complete != (state.next_offset == state.expected_length)
+            })
+        {
+            return Err(ClusterError::Denied(
+                "artifact begin response differs from the manifest closure".into(),
+            ));
+        }
+        for (sha256, object) in distinct {
+            let mut state = progress
+                .remove(&sha256)
+                .expect("validated progress contains every digest");
+            if state.complete {
+                continue;
+            }
+            let reference = object.clone();
+            let source_store = source.objects.clone();
+            let path = tokio::task::spawn_blocking(move || source_store.verified_path(&reference))
+                .await
+                .map_err(|error| {
+                    ClusterError::Unavailable(format!("artifact source verify task: {error}"))
+                })?
+                .map_err(|error| ClusterError::Unavailable(error.to_string()))?;
+            let mut file = tokio::fs::File::open(path)
+                .await
+                .map_err(|error| ClusterError::Unavailable(error.to_string()))?;
+            while !state.complete {
+                file.seek(std::io::SeekFrom::Start(state.next_offset))
+                    .await
+                    .map_err(|error| ClusterError::Unavailable(error.to_string()))?;
+                let remaining = state.expected_length - state.next_offset;
+                let chunk_length = remaining.min(ARTIFACT_TRANSFER_CHUNK_MAX_BYTES as u64) as usize;
+                let mut bytes = vec![0u8; chunk_length];
+                file.read_exact(&mut bytes)
+                    .await
+                    .map_err(|error| ClusterError::Unavailable(error.to_string()))?;
+                let sent_offset = state.next_offset;
+                let response = self
+                    .call_artifact(ArtifactTransferRpc::chunk(
+                        manifest.manifest_digest.clone(),
+                        sha256.clone(),
+                        sent_offset,
+                        bytes,
+                    )?)
+                    .await?;
+                let ArtifactTransferRpcResult::ChunkAccepted {
+                    manifest_digest,
+                    object: next,
+                } = response
+                else {
+                    return Err(ClusterError::Unavailable(
+                        "artifact chunk response had the wrong result kind".into(),
+                    ));
+                };
+                if manifest_digest != manifest.manifest_digest
+                    || next.sha256 != sha256
+                    || next.expected_length != object.length
+                    || next.next_offset > object.length
+                    || next.complete != (next.next_offset == object.length)
+                    || next.next_offset == sent_offset
+                {
+                    return Err(ClusterError::Denied(
+                        "artifact chunk response did not make valid progress".into(),
+                    ));
+                }
+                observe_artifact(
+                    source,
+                    ArtifactTransferObservation::progress(manifest, attempt, now_millis(), &next)?,
+                )?;
+                state = next;
+            }
+        }
+        let completed_at = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as u64;
+        let response = self
+            .call_artifact(ArtifactTransferRpc::complete(
+                manifest.manifest_digest.clone(),
+                completed_at,
+            )?)
+            .await?;
+        let ArtifactTransferRpcResult::Completed { receipt } = response else {
+            return Err(ClusterError::Unavailable(
+                "artifact completion response had the wrong result kind".into(),
+            ));
+        };
+        receipt.validate(manifest)?;
+        Ok(receipt)
+    }
+
+    async fn call_artifact(
+        &self,
+        request: ArtifactTransferRpc,
+    ) -> ClusterResult<ArtifactTransferRpcResult> {
+        let response = tokio::time::timeout(
+            VYRM_ARTIFACT_RPC_TIMEOUT,
+            self.call::<std::io::Error>(WireRequest::Artifact(request)),
+        )
+        .await
+        .map_err(|_| ClusterError::Unavailable("artifact RPC timed out".into()))?
+        .map_err(|error| ClusterError::Unavailable(error.to_string()))?;
+        match response {
+            WireResponse::Artifact(Ok(response)) => Ok(response),
+            WireResponse::Artifact(Err(error)) => Err(ClusterError::Unavailable(error)),
+            _ => Err(ClusterError::Unavailable(
+                "artifact response kind did not match request".into(),
+            )),
+        }
+    }
+
     async fn call_with_timeout<E>(
         &self,
         request: WireRequest,
@@ -518,6 +842,7 @@ pub struct VyrmRaftTlsServer {
     admission: Arc<Semaphore>,
     gate: VyrmTransportGate,
     reloader: Option<VyrmTlsReloader>,
+    artifacts: Option<ArtifactTransferReceiver>,
 }
 
 impl VyrmRaftTlsServer {
@@ -546,6 +871,7 @@ impl VyrmRaftTlsServer {
             admission: Arc::new(Semaphore::new(VYRM_RAFT_MAX_IN_FLIGHT_RPCS)),
             gate,
             reloader: None,
+            artifacts: None,
         })
     }
 
@@ -571,7 +897,21 @@ impl VyrmRaftTlsServer {
             admission: Arc::new(Semaphore::new(VYRM_RAFT_MAX_IN_FLIGHT_RPCS)),
             gate,
             reloader: Some(credentials),
+            artifacts: None,
         })
+    }
+
+    pub fn new_reloadable_with_artifacts(
+        binding: VyrmTransportBinding,
+        trust: VyrmTransportTrust,
+        raft: VyrmRaft,
+        credentials: VyrmTlsReloader,
+        gate: VyrmTransportGate,
+        artifacts: ArtifactTransferReceiver,
+    ) -> ClusterResult<Self> {
+        let mut server = Self::new_reloadable(binding, trust, raft, credentials, gate)?;
+        server.artifacts = Some(artifacts);
+        Ok(server)
     }
 
     pub async fn serve(self, listener: TcpListener) -> io::Result<()> {
@@ -612,6 +952,7 @@ impl VyrmRaftTlsServer {
         let peer = certificate_spiffe_id(stream.get_ref().1.peer_certificates())?;
         let envelope: WireEnvelope = read_frame(&mut stream).await?;
         envelope.validate(&self.binding, &self.trust, &peer)?;
+        let source = envelope.source_canonical_id.clone();
         let response = match envelope.request {
             WireRequest::Append(request) => {
                 WireResponse::Append(self.raft.append_entries(request).await)
@@ -620,6 +961,12 @@ impl VyrmRaftTlsServer {
                 WireResponse::Snapshot(self.raft.install_snapshot(request).await)
             }
             WireRequest::Vote(request) => WireResponse::Vote(self.raft.vote(request).await),
+            WireRequest::Artifact(request) => WireResponse::Artifact(match &self.artifacts {
+                Some(receiver) => receiver
+                    .handle(&source, &self.binding.canonical_node_id, request)
+                    .map_err(|error| error.to_string()),
+                None => Err("artifact transport is not configured on this node".into()),
+            }),
         };
         write_frame(&mut stream, &response).await
     }
@@ -679,7 +1026,11 @@ impl WireEnvelope {
                 "transport envelope binding or digest mismatch",
             ));
         }
-        if self.request.source_raft_id() != Some(self.source_raft_id) {
+        if self
+            .request
+            .source_raft_id()
+            .is_some_and(|source| source != self.source_raft_id)
+        {
             return Err(invalid_data(
                 "authenticated envelope source does not match the Raft vote source",
             ));
@@ -711,6 +1062,7 @@ enum WireRequest {
     Append(AppendEntriesRequest<VyrmRaftTypeConfig>),
     Snapshot(InstallSnapshotRequest<VyrmRaftTypeConfig>),
     Vote(VoteRequest<u64>),
+    Artifact(ArtifactTransferRpc),
 }
 
 impl WireRequest {
@@ -719,6 +1071,7 @@ impl WireRequest {
             Self::Append(request) => request.vote.leader_id().voted_for(),
             Self::Snapshot(request) => request.vote.leader_id().voted_for(),
             Self::Vote(request) => request.vote.leader_id().voted_for(),
+            Self::Artifact(_) => None,
         }
     }
 }
@@ -729,6 +1082,7 @@ enum WireResponse {
     Append(AppendResult),
     Snapshot(SnapshotResult),
     Vote(VoteResult),
+    Artifact(std::result::Result<ArtifactTransferRpcResult, String>),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

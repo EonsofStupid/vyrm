@@ -35,7 +35,10 @@ pub mod trace;
 pub mod vector_catalog;
 pub mod workflow;
 
-pub use cluster_transfer::execute_traced_artifact_transfer;
+pub use cluster_transfer::{
+    execute_traced_artifact_transfer, record_artifact_transfer_observation,
+    DurableArtifactTransferObserver,
+};
 pub use data_plane::{
     execute_traced_embedding, execute_traced_vector_search, TracedEmbeddingExecution,
     TracedVectorSearch,

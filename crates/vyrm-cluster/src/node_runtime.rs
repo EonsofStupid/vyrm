@@ -7,10 +7,10 @@
 //! management plane.
 
 use crate::{
-    ClusterError, ClusterId, NodeId, Result as ClusterResult, ShardId, ShardPlacement,
-    VyrmRaftCommand, VyrmRaftNetworkFactory, VyrmRaftNode, VyrmRaftResponse, VyrmRaftStore,
-    VyrmRaftTlsServer, VyrmTlsGeneration, VyrmTlsMaterial, VyrmTlsReloader, VyrmTransportBinding,
-    VyrmTransportGate, VyrmTransportTrust,
+    ArtifactTransferReceiver, ClusterError, ClusterId, NodeId, Result as ClusterResult, ShardId,
+    ShardPlacement, VyrmRaftCommand, VyrmRaftNetworkFactory, VyrmRaftNode, VyrmRaftResponse,
+    VyrmRaftStore, VyrmRaftTlsServer, VyrmTlsGeneration, VyrmTlsMaterial, VyrmTlsReloader,
+    VyrmTransportBinding, VyrmTransportGate, VyrmTransportTrust,
 };
 use openraft::metrics::Metric;
 use openraft::{Config, Raft, SnapshotPolicy};
@@ -26,9 +26,10 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::TcpListener;
+use vyrm_core::{RuntimeCommit, ScopeId};
 
-pub const VYRM_NODE_CONFIG_VERSION: u16 = 1;
-pub const VYRM_NODE_CONTROL_VERSION: u16 = 1;
+pub const VYRM_NODE_CONFIG_VERSION: u16 = 2;
+pub const VYRM_NODE_CONTROL_VERSION: u16 = 2;
 pub const VYRM_NODE_MAX_CONFIG_BYTES: u64 = 1024 * 1024;
 pub const VYRM_NODE_MAX_CONTROL_LINE_BYTES: usize = 1024 * 1024;
 
@@ -41,6 +42,7 @@ pub struct VyrmNodeConfig {
     pub trust_domain: String,
     pub cluster: ClusterId,
     pub shard: ShardId,
+    pub project_scope: ScopeId,
     pub raft_node_id: u64,
     pub data_root: PathBuf,
     pub raft_listen: String,
@@ -122,6 +124,12 @@ pub enum VyrmNodeCommand {
         placement_epoch: u64,
         expected_commit_index: Option<u64>,
         payload: Vec<u8>,
+    },
+    RuntimeCommit {
+        request_id: String,
+        placement_epoch: u64,
+        expected_commit_index: Option<u64>,
+        commit: RuntimeCommit,
     },
     TriggerSnapshot,
     PurgeLog {
@@ -266,12 +274,17 @@ pub async fn run_vyrm_node(config: VyrmNodeConfig) -> ClusterResult<()> {
     })?;
     let credentials = VyrmTlsReloader::new(binding.clone(), 1, material)?;
     let transport_gate = VyrmTransportGate::enabled();
-    let network = VyrmRaftNetworkFactory::new_reloadable(
+    let (log, state_machine) = VyrmRaftStore::open(&config.data_root, config.shard)?;
+    let application_objects = state_machine.application_objects();
+    let artifact_receiver = ArtifactTransferReceiver::open(application_objects.clone())?;
+    let network = VyrmRaftNetworkFactory::new_reloadable_with_artifacts(
         binding.clone(),
         credentials.clone(),
         transport_gate.clone(),
+        state_machine.clone(),
+        application_objects,
+        config.project_scope.clone(),
     )?;
-    let (log, state_machine) = VyrmRaftStore::open(&config.data_root, config.shard)?;
     let raft_config = Arc::new(
         Config {
             snapshot_policy: SnapshotPolicy::Never,
@@ -287,19 +300,20 @@ pub async fn run_vyrm_node(config: VyrmNodeConfig) -> ClusterResult<()> {
         raft_config,
         network,
         log,
-        state_machine,
+        state_machine.clone(),
     )
     .await
     .map_err(|error| ClusterError::Unavailable(error.to_string()))?;
     let listener = TcpListener::bind(&config.raft_listen)
         .await
         .map_err(|error| ClusterError::Unavailable(format!("bind Raft transport: {error}")))?;
-    let server = VyrmRaftTlsServer::new_reloadable(
+    let server = VyrmRaftTlsServer::new_reloadable_with_artifacts(
         binding,
         trust,
         raft.clone(),
         credentials.clone(),
         transport_gate.clone(),
+        artifact_receiver,
     )?;
     let server_task = tokio::spawn(async move { server.serve(listener).await });
 
@@ -342,8 +356,15 @@ pub async fn run_vyrm_node(config: VyrmNodeConfig) -> ClusterResult<()> {
                     request_id,
                     command,
                     ..
-                }) => match execute_command(&raft, &config, &transport_gate, &credentials, command)
-                    .await
+                }) => match execute_command(
+                    &raft,
+                    &state_machine,
+                    &config,
+                    &transport_gate,
+                    &credentials,
+                    command,
+                )
+                .await
                 {
                     Ok(value) => VyrmNodeReply::success(Some(request_id), value),
                     Err(error) => VyrmNodeReply::failure(Some(request_id), error),
@@ -414,6 +435,7 @@ async fn read_control_line<R: AsyncBufRead + Unpin>(
 
 async fn execute_command(
     raft: &VyrmRaft,
+    state_machine: &crate::VyrmRaftStateMachine,
     config: &VyrmNodeConfig,
     transport_gate: &VyrmTransportGate,
     credentials: &VyrmTlsReloader,
@@ -421,7 +443,7 @@ async fn execute_command(
 ) -> Result<VyrmNodeResult, String> {
     match command {
         VyrmNodeCommand::Status => Ok(VyrmNodeResult::Status {
-            status: node_status(raft, credentials)?,
+            status: node_status(raft, state_machine, credentials)?,
         }),
         VyrmNodeCommand::Initialize => raft
             .initialize(BTreeMap::from([(
@@ -484,6 +506,28 @@ async fn execute_command(
             )
             .await
         }
+        VyrmNodeCommand::RuntimeCommit {
+            request_id,
+            placement_epoch,
+            expected_commit_index,
+            commit,
+        } => {
+            if commit.scope != config.project_scope {
+                return Err("runtime commit scope differs from the configured project".into());
+            }
+            write_command(
+                raft,
+                VyrmRaftCommand::runtime_commit(
+                    request_id,
+                    config.shard,
+                    placement_epoch,
+                    expected_commit_index,
+                    commit,
+                )
+                .map_err(|error| error.to_string())?,
+            )
+            .await
+        }
         VyrmNodeCommand::TriggerSnapshot => raft
             .trigger()
             .snapshot()
@@ -510,7 +554,7 @@ async fn execute_command(
                 )
                 .await
                 .map(|_| VyrmNodeResult::Status {
-                    status: node_status(raft, credentials)
+                    status: node_status(raft, state_machine, credentials)
                         .expect("validated TLS credential state remains readable"),
                 })
                 .map_err(|error| error.to_string())
@@ -547,15 +591,23 @@ async fn write_command(
     })
 }
 
-fn node_status(raft: &VyrmRaft, credentials: &VyrmTlsReloader) -> Result<VyrmNodeStatus, String> {
+fn node_status(
+    raft: &VyrmRaft,
+    state_machine: &crate::VyrmRaftStateMachine,
+    credentials: &VyrmTlsReloader,
+) -> Result<VyrmNodeStatus, String> {
     let metrics = raft.metrics().borrow().clone();
+    let snapshot_index = state_machine
+        .persisted_snapshot_meta()
+        .map_err(|error| error.to_string())?
+        .and_then(|meta| meta.last_log_id.map(|log| log.index));
     Ok(VyrmNodeStatus {
         raft_node_id: metrics.id,
         current_term: metrics.current_term,
         current_leader: metrics.current_leader,
         last_log_index: metrics.last_log_index,
         last_applied_index: metrics.last_applied.map(|log| log.index),
-        snapshot_index: metrics.snapshot.map(|log| log.index),
+        snapshot_index,
         purged_index: metrics.purged.map(|log| log.index),
         state: format!("{:?}", metrics.state).to_ascii_lowercase(),
         credentials: credentials.identity().map_err(|error| error.to_string())?,

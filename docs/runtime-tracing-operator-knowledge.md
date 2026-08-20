@@ -3,9 +3,11 @@
 Status: contract, conflict-safe recorder, instance bootstrap, lifecycle, query,
 native-storage-read, projection-publication, vector-search, embedding-commit,
 provider/tool-envelope, causal-analysis, and data-class export slices
-implemented. The portable operator boundary and first live pgvector functional
-gate are implemented; production TLS/failure/scale promotion remains pending
-alongside storage-write, cluster, OTLP, and retained-regression coverage.
+implemented. Cluster artifact transfer now has a typed observation port and a
+durable project-trace adapter. The portable operator boundary and first live
+pgvector functional gate are implemented; production TLS/failure/scale
+promotion remains pending alongside storage-write, broader cluster operations,
+OTLP, and retained-regression coverage.
 Repository state was verified 2026-08-20.
 
 ## Why this is a kernel feature
@@ -137,6 +139,17 @@ subsystem by subsystem and must carry the following minimum evidence:
 | Provider/tool | provider invocation, observable token/tool envelope, outcome; never hidden chain-of-thought |
 | Cluster | shard/term/leader, snapshot or log coordinate, transport decision, retry class |
 | External adapter | system, project, source revision, latency, result count, freshness/fallback decision |
+
+Authenticated artifact recovery now emits bounded prepared/chunk/completed/
+failed observations from the source. Each attempt binds project scope,
+manifest, source/target, shard, placement epoch, exact read and grounded
+snapshot, offsets, duration, transfer totals, and terminal receipt/error digest.
+`DurableArtifactTransferObserver` maps these to a
+`cluster.artifact_transfer` lifecycle and child chunk annotations. Observer
+failure blocks snapshot activation. Raw bytes and raw error text never enter
+the trace. In a clustered deployment the observer's runtime commits must cross
+Raft; the adapter explicitly does not turn an unreplicated local write into a
+consensus claim.
 
 High-volume physical events require sampling or aggregation policy. Logical
 mutation and denial evidence must not be sampled. Credentials, authorization

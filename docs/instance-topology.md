@@ -13,6 +13,12 @@ A major platform gets a dedicated instance. Its claims, reasoning ledger,
 routing projection, policy evidence, and runtime configuration remain local to
 that platform.
 
+The deployable Raft node config now carries a required `project_scope`. Its
+typed supervisor `runtime_commit` command denies any commit for another scope,
+and snapshot artifact derivation uses the same scope before authenticated
+transfer. This makes the per-project boundary executable at the storage-node
+edge rather than relying only on directory convention.
+
 A set of genuinely related small projects may use one umbrella instance. The
 umbrella has an explicit member list; filesystem proximity is not membership.
 An unlisted project is denied rather than silently included.

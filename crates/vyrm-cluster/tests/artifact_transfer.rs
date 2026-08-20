@@ -2,8 +2,10 @@
 
 use std::collections::BTreeSet;
 use vyrm_cluster::{
-    prepare_artifact_transfer, transfer_artifacts, NodeId, ReplicaTransferPlan, ShardId,
-    ShardReadStamp, CLUSTER_CONTRACT_VERSION,
+    prepare_artifact_transfer, transfer_artifacts, ArtifactTransferOperation,
+    ArtifactTransferReceiver, ArtifactTransferRpc, ArtifactTransferRpcResult, NodeId,
+    ReplicaTransferPlan, ShardId, ShardReadStamp, ARTIFACT_TRANSFER_CHUNK_MAX_BYTES,
+    CLUSTER_CONTRACT_VERSION,
 };
 use vyrm_core::{
     DataTransaction, RuntimeCommit, RuntimeMutation, RuntimeProperties, RuntimeRecord,
@@ -151,4 +153,200 @@ fn corruption_missing_source_and_manifest_substitution_fail_closed() {
         .unwrap()
         .entries
         .is_empty());
+}
+
+#[test]
+fn durable_chunk_session_resumes_rejects_wrong_offsets_and_completes_once() {
+    let root = tempfile::tempdir().unwrap();
+    let bytes = (0..(ARTIFACT_TRANSFER_CHUNK_MAX_BYTES + 73_117))
+        .map(|index| (index % 251) as u8)
+        .collect::<Vec<_>>();
+    let source = source_runtime(
+        MemoryEngine::new(),
+        LocalObjectStore::open(root.path().join("source-resume")).unwrap(),
+        &bytes,
+    );
+    let manifest = prepare_artifact_transfer(transfer_plan(), source.engine(), &scope()).unwrap();
+    let target = LocalObjectStore::open(root.path().join("target-resume")).unwrap();
+    let source_node = manifest.plan.source.clone();
+    let target_node = manifest.plan.target.clone();
+    let receiver = ArtifactTransferReceiver::open(target.clone()).unwrap();
+
+    let ArtifactTransferRpcResult::Progress { objects, .. } = receiver
+        .handle(
+            &source_node,
+            &target_node,
+            ArtifactTransferRpc::begin(manifest.clone()).unwrap(),
+        )
+        .unwrap()
+    else {
+        panic!("begin did not return progress")
+    };
+    assert_eq!(objects[0].next_offset, 0);
+    let first = 333_333usize;
+    receiver
+        .handle(
+            &source_node,
+            &target_node,
+            ArtifactTransferRpc::chunk(
+                manifest.manifest_digest.clone(),
+                manifest.objects[0].sha256.clone(),
+                0,
+                bytes[..first].to_vec(),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+
+    let restarted = ArtifactTransferReceiver::open(target.clone()).unwrap();
+    let ArtifactTransferRpcResult::Progress { objects, .. } = restarted
+        .handle(
+            &source_node,
+            &target_node,
+            ArtifactTransferRpc::begin(manifest.clone()).unwrap(),
+        )
+        .unwrap()
+    else {
+        panic!("resume did not return progress")
+    };
+    assert_eq!(objects[0].next_offset, first as u64);
+    let ArtifactTransferRpcResult::ChunkAccepted { object, .. } = restarted
+        .handle(
+            &source_node,
+            &target_node,
+            ArtifactTransferRpc::chunk(
+                manifest.manifest_digest.clone(),
+                manifest.objects[0].sha256.clone(),
+                0,
+                b"wrong-offset".to_vec(),
+            )
+            .unwrap(),
+        )
+        .unwrap()
+    else {
+        panic!("wrong-offset retry did not return authoritative progress")
+    };
+    assert_eq!(object.next_offset, first as u64);
+
+    let mut offset = first;
+    while offset < bytes.len() {
+        let end = (offset + ARTIFACT_TRANSFER_CHUNK_MAX_BYTES).min(bytes.len());
+        restarted
+            .handle(
+                &source_node,
+                &target_node,
+                ArtifactTransferRpc::chunk(
+                    manifest.manifest_digest.clone(),
+                    manifest.objects[0].sha256.clone(),
+                    offset as u64,
+                    bytes[offset..end].to_vec(),
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        offset = end;
+    }
+    let completed = restarted
+        .handle(
+            &source_node,
+            &target_node,
+            ArtifactTransferRpc::complete(manifest.manifest_digest.clone(), 99).unwrap(),
+        )
+        .unwrap();
+    let ArtifactTransferRpcResult::Completed { receipt } = completed else {
+        panic!("completion did not return a receipt")
+    };
+    assert_eq!(receipt.transferred_objects, 1);
+    assert_eq!(receipt.transferred_bytes, bytes.len() as u64);
+    let replayed = restarted
+        .handle(
+            &source_node,
+            &target_node,
+            ArtifactTransferRpc::complete(manifest.manifest_digest.clone(), 99).unwrap(),
+        )
+        .unwrap();
+    assert_eq!(
+        replayed,
+        ArtifactTransferRpcResult::Completed {
+            receipt: receipt.clone()
+        }
+    );
+    assert_eq!(
+        restarted
+            .handle(
+                &source_node,
+                &target_node,
+                ArtifactTransferRpc::complete(manifest.manifest_digest.clone(), 100).unwrap(),
+            )
+            .unwrap(),
+        ArtifactTransferRpcResult::Completed { receipt }
+    );
+    assert_eq!(target.get(&manifest.objects[0]).unwrap(), bytes);
+}
+
+#[test]
+fn chunk_sessions_bind_authenticated_peers_and_discard_corrupt_completed_parts() {
+    let root = tempfile::tempdir().unwrap();
+    let bytes = b"expected immutable bytes";
+    let source = source_runtime(
+        MemoryEngine::new(),
+        LocalObjectStore::open(root.path().join("source-corrupt-session")).unwrap(),
+        bytes,
+    );
+    let manifest = prepare_artifact_transfer(transfer_plan(), source.engine(), &scope()).unwrap();
+    let target = LocalObjectStore::open(root.path().join("target-corrupt-session")).unwrap();
+    let receiver = ArtifactTransferReceiver::open(target.clone()).unwrap();
+    let source_node = manifest.plan.source.clone();
+    let target_node = manifest.plan.target.clone();
+    assert!(receiver
+        .handle(
+            &NodeId::new("node:impostor").unwrap(),
+            &target_node,
+            ArtifactTransferRpc::begin(manifest.clone()).unwrap(),
+        )
+        .is_err());
+    receiver
+        .handle(
+            &source_node,
+            &target_node,
+            ArtifactTransferRpc::begin(manifest.clone()).unwrap(),
+        )
+        .unwrap();
+
+    let mut tampered = ArtifactTransferRpc::chunk(
+        manifest.manifest_digest.clone(),
+        manifest.objects[0].sha256.clone(),
+        0,
+        vec![b'x'; bytes.len()],
+    )
+    .unwrap();
+    let ArtifactTransferOperation::Chunk { chunk_digest, .. } = &mut tampered.operation else {
+        unreachable!()
+    };
+    *chunk_digest = "00".repeat(32);
+    assert!(receiver
+        .handle(&source_node, &target_node, tampered)
+        .is_err());
+    let corrupt = ArtifactTransferRpc::chunk(
+        manifest.manifest_digest.clone(),
+        manifest.objects[0].sha256.clone(),
+        0,
+        vec![b'x'; bytes.len()],
+    )
+    .unwrap();
+    assert!(receiver
+        .handle(&source_node, &target_node, corrupt)
+        .is_err());
+    assert!(target.verify(&manifest.objects[0].sha256).is_err());
+    let ArtifactTransferRpcResult::Progress { objects, .. } = receiver
+        .handle(
+            &source_node,
+            &target_node,
+            ArtifactTransferRpc::begin(manifest).unwrap(),
+        )
+        .unwrap()
+    else {
+        panic!("restart did not return progress")
+    };
+    assert_eq!(objects[0].next_offset, 0);
 }

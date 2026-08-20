@@ -1,13 +1,15 @@
 use std::collections::{BTreeMap, BTreeSet};
+use std::sync::Arc;
 use vyrm_cluster::{
-    prepare_artifact_transfer, NodeId, ReplicaTransferPlan, ShardId, ShardReadStamp,
-    CLUSTER_CONTRACT_VERSION,
+    prepare_artifact_transfer, transfer_artifacts, ArtifactObjectProgress,
+    ArtifactTransferObservation, ArtifactTransferObserver, NodeId, ReplicaTransferPlan, ShardId,
+    ShardReadStamp, CLUSTER_CONTRACT_VERSION,
 };
 use vyrm_core::{
     DataTransaction, RuntimeCommit, RuntimeMutation, RuntimeRecordSchema, RuntimeSchemaRegistry,
     RuntimeType, RuntimeValue, ScopeId,
 };
-use vyrm_node::execute_traced_artifact_transfer;
+use vyrm_node::{execute_traced_artifact_transfer, DurableArtifactTransferObserver};
 use vyrm_store::{DataRuntime, Engine, LocalObjectStore, MemoryEngine, NativeEngine, Store};
 
 fn scope() -> ScopeId {
@@ -33,7 +35,7 @@ fn plan() -> ReplicaTransferPlan {
     }
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, serde::Serialize)]
 struct TraceView {
     name: String,
     phase: String,
@@ -162,4 +164,94 @@ fn cluster_object_transfer_is_causal_private_and_equal_across_engines() {
     );
     let encoded = serde_json::to_string(&memory[3].attributes).unwrap();
     assert!(!encoded.contains("bounded vector artifact"));
+}
+
+#[test]
+fn transport_observations_persist_as_one_causal_project_trace() {
+    let root = tempfile::tempdir().unwrap();
+    let source = LocalObjectStore::open(root.path().join("observed-source")).unwrap();
+    let runtime = DataRuntime::new(MemoryEngine::new(), source);
+    let object = runtime
+        .stage_object(
+            "vector:observed@1:bytes",
+            None,
+            "application/vnd.vyrm.vector-hnsw+json",
+            b"operator-generated vector index bytes",
+        )
+        .unwrap();
+    let mut schema = RuntimeSchemaRegistry::empty(1, "observed transfer fixture");
+    schema.records.insert(
+        RuntimeType::new("fixture").unwrap(),
+        RuntimeRecordSchema::default(),
+    );
+    let read = runtime.engine().runtime_read_stamp(&scope()).unwrap();
+    runtime
+        .commit(
+            &DataTransaction::new(
+                read,
+                RuntimeCommit {
+                    scope: scope(),
+                    at: 10,
+                    actor: "cluster:test".into(),
+                    expected_cursor: 0,
+                    mutations: vec![
+                        RuntimeMutation::Schema { registry: schema },
+                        RuntimeMutation::Object { object },
+                    ],
+                },
+            )
+            .unwrap(),
+        )
+        .unwrap();
+    let manifest = prepare_artifact_transfer(plan(), runtime.engine(), &scope()).unwrap();
+    let target = LocalObjectStore::open(root.path().join("observed-target")).unwrap();
+    let receipt = transfer_artifacts(runtime.objects(), &target, &manifest, 23).unwrap();
+    let object = &manifest.objects[0];
+    let (engine, _) = runtime.into_parts();
+    let engine = Arc::new(engine);
+    let observer =
+        DurableArtifactTransferObserver::new(Arc::clone(&engine), "cluster:transport").unwrap();
+    observer
+        .observe(ArtifactTransferObservation::prepared(&manifest, 1, 20).unwrap())
+        .unwrap();
+    observer
+        .observe(
+            ArtifactTransferObservation::progress(
+                &manifest,
+                1,
+                21,
+                &ArtifactObjectProgress {
+                    sha256: object.sha256.clone(),
+                    expected_length: object.length,
+                    next_offset: object.length,
+                    complete: true,
+                },
+            )
+            .unwrap(),
+        )
+        .unwrap();
+    observer
+        .observe(ArtifactTransferObservation::completed(&manifest, 1, 22, 2_000, &receipt).unwrap())
+        .unwrap();
+
+    let trace = traces(engine.as_ref());
+    let transfer = trace
+        .iter()
+        .filter(|event| event.name == "cluster.artifact_transfer")
+        .collect::<Vec<_>>();
+    assert_eq!(transfer.len(), 2);
+    assert_eq!(transfer[0].phase, "start");
+    assert_eq!(transfer[1].phase, "finish");
+    assert_eq!(transfer[1].outcome, "ok");
+    let chunk = trace
+        .iter()
+        .find(|event| event.name == "cluster.artifact_chunk")
+        .unwrap();
+    assert!(chunk.parent.is_some());
+    assert_eq!(
+        transfer[1].attributes["transferred_bytes"],
+        RuntimeValue::Unsigned(object.length)
+    );
+    let encoded = serde_json::to_string(&trace).unwrap();
+    assert!(!encoded.contains("operator-generated vector index bytes"));
 }

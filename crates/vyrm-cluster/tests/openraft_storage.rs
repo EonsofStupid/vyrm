@@ -426,6 +426,14 @@ fn canonical_runtime_commit_is_atomic_idempotent_durable_and_transferable() {
                 .get(b"vyrm/raft/v4/local/vote")
                 .map_err(test_storage_error)?
                 .is_none());
+            let cached_transfer = state_machine
+                .artifact_manifest_for_cached_snapshot(
+                    &snapshot_meta,
+                    &ScopeId::new("cluster:atomic").map_err(test_storage_error)?,
+                    NodeId::new("node:source").map_err(test_storage_error)?,
+                    NodeId::new("node:target").map_err(test_storage_error)?,
+                )?
+                .expect("artifact-bearing snapshot must produce a transfer manifest");
             drop(builder);
             drop(state_machine);
             drop(log_store);
@@ -453,6 +461,7 @@ fn canonical_runtime_commit_is_atomic_idempotent_durable_and_transferable() {
             )
             .map_err(test_storage_error)?;
             assert_eq!(transfer.objects.len(), 1);
+            assert_eq!(cached_transfer, transfer);
             drop(source_native);
 
             let wal = recover(&directory.path().join("wal/00000000000000000001.wal"))
@@ -509,6 +518,14 @@ fn canonical_runtime_commit_is_atomic_idempotent_durable_and_transferable() {
                 .install_snapshot(&forged_meta, forged_snapshot)
                 .await
                 .is_err());
+            assert_eq!(target_state.applied_state().await?.0, None);
+            let unhydrated_snapshot =
+                snapshot_handle(target_directory.path(), &snapshot_data).await?;
+            let unhydrated = target_state
+                .install_snapshot(&snapshot_meta, unhydrated_snapshot)
+                .await
+                .unwrap_err();
+            assert!(unhydrated.to_string().contains("object missing"));
             assert_eq!(target_state.applied_state().await?.0, None);
             let target_artifacts =
                 LocalObjectStore::open(target_directory.path().join("application-objects"))

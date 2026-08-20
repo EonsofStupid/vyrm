@@ -91,12 +91,15 @@ Vyrm provides:
   remain gated);
 - grounded replica-artifact hydration for project-scoped vector/index bytes:
   typed manifests bind source/target, placement epoch, shard snapshot, exact
-  runtime read, sorted object references, and digest closure; bounded local
-  streaming verifies both endpoints, reuses duplicate content, and completes
-  before OpenRaft snapshot activation. The target independently scans the
-  authenticated VyrmKV snapshot and denies incomplete or substituted manifests.
-  Cluster/storage trace spans expose transfer counts, bytes, and receipt
-  identities without persisting object content;
+  runtime read, sorted object references, and digest closure. OpenRaft's real
+  mTLS path now hydrates that closure through durable, resumable, exact-offset
+  sessions with independently digested chunks before sending snapshot byte
+  zero; retries re-check the same closure and reuse verified content. The
+  target independently scans the authenticated VyrmKV snapshot and denies
+  activation if any referenced bytes are missing or corrupt. Typed bounded
+  observations expose attempts, progress, duration, counts, bytes, and receipt
+  identities without persisting object content; `vyrm-node` can commit them as
+  causal project traces through an injected fail-closed observer;
 - identical lifecycle semantics through hooks, CLI, and MCP;
 - isolated per-platform instances with explicit store/root binding.
 
