@@ -1,0 +1,10 @@
+format = 1
+
+[[workflows]]
+event = "package:bun:test"
+command = ["bun", "test"]
+allow_arguments = true
+scope = "fixture-app"
+required_projections = ["source-routing"]
+max_source_lag_generations = 0
+verification = "exit_zero"

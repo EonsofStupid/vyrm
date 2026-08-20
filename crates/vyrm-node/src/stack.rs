@@ -24,6 +24,39 @@
 use std::path::Path;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PackageManager {
+    Bun,
+    Pnpm,
+    Npm,
+    Yarn,
+}
+
+impl PackageManager {
+    pub const fn canonical_name(self) -> &'static str {
+        match self {
+            Self::Bun => "bun",
+            Self::Pnpm => "pnpm",
+            Self::Npm => "npm",
+            Self::Yarn => "yarn",
+        }
+    }
+}
+
+/// One package-manager lifecycle event with a stable, script-sensitive name.
+/// These names are the hook/trigger seam used by TanStack and other JS apps.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PackageRunEvent {
+    pub manager: PackageManager,
+    pub action: String,
+}
+
+impl PackageRunEvent {
+    pub fn canonical_subject(&self) -> String {
+        format!("package:{}:{}", self.manager.canonical_name(), self.action)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct StackProfile {
     pub name: &'static str,
     /// Marker files any one of which is the detection evidence.
@@ -36,7 +69,14 @@ pub struct StackProfile {
 const CARGO: StackProfile = StackProfile {
     name: "cargo",
     markers: &["Cargo.toml"],
-    run_prefixes: &["cargo test", "cargo build", "cargo run", "cargo clippy", "cargo check", "cargo nextest"],
+    run_prefixes: &[
+        "cargo test",
+        "cargo build",
+        "cargo run",
+        "cargo clippy",
+        "cargo check",
+        "cargo nextest",
+    ],
 };
 
 const BUN: StackProfile = StackProfile {
@@ -49,7 +89,13 @@ const NODE: StackProfile = StackProfile {
     name: "node",
     markers: &["package.json"],
     run_prefixes: &[
-        "npm test", "npm run", "pnpm test", "pnpm run", "yarn test", "yarn run", "npx",
+        "npm test",
+        "npm run",
+        "pnpm test",
+        "pnpm run",
+        "yarn test",
+        "yarn run",
+        "npx",
     ],
 };
 
@@ -57,7 +103,13 @@ const PYTHON: StackProfile = StackProfile {
     name: "python",
     markers: &["pyproject.toml", "uv.lock", "requirements.txt", "setup.py"],
     run_prefixes: &[
-        "uv run", "uv sync", "pytest", "python -m pytest", "ruff check", "ruff format", "mypy",
+        "uv run",
+        "uv sync",
+        "pytest",
+        "python -m pytest",
+        "ruff check",
+        "ruff format",
+        "mypy",
     ],
 };
 
@@ -70,15 +122,34 @@ const GO: StackProfile = StackProfile {
 const CPP: StackProfile = StackProfile {
     name: "cpp",
     markers: &["CMakeLists.txt", "meson.build"],
-    run_prefixes: &["cmake --build", "cmake --workflow", "ctest", "ninja", "meson test", "make"],
+    run_prefixes: &[
+        "cmake --build",
+        "cmake --workflow",
+        "ctest",
+        "ninja",
+        "meson test",
+        "make",
+    ],
 };
 
 /// Not a runtime: the Vite tool layer, which rides on bun or node. Detected
 /// separately so its runners are journaled even when invoked bare.
 const VITE: StackProfile = StackProfile {
     name: "vite",
-    markers: &["vite.config.ts", "vite.config.js", "vite.config.mts", "vitest.config.ts"],
-    run_prefixes: &["vitest", "vite build", "vite dev", "vite preview", "playwright test", "tsc"],
+    markers: &[
+        "vite.config.ts",
+        "vite.config.js",
+        "vite.config.mts",
+        "vitest.config.ts",
+    ],
+    run_prefixes: &[
+        "vitest",
+        "vite build",
+        "vite dev",
+        "vite preview",
+        "playwright test",
+        "tsc",
+    ],
 };
 
 /// Detects the stacks present at `root`, in census priority order. A
@@ -150,14 +221,73 @@ impl StackProfile {
     /// `makepkg`.
     pub fn run_subject(&self, command: &str) -> Option<String> {
         let trimmed = command.trim_start();
-        self.run_prefixes
-            .iter()
-            .find(|prefix| {
-                trimmed.strip_prefix(**prefix).is_some_and(|rest| {
-                    rest.is_empty() || rest.starts_with(char::is_whitespace)
-                })
-            })
-            .map(|prefix| prefix.replace(' ', "-").replace("--", ""))
+        let matched = self.run_prefixes.iter().find(|prefix| {
+            trimmed
+                .strip_prefix(**prefix)
+                .is_some_and(|rest| rest.is_empty() || rest.starts_with(char::is_whitespace))
+        })?;
+        if matches!(self.name, "bun" | "node") {
+            if let Some(event) = package_run_event(trimmed) {
+                return Some(event.canonical_subject());
+            }
+        }
+        Some(matched.replace(' ', "-").replace("--", ""))
+    }
+}
+
+/// Parses only the package-manager commands already admitted by a stack
+/// profile. Shell composition remains outside this function; callers pass the
+/// executed command and receive a canonical event identity when its first
+/// command is an npm-compatible lifecycle run.
+pub fn package_run_event(command: &str) -> Option<PackageRunEvent> {
+    let mut words = command.split_whitespace();
+    let executable = words.next()?;
+    let manager = match executable {
+        "bun" | "bunx" => PackageManager::Bun,
+        "pnpm" => PackageManager::Pnpm,
+        "npm" | "npx" => PackageManager::Npm,
+        "yarn" => PackageManager::Yarn,
+        _ => return None,
+    };
+    let first = words.next();
+    let action = match executable {
+        "bunx" | "npx" => format!("exec:{}", canonical_fragment(first.unwrap_or("unknown"))),
+        _ => {
+            let verb = first?;
+            if verb == "run" {
+                match words.next() {
+                    Some(script) if !script.starts_with('-') => {
+                        format!("run:{}", canonical_fragment(script))
+                    }
+                    _ => "run".into(),
+                }
+            } else {
+                canonical_fragment(verb)
+            }
+        }
+    };
+    Some(PackageRunEvent { manager, action })
+}
+
+fn canonical_fragment(value: &str) -> String {
+    let mut out = String::with_capacity(value.len());
+    let mut separator = false;
+    for character in value.chars().flat_map(char::to_lowercase) {
+        if character.is_ascii_alphanumeric() || matches!(character, '-' | '_' | '.') {
+            out.push(character);
+            separator = false;
+        } else if !separator && !out.is_empty() {
+            out.push('-');
+            separator = true;
+        }
+    }
+    while out.ends_with('-') {
+        out.pop();
+    }
+    if out.is_empty() {
+        "unknown".into()
+    } else {
+        out
     }
 }
 
@@ -177,7 +307,11 @@ mod tests {
 
         std::fs::write(dir.path().join("bun.lock"), "").unwrap();
         let names: Vec<_> = detect(dir.path()).iter().map(|s| s.name).collect();
-        assert_eq!(names, vec!["cargo", "bun"], "the lockfile names the runtime");
+        assert_eq!(
+            names,
+            vec!["cargo", "bun"],
+            "the lockfile names the runtime"
+        );
     }
 
     #[test]
@@ -193,17 +327,52 @@ mod tests {
 
     #[test]
     fn run_subjects_group_by_command_kind_at_word_boundaries() {
-        assert_eq!(CARGO.run_subject("cargo test --lib"), Some("cargo-test".into()));
-        assert_eq!(CARGO.run_subject("  cargo build --release"), Some("cargo-build".into()));
-        assert_eq!(CARGO.run_subject("cargo publish"), None, "unlisted commands are not runs");
-        assert_eq!(PYTHON.run_subject("uv run pytest -x"), Some("uv-run".into()));
+        assert_eq!(
+            CARGO.run_subject("cargo test --lib"),
+            Some("cargo-test".into())
+        );
+        assert_eq!(
+            CARGO.run_subject("  cargo build --release"),
+            Some("cargo-build".into())
+        );
+        assert_eq!(
+            CARGO.run_subject("cargo publish"),
+            None,
+            "unlisted commands are not runs"
+        );
+        assert_eq!(
+            PYTHON.run_subject("uv run pytest -x"),
+            Some("uv-run".into())
+        );
         assert_eq!(PYTHON.run_subject("pytest tests/"), Some("pytest".into()));
         assert_eq!(GO.run_subject("go test ./..."), Some("go-test".into()));
-        assert_eq!(CPP.run_subject("cmake --build build"), Some("cmake-build".into()));
+        assert_eq!(
+            CPP.run_subject("cmake --build build"),
+            Some("cmake-build".into())
+        );
         assert_eq!(CPP.run_subject("make -j8"), Some("make".into()));
-        assert_eq!(CPP.run_subject("makepkg -si"), None, "word boundary: make must not claim makepkg");
+        assert_eq!(
+            CPP.run_subject("makepkg -si"),
+            None,
+            "word boundary: make must not claim makepkg"
+        );
         assert_eq!(VITE.run_subject("vitest run"), Some("vitest".into()));
-        assert_eq!(BUN.run_subject("bun test src/"), Some("bun-test".into()));
+        assert_eq!(
+            BUN.run_subject("bun test src/"),
+            Some("package:bun:test".into())
+        );
+        assert_eq!(
+            NODE.run_subject("pnpm run typecheck -- --watch"),
+            Some("package:pnpm:run:typecheck".into())
+        );
+        assert_eq!(
+            NODE.run_subject("npm run test:unit"),
+            Some("package:npm:run:test-unit".into())
+        );
+        assert_eq!(
+            NODE.run_subject("npx playwright test"),
+            Some("package:npm:exec:playwright".into())
+        );
     }
 
     #[test]
@@ -230,6 +399,9 @@ mod tests {
         );
 
         std::fs::write(dir.path().join("package.json"), "not json").unwrap();
-        assert!(frameworks(dir.path()).is_empty(), "corrupt manifests degrade, never error");
+        assert!(
+            frameworks(dir.path()).is_empty(),
+            "corrupt manifests degrade, never error"
+        );
     }
 }

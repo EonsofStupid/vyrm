@@ -10,7 +10,10 @@ use fjall::PersistMode;
 
 /// Authoritative claims.
 pub const CLAIMS: &str = "claims";
-/// Sequence index: append sequence to claim key.
+/// Sequence index: append sequence to claim key. Native Vyrm additionally
+/// carries canonical claim bytes in a versioned value envelope so replay needs
+/// one bounded range scan; the Fjall adapter and legacy native values retain
+/// the key-only representation.
 ///
 /// Replaces the `events` keyspace carried over from the prior runtime, which was
 /// allocated for a term the specification never defined and which nothing wrote
@@ -25,12 +28,70 @@ pub const INVOCATIONS: &str = "invocations";
 /// Derived projections (the routing index among them). Derivable from their
 /// sources by construction, so loss on crash costs a rebuild, not truth.
 pub const PROJECTIONS: &str = "projections";
+/// Authoritative append-only runtime change log, keyed by global cursor.
+pub const RUNTIME_CHANGES: &str = "runtime_changes";
+/// Latest persisted version of each typed runtime record. Updated atomically
+/// with the authoritative change log and used for reference-integrity checks.
+pub const RUNTIME_RECORDS: &str = "runtime_records";
+/// Latest persisted version of each typed runtime relation.
+pub const RUNTIME_RELATIONS: &str = "runtime_relations";
+/// Latest canonical vector values. Vector indexes remain projections.
+pub const RUNTIME_VECTORS: &str = "runtime_vectors";
+/// Latest canonical time-series samples. Time indexes remain projections.
+pub const RUNTIME_SERIES: &str = "runtime_series";
+/// Latest canonical WGS84 values. Spatial indexes remain projections.
+pub const RUNTIME_GEO: &str = "runtime_geo";
+/// Canonical visibility records for verified immutable object bytes.
+pub const RUNTIME_OBJECTS: &str = "runtime_objects";
+/// Transactional projection work keyed by the source runtime cursor.
+pub const RUNTIME_OUTBOX: &str = "runtime_outbox";
+/// Accepted-operation audit envelopes keyed by commit identity.
+pub const RUNTIME_AUDIT: &str = "runtime_audit";
+/// Accepted transaction outcomes keyed by content identity for idempotent retry.
+pub const RUNTIME_COMMITS: &str = "runtime_commits";
+/// Latest authoritative schema registry for each runtime scope. Every update
+/// is also present in the hash-chained runtime change log.
+pub const RUNTIME_SCHEMAS: &str = "runtime_schemas";
+/// Persisted leased read stamps. Native `vyrmKV` uses the same catalog to pin
+/// physical manifests; the append-only compatibility engine needs no further
+/// retention machinery yet.
+pub const RUNTIME_SNAPSHOTS: &str = "runtime_snapshots";
+
+/// Every logical keyspace owned by the persistent Engine contract, in the
+/// canonical order used by storage migration archives. Adding a keyspace is a
+/// format decision: migrations deny unknown source keyspaces and therefore
+/// cannot silently omit newly introduced state.
+pub const ALL: [&str; 18] = [
+    CLAIMS,
+    SEQUENCE_INDEX,
+    ACCESS,
+    META,
+    INVOCATIONS,
+    PROJECTIONS,
+    RUNTIME_CHANGES,
+    RUNTIME_RECORDS,
+    RUNTIME_RELATIONS,
+    RUNTIME_VECTORS,
+    RUNTIME_SERIES,
+    RUNTIME_GEO,
+    RUNTIME_OBJECTS,
+    RUNTIME_OUTBOX,
+    RUNTIME_AUDIT,
+    RUNTIME_COMMITS,
+    RUNTIME_SCHEMAS,
+    RUNTIME_SNAPSHOTS,
+];
 
 /// Key under which the claim sequence watermark is recorded.
 pub const SEQUENCE_WATERMARK: &[u8] = b"watermark/claims/sequence";
 
 /// Key under which the invocation ordinal watermark is recorded.
 pub const INVOCATION_WATERMARK: &[u8] = b"watermark/invocations/ordinal";
+
+/// Global cursor and hash-chain head for typed runtime changes.
+pub const RUNTIME_CURSOR: &[u8] = b"watermark/runtime/cursor";
+pub const RUNTIME_LAST_DIGEST: &[u8] = b"watermark/runtime/last-digest";
+pub const RUNTIME_LAST_AUDIT_DIGEST: &[u8] = b"watermark/runtime/last-audit-digest";
 
 /// Persistence policy for a write transaction.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

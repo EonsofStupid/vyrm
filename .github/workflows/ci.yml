@@ -1,0 +1,41 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Test workspace
+        run: cargo test --workspace --all-features --locked
+      - name: Deny warnings
+        run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
+      - name: Verify controlled evaluation evidence
+        run: cargo run --locked -p vyrm-eval -- verify eval/results/2026-08-18-summary.json
+      - name: Enforce kernel dependency boundary
+        run: |
+          tree="$(cargo tree --locked -p vyrm-core --edges normal --depth 1)"
+          printf '%s\n' "$tree"
+          test "$(printf '%s\n' "$tree" | tail -n +2 | wc -l)" -eq 1
+          printf '%s\n' "$tree" | tail -n 1 | grep -q 'serde v'
+      - name: Enforce offline edge dependency and binary budgets
+        run: |
+          tree="$(cargo tree --locked -p vyrm-edge --edges normal)"
+          printf '%s\n' "$tree"
+          ! printf '%s\n' "$tree" | grep -Eiq 'reqwest|hyper|tokio|rustls|openssl|ureq|curl|quinn|tonic'
+          local_model_tree="$(cargo tree --locked -p vyrm-embed --features fastembed-local --edges normal)"
+          printf '%s\n' "$local_model_tree"
+          ! printf '%s\n' "$local_model_tree" | grep -Eiq 'reqwest|hyper|tokio|rustls|openssl|ureq|curl|quinn|tonic|hf-hub'
+          cargo build --locked --release -p vyrm-edge
+          binary="${CARGO_TARGET_DIR:-target}/release/vyrm-edge"
+          test "$(stat -c '%s' "$binary")" -le 2097152

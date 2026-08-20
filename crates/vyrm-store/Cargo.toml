@@ -4,10 +4,11 @@ version = "0.1.0"
 edition.workspace = true
 license.workspace = true
 publish.workspace = true
-description = "vyrm substrate adapter: Fjall keyspaces, durability classes, batch commit."
+description = "vyrm storage contract and transitional Fjall adapter: atomic runtime commits, durability, and replay."
 
 [dependencies]
 vyrm-core = { path = "../vyrm-core" }
+vyrm-kv = { path = "../vyrm-kv" }
 fjall = "=3.1.8"
 serde = { workspace = true }
 serde_json = { workspace = true }

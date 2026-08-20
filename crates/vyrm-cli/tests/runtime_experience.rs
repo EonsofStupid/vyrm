@@ -7,6 +7,7 @@
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use vyrm_store::{Engine, PersistentEngine};
 
 fn vyrm(db: &Path, args: &[&str], stdin_json: Option<&str>) -> (bool, String, String) {
     let mut child = Command::new(env!("CARGO_BIN_EXE_vyrm"))
@@ -39,7 +40,31 @@ fn scratch(name: &str) -> PathBuf {
     path.push(name);
     let _ = std::fs::remove_dir_all(&path);
     std::fs::create_dir_all(&path).expect("create scratch directory");
+    std::fs::create_dir_all(path.join(".vyrm")).expect("create instance directory");
+    std::fs::write(
+        path.join(".vyrm/instance.toml"),
+        format!(
+            "format = 1\nid = {:?}\nmode = \"dedicated\"\nmembers = [\".\"]\n",
+            name
+        ),
+    )
+    .expect("write instance manifest");
     path
+}
+
+fn declare_attempt(db: &Path, run: &str) {
+    for payload in [
+        r#"{"kind":"goal","statement":"mutate project","acceptance":["verified"]}"#,
+        r#"{"kind":"plan","hypothesis":"the declared edit is needed","steps":["edit","verify"]}"#,
+        r#"{"kind":"attempt","summary":"execute declared mutation","actions":["Edit"]}"#,
+    ] {
+        let (ok, _, err) = vyrm(
+            db,
+            &["reasoning", "record", "--run", run, "--payload", payload],
+            None,
+        );
+        assert!(ok, "could not declare reasoning attempt: {err}");
+    }
 }
 
 #[test]
@@ -113,6 +138,18 @@ fn a_scripted_session_recall_arrives_before_reasoning_and_runs_are_journaled() {
         out.contains("failing") && out.contains("passing"),
         "history must keep both readings: {out}"
     );
+    let history: serde_json::Value = {
+        let (_, out, _) = vyrm(
+            &db,
+            &["history", "--subject", "cargo-test", "--predicate", "status", "--json"],
+            None,
+        );
+        serde_json::from_str(&out).unwrap()
+    };
+    assert!(history.as_array().unwrap().iter().any(|claim| {
+        claim["object"].as_str().is_some_and(|object| object.contains("failing"))
+            && claim["valid_to"].is_number()
+    }), "the failing run must have an explicit retirement interval: {history}");
 
     // Hook dispatches are recorded with trigger `event` — automation that
     // still cannot forget to record itself.
@@ -124,19 +161,29 @@ fn a_scripted_session_recall_arrives_before_reasoning_and_runs_are_journaled() {
 fn the_wait_gate_denies_mutation_while_quarantined_and_reset_reopens() {
     let root = scratch("gated-project");
     let db = root.join(".vyrm/store");
+    let root_str = root.to_str().unwrap();
     vyrm(&db, &["assert", "--subject", "wp3", "--predicate", "status", "--object", "active",
                 "--valid-from", "1000"], None);
     vyrm(&db, &["rebuild"], None);
-
-    // Healthy: the gate stays out of the way.
     let edit = r#"{"tool_name":"Edit","tool_input":{"file_path":"x.rs"}}"#;
-    let (ok, out, _) = vyrm(&db, &["hook", "pre-tool-use"], Some(edit));
+
+    // Deny by default: healthy storage is not authority to mutate without a
+    // declared goal, plan, and attempt.
+    let (ok, out, err) = vyrm(&db, &["hook", "pre-tool-use", "--root", root_str], Some(edit));
+    assert!(ok, "policy hook failed: {err}");
+    assert!(out.contains("\"permissionDecision\":\"deny\""));
+    assert!(out.contains("contract differential"));
+    assert!(out.contains("no active run"));
+
+    // Once the attempt is explicit, healthy gates stay out of the way.
+    declare_attempt(&db, "projection-gate");
+    let (ok, out, _) = vyrm(&db, &["hook", "pre-tool-use", "--root", root_str], Some(edit));
     assert!(ok);
     assert!(out.is_empty(), "healthy projection must not gate: {out:?}");
 
     // Corrupt the stored projection, ground, quarantine.
     {
-        let store = vyrm_store::Store::open(&db).unwrap();
+        let store = PersistentEngine::open(&db).unwrap();
         let bytes = store.get_projection(vyrm_store::CURRENT_PROJECTION).unwrap().unwrap();
         let corrupted = String::from_utf8(bytes).unwrap().replacen("\"active\"", "\"drifted\"", 1);
         store.put_projection(vyrm_store::CURRENT_PROJECTION, corrupted.as_bytes()).unwrap();
@@ -145,7 +192,7 @@ fn the_wait_gate_denies_mutation_while_quarantined_and_reset_reopens() {
     assert!(out.contains("DIVERGENCE"), "grounding missed the corruption: {out}");
 
     // The gate: mutation is denied with the reason and the way out.
-    let (ok, out, err) = vyrm(&db, &["hook", "pre-tool-use"], Some(edit));
+    let (ok, out, err) = vyrm(&db, &["hook", "pre-tool-use", "--root", root_str], Some(edit));
     assert!(ok, "gate hook errored: {err}");
     assert!(out.contains("\"permissionDecision\":\"deny\""), "no deny decision: {out}");
     assert!(out.contains("quarantined"), "reason must say why: {out}");
@@ -154,15 +201,66 @@ fn the_wait_gate_denies_mutation_while_quarantined_and_reset_reopens() {
     // A read-only tool passes even under quarantine: waiting applies to
     // mutation, not to looking.
     let read = r#"{"tool_name":"Read","tool_input":{"file_path":"x.rs"}}"#;
-    let (ok, out, _) = vyrm(&db, &["hook", "pre-tool-use"], Some(read));
+    let (ok, out, _) = vyrm(&db, &["hook", "pre-tool-use", "--root", root_str], Some(read));
     assert!(ok);
     assert!(out.is_empty(), "reads are not gated: {out:?}");
 
     // Reset reopens the gate.
     vyrm(&db, &["reset-projection"], None);
-    let (ok, out, _) = vyrm(&db, &["hook", "pre-tool-use"], Some(edit));
+    let (ok, out, _) = vyrm(&db, &["hook", "pre-tool-use", "--root", root_str], Some(edit));
     assert!(ok);
     assert!(out.is_empty(), "reset must reopen the gate: {out:?}");
+}
+
+#[test]
+fn routing_is_refreshed_before_mutation_and_corruption_has_an_explicit_recovery() {
+    let root = scratch("routing-gated-project");
+    let db = root.join(".vyrm/store");
+    let source = root.join("lib.rs");
+    std::fs::write(&source, "pub fn before() {}\n").unwrap();
+    let root_str = root.to_str().unwrap();
+    declare_attempt(&db, "routing-gate");
+
+    let (ok, out, err) = vyrm(&db, &["preflight", "--root", root_str], None);
+    assert!(ok, "preflight failed: {err}");
+    assert!(out.contains("routing: built generation 1"), "routing was not composed: {out}");
+
+    std::fs::write(&source, "pub fn after_() {}\n").unwrap();
+    let edit = format!(
+        r#"{{"tool_name":"Edit","tool_input":{{"file_path":{source:?}}}}}"#
+    );
+    let (ok, out, err) = vyrm(
+        &db,
+        &["hook", "pre-tool-use", "--root", root_str],
+        Some(&edit),
+    );
+    assert!(ok, "freshness hook failed: {err}");
+    assert!(out.is_empty(), "a successful refresh should allow: {out}");
+
+    {
+        let store = PersistentEngine::open(&db).unwrap();
+        store
+            .put_projection(vyrm_node::routing::ROUTING_PROJECTION, b"corrupt")
+            .unwrap();
+    }
+    let (ok, out, err) = vyrm(
+        &db,
+        &["hook", "pre-tool-use", "--root", root_str],
+        Some(&edit),
+    );
+    assert!(ok, "a gate decision is a successful hook response: {err}");
+    assert!(out.contains("\"permissionDecision\":\"deny\""));
+    assert!(out.contains("reset-routing"));
+
+    let (ok, out, err) = vyrm(&db, &["reset-routing", "--root", root_str], None);
+    assert!(ok, "reset-routing failed: {err}");
+    assert!(out.contains("routing projection rebuilt"));
+    let (_, out, _) = vyrm(
+        &db,
+        &["hook", "pre-tool-use", "--root", root_str],
+        Some(&edit),
+    );
+    assert!(out.is_empty(), "explicit routing reset must reopen the gate: {out}");
 }
 
 #[test]
@@ -174,6 +272,11 @@ fn init_writes_real_wiring_idempotently_and_refuses_a_dead_harness() {
     let (ok, out, err) = vyrm(&db, &["init", "--harness", "claude-code", "--root", root_str], None);
     assert!(ok, "init failed: {err}");
     assert!(out.contains("wrote"), "nothing written: {out}");
+
+    let instance = std::fs::read_to_string(root.join(".vyrm/instance.toml")).unwrap();
+    assert!(instance.contains("format = 1"));
+    assert!(instance.contains("mode = \"dedicated\""));
+    assert!(instance.contains("members = [\".\"]"));
 
     let settings = std::fs::read_to_string(root.join(".claude/settings.json")).unwrap();
     for expected in ["SessionStart", "startup|resume|compact", "UserPromptSubmit",
@@ -202,6 +305,22 @@ fn init_writes_real_wiring_idempotently_and_refuses_a_dead_harness() {
     assert!(ok, "status failed: {err}");
     assert!(out.contains("RETIRED"), "gemini-cli's closed interval missing: {out}");
     assert!(out.contains("per_usage") && out.contains("subscription"), "billing axes missing: {out}");
+}
+
+#[test]
+fn runtime_entry_points_refuse_cross_instance_state() {
+    let first = scratch("isolation-first");
+    let second = scratch("isolation-second");
+    let foreign_db = first.join(".vyrm/store");
+    let second_root = second.to_str().unwrap();
+
+    let (ok, _, err) = vyrm(
+        &foreign_db,
+        &["preflight", "--root", second_root],
+        None,
+    );
+    assert!(!ok, "a foreign store/root pairing must fail");
+    assert!(err.contains("does not belong"), "wrong refusal: {err}");
 }
 
 #[test]

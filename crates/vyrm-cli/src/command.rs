@@ -6,7 +6,9 @@
 
 use clap::{Parser, Subcommand};
 use vyrm_core::{Claim, ClaimReader, Millis, Predicate, Producer, Reader, RecallQuery, Subject};
-use vyrm_store::{Effectiveness, Engine, GroundingReport, Outcome, RecallOutcome, Store, Trigger};
+use vyrm_store::{
+    Effectiveness, Engine, GroundingReport, Outcome, PersistentEngine, RecallOutcome, Trigger,
+};
 
 /// What a command produced: the operator-facing text, the `SPEC.md` §13.1
 /// effectiveness fields for recall-carrying commands, and a detail line for
@@ -143,6 +145,13 @@ pub enum Command {
     /// Discard the current-state projection and recompute it from the claim
     /// log. The only exit from quarantine, and an explicit operator decision.
     ResetProjection,
+    /// Explicitly discard and rebuild the persisted source-routing index.
+    /// This is the recovery path for corrupt state and the only way to rebind
+    /// one database to a different project root.
+    ResetRouting {
+        #[arg(long, default_value = ".")]
+        root: std::path::PathBuf,
+    },
     /// The moment of attunement (`PLAN.md` Step P): detect the stack, check
     /// estate health and adapter verification, and emit a budgeted recall of
     /// every claim in force, rendered for context injection.
@@ -180,10 +189,39 @@ pub enum Command {
         #[arg(long, default_value = ".")]
         root: std::path::PathBuf,
     },
+    /// Record or inspect the typed operational reasoning contract.
+    Reasoning {
+        #[command(subcommand)]
+        action: ReasoningAction,
+    },
     /// The harness registry and its drift alarm.
     Harness {
         #[command(subcommand)]
         action: HarnessAction,
+    },
+    /// Offline storage migration and recovery operations.
+    Storage {
+        #[command(subcommand)]
+        action: StorageAction,
+    },
+}
+
+#[derive(Subcommand, Debug, Clone)]
+pub enum ReasoningAction {
+    /// Append one typed transition. `payload` is a tagged ReasoningPayload JSON
+    /// object, for example `{"kind":"goal",...}`.
+    Record {
+        #[arg(long)]
+        run: String,
+        #[arg(long, default_value = "operator:cli")]
+        actor: String,
+        #[arg(long)]
+        payload: String,
+    },
+    /// Show one run, or the active run when `--run` is omitted.
+    Show {
+        #[arg(long)]
+        run: Option<String>,
     },
 }
 
@@ -202,6 +240,16 @@ pub enum HarnessAction {
     Status,
 }
 
+#[derive(Subcommand, Debug, Clone)]
+pub enum StorageAction {
+    /// Start or resume the explicit Fjall-to-vyrmKV migration.
+    Migrate,
+    /// Inspect the durable migration marker without opening the database.
+    Status,
+    /// Restore the retained Fjall source if native has not diverged.
+    Rollback,
+}
+
 impl Command {
     /// Stable name used in the invocation record.
     pub fn name(&self) -> &'static str {
@@ -218,11 +266,17 @@ impl Command {
             Command::Rebuild => "rebuild",
             Command::Ground => "ground",
             Command::ResetProjection => "reset-projection",
+            Command::ResetRouting { .. } => "reset-routing",
             Command::Preflight { .. } => "preflight",
             Command::Hook { .. } => "hook",
             Command::Init { .. } => "init",
+            Command::Reasoning { action: ReasoningAction::Record { .. } } => "reasoning-record",
+            Command::Reasoning { action: ReasoningAction::Show { .. } } => "reasoning-show",
             Command::Harness { action: HarnessAction::Audit { .. } } => "harness-audit",
             Command::Harness { action: HarnessAction::Status } => "harness-status",
+            Command::Storage { action: StorageAction::Migrate } => "storage-migrate",
+            Command::Storage { action: StorageAction::Status } => "storage-status",
+            Command::Storage { action: StorageAction::Rollback } => "storage-rollback",
         }
     }
 
@@ -284,6 +338,7 @@ impl Command {
             }
             Command::Ledger { since } => vec![format!("since={since}")],
             Command::Rebuild | Command::Ground | Command::ResetProjection => Vec::new(),
+            Command::ResetRouting { root } => vec![format!("root={}", root.display())],
             Command::Preflight { root, harness, budget } => {
                 let mut a = vec![format!("root={}", root.display()), format!("budget={budget}")];
                 if let Some(h) = harness {
@@ -304,19 +359,64 @@ impl Command {
             Command::Init { harness, root } => {
                 vec![format!("harness={harness}"), format!("root={}", root.display())]
             }
+            Command::Reasoning { action: ReasoningAction::Record { run, actor, payload } } => {
+                vec![format!("run={run}"), format!("actor={actor}"), format!("payload={payload}")]
+            }
+            Command::Reasoning { action: ReasoningAction::Show { run } } => {
+                run.iter().map(|run| format!("run={run}")).collect()
+            }
             Command::Harness { action: HarnessAction::Audit { name, evidence } } => {
                 vec![format!("name={name}"), format!("evidence={evidence}")]
             }
             Command::Harness { action: HarnessAction::Status } => Vec::new(),
+            Command::Storage { .. } => Vec::new(),
         }
     }
+}
+
+/// Executes commands that must run before the normal persistent Engine is
+/// opened. Migration deliberately takes exclusive ownership of the database
+/// directory and therefore cannot travel through the invocation wrapper.
+pub fn execute_offline(
+    db: &std::path::Path,
+    command: &Command,
+    now: Millis,
+    json: bool,
+) -> Option<Result<Execution, Box<dyn std::error::Error>>> {
+    let action = match command {
+        Command::Storage { action } => action,
+        _ => return None,
+    };
+    Some((|| {
+        let report = match action {
+            StorageAction::Migrate => Some(vyrm_store::migrate_fjall_to_native(db, now)?),
+            StorageAction::Status => vyrm_store::migration_status(db)?,
+            StorageAction::Rollback => Some(vyrm_store::rollback_fjall_migration(db)?),
+        };
+        let text = if json {
+            serde_json::to_string_pretty(&report)?
+        } else if let Some(report) = report {
+            format!(
+                "storage migration {:?}: {} entries / {} bytes / sha256 {}\nFjall backup: {}\nArchive: {}",
+                report.phase,
+                report.inventory.entries,
+                report.inventory.payload_bytes,
+                report.inventory.archive_sha256,
+                report.fjall_backup.display(),
+                report.archive.display(),
+            )
+        } else {
+            "no storage migration marker".into()
+        };
+        Ok(text.into())
+    })())
 }
 
 /// Executes one command.
 ///
 /// `now` is supplied rather than read here, so that tests are deterministic and
 /// the clock enters at exactly one place (`main`).
-pub fn execute(store: &Store, command: &Command, reader: &Reader, now: Millis, json: bool)
+pub fn execute(store: &PersistentEngine, command: &Command, reader: &Reader, now: Millis, json: bool)
     -> Result<Execution, Box<dyn std::error::Error>>
 {
     match command {
@@ -411,6 +511,7 @@ pub fn execute(store: &Store, command: &Command, reader: &Reader, now: Millis, j
         }
 
         Command::Preflight { root, harness, budget } => {
+            verify_instance_store(store, root)?;
             let flight =
                 vyrm_node::preflight(store, root, harness.as_deref(), reader, now, *budget)?;
             let detail = (!flight.warnings.is_empty())
@@ -441,6 +542,7 @@ pub fn execute(store: &Store, command: &Command, reader: &Reader, now: Millis, j
                     .map(Into::into)
                     .unwrap_or_else(|| ".".into())
             });
+            verify_instance_store(store, &root)?;
             let ctx = vyrm_node::HookContext {
                 store,
                 root: &root,
@@ -501,7 +603,8 @@ pub fn execute(store: &Store, command: &Command, reader: &Reader, now: Millis, j
         | Command::Outcome { .. }
         | Command::Ledger { .. }
         | Command::Preflight { .. }
-        | Command::Hook { .. } => {
+        | Command::Hook { .. }
+        | Command::Storage { .. } => {
             unreachable!("handled above with an early return")
         }
 
@@ -523,6 +626,57 @@ pub fn execute(store: &Store, command: &Command, reader: &Reader, now: Millis, j
                 .collect();
             lines.extend(report.notes.iter().map(|n| format!("note: {n}")));
             Ok(lines.join("\n"))
+        }
+
+        Command::Reasoning { action: ReasoningAction::Record { run, actor, payload } } => {
+            let payload: vyrm_core::ReasoningPayload = serde_json::from_str(payload)?;
+            let event = vyrm_node::record_reasoning(store, run, now, actor, payload)?;
+            Ok(if json {
+                serde_json::to_string_pretty(&event)?
+            } else {
+                format!(
+                    "reasoning run {}: recorded {} #{} [{}]",
+                    event.run_id,
+                    event.payload.name(),
+                    event.ordinal,
+                    event.digest
+                )
+            })
+        }
+
+        Command::Reasoning { action: ReasoningAction::Show { run } } => {
+            let run = match run {
+                Some(id) => vyrm_node::reasoning_run(store, id)?,
+                None => vyrm_node::active_reasoning_run(store)?,
+            };
+            let Some(run) = run else {
+                return Ok("no matching reasoning run".into());
+            };
+            Ok(if json {
+                serde_json::to_string_pretty(&serde_json::json!({
+                    "run_id": run.id(),
+                    "state": run.state(),
+                    "events": run.events(),
+                }))?
+            } else {
+                let mut lines = vec![format!(
+                    "reasoning run {}: {:?}; {} event(s)",
+                    run.id(),
+                    run.state(),
+                    run.events().len()
+                )];
+                lines.extend(run.events().iter().map(|event| {
+                    format!(
+                        "  #{:<3} {:<12} at={} by={} {}",
+                        event.ordinal,
+                        event.payload.name(),
+                        event.at,
+                        event.actor,
+                        event.digest
+                    )
+                }));
+                lines.join("\n")
+            })
         }
 
         Command::Harness { action: HarnessAction::Audit { name, evidence } } => {
@@ -630,6 +784,27 @@ pub fn execute(store: &Store, command: &Command, reader: &Reader, now: Millis, j
                 )
             })
         }
+        Command::ResetRouting { root } => {
+            verify_instance_store(store, root)?;
+            let ready = vyrm_node::reset_routing(store, root)?;
+            Ok(if json {
+                serde_json::to_string_pretty(&serde_json::json!({
+                    "generation": ready.generation,
+                    "files": ready.files,
+                    "symbols": ready.symbols,
+                    "refresh": {
+                        "added": ready.refresh.added,
+                        "changed": ready.refresh.changed,
+                        "removed": ready.refresh.removed,
+                        "skipped_unread": ready.refresh.skipped_unread,
+                        "read_but_identical": ready.refresh.read_but_identical,
+                        "duration_ms": ready.refresh.duration_ms,
+                    },
+                }))?
+            } else {
+                format!("routing projection rebuilt: {}", ready.render())
+            })
+        }
         Command::Assert { subject, predicate, object, valid_from, actor, on_behalf_of } => {
             let subject = Subject::new(subject.clone())?;
             let predicate = Predicate::new(predicate.clone())?;
@@ -711,18 +886,21 @@ pub fn execute(store: &Store, command: &Command, reader: &Reader, now: Millis, j
         Command::Status => {
             let sequence = store.sequence()?;
             let invocations = store.invocation_count()?;
-            let access = store.access_count();
+            let access = store.access_count()?;
             Ok(if json {
                 serde_json::to_string_pretty(&serde_json::json!({
+                    "storage_backend": store.backend().as_str(),
                     "claim_sequence": sequence,
                     "invocations": invocations,
                     "access_records_approximate": access,
                 }))?
             } else {
                 format!(
-                    "claim sequence      {sequence}\n\
+                    "storage backend     {}\n\
+                     claim sequence      {sequence}\n\
                      invocations         {invocations}\n\
-                     access records      {access} (approximate)"
+                     access records      {access} (approximate)",
+                    store.backend().as_str()
                 )
             })
         }
@@ -774,6 +952,16 @@ pub fn execute(store: &Store, command: &Command, reader: &Reader, now: Millis, j
     Ok(text.into())
 }
 
+fn verify_instance_store(
+    store: &PersistentEngine,
+    root: &std::path::Path,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let binding = vyrm_node::InstanceBinding::discover(root)?;
+    binding.require_runtime_ready()?;
+    binding.verify_store_path(store.path())?;
+    Ok(())
+}
+
 /// Maps an execution result onto the recorded outcome.
 pub fn outcome_of(
     result: &Result<Execution, Box<dyn std::error::Error>>,
@@ -783,4 +971,3 @@ pub fn outcome_of(
         Err(error) => (Outcome::Error, Some(error.to_string())),
     }
 }
-

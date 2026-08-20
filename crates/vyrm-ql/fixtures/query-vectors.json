@@ -1,0 +1,99 @@
+[
+  {
+    "source": "FROM record:document AT VALID 100 KNOWN HEAD WHERE status = \"open\" PROJECT id, status LIMIT 10 EXPLAIN CONTRACT",
+    "canonical": "FROM record:document AT VALID 100 KNOWN HEAD WHERE status = \"open\" PROJECT id, status LIMIT 10 EXPLAIN CONTRACT",
+    "ast": {
+      "contract_version": 1,
+      "source": {
+        "family": "record",
+        "kind": "document"
+      },
+      "temporal": {
+        "valid_at": {
+          "kind": "literal",
+          "value": 100
+        },
+        "known_at": {
+          "kind": "head"
+        }
+      },
+      "filters": [
+        {
+          "field": "status",
+          "value": {
+            "kind": "literal",
+            "value": {
+              "type": "string",
+              "value": "open"
+            }
+          }
+        }
+      ],
+      "projection": {
+        "kind": "fields",
+        "fields": [
+          "id",
+          "status"
+        ]
+      },
+      "limit": 10,
+      "explain_contract": true
+    }
+  },
+  {
+    "source": "FROM relation:depends_on AT VALID $when KNOWN $cursor PROJECT *",
+    "canonical": "FROM relation:depends_on AT VALID $when KNOWN $cursor PROJECT *",
+    "ast": {
+      "contract_version": 1,
+      "source": {
+        "family": "relation",
+        "kind": "depends_on"
+      },
+      "temporal": {
+        "valid_at": {
+          "kind": "parameter",
+          "value": "when"
+        },
+        "known_at": {
+          "kind": "parameter",
+          "value": "cursor"
+        }
+      },
+      "filters": [],
+      "projection": {
+        "kind": "all"
+      },
+      "explain_contract": false
+    }
+  },
+  {
+    "source": "FROM claim:status AT VALID 50 KNOWN 7 PROJECT subject, object",
+    "canonical": "FROM claim:status AT VALID 50 KNOWN 7 PROJECT subject, object",
+    "ast": {
+      "contract_version": 1,
+      "source": {
+        "family": "claim",
+        "predicate": "status"
+      },
+      "temporal": {
+        "valid_at": {
+          "kind": "literal",
+          "value": 50
+        },
+        "known_at": {
+          "kind": "literal",
+          "value": 7
+        }
+      },
+      "filters": [],
+      "projection": {
+        "kind": "fields",
+        "fields": [
+          "subject",
+          "object"
+        ]
+      },
+      "explain_contract": false
+    }
+  }
+]

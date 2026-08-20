@@ -1,6 +1,7 @@
 //! # vyrm-store
 //!
-//! Substrate adapter. Implements [`vyrm_core::ClaimSource`] over Fjall.
+//! Storage port and transitional Fjall compatibility adapter. The port is the
+//! contract the Vyrm-native substrate will implement and eventually replace.
 //!
 //! ## Corrections applied
 //!
@@ -21,23 +22,48 @@
 //! external mutex in the prior runtime protected only correction 1; with that
 //! corrected, reads run concurrently.
 
+mod ds;
 mod engine;
 mod error;
 mod gc;
 mod invocation;
 mod keyspaces;
+mod migration;
+mod native;
+mod object;
+mod persistent;
 mod projection;
+mod s3;
 mod store;
 mod writer;
 
+pub use ds::{DataRuntime, DataRuntimeStep};
 pub use engine::{Engine, MemoryEngine};
 pub use error::{Error, Result};
 pub use gc::{PairStatus, RemovalReport, Verdict};
 pub use invocation::{Effectiveness, Invocation, InvocationInput, Outcome, RecallOutcome, Trigger};
 pub use keyspaces::Durability;
+pub use migration::{
+    migrate_fjall_to_native, migrate_fjall_to_native_with_fault, migration_status,
+    rollback_fjall_migration, MigrationFault, MigrationInventory, MigrationPhase, MigrationReport,
+};
+pub use native::{
+    native_runtime_commit_outcome, prepare_native_runtime_commit, NativeEngine,
+    NativeRuntimeCommitPlan,
+};
+pub use object::{
+    ImmutableObjectStore, LocalObjectStore, ObjectInventory, ObjectInventoryEntry,
+    ObjectInventoryState, ObjectStep, VerifiedObject,
+};
+pub use persistent::{PersistentBackend, PersistentEngine};
 pub use projection::{
     CurrentProjection, GroundedStamp, GroundingReport, ProjectionStatus, RebuildOutcome,
     CURRENT_PROJECTION,
 };
+pub use s3::{ConditionalPut, S3CompatibleObjectStore, S3ObjectClient, S3ObjectMetadata};
 pub use store::{AppendOutcome, Store};
+pub use vyrm_core::{
+    DataTransaction, DataTransactionView, ReadStamp, RetentionPin, RetentionPinId,
+    RuntimeChangePage, RuntimeCommitOutcome, SnapshotHandle, SnapshotId,
+};
 pub use writer::{Writer, WriterConfig, WriterStats};

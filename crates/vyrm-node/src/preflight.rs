@@ -10,7 +10,10 @@
 //! compaction and the preflight re-injects.
 
 use crate::registry::{Registry, Verification};
+use crate::routing::{ensure_routing_fresh, RoutingReady};
 use crate::stack;
+use crate::workflow::{WorkflowCatalog, WorkflowPreflight, WORKFLOW_FILE};
+use crate::InstanceBinding;
 use vyrm_core::{recall, Millis, Reader, RecallQuery};
 use vyrm_store::{Effectiveness, Engine, ProjectionStatus, RecallOutcome};
 
@@ -19,6 +22,13 @@ use vyrm_store::{Effectiveness, Engine, ProjectionStatus, RecallOutcome};
 #[derive(Debug)]
 pub struct Preflight {
     pub stacks: Vec<&'static str>,
+    /// Persisted source-routing state established before recall is injected.
+    /// `None` means freshness could not be established and `warnings` says
+    /// why; the pre-tool gate will deny mutation under the same condition.
+    pub routing: Option<RoutingReady>,
+    /// Declared workflow events and the exact runtime read state captured
+    /// before context injection.
+    pub workflows: Vec<WorkflowPreflight>,
     /// Estate and adapter warnings, already included in `context`.
     pub warnings: Vec<String>,
     /// The rendered injection: warnings, then recalled claims with
@@ -40,11 +50,58 @@ pub fn preflight<E: Engine>(
     now: Millis,
     budget: usize,
 ) -> Result<Preflight, Box<dyn std::error::Error>> {
+    let binding = InstanceBinding::discover(root)?;
+    binding.require_runtime_ready()?;
+    let root = binding.project_root.as_path();
+
     // Runtime stacks plus the framework facet: `bun+vite+tanstack-start`
     // tells the agent what it landed in before it reads a single file.
     let mut stacks: Vec<&'static str> = stack::detect(root).iter().map(|s| s.name).collect();
     stacks.extend(stack::frameworks(root));
     let mut warnings = Vec::new();
+    let mut workflows = Vec::new();
+
+    match WorkflowCatalog::load(root) {
+        Ok(Some(catalog)) => {
+            for rule in &catalog.manifest.workflows {
+                if rule.scope != binding.manifest.id {
+                    warnings.push(format!(
+                        "workflow {} declares scope {:?}, but this instance is {:?}",
+                        rule.event, rule.scope, binding.manifest.id
+                    ));
+                    continue;
+                }
+                let scope = vyrm_core::ScopeId::new(rule.scope.clone())?;
+                workflows.push(WorkflowPreflight {
+                    event: rule.event.clone(),
+                    manifest_digest: catalog.digest.clone(),
+                    read: store.runtime_read_stamp(&scope)?,
+                });
+            }
+        }
+        Ok(None) if stacks.iter().any(|stack| matches!(*stack, "bun" | "node")) => {
+            warnings.push(format!(
+                "package workflow policy is absent; package commands are denied until {WORKFLOW_FILE} declares them"
+            ));
+        }
+        Ok(None) => {}
+        Err(error) => warnings.push(format!(
+            "package workflow policy cannot be trusted and package commands are denied: {error}"
+        )),
+    }
+
+    // Source routing is part of attunement, not an optional command the model
+    // must remember to run. Preflight remains available for recall if this
+    // fails, but makes the failure loud; the pre-tool barrier fails closed.
+    let routing = match ensure_routing_fresh(store, root) {
+        Ok(ready) => Some(ready),
+        Err(error) => {
+            warnings.push(format!(
+                "source-routing freshness could not be established: {error}"
+            ));
+            None
+        }
+    };
 
     // Estate health: a quarantined projection is surfaced, and recall
     // proceeds from the authoritative claims keyspace regardless — the gate
@@ -82,7 +139,11 @@ pub fn preflight<E: Engine>(
     }
 
     let subjects = store.subjects()?;
-    let query = RecallQuery { subjects, predicates: None, as_of: now };
+    let query = RecallQuery {
+        subjects,
+        predicates: None,
+        as_of: now,
+    };
     let set = recall(store, &query, budget)?;
     for claim in &set.claims {
         store.observe(reader, &claim.subject, &claim.predicate, now)?;
@@ -91,11 +152,31 @@ pub fn preflight<E: Engine>(
     let mut lines = Vec::new();
     lines.push(format!(
         "[vyrm] preflight: stack={}; {} claim(s) in force, ~{} token(s){}",
-        if stacks.is_empty() { "none detected".to_string() } else { stacks.join("+") },
+        if stacks.is_empty() {
+            "none detected".to_string()
+        } else {
+            stacks.join("+")
+        },
         set.claims.len(),
         set.token_estimate,
-        if set.truncated { ", TRUNCATED by budget" } else { "" },
+        if set.truncated {
+            ", TRUNCATED by budget"
+        } else {
+            ""
+        },
     ));
+    if let Some(ready) = &routing {
+        lines.push(format!("[vyrm] routing: {}", ready.render()));
+    }
+    for workflow in &workflows {
+        lines.push(format!(
+            "[vyrm] workflow: {} manifest={} read_cursor={} manifest_id={}",
+            workflow.event,
+            workflow.manifest_digest,
+            workflow.read.commit_cursor,
+            workflow.read.manifest_id,
+        ));
+    }
     for warning in &warnings {
         lines.push(format!("[vyrm] WARNING: {warning}"));
     }
@@ -117,7 +198,9 @@ pub fn preflight<E: Engine>(
         tokens_emitted: set.token_estimate as u64,
         baseline_tokens: None,
         baseline_mode: None,
-        provider: harness.map(|h| format!("harness:{h}")).unwrap_or_else(|| "operator:cli".into()),
+        provider: harness
+            .map(|h| format!("harness:{h}"))
+            .unwrap_or_else(|| "operator:cli".into()),
         outcome: RecallOutcome::Unknown,
     };
 
@@ -128,5 +211,12 @@ pub fn preflight<E: Engine>(
         warnings = warnings.len(),
         "preflight"
     );
-    Ok(Preflight { stacks, warnings, context: lines.join("\n"), effectiveness })
+    Ok(Preflight {
+        stacks,
+        routing,
+        workflows,
+        warnings,
+        context: lines.join("\n"),
+        effectiveness,
+    })
 }

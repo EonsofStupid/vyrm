@@ -3,7 +3,7 @@
 | Field | Value |
 |-------|-------|
 | Status | Draft. Pre-release. Subject to revision without migration guarantees. |
-| Substrate | Fjall 3.1.8 (MIT OR Apache-2.0), embedded LSM key-value store |
+| Default substrate | Native `vyrmKV`; pre-existing non-native directories reopen through the Fjall 3.1.8 compatibility adapter until explicitly migrated |
 | Scope | Tier 0 only: development-time persistence and recall for a single operator |
 | Supersedes | Nothing. Extends `docs/architecture-journal.md` and `automaton/docs/00-abstract-layer.md`. |
 
@@ -40,8 +40,8 @@ under "Not" MUST NOT appear in vyrm source, documentation, or API surface.
 | **promotion** | A claim crossing a tier boundary by satisfying a gate. | publish, sync, escalation |
 | **recall** | Retrieval of claims for supply to a model context. | retrieval, lookup, fetch, search |
 | **recall set** | The result of a recall: claims plus provenance and a content digest. | context block, payload |
-| **substrate** | The embedded storage engine (Fjall). | engine, backend, database, wrapper, store |
-| **keyspace** | A Fjall 3.x keyspace: one LSM tree within one database. Named a *partition* prior to Fjall 3.0. | table, column family, bucket |
+| **substrate** | The persistence implementation behind the Vyrm storage port; native `vyrmKV` is the default and Fjall is the existing-store compatibility adapter/oracle. | engine, backend, database, wrapper, store |
+| **keyspace** | A logical isolated ordered key-value space. The compatibility adapter maps it to a Fjall 3.x keyspace. | table, column family, bucket |
 | **durability class** | The persistence policy assigned to a keyspace. | sync mode, flush policy |
 | **port** | A trait the kernel defines for an external implementation. | interface, hook |
 | **adapter** | An implementation of a port. | driver, plugin, binding, client |
@@ -58,9 +58,12 @@ MUST cite the date and host on which they were obtained.
 
 ## 2 · Position
 
-vyrm is a semantic layer over a commodity substrate. vyrm is not a storage engine
-and MUST NOT be described as one in any documentation, API surface, or external
-communication.
+vyrm owns both its semantic contract and persistence architecture. New runtime
+stores use native `vyrmKV` behind the canonical `PersistentEngine` selector.
+Directories carrying native's authenticated `CURRENT` pointer reopen as native;
+other existing directories remain on the Fjall compatibility adapter until an
+explicit migration. Selection MUST fail closed and MUST NOT reinterpret bytes.
+Fjall MUST NOT be described as the permanent architecture.
 
 Measured on `warden-devstation-01`, 2026-08-09:
 
@@ -70,16 +73,19 @@ Measured on `warden-devstation-01`, 2026-08-09:
 | Transport plus one substrate point read | 0.135 ms | Substrate: 0.004 ms / 2.8 % |
 | Transport plus three inserts and two fsync | 0.562 ms | Durability: 0.431 ms |
 
-The substrate accounts for 4 µs of a 135 µs read. There is no measured substrate
-deficiency, and therefore no basis for replacing it.
+The compatibility substrate accounts for 4 µs of a 135 µs read in this historical
+point-read measurement. That result remains a baseline for the native engine; it
+does not veto workloads or structures optimized for AI runtime persistence.
 
-Qdrant replaced RocksDB with Gridstore in v1.13 only after measuring a specific
-workload mismatch: compaction-induced latency variance on sequential integer keys.
-An equivalent measurement MUST exist before vyrm considers substrate replacement.
+The Vyrm-native engine MUST preserve the cross-adapter conformance differential
+and MUST meet or beat the compatibility substrate on representative runtime
+workloads: latency distribution, throughput, durability, crash recovery, and
+memory use. Performance claims require retained measurements.
 
-This requirement extends the Lance comparison guardrail recorded in
-`docs/architecture-journal.md` from capability claims to naming: adopt the
-semantics, do not claim the substrate.
+Existing Fjall and external-system measurements remain comparison evidence.
+They are not architectural ownership boundaries and do not prohibit native
+implementation of capabilities covered by the project's recorded permissions
+and provenance.
 
 ## 3 · Kernel API
 
@@ -252,7 +258,12 @@ NOT incur that cost.
 The sequence index maps an append sequence to the claim key written at that
 sequence, and is what makes §8.2 and §8.4 answerable. Its entry MUST be written
 in the transaction that writes the claim, so that the index cannot diverge from
-the watermark under termination.
+the watermark under termination. Native Vyrm values additionally carry the
+canonical claim bytes in a versioned `VYRNSI01` envelope. The typed bytes
+deterministically define the claim key, so a bounded replay needs one contiguous
+range scan without storing that identity twice.
+Legacy native key-only values remain readable through an explicit compatibility
+branch; the Fjall adapter retains its key-only representation.
 
 Fjall persists writes across keyspaces in a single database-level journal, so
 writes requiring mutual atomicity retain it across durability classes.
@@ -507,6 +518,32 @@ Retransmission of an unchanged object then costs a digest rather than a payload.
 This is the mechanism used for differentials in §8.4: identity by content digest,
 transfer of the differential only.
 
+Object bytes MUST be staged, durably published at a canonical SHA-256 key, and
+read-verified before their `ObjectReference` can enter a data transaction. The
+reference MUST bind digest, length, media type, backend, key, and available
+version/ETag evidence. A remote object service is not the transaction
+coordinator: Vyrm guarantees atomic visibility of the verified reference, audit,
+and projection work. An upload abandoned by a failed commit is an inventoried
+orphan and MUST NOT become reachable implicitly. Reclamation MUST delete only an
+explicitly proven unreachable digest. Backend ETags MUST NOT be treated as
+content hashes.
+
+### 13.3 Unified canonical mutations
+
+One runtime transaction MAY atomically include claims, schema revisions, typed
+records, relations, lifecycle events, exact vector values, typed time-series
+samples, WGS84 values, and verified object references. Every mutation MUST join
+the same cursor/hash chain and its synchronous integrity index. Every
+projection-relevant mutation MUST emit durable outbox work in that transaction;
+every accepted transaction MUST emit chained audit evidence and a stored
+idempotent outcome. A projection, ANN index, time index, or spatial index is
+rebuildable and MUST NOT become canonical truth.
+
+Derived vectors MUST bind the source digest, model identity and digest,
+dimensions, normalization, and generation parameters. Vector values MUST be
+finite and dimensionally valid; sparse indices MUST be strictly increasing.
+Spatial coordinates MUST be finite and valid WGS84 longitude/latitude values.
+
 ## 14 · Consumer
 
 The first consumer is Clyffy, acting as task executor.
@@ -530,7 +567,7 @@ executor on behalf of a model MUST be attributable to both.
 
 ## 15 · Out of scope for v0
 
-Vector indexes and rank fusion. Claims are short, structured, and number in the
-thousands, which is a bi-temporal relational workload rather than a
-similarity-search workload. Rank fusion is a query-layer concern, is decoupled
-from this schema, and is introduced when a corpus justifies it.
+Approximate vector indexes, rank fusion, embedding execution, GPU builders, and
+distributed placement remain outside this revision. Canonical exact vectors are
+in scope under §13.3 so later search artifacts can be rebuilt without becoming
+truth. Search promotion requires exact-oracle and recall evidence.

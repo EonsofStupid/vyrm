@@ -46,7 +46,19 @@ pub trait ClaimSource {
 ///
 /// See `SPEC.md` §6.2.
 pub fn resolve_as_of(candidates: &[Claim], as_of: Millis) -> Option<&Claim> {
-    candidates.iter().find(|claim| claim.valid_at(as_of))
+    let mut index = 0;
+    while index < candidates.len() {
+        // Transaction-time versions at one valid-time start are corrections
+        // of one logical claim. Only the newest may resolve; falling through
+        // would resurrect an open predecessor after its retirement correction.
+        let valid_from = candidates[index].valid_from;
+        let newest_correction = &candidates[index];
+        while index < candidates.len() && candidates[index].valid_from == valid_from {
+            index += 1;
+        }
+        if newest_correction.valid_at(as_of) { return Some(newest_correction); }
+    }
+    None
 }
 
 /// Claims recorded after `since`, ordered by transaction time.
@@ -152,6 +164,16 @@ mod tests {
         let v = vec![claim("temporary", 200, Some(210)), claim("standing", 100, None)];
         assert_eq!(resolve_as_of(&v, 205).map(|c| c.object.as_str()), Some("temporary"));
         assert_eq!(resolve_as_of(&v, 250).map(|c| c.object.as_str()), Some("standing"));
+    }
+
+    #[test]
+    fn a_retirement_correction_does_not_resurrect_the_open_original() {
+        let original = claim("standing", 100, None);
+        let mut retirement = claim("standing", 100, Some(200));
+        retirement.tx_time = 300;
+        let candidates = vec![retirement, original];
+        assert_eq!(resolve_as_of(&candidates, 150).map(|c| c.object.as_str()), Some("standing"));
+        assert_eq!(resolve_as_of(&candidates, 250), None);
     }
 
     #[test]

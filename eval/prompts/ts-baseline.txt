@@ -1,0 +1,1 @@
+This task resumes after compaction. The compacted summary may be stale. Read the repository with read-only tools and return exactly one final line ANSWER=<integer> for the current REQUEST_TIMEOUT_MS from authoritative source. Do not modify files.

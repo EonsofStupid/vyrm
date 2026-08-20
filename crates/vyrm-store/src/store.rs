@@ -5,9 +5,15 @@ use crate::gc::{build_report, RemovalReport, Tally};
 use crate::invocation::{self, Invocation, InvocationInput};
 use crate::keyspaces::{self, Durability};
 use fjall::{KeyspaceCreateOptions, Readable, SingleWriterTxDatabase, SingleWriterTxKeyspace};
-use std::collections::BTreeMap;
-use std::path::Path;
-use vyrm_core::{key, Claim, ClaimSource, Millis, Predicate, Reader, Subject};
+use serde::de::DeserializeOwned;
+use std::collections::{BTreeMap, BTreeSet};
+use std::path::{Path, PathBuf};
+use vyrm_core::{
+    key, projection_family, AuditEnvelope, Claim, ClaimSource, Millis, Predicate, ProjectionWork,
+    ReadStamp, Reader, RetentionPin, RuntimeChange, RuntimeChangePage, RuntimeCommit,
+    RuntimeCommitOutcome, RuntimeMutation, RuntimeRecord, RuntimeRef, RuntimeRelation,
+    RuntimeSchemaRegistry, ScopeId, SnapshotHandle, SnapshotId, Subject,
+};
 
 /// Sequences assigned by an append.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -18,6 +24,7 @@ pub struct AppendOutcome {
 }
 
 pub struct Store {
+    path: PathBuf,
     db: SingleWriterTxDatabase,
     claims: SingleWriterTxKeyspace,
     /// Append sequence to claim key. Written in the same transaction as the
@@ -29,12 +36,27 @@ pub struct Store {
     invocations: SingleWriterTxKeyspace,
     /// Derived projections, stored whole under a caller-chosen name.
     projections: SingleWriterTxKeyspace,
+    /// Authoritative typed runtime log and transactionally maintained identity
+    /// indexes. The indexes never replace the log; they enforce references.
+    runtime_changes: SingleWriterTxKeyspace,
+    runtime_records: SingleWriterTxKeyspace,
+    runtime_relations: SingleWriterTxKeyspace,
+    runtime_vectors: SingleWriterTxKeyspace,
+    runtime_series: SingleWriterTxKeyspace,
+    runtime_geo: SingleWriterTxKeyspace,
+    runtime_objects: SingleWriterTxKeyspace,
+    runtime_outbox: SingleWriterTxKeyspace,
+    runtime_audit: SingleWriterTxKeyspace,
+    runtime_commits: SingleWriterTxKeyspace,
+    runtime_schemas: SingleWriterTxKeyspace,
+    runtime_snapshots: SingleWriterTxKeyspace,
 }
 
 impl Store {
     pub fn open(path: &Path) -> Result<Self> {
         std::fs::create_dir_all(path).map_err(|e| Error::Substrate(e.to_string()))?;
-        let db = SingleWriterTxDatabase::builder(path)
+        let path = std::fs::canonicalize(path).map_err(|e| Error::Substrate(e.to_string()))?;
+        let db = SingleWriterTxDatabase::builder(&path)
             .manual_journal_persist(true)
             .open()?;
         let claims = db.keyspace(keyspaces::CLAIMS, KeyspaceCreateOptions::default)?;
@@ -42,11 +64,33 @@ impl Store {
             db.keyspace(keyspaces::SEQUENCE_INDEX, KeyspaceCreateOptions::default)?;
         let access = db.keyspace(keyspaces::ACCESS, KeyspaceCreateOptions::default)?;
         let meta = db.keyspace(keyspaces::META, KeyspaceCreateOptions::default)?;
-        let invocations =
-            db.keyspace(keyspaces::INVOCATIONS, KeyspaceCreateOptions::default)?;
-        let projections =
-            db.keyspace(keyspaces::PROJECTIONS, KeyspaceCreateOptions::default)?;
+        let invocations = db.keyspace(keyspaces::INVOCATIONS, KeyspaceCreateOptions::default)?;
+        let projections = db.keyspace(keyspaces::PROJECTIONS, KeyspaceCreateOptions::default)?;
+        let runtime_changes =
+            db.keyspace(keyspaces::RUNTIME_CHANGES, KeyspaceCreateOptions::default)?;
+        let runtime_records =
+            db.keyspace(keyspaces::RUNTIME_RECORDS, KeyspaceCreateOptions::default)?;
+        let runtime_relations =
+            db.keyspace(keyspaces::RUNTIME_RELATIONS, KeyspaceCreateOptions::default)?;
+        let runtime_vectors =
+            db.keyspace(keyspaces::RUNTIME_VECTORS, KeyspaceCreateOptions::default)?;
+        let runtime_series =
+            db.keyspace(keyspaces::RUNTIME_SERIES, KeyspaceCreateOptions::default)?;
+        let runtime_geo = db.keyspace(keyspaces::RUNTIME_GEO, KeyspaceCreateOptions::default)?;
+        let runtime_objects =
+            db.keyspace(keyspaces::RUNTIME_OBJECTS, KeyspaceCreateOptions::default)?;
+        let runtime_outbox =
+            db.keyspace(keyspaces::RUNTIME_OUTBOX, KeyspaceCreateOptions::default)?;
+        let runtime_audit =
+            db.keyspace(keyspaces::RUNTIME_AUDIT, KeyspaceCreateOptions::default)?;
+        let runtime_commits =
+            db.keyspace(keyspaces::RUNTIME_COMMITS, KeyspaceCreateOptions::default)?;
+        let runtime_schemas =
+            db.keyspace(keyspaces::RUNTIME_SCHEMAS, KeyspaceCreateOptions::default)?;
+        let runtime_snapshots =
+            db.keyspace(keyspaces::RUNTIME_SNAPSHOTS, KeyspaceCreateOptions::default)?;
         Ok(Self {
+            path,
             db,
             claims,
             sequence_index,
@@ -54,7 +98,87 @@ impl Store {
             meta,
             invocations,
             projections,
+            runtime_changes,
+            runtime_records,
+            runtime_relations,
+            runtime_vectors,
+            runtime_series,
+            runtime_geo,
+            runtime_objects,
+            runtime_outbox,
+            runtime_audit,
+            runtime_commits,
+            runtime_schemas,
+            runtime_snapshots,
         })
+    }
+
+    /// Canonical directory backing this store. Runtime entry points use it to
+    /// prove that a root cannot be paired with a different instance's state.
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
+    /// Writes one durable, cross-keyspace snapshot for the explicit
+    /// Fjall-to-vyrmKV migration path. Kept crate-private so ordinary runtime
+    /// code cannot accidentally treat the compatibility adapter as an export
+    /// API.
+    pub(crate) fn export_migration_archive(&self, path: &Path) -> Result<crate::MigrationInventory> {
+        self.db.persist(fjall::PersistMode::SyncAll)?;
+
+        let known: BTreeSet<&str> = keyspaces::ALL.into_iter().collect();
+        let mut present = BTreeSet::new();
+        for name in self.db.list_keyspace_names() {
+            let name = name.as_ref();
+            if !known.contains(name) {
+                return Err(Error::Migration(format!(
+                    "source contains unknown keyspace {name:?}; refusing an incomplete migration"
+                )));
+            }
+            present.insert(name.to_owned());
+        }
+        for name in keyspaces::ALL {
+            if !present.contains(name) {
+                return Err(Error::Migration(format!(
+                    "source is missing canonical keyspace {name:?}"
+                )));
+            }
+        }
+
+        let snapshot = self.db.read_tx();
+        let mut writer = crate::migration::ArchiveWriter::create(path)?;
+        for (ordinal, name) in keyspaces::ALL.into_iter().enumerate() {
+            let keyspace = self.migration_keyspace(name);
+            for item in snapshot.iter(keyspace) {
+                let (key, value) = item.into_inner()?;
+                writer.record(ordinal, key.as_ref(), value.as_ref())?;
+            }
+        }
+        writer.finish()
+    }
+
+    fn migration_keyspace(&self, name: &str) -> &SingleWriterTxKeyspace {
+        match name {
+            keyspaces::CLAIMS => &self.claims,
+            keyspaces::SEQUENCE_INDEX => &self.sequence_index,
+            keyspaces::ACCESS => &self.access,
+            keyspaces::META => &self.meta,
+            keyspaces::INVOCATIONS => &self.invocations,
+            keyspaces::PROJECTIONS => &self.projections,
+            keyspaces::RUNTIME_CHANGES => &self.runtime_changes,
+            keyspaces::RUNTIME_RECORDS => &self.runtime_records,
+            keyspaces::RUNTIME_RELATIONS => &self.runtime_relations,
+            keyspaces::RUNTIME_VECTORS => &self.runtime_vectors,
+            keyspaces::RUNTIME_SERIES => &self.runtime_series,
+            keyspaces::RUNTIME_GEO => &self.runtime_geo,
+            keyspaces::RUNTIME_OBJECTS => &self.runtime_objects,
+            keyspaces::RUNTIME_OUTBOX => &self.runtime_outbox,
+            keyspaces::RUNTIME_AUDIT => &self.runtime_audit,
+            keyspaces::RUNTIME_COMMITS => &self.runtime_commits,
+            keyspaces::RUNTIME_SCHEMAS => &self.runtime_schemas,
+            keyspaces::RUNTIME_SNAPSHOTS => &self.runtime_snapshots,
+            _ => unreachable!("keyspace was validated against keyspaces::ALL"),
+        }
     }
 
     /// Stores a derived projection under a name, replacing any prior value.
@@ -100,6 +224,487 @@ impl Store {
         }
     }
 
+    /// Current global cursor of the typed runtime log.
+    pub fn runtime_cursor(&self) -> Result<u64> {
+        let snapshot = self.db.read_tx();
+        decode_optional_sequence(snapshot.get(&self.meta, keyspaces::RUNTIME_CURSOR)?)
+    }
+
+    /// Latest authoritative schema registry for one scope.
+    pub fn runtime_schema(&self, scope: &ScopeId) -> Result<Option<RuntimeSchemaRegistry>> {
+        let snapshot = self.db.read_tx();
+        snapshot
+            .get(&self.runtime_schemas, scope.as_str().as_bytes())?
+            .map(|bytes| serde_json::from_slice(&bytes).map_err(Error::from))
+            .transpose()
+    }
+
+    /// Captures one semantic manifest identity from a single substrate read
+    /// transaction. Cursor, schema revision, and hash head cannot be torn
+    /// across concurrent commits.
+    pub fn runtime_read_stamp(&self, scope: &ScopeId) -> Result<ReadStamp> {
+        let snapshot = self.db.read_tx();
+        runtime_read_stamp_with(&snapshot, &self.meta, &self.runtime_schemas, scope)
+    }
+
+    /// Persists a leased read stamp in the same transaction that observes its
+    /// cursor and schema. The current log is append-only; native `vyrmKV` will
+    /// additionally use this catalog to pin physical manifest objects.
+    pub fn open_runtime_snapshot(
+        &self,
+        scope: &ScopeId,
+        owner: &str,
+        now: Millis,
+        ttl: Millis,
+    ) -> Result<SnapshotHandle> {
+        let mut tx = self
+            .db
+            .write_tx()
+            .durability(Durability::Authoritative.persist_mode());
+        let read = runtime_read_stamp_with(&tx, &self.meta, &self.runtime_schemas, scope)?;
+        let handle = SnapshotHandle::new(read, owner, now, ttl)?;
+        tx.insert(
+            &self.runtime_snapshots,
+            handle.id.as_str().as_bytes(),
+            serde_json::to_vec(&handle)?,
+        );
+        tx.commit()?;
+        Ok(handle)
+    }
+
+    /// Replays through a persisted, unexpired lease and never beyond the head
+    /// it captured, even if newer commits exist when this call begins.
+    pub fn runtime_snapshot_changes(
+        &self,
+        handle: &SnapshotHandle,
+        after: u64,
+        limit: usize,
+        now: Millis,
+    ) -> Result<RuntimeChangePage> {
+        handle.validate()?;
+        let snapshot = self.db.read_tx();
+        let bytes = snapshot
+            .get(&self.runtime_snapshots, handle.id.as_str().as_bytes())?
+            .ok_or_else(|| Error::SnapshotNotFound(handle.id.to_string()))?;
+        let persisted: SnapshotHandle = serde_json::from_slice(&bytes)?;
+        if &persisted != handle {
+            return Err(Error::SnapshotMismatch(handle.id.to_string()));
+        }
+        if handle.is_expired(now) {
+            return Err(Error::SnapshotExpired {
+                id: handle.id.to_string(),
+                expired_at: handle.expires_at,
+            });
+        }
+        runtime_change_page(
+            &snapshot,
+            &self.runtime_changes,
+            handle.read.commit_cursor,
+            after,
+            limit,
+            Some(&handle.read.scope),
+        )
+    }
+
+    pub fn release_runtime_snapshot(&self, id: &SnapshotId) -> Result<bool> {
+        let mut tx = self
+            .db
+            .write_tx()
+            .durability(Durability::Authoritative.persist_mode());
+        let exists = tx
+            .get(&self.runtime_snapshots, id.as_str().as_bytes())?
+            .is_some();
+        if exists {
+            tx.remove(&self.runtime_snapshots, id.as_str().as_bytes());
+            tx.commit()?;
+        }
+        Ok(exists)
+    }
+
+    pub fn runtime_snapshots(&self, now: Millis) -> Result<Vec<SnapshotHandle>> {
+        let snapshot = self.db.read_tx();
+        let mut handles = Vec::new();
+        for guard in snapshot.range(&self.runtime_snapshots, Vec::new()..) {
+            let (_, bytes) = guard.into_inner()?;
+            let handle: SnapshotHandle = serde_json::from_slice(&bytes)?;
+            handle.validate()?;
+            if !handle.is_expired(now) {
+                handles.push(handle);
+            }
+        }
+        handles.sort_by(|left, right| left.id.cmp(&right.id));
+        Ok(handles)
+    }
+
+    /// Logical GC roots derived from the authoritative snapshot catalog.
+    /// The compatibility adapter never reclaims runtime changes; native
+    /// `vyrmKV` binds these identities to its physical object graph.
+    pub fn runtime_retention_pins(&self, now: Millis) -> Result<Vec<RetentionPin>> {
+        self.runtime_snapshots(now)?
+            .iter()
+            .map(RetentionPin::from_snapshot)
+            .collect::<vyrm_core::Result<Vec<_>>>()
+            .map_err(Error::from)
+    }
+
+    /// Reads the append-only log at an exact transaction stamp without
+    /// persisting a long-lived lease.
+    pub fn runtime_read_changes(
+        &self,
+        read: &ReadStamp,
+        after: u64,
+        limit: usize,
+    ) -> Result<RuntimeChangePage> {
+        let snapshot = self.db.read_tx();
+        validate_read_stamp_with(&snapshot, &self.meta, &self.runtime_changes, read)?;
+        runtime_change_page(
+            &snapshot,
+            &self.runtime_changes,
+            read.commit_cursor,
+            after,
+            limit,
+            Some(&read.scope),
+        )
+    }
+
+    /// Atomically appends a complete causal runtime transaction.
+    ///
+    /// The expected cursor is compared inside the Fjall write transaction.
+    /// Claims embedded in the commit advance the existing claim sequence in
+    /// that same transaction, while every mutation advances the runtime cursor
+    /// and hash chain. Relations and subject-bearing events fail closed when
+    /// their endpoint records do not exist in the commit's scope.
+    #[tracing::instrument(level = "debug", skip_all, fields(mutations = commit.mutations.len()))]
+    pub fn commit_runtime(&self, commit: &RuntimeCommit) -> Result<RuntimeCommitOutcome> {
+        commit.validate()?;
+        let commit_id = commit.digest();
+        let mut tx = self
+            .db
+            .write_tx()
+            .durability(Durability::Authoritative.persist_mode());
+
+        let start = decode_optional_sequence(tx.get(&self.meta, keyspaces::RUNTIME_CURSOR)?)?;
+        if start != commit.expected_cursor {
+            return Err(Error::RuntimeConflict {
+                expected: commit.expected_cursor,
+                actual: start,
+            });
+        }
+
+        let previous_schema = tx
+            .get(&self.runtime_schemas, commit.scope.as_str().as_bytes())?
+            .map(|bytes| serde_json::from_slice::<RuntimeSchemaRegistry>(&bytes))
+            .transpose()?;
+        let proposed_schema = commit.mutations.iter().find_map(|mutation| match mutation {
+            RuntimeMutation::Schema { registry } => Some(registry),
+            _ => None,
+        });
+        let effective_schema = match (previous_schema.as_ref(), proposed_schema) {
+            (None, Some(registry)) if registry.revision == 1 => registry,
+            (None, Some(registry)) => {
+                return Err(Error::RuntimeSchemaConflict {
+                    expected: 1,
+                    actual: registry.revision,
+                });
+            }
+            (Some(previous), Some(registry))
+                if registry.revision == previous.revision.saturating_add(1) =>
+            {
+                registry
+            }
+            (Some(previous), Some(registry)) => {
+                return Err(Error::RuntimeSchemaConflict {
+                    expected: previous.revision.saturating_add(1),
+                    actual: registry.revision,
+                });
+            }
+            (Some(previous), None) => previous,
+            (None, None) => {
+                return Err(Error::RuntimeSchemaMissing(commit.scope.to_string()));
+            }
+        };
+        // Existing bodies are needed only for constraints whose truth depends
+        // on other live objects. Strict type/property/endpoint checks validate
+        // the incoming mutations directly; avoiding a full scoped scan keeps
+        // high-volume event appends independent of retained history size.
+        let existing_records = if effective_schema
+            .records
+            .values()
+            .any(|schema| !schema.unique_properties.is_empty())
+        {
+            runtime_values_for_scope::<RuntimeRecord, _>(&tx, &self.runtime_records, &commit.scope)?
+        } else {
+            Vec::new()
+        };
+        let existing_relations = if effective_schema.relations.values().any(|schema| {
+            schema.unique_pair || schema.max_outgoing.is_some() || schema.max_incoming.is_some()
+        }) {
+            runtime_values_for_scope::<RuntimeRelation, _>(
+                &tx,
+                &self.runtime_relations,
+                &commit.scope,
+            )?
+        } else {
+            Vec::new()
+        };
+        effective_schema.validate_objects(
+            &commit.mutations,
+            &existing_records,
+            &existing_relations,
+        )?;
+
+        let new_records = commit
+            .mutations
+            .iter()
+            .filter_map(|mutation| match mutation {
+                RuntimeMutation::Record { record } => Some(record.reference.clone()),
+                _ => None,
+            })
+            .collect::<BTreeSet<_>>();
+        for mutation in &commit.mutations {
+            let references: Vec<&RuntimeRef> = match mutation {
+                RuntimeMutation::Relation { relation } => vec![&relation.from, &relation.to],
+                RuntimeMutation::Event { event } => event.subject.iter().collect(),
+                RuntimeMutation::Vector { vector } => vec![&vector.subject],
+                RuntimeMutation::SeriesSample { sample } => vec![&sample.series],
+                RuntimeMutation::Geo { geo } => vec![&geo.subject],
+                RuntimeMutation::Object { object } => object.subject.iter().collect(),
+                RuntimeMutation::Claim { .. }
+                | RuntimeMutation::Schema { .. }
+                | RuntimeMutation::Record { .. } => Vec::new(),
+            };
+            for reference in references {
+                if !new_records.contains(reference)
+                    && tx
+                        .get(
+                            &self.runtime_records,
+                            runtime_identity_key(&commit.scope, reference),
+                        )?
+                        .is_none()
+                {
+                    return Err(Error::DanglingRuntimeReference(format!(
+                        "{}/{} in scope {}",
+                        reference.kind, reference.id, commit.scope
+                    )));
+                }
+            }
+        }
+
+        let claim_count = commit
+            .mutations
+            .iter()
+            .filter(|mutation| matches!(mutation, RuntimeMutation::Claim { .. }))
+            .count();
+        let claim_start =
+            decode_optional_sequence(tx.get(&self.meta, keyspaces::SEQUENCE_WATERMARK)?)?;
+        let mut claim_sequence = claim_start;
+        let mut cursor = start;
+        let mut previous_digest = tx
+            .get(&self.meta, keyspaces::RUNTIME_LAST_DIGEST)?
+            .map(|bytes| String::from_utf8(bytes.to_vec()))
+            .transpose()
+            .map_err(|error| Error::CorruptWatermark(error.to_string()))?;
+        let previous_audit_digest = tx
+            .get(&self.meta, keyspaces::RUNTIME_LAST_AUDIT_DIGEST)?
+            .map(|bytes| String::from_utf8(bytes.to_vec()))
+            .transpose()
+            .map_err(|error| Error::CorruptWatermark(error.to_string()))?;
+        let mut outbox_count = 0;
+
+        for (ordinal, mutation) in commit.mutations.iter().cloned().enumerate() {
+            if let RuntimeMutation::Claim { claim } = &mutation {
+                claim_sequence = claim_sequence
+                    .checked_add(1)
+                    .ok_or(Error::SequenceOverflow)?;
+                let claim_key = key::claim_key(
+                    &claim.subject,
+                    &claim.predicate,
+                    claim.valid_from,
+                    claim.tx_time,
+                );
+                tx.insert(
+                    &self.sequence_index,
+                    key::sequence_key(claim_sequence),
+                    claim_key.clone(),
+                );
+                tx.insert(&self.claims, claim_key, serde_json::to_vec(claim)?);
+            }
+
+            cursor = cursor.checked_add(1).ok_or(Error::SequenceOverflow)?;
+            let change = RuntimeChange::committed(
+                cursor,
+                commit,
+                &commit_id,
+                ordinal as u64,
+                mutation.clone(),
+                previous_digest.clone(),
+            );
+            tx.insert(
+                &self.runtime_changes,
+                runtime_cursor_key(cursor),
+                serde_json::to_vec(&change)?,
+            );
+            if let Some(family) = projection_family(&mutation) {
+                let work = ProjectionWork::for_change(
+                    commit.scope.clone(),
+                    cursor,
+                    commit_id.clone(),
+                    ordinal as u64,
+                    family,
+                )?;
+                tx.insert(
+                    &self.runtime_outbox,
+                    runtime_cursor_key(cursor),
+                    serde_json::to_vec(&work)?,
+                );
+                outbox_count += 1;
+            }
+            match mutation {
+                RuntimeMutation::Schema { registry } => tx.insert(
+                    &self.runtime_schemas,
+                    commit.scope.as_str().as_bytes(),
+                    serde_json::to_vec(&registry)?,
+                ),
+                RuntimeMutation::Record { record } => tx.insert(
+                    &self.runtime_records,
+                    runtime_identity_key(&commit.scope, &record.reference),
+                    serde_json::to_vec(&record)?,
+                ),
+                RuntimeMutation::Relation { relation } => tx.insert(
+                    &self.runtime_relations,
+                    runtime_identity_key(&commit.scope, &relation.reference),
+                    serde_json::to_vec(&relation)?,
+                ),
+                RuntimeMutation::Vector { vector } => tx.insert(
+                    &self.runtime_vectors,
+                    runtime_identity_key(&commit.scope, &vector.reference),
+                    serde_json::to_vec(&vector)?,
+                ),
+                RuntimeMutation::SeriesSample { sample } => tx.insert(
+                    &self.runtime_series,
+                    runtime_identity_key(&commit.scope, &sample.reference),
+                    serde_json::to_vec(&sample)?,
+                ),
+                RuntimeMutation::Geo { geo } => tx.insert(
+                    &self.runtime_geo,
+                    runtime_identity_key(&commit.scope, &geo.reference),
+                    serde_json::to_vec(&geo)?,
+                ),
+                RuntimeMutation::Object { object } => tx.insert(
+                    &self.runtime_objects,
+                    runtime_identity_key(&commit.scope, &object.reference),
+                    serde_json::to_vec(&object)?,
+                ),
+                RuntimeMutation::Claim { .. } | RuntimeMutation::Event { .. } => {}
+            }
+            previous_digest = Some(change.digest);
+        }
+
+        if claim_count > 0 {
+            tx.insert(
+                &self.meta,
+                keyspaces::SEQUENCE_WATERMARK,
+                claim_sequence.to_string().as_bytes(),
+            );
+        }
+        tx.insert(
+            &self.meta,
+            keyspaces::RUNTIME_CURSOR,
+            cursor.to_string().as_bytes(),
+        );
+        tx.insert(
+            &self.meta,
+            keyspaces::RUNTIME_LAST_DIGEST,
+            previous_digest.as_deref().unwrap_or("").as_bytes(),
+        );
+        let audit =
+            AuditEnvelope::accepted_commit(commit, &commit_id, cursor, previous_audit_digest)?;
+        tx.insert(
+            &self.runtime_audit,
+            commit_id.as_bytes(),
+            serde_json::to_vec(&audit)?,
+        );
+        tx.insert(
+            &self.meta,
+            keyspaces::RUNTIME_LAST_AUDIT_DIGEST,
+            audit.digest.as_bytes(),
+        );
+        let outcome = RuntimeCommitOutcome {
+            commit_id,
+            first_cursor: start + 1,
+            last_cursor: cursor,
+            count: commit.mutations.len(),
+            first_claim_sequence: (claim_count > 0).then_some(claim_start + 1),
+            last_claim_sequence: (claim_count > 0).then_some(claim_sequence),
+            outbox_count,
+        };
+        tx.insert(
+            &self.runtime_commits,
+            outcome.commit_id.as_bytes(),
+            serde_json::to_vec(&outcome)?,
+        );
+        tx.commit()?;
+
+        Ok(outcome)
+    }
+
+    /// Replays at most `limit` global cursor positions after `after`. Scope
+    /// filtering happens after cursor advancement, so callers always resume at
+    /// `through_cursor` and cannot stall on other scopes' traffic.
+    pub fn runtime_changes_since(
+        &self,
+        after: u64,
+        limit: usize,
+        scope: Option<&ScopeId>,
+    ) -> Result<RuntimeChangePage> {
+        let snapshot = self.db.read_tx();
+        let head = decode_optional_sequence(snapshot.get(&self.meta, keyspaces::RUNTIME_CURSOR)?)?;
+        runtime_change_page(&snapshot, &self.runtime_changes, head, after, limit, scope)
+    }
+
+    pub fn runtime_outbox_since(&self, after: u64, limit: usize) -> Result<Vec<ProjectionWork>> {
+        if limit == 0 {
+            return Err(Error::Substrate(
+                "runtime outbox page limit must be greater than zero".into(),
+            ));
+        }
+        let start = after.checked_add(1).ok_or(Error::SequenceOverflow)?;
+        let snapshot = self.db.read_tx();
+        snapshot
+            .range(&self.runtime_outbox, runtime_cursor_key(start)..)
+            .take(limit)
+            .map(|guard| {
+                let (_, bytes) = guard.into_inner()?;
+                let work: ProjectionWork = serde_json::from_slice(&bytes)?;
+                work.validate()?;
+                Ok(work)
+            })
+            .collect()
+    }
+
+    pub fn runtime_audit(&self, commit_id: &str) -> Result<Option<AuditEnvelope>> {
+        let snapshot = self.db.read_tx();
+        let audit = snapshot
+            .get(&self.runtime_audit, commit_id.as_bytes())?
+            .map(|bytes| serde_json::from_slice::<AuditEnvelope>(&bytes))
+            .transpose()?;
+        if let Some(value) = &audit {
+            value.validate()?;
+        }
+        Ok(audit)
+    }
+
+    pub fn runtime_commit_outcome(
+        &self,
+        commit_id: &str,
+    ) -> Result<Option<RuntimeCommitOutcome>> {
+        let snapshot = self.db.read_tx();
+        snapshot
+            .get(&self.runtime_commits, commit_id.as_bytes())?
+            .map(|bytes| serde_json::from_slice(&bytes).map_err(Error::from))
+            .transpose()
+    }
+
     /// Appends claims in one transaction with one fsync.
     ///
     /// `SPEC.md` §11 corrections 1, 2, 3 and 5. The sequence watermark is read
@@ -134,8 +739,12 @@ impl Store {
             // Correction 2: overflow is reported, never saturated.
             sequence = sequence.checked_add(1).ok_or(Error::SequenceOverflow)?;
             let encoded = serde_json::to_vec(claim)?;
-            let claim_key =
-                key::claim_key(&claim.subject, &claim.predicate, claim.valid_from, claim.tx_time);
+            let claim_key = key::claim_key(
+                &claim.subject,
+                &claim.predicate,
+                claim.valid_from,
+                claim.tx_time,
+            );
             // The index entry is written in this same transaction, so it cannot
             // diverge from the watermark advanced below.
             tx.insert(
@@ -166,7 +775,7 @@ impl Store {
     /// Appends a single claim. Equivalent to a batch of one; provided for call
     /// sites that genuinely have one claim, not as the preferred write path.
     pub fn assert(&self, claim: &Claim) -> Result<AppendOutcome> {
-        self.append_batch(std::slice::from_ref(claim))
+        <Self as crate::Engine>::assert(self, claim)
     }
 
     /// Records a read against a claim. Buffered: telemetry must not pay for
@@ -185,7 +794,11 @@ impl Store {
             .db
             .write_tx()
             .durability(Durability::Buffered.persist_mode());
-        tx.insert(&self.access, key::access_key(at, reader, subject, predicate), []);
+        tx.insert(
+            &self.access,
+            key::access_key(at, reader, subject, predicate),
+            [],
+        );
         tx.commit()?;
         Ok(())
     }
@@ -316,7 +929,9 @@ impl Store {
             }
         }
         let Some((key, mut record)) = found else {
-            return Err(Error::Substrate(format!("no invocation with ordinal {ordinal}")));
+            return Err(Error::Substrate(format!(
+                "no invocation with ordinal {ordinal}"
+            )));
         };
         let Some(effectiveness) = record.effectiveness.as_mut() else {
             return Err(Error::Substrate(format!(
@@ -411,12 +1026,7 @@ impl Store {
     /// Scans one subject and predicate from `from`, bounded by the version
     /// prefix. Reads take a snapshot and acquire no write lock
     /// (`SPEC.md` §11 correction 4).
-    fn scan(
-        &self,
-        subject: &Subject,
-        predicate: &Predicate,
-        from: Vec<u8>,
-    ) -> Result<Vec<Claim>> {
+    fn scan(&self, subject: &Subject, predicate: &Predicate, from: Vec<u8>) -> Result<Vec<Claim>> {
         let prefix = key::version_prefix(subject, predicate);
         let snapshot = self.db.read_tx();
         let mut out = Vec::new();
@@ -481,4 +1091,213 @@ fn decode_sequence(value: &[u8]) -> Result<u64> {
         .map_err(|e| Error::CorruptWatermark(e.to_string()))?
         .parse::<u64>()
         .map_err(|e| Error::CorruptWatermark(e.to_string()))
+}
+
+fn decode_optional_sequence(value: Option<fjall::Slice>) -> Result<u64> {
+    value
+        .as_deref()
+        .map(decode_sequence)
+        .transpose()
+        .map(Option::unwrap_or_default)
+}
+
+fn runtime_read_stamp_with<R: Readable>(
+    reader: &R,
+    meta: &SingleWriterTxKeyspace,
+    schemas: &SingleWriterTxKeyspace,
+    scope: &ScopeId,
+) -> Result<ReadStamp> {
+    let commit_cursor = decode_optional_sequence(reader.get(meta, keyspaces::RUNTIME_CURSOR)?)?;
+    let schema_revision = reader
+        .get(schemas, scope.as_str().as_bytes())?
+        .map(|bytes| {
+            serde_json::from_slice::<RuntimeSchemaRegistry>(&bytes).map(|schema| schema.revision)
+        })
+        .transpose()?;
+    let head_digest = reader
+        .get(meta, keyspaces::RUNTIME_LAST_DIGEST)?
+        .map(|bytes| String::from_utf8(bytes.to_vec()))
+        .transpose()
+        .map_err(|error| Error::CorruptWatermark(error.to_string()))?
+        .filter(|digest| !digest.is_empty());
+
+    ReadStamp::new(
+        scope.clone(),
+        schema_revision,
+        0,
+        commit_cursor,
+        head_digest,
+    )
+    .map_err(Error::from)
+}
+
+fn validate_read_stamp_with<R: Readable>(
+    reader: &R,
+    meta: &SingleWriterTxKeyspace,
+    changes_keyspace: &SingleWriterTxKeyspace,
+    read: &ReadStamp,
+) -> Result<()> {
+    read.validate()?;
+    let current = decode_optional_sequence(reader.get(meta, keyspaces::RUNTIME_CURSOR)?)?;
+    if read.commit_cursor > current {
+        return Err(Error::ReadStampUnavailable(read.manifest_id.clone()));
+    }
+    let retained_head = if read.commit_cursor == 0 {
+        None
+    } else {
+        let bytes = reader
+            .get(changes_keyspace, runtime_cursor_key(read.commit_cursor))?
+            .ok_or_else(|| Error::ReadStampUnavailable(read.manifest_id.clone()))?;
+        let change: RuntimeChange = serde_json::from_slice(&bytes)?;
+        if !change.verify_digest() {
+            return Err(Error::Substrate(format!(
+                "runtime change {} failed digest verification",
+                read.commit_cursor
+            )));
+        }
+        Some(change.digest)
+    };
+    let stamped = runtime_change_page(
+        reader,
+        changes_keyspace,
+        read.commit_cursor,
+        0,
+        usize::MAX,
+        Some(&read.scope),
+    )?;
+    let schema_revision = stamped
+        .changes
+        .iter()
+        .filter_map(|change| match &change.mutation {
+            RuntimeMutation::Schema { registry } => Some(registry.revision),
+            _ => None,
+        })
+        .next_back();
+    if read.catalog_revision != 0
+        || read.head_digest != retained_head
+        || read.schema_revision != schema_revision
+    {
+        return Err(Error::ReadStampMismatch(read.manifest_id.clone()));
+    }
+    Ok(())
+}
+
+fn runtime_change_page<R: Readable>(
+    reader: &R,
+    changes_keyspace: &SingleWriterTxKeyspace,
+    head: u64,
+    after: u64,
+    limit: usize,
+    scope: Option<&ScopeId>,
+) -> Result<RuntimeChangePage> {
+    if limit == 0 {
+        return Err(Error::Substrate(
+            "runtime change page limit must be greater than zero".into(),
+        ));
+    }
+    if after == u64::MAX || after >= head {
+        return Ok(RuntimeChangePage {
+            requested_after: after,
+            through_cursor: after,
+            head_cursor: head,
+            changes: Vec::new(),
+        });
+    }
+
+    let mut previous_digest = if after == 0 {
+        None
+    } else {
+        let bytes = reader
+            .get(changes_keyspace, runtime_cursor_key(after))?
+            .ok_or_else(|| Error::Substrate(format!("runtime log is missing cursor {after}")))?;
+        let prior: RuntimeChange = serde_json::from_slice(&bytes)?;
+        if !prior.verify_digest() {
+            return Err(Error::Substrate(format!(
+                "runtime change {after} failed digest verification"
+            )));
+        }
+        Some(prior.digest)
+    };
+    let mut through = after;
+    let mut selected = Vec::new();
+    for (expected_cursor, guard) in
+        (after + 1..).zip(reader.range(changes_keyspace, runtime_cursor_key(after + 1)..))
+    {
+        if expected_cursor > head || through.saturating_sub(after) as usize >= limit {
+            break;
+        }
+        let (_, bytes) = guard.into_inner()?;
+        let change: RuntimeChange = serde_json::from_slice(&bytes)?;
+        if change.cursor != expected_cursor {
+            return Err(Error::Substrate(format!(
+                "runtime log cursor gap: expected {expected_cursor}, found {}",
+                change.cursor
+            )));
+        }
+        if change.previous_digest != previous_digest || !change.verify_digest() {
+            return Err(Error::Substrate(format!(
+                "runtime change {} failed hash-chain verification",
+                change.cursor
+            )));
+        }
+        through = change.cursor;
+        previous_digest = Some(change.digest.clone());
+        if scope.is_none_or(|scope| scope == &change.scope) {
+            selected.push(change);
+        }
+    }
+    Ok(RuntimeChangePage {
+        requested_after: after,
+        through_cursor: through,
+        head_cursor: head,
+        changes: selected,
+    })
+}
+
+fn runtime_cursor_key(cursor: u64) -> [u8; 8] {
+    cursor.to_be_bytes()
+}
+
+fn runtime_identity_key(scope: &ScopeId, reference: &RuntimeRef) -> Vec<u8> {
+    let mut key = Vec::with_capacity(
+        scope.as_str().len() + reference.kind.as_str().len() + reference.id.as_str().len() + 2,
+    );
+    key.extend_from_slice(scope.as_str().as_bytes());
+    key.push(0);
+    key.extend_from_slice(reference.kind.as_str().as_bytes());
+    key.push(0);
+    key.extend_from_slice(reference.id.as_str().as_bytes());
+    key
+}
+
+fn runtime_values_for_scope<T: DeserializeOwned, R: Readable>(
+    reader: &R,
+    keyspace: &SingleWriterTxKeyspace,
+    scope: &ScopeId,
+) -> Result<Vec<T>> {
+    let mut prefix = scope.as_str().as_bytes().to_vec();
+    prefix.push(0);
+    let Some(end) = prefix_end(&prefix) else {
+        return Err(Error::Substrate(
+            "runtime scope prefix has no finite upper bound".into(),
+        ));
+    };
+    let mut values = Vec::new();
+    for guard in reader.range(keyspace, prefix..end) {
+        let (_, bytes) = guard.into_inner()?;
+        values.push(serde_json::from_slice(&bytes)?);
+    }
+    Ok(values)
+}
+
+fn prefix_end(prefix: &[u8]) -> Option<Vec<u8>> {
+    let mut end = prefix.to_vec();
+    for index in (0..end.len()).rev() {
+        if end[index] != u8::MAX {
+            end[index] += 1;
+            end.truncate(index + 1);
+            return Some(end);
+        }
+    }
+    None
 }

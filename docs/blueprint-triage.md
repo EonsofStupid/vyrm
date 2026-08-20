@@ -1,5 +1,11 @@
 # Blueprint Triage — HTAP GraphRAG architecture document
 
+> **Superseded architecture decision (2026-08-18).** The measurements and
+> capability comparisons below remain historical evidence, but Fjall is no
+> longer the permanent substrate decision. Vyrm will replace it with a native
+> engine behind the existing conformance port. Compatibility behavior is a
+> baseline to meet or beat, not a reason to discard AI-specific storage gains.
+
 | Field | Value |
 |-------|-------|
 | Source | Operator-supplied research blueprint, received 2026-08-10 |

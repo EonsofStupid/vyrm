@@ -9,9 +9,17 @@
 //! down with it. Unknown shapes degrade to "do nothing", never to an error.
 
 use crate::preflight::{preflight, Preflight};
+use crate::reasoning::active_reasoning_run;
+use crate::routing::ensure_routing_fresh;
 use crate::stack;
+use crate::workflow::{resolve_package_command, WorkflowDecision, WorkflowObservation};
+use crate::{evaluate_tool, ToolPolicy};
 use serde_json::Value;
-use vyrm_core::{recall, Claim, Millis, Predicate, Producer, Reader, RecallQuery, Subject};
+use vyrm_core::{
+    recall, resolve_as_of, Check, CheckStatus, Claim, Evidence, Millis, Predicate, Producer,
+    Reader, ReasoningPayload, ReasoningState, RecallQuery, RuntimeCommit, RuntimeEventSchema,
+    RuntimeMutation, RuntimeSchemaRegistry, RuntimeType, Subject,
+};
 use vyrm_store::{Effectiveness, Engine, ProjectionStatus, RecallOutcome};
 
 /// Lifecycle events the dispatcher answers. Kebab-case names match the CLI
@@ -78,11 +86,24 @@ pub fn handle<E: Engine>(
     event: HookEvent,
     input: &Value,
 ) -> Result<HookResponse, Box<dyn std::error::Error>> {
-    let HookContext { store, root, harness, reader, now, budget } = *ctx;
+    let HookContext {
+        store,
+        root,
+        harness,
+        reader,
+        now,
+        budget,
+    } = *ctx;
+    let binding = crate::InstanceBinding::discover(root)?;
+    binding.require_runtime_ready()?;
     match event {
         HookEvent::SessionStart => {
-            let Preflight { context, effectiveness, warnings, .. } =
-                preflight(store, root, harness, reader, now, budget)?;
+            let Preflight {
+                context,
+                effectiveness,
+                warnings,
+                ..
+            } = preflight(store, root, harness, reader, now, budget)?;
             Ok(HookResponse {
                 stdout: context,
                 effectiveness: Some(effectiveness),
@@ -96,7 +117,11 @@ pub fn handle<E: Engine>(
             if matched.is_empty() {
                 return Ok(HookResponse::default());
             }
-            let query = RecallQuery { subjects: matched, predicates: None, as_of: now };
+            let query = RecallQuery {
+                subjects: matched,
+                predicates: None,
+                as_of: now,
+            };
             let set = recall(store, &query, budget)?;
             for claim in &set.claims {
                 store.observe(reader, &claim.subject, &claim.predicate, now)?;
@@ -108,7 +133,12 @@ pub fn handle<E: Engine>(
             )];
             lines.extend(set.claims.iter().map(render_claim));
             let effectiveness = Effectiveness {
-                query: query.subjects.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(","),
+                query: query
+                    .subjects
+                    .iter()
+                    .map(|s| s.as_str())
+                    .collect::<Vec<_>>()
+                    .join(","),
                 claims_returned: set.claims.len(),
                 tokens_emitted: set.token_estimate as u64,
                 baseline_tokens: None,
@@ -126,15 +156,43 @@ pub fn handle<E: Engine>(
         }
 
         HookEvent::PreToolUse => {
-            // The wait gate: a quarantined projection makes mutation wait,
-            // as an enforced decision rather than advice the model may skip.
-            let mutating = matches!(
-                input.get("tool_name").and_then(Value::as_str),
-                Some("Edit" | "Write" | "NotebookEdit" | "Bash")
-            );
-            if !mutating {
-                return Ok(HookResponse::default());
+            // Read-only and vyrm control-plane calls bypass project-mutation
+            // policy. The latter is deliberately narrow so recording the
+            // contract or recovering a quarantine cannot deadlock itself.
+            match evaluate_tool(None, input) {
+                ToolPolicy::ReadOnly => return Ok(HookResponse::default()),
+                ToolPolicy::ControlPlane => {
+                    return Ok(HookResponse {
+                        detail: Some("allowed: vyrm control plane".into()),
+                        ..HookResponse::default()
+                    })
+                }
+                ToolPolicy::Allow { .. } | ToolPolicy::Deny { .. } => {}
             }
+
+            let run = match active_reasoning_run(store) {
+                Ok(run) => run,
+                Err(error) => {
+                    return Ok(deny(
+                        format!("vyrm: reasoning contract cannot be trusted. Wait: {error}"),
+                        "denied: reasoning ledger unavailable",
+                    ))
+                }
+            };
+            let policy_evidence = match evaluate_tool(run.as_ref(), input) {
+                ToolPolicy::Allow { differential } => differential.render(),
+                ToolPolicy::Deny { differential } => {
+                    let rendered = differential.render();
+                    return Ok(deny(
+                        format!("vyrm: mutation denied by reasoning policy. Wait: {rendered}"),
+                        &format!("denied: {rendered}"),
+                    ));
+                }
+                ToolPolicy::ReadOnly | ToolPolicy::ControlPlane => unreachable!("handled above"),
+            };
+
+            // The estate wait gate follows the contract gate: a quarantined
+            // projection makes even a properly declared attempt wait.
             if let ProjectionStatus::Quarantined { at, .. } = store.current_projection()?.status {
                 let decision = serde_json::json!({
                     "hookSpecificOutput": {
@@ -153,30 +211,246 @@ pub fn handle<E: Engine>(
                     detail: Some("denied: projection quarantined".into()),
                 });
             }
-            Ok(HookResponse::default())
+            // The second wait gate is source evidence. It refreshes immediately
+            // before the mutation, persists any new generation, and denies if
+            // the project tree cannot be read or the stored routing state
+            // cannot be trusted.
+            let ready = match ensure_routing_fresh(store, root) {
+                Ok(ready) => ready,
+                Err(error) => {
+                    let decision = serde_json::json!({
+                        "hookSpecificOutput": {
+                            "hookEventName": "PreToolUse",
+                            "permissionDecision": "deny",
+                            "permissionDecisionReason": format!(
+                                "vyrm: source-routing freshness could not be established. Wait: {error}"
+                            ),
+                        }
+                    });
+                    return Ok(HookResponse {
+                        stdout: decision.to_string(),
+                        effectiveness: None,
+                        detail: Some("denied: routing freshness unavailable".into()),
+                    });
+                }
+            };
+
+            let workflow_evidence =
+                if input.get("tool_name").and_then(Value::as_str) == Some("Bash") {
+                    let command = input
+                        .pointer("/tool_input/command")
+                        .and_then(Value::as_str)
+                        .unwrap_or("");
+                    match resolve_package_command(root, &binding, command) {
+                        Ok(WorkflowDecision::NotPackage) => None,
+                        Ok(WorkflowDecision::Allow(authorization)) => {
+                            match authorization.establish_freshness(&ready) {
+                                Ok(evidence) => Some(evidence),
+                                Err(differential) => {
+                                    let rendered = differential.render();
+                                    return Ok(deny(
+                                        format!("vyrm: package workflow denied. Wait: {rendered}"),
+                                        &format!("denied: {rendered}"),
+                                    ));
+                                }
+                            }
+                        }
+                        Ok(WorkflowDecision::Deny(differential)) => {
+                            let rendered = differential.render();
+                            return Ok(deny(
+                                format!("vyrm: package workflow denied. Wait: {rendered}"),
+                                &format!("denied: {rendered}"),
+                            ));
+                        }
+                        Err(error) => {
+                            return Ok(deny(
+                                format!(
+                                "vyrm: package workflow policy cannot be trusted. Wait: {error}"
+                            ),
+                                "denied: workflow manifest unavailable",
+                            ));
+                        }
+                    }
+                } else {
+                    None
+                };
+            let mut detail = format!(
+                "policy allowed ({policy_evidence}); routing freshness established: {}",
+                ready.render()
+            );
+            if let Some(evidence) = workflow_evidence {
+                detail.push_str("; ");
+                detail.push_str(&evidence);
+            }
+            Ok(HookResponse {
+                detail: Some(detail),
+                ..HookResponse::default()
+            })
         }
 
         HookEvent::PostToolUse => {
+            let tool = input
+                .get("tool_name")
+                .and_then(Value::as_str)
+                .unwrap_or("unknown");
+            if matches!(evaluate_tool(None, input), ToolPolicy::ControlPlane) {
+                return Ok(HookResponse {
+                    detail: Some("ignored: vyrm control plane".into()),
+                    ..HookResponse::default()
+                });
+            }
+            let mut details = Vec::new();
+
+            // Close the pre-tool authorization with immutable evidence. One
+            // declared attempt authorizes one tool result; the resulting
+            // observation moves the run to NeedsDecision, so another mutation
+            // cannot ride the same declaration. Verification Bash calls are
+            // similarly converted into typed pass/fail checks from exit code.
+            if matches!(tool, "Edit" | "Write" | "NotebookEdit" | "Bash") {
+                if let Some(run) = active_reasoning_run(store)? {
+                    let encoded = serde_json::to_vec(input)?;
+                    let evidence = Evidence {
+                        source: tool_source(input),
+                        digest: vyrm_core::digest::sha256_hex(&encoded),
+                        summary: format!("{tool} hook result captured"),
+                    };
+                    let payload = match run.state() {
+                        ReasoningState::NeedsObservation => Some(ReasoningPayload::Observation {
+                            summary: format!("observed result of declared {tool} attempt"),
+                            evidence: vec![evidence],
+                        }),
+                        ReasoningState::NeedsVerification if tool == "Bash" => {
+                            let status = if run_exit_code(input) == Some(0) {
+                                CheckStatus::Passed
+                            } else {
+                                CheckStatus::Failed
+                            };
+                            Some(ReasoningPayload::Verification {
+                                checks: vec![Check {
+                                    name: format!(
+                                        "verify {}",
+                                        first_line(
+                                            input
+                                                .pointer("/tool_input/command")
+                                                .and_then(Value::as_str)
+                                                .unwrap_or("unreported command")
+                                        )
+                                    ),
+                                    status,
+                                    evidence: vec![evidence],
+                                }],
+                            })
+                        }
+                        _ => None,
+                    };
+                    if let Some(payload) = payload {
+                        let event = crate::reasoning::record_reasoning(
+                            store,
+                            run.id(),
+                            now,
+                            &format!("hook:{}", harness.unwrap_or("unknown")),
+                            payload,
+                        )?;
+                        details.push(format!(
+                            "reasoning {} #{} recorded",
+                            event.payload.name(),
+                            event.ordinal
+                        ));
+                    }
+                }
+            }
+
             // The application journal: a run's outcome becomes a claim, and
             // the next run of the same kind supersedes it. Retirement by
             // supersession, exactly as every other claim.
-            if input.get("tool_name").and_then(Value::as_str) != Some("Bash") {
-                return Ok(HookResponse::default());
+            if tool != "Bash" {
+                return Ok(HookResponse {
+                    detail: (!details.is_empty()).then(|| details.join("; ")),
+                    ..HookResponse::default()
+                });
             }
             let command = input
                 .pointer("/tool_input/command")
                 .and_then(Value::as_str)
                 .unwrap_or("");
+            match resolve_package_command(root, &binding, command)? {
+                WorkflowDecision::Allow(authorization) => {
+                    let response = input.get("tool_response").unwrap_or(&Value::Null);
+                    let observation = WorkflowObservation::capture(
+                        &authorization,
+                        command,
+                        response,
+                        run_exit_code(input),
+                        now,
+                    )?;
+                    let claim = Claim::new(
+                        Subject::new(authorization.event.clone())?,
+                        Predicate::new("status")?,
+                        serde_json::to_string(&observation)?,
+                        now,
+                        now,
+                        Producer {
+                            actor: format!("hook:{}", harness.unwrap_or("unknown")),
+                            on_behalf_of: None,
+                            session: None,
+                        },
+                    );
+                    let mut mutations = superseding_claim_mutations(store, &claim)?;
+                    if store.runtime_schema(&authorization.scope)?.is_none() {
+                        let mut registry = RuntimeSchemaRegistry::empty(
+                            1,
+                            "install package workflow evidence contract",
+                        );
+                        registry.events.insert(
+                            RuntimeType::new("workflow-observation")?,
+                            RuntimeEventSchema::default(),
+                        );
+                        mutations.insert(0, RuntimeMutation::Schema { registry });
+                    }
+                    let outcome = store.commit_runtime(&RuntimeCommit {
+                        scope: authorization.scope,
+                        at: now,
+                        actor: format!("hook:{}", harness.unwrap_or("unknown")),
+                        expected_cursor: store.runtime_cursor()?,
+                        mutations,
+                    })?;
+                    details.push(format!(
+                        "workflow {} committed atomically: status={:?} cursor={} audit={}",
+                        observation.event,
+                        observation.status,
+                        outcome.last_cursor,
+                        outcome.commit_id,
+                    ));
+                    return Ok(HookResponse {
+                        detail: Some(details.join("; ")),
+                        ..HookResponse::default()
+                    });
+                }
+                WorkflowDecision::Deny(differential) => {
+                    return Err(format!(
+                        "post-tool package command has no trusted pre-tool declaration: {}",
+                        differential.render()
+                    )
+                    .into())
+                }
+                WorkflowDecision::NotPackage => {}
+            }
             let Some((subject, stack_name)) = stack::detect(root)
                 .iter()
                 .find_map(|s| s.run_subject(command).map(|subj| (subj, s.name)))
             else {
-                return Ok(HookResponse::default());
+                return Ok(HookResponse {
+                    detail: (!details.is_empty()).then(|| details.join("; ")),
+                    ..HookResponse::default()
+                });
             };
             let object = match run_exit_code(input) {
                 Some(0) => format!("passing: {}", first_line(command)),
                 Some(code) => format!("failing (exit {code}): {}", first_line(command)),
-                None => format!("ran (outcome unreported by harness): {}", first_line(command)),
+                None => format!(
+                    "ran (outcome unreported by harness): {}",
+                    first_line(command)
+                ),
             };
             let claim = Claim::new(
                 Subject::new(subject.clone())?,
@@ -191,10 +465,11 @@ pub fn handle<E: Engine>(
                 },
             );
             store.assert(&claim)?;
+            details.push(format!("journaled {stack_name} run: {subject} = {object}"));
             Ok(HookResponse {
                 stdout: String::new(),
                 effectiveness: None,
-                detail: Some(format!("journaled {stack_name} run: {subject} = {object}")),
+                detail: Some(details.join("; ")),
             })
         }
 
@@ -210,6 +485,54 @@ pub fn handle<E: Engine>(
             ..HookResponse::default()
         }),
     }
+}
+
+fn superseding_claim_mutations<E: Engine>(
+    store: &E,
+    claim: &Claim,
+) -> Result<Vec<RuntimeMutation>, Box<dyn std::error::Error>> {
+    let candidates =
+        store.versions_at_or_before(&claim.subject, &claim.predicate, claim.valid_from)?;
+    let previous = resolve_as_of(&candidates, claim.valid_from).cloned();
+    let claims = match previous {
+        Some(previous) if previous.valid_from < claim.valid_from => {
+            vyrm_core::supersede(&previous, claim.clone())?.to_vec()
+        }
+        _ => vec![claim.clone()],
+    };
+    Ok(claims
+        .into_iter()
+        .map(|claim| RuntimeMutation::Claim { claim })
+        .collect())
+}
+
+fn deny(reason: String, detail: &str) -> HookResponse {
+    let decision = serde_json::json!({
+        "hookSpecificOutput": {
+            "hookEventName": "PreToolUse",
+            "permissionDecision": "deny",
+            "permissionDecisionReason": reason,
+        }
+    });
+    HookResponse {
+        stdout: decision.to_string(),
+        effectiveness: None,
+        detail: Some(detail.to_owned()),
+    }
+}
+
+fn tool_source(input: &Value) -> String {
+    let tool = input
+        .get("tool_name")
+        .and_then(Value::as_str)
+        .unwrap_or("unknown");
+    let target = input
+        .pointer("/tool_input/file_path")
+        .or_else(|| input.pointer("/tool_input/notebook_path"))
+        .or_else(|| input.pointer("/tool_input/command"))
+        .and_then(Value::as_str)
+        .unwrap_or("unreported target");
+    format!("{tool}:{target}")
 }
 
 /// Subjects whose name appears in the prompt as a whole word

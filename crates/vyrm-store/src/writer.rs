@@ -104,6 +104,9 @@ struct State {
     durable_through: u64,
     stats: WriterStats,
     failure: Option<String>,
+    /// Set by `flush` so the worker can distinguish an explicit durability
+    /// boundary from a spurious wakeup or a producer arriving before its wait.
+    flush_requested: bool,
     shutdown: bool,
 }
 
@@ -137,6 +140,7 @@ impl Writer {
                 durable_through: 0,
                 stats: WriterStats::default(),
                 failure: None,
+                flush_requested: false,
                 shutdown: false,
             }),
             work: Condvar::new(),
@@ -197,7 +201,7 @@ impl Writer {
 
     /// Commits everything submitted before this call and returns once durable.
     pub fn flush(&self) -> Result<()> {
-        let state = self.shared.state.lock().expect("writer state poisoned");
+        let mut state = self.shared.state.lock().expect("writer state poisoned");
         if let Some(failure) = &state.failure {
             return Err(Error::Substrate(failure.clone()));
         }
@@ -205,6 +209,7 @@ impl Writer {
         if state.durable_through >= target {
             return Ok(());
         }
+        state.flush_requested = true;
         drop(state);
         self.shared.work.notify_one();
 
@@ -280,24 +285,40 @@ fn commit_loop(store: Arc<Store>, shared: Arc<Shared>, config: WriterConfig) {
     loop {
         let batch = {
             let mut state = shared.state.lock().expect("writer state poisoned");
-            while state.pending.is_empty() && !state.shutdown {
+            loop {
+                if state.shutdown && state.pending.is_empty() {
+                    return;
+                }
+                if state.pending.is_empty() {
+                    // A flush requested while the previous batch was in the
+                    // substrate is satisfied by that batch's progress update.
+                    state.flush_requested = false;
+                }
+                if !state.pending.is_empty()
+                    && (state.pending.len() >= config.max_batch
+                        || state.flush_requested
+                        || state.shutdown)
+                {
+                    break;
+                }
                 let (next, timeout) = shared
                     .work
                     .wait_timeout(state, config.flush_delay)
                     .expect("writer state poisoned");
                 state = next;
-                if timeout.timed_out() {
+                if timeout.timed_out() && !state.pending.is_empty() {
                     break;
                 }
             }
             if state.pending.is_empty() {
-                if state.shutdown {
-                    return;
-                }
+                state.flush_requested = false;
                 continue;
             }
             let take = config.max_batch.min(state.pending.len());
             let batch: Vec<Claim> = state.pending.drain(..take).collect();
+            if state.pending.is_empty() {
+                state.flush_requested = false;
+            }
             shared.drained.notify_all();
             batch
         };

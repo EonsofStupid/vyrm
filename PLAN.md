@@ -2,12 +2,292 @@
 
 | Field | Value |
 |-------|-------|
-| Status | Draft. Grounding result re-run 2026-08-10 after Step 1. |
+| Status | Runtime completion plus persisted schema pass landed 2026-08-19; historical execution journal retained below. |
 | Governs | Sequencing and acceptance of work against `SPEC.md` |
 | Does not govern | Contracts, terminology, or requirements. Those are `SPEC.md` only. |
 
 This document sequences work. It does not restate requirements. Where the two
 disagree, `SPEC.md` is authoritative and this document is wrong.
+
+> **Current-state overlay (2026-08-18).** The original grounding table below is
+> retained as historical evidence and is not the current status board. The
+> completed runtime now includes `vyrm-node`, persisted graph freshness,
+> hash-chained reasoning runs, deny-by-default contract differentials, `vyrmd`
+> MCP, controlled provider evaluations, and CI regression checks. See
+> `STATUS.md` for current state and `eval/results/2026-08-18-summary.json` for
+> measured evaluation evidence.
+
+> **Instance-topology overlay (2026-08-18).** vyrm/connectome is rolled out as
+> an isolated, platform-molded instance for each major platform. Related small
+> projects may use an explicitly configured umbrella instance. There is no
+> implicit estate-wide store. The active follow-on is to enforce this boundary
+> with a versioned instance manifest and scoped runtime state. SurrealDB and
+> Qdrant capability adoption is postponed. See `docs/instance-topology.md`.
+
+> **Prompt-flight overlay (2026-08-18).** Connectome now records controlled
+> fresh/pruned/full prompt flights. Fresh means a new provider session with zero
+> injected Vyrm context; it never deletes the authoritative claim or reasoning
+> ledgers. Each externally observable micro-event is replayable, and exact
+> prompts form comparison cohorts. The next evidence pass is repeated vague-
+> prompt trials with non-trivial acceptance markers, not additional UI chrome.
+> See `docs/prompt-flight-experiments.md`.
+
+> **Temporal runtime-graph overlay (2026-08-19).** Vyrm now persists typed
+> records, relations, claims, and lifecycle events through one atomic
+> `RuntimeCommit`. Every mutation receives a monotonic global cursor and joins a
+> verified hash chain; stale expected cursors fail rather than overwrite.
+> Reasoning and prompt-flight ledgers have moved from whole-projection rewrites
+> to this append-only log. Connectome exposes cursor replay, graph-at-time, and
+> graph differential endpoints. A strict persisted schema registry now denies
+> unknown types/properties, wrong value types, illegal endpoints, temporal
+> uniqueness collisions, and edge-cardinality violations; its migrations are
+> atomic runtime mutations and its active contract is visible in Connectome.
+> This work deliberately excludes BM25, embedding execution, and semantic
+> retrieval. Content-addressed artifact bytes/backreferences landed in M4;
+> incremental grounded graph lenses and member-scoped authorization remain. See
+> `docs/runtime-graph.md`.
+
+> **Native-engine decision (2026-08-18).** Fjall is transitional and will be
+> removed in favor of a Vyrm-native substrate. Existing Fjall measurements and
+> tests remain comparison evidence, not an architectural veto. The
+> `vyrm_store::Engine` differential is now the migration harness: the native
+> engine must preserve wire/temporal/runtime semantics and meet or beat the
+> compatibility adapter on latency, throughput, durability, recovery, and
+> memory. Licensing is not the optimization boundary; measured behavior is.
+
+> **Data-runtime implementation overlay (2026-08-19).** The proposed `vyrmQL`,
+> `vyrmMX`, `vyrmDS`, and native `vyrmKV` names have explicit boundaries; they
+> are not represented as complete subsystems. A pinned primary-source
+> review of Qdrant, SurrealDB, HelixDB, SlateDB, Lance, DataFusion, OpenDAL,
+> cuVS, and TiKV produced an adopt/adapt/reject matrix and milestones M0–M8.
+> M0/M1 now have a versioned portable contract (`ReadStamp`, leased
+> `SnapshotHandle`, `DataTransaction`, `ProjectionStamp`, and hash-chained
+> `AuditEnvelope`), checked-in golden JSON, and matching MemoryEngine/Fjall
+> behavior for frozen replay, expiry, restart persistence, and concurrent CAS.
+> M1 is now closed with stamped transaction reads, prospective read-your-writes,
+> same/disjoint global-CAS coverage, repeatable paged replay, and logical
+> retention-pin inventory exposed to Connectome. Physical segment attachment
+> belongs to native M3. M2 is now closed with explicit-time `vyrmQL`, catalog
+> binding, deterministic logical/physical `vyrmMX` plans, exact stamped-log
+> execution, budgets, diagnostics, backend/direct-API differentials, and a
+> browser-visible Query Lab. Native `vyrmKV` M3 implementation and its first
+> local promotion gate are now closed; repeated CI/broader workload evidence and
+> the backend-default decision remain. Vector, object, and cluster work stay
+> sequenced behind that explicit decision. See
+> `docs/vyrmds-architecture-research.md`.
+> M3 is now active in a standalone `vyrm-kv` crate. Its v1 WAL, atomic mutation
+> batch, and immutable-manifest formats are frozen by checked-in vectors.
+> Checksummed replay, explicit torn-tail repair, MVCC allocation, ordered
+> memtables, repeatable snapshots, and reopen are green. Content-addressed
+> immutable segments now retain MVCC history, and locked manifest publication
+> uses expected-parent CAS plus sync-before-`CURRENT` ordering. Checkpoints and
+> segment/WAL lifecycle integration followed. Named, checksummed checkpoints
+> pin historical manifests and release explicitly. Database flush now orders
+> WAL sync, content-addressed segment sync, successor-WAL creation, and manifest
+> CAS publication; reopen validates reachable segments and replays only the
+> manifest-declared WAL range. `NativeEngine` now implements the complete
+> semantic port over prefixed native keys and one atomic `vyrmKV` batch per
+> commit. Memory/Fjall/native differentials cover claims, projections, runtime
+> schemas and hash chains, snapshots, restart, concurrent CAS, and exact query
+> results. Snapshot-aware compaction retains only versions visible at protected
+> physical snapshots; runtime leases create/reconcile manifest checkpoints; GC
+> derives reachability from `CURRENT` plus those pins. Crash and storage-full
+> injection now cover every flush and compaction durability boundary. Native
+> performance proof has a five-trial isolated-process baseline. After segment-v2
+> compression, sparse immutable reads, hardware CRC32C, and fresh steady-state
+> probe processes, native passes correctness and every strict equal-or-better
+> cell: write/read throughput, write/read p95, maintained recovery, steady RSS,
+> and disk. This closes the local M3 gap; Fjall remains live as an oracle until
+> CI and broader workload matrices reproduce the result. A second nine-trial
+> small-batch/standard/read-heavy/sustained matrix now passes every strict cell;
+> the sparse index holds byte ranges into canonical segment storage rather than
+> duplicate heap keys. The deterministic physical mutation gate now adds
+> 20,000 puts/overwrites/deletes across 10 reopens and 8 compactions, with
+> byte-identical Fjall/native/independent-model state. The offline migration
+> rehearsal now authenticates all 18 keyspaces, stages and verifies native
+> bytes, resumes seven interruption boundaries, retains Fjall, and refuses
+> rollback after native divergence. Remote benchmark repetition and an explicit
+> compatibility-retirement release remain before Fjall source removal—not
+> another append/replay microbenchmark. Typed entity deletion is separately
+> unresolved because referential integrity belongs in the runtime contract.
+> The default switch itself is now safe and explicit: `PersistentEngine` creates
+> native stores for missing paths, reopens native by authenticated `CURRENT`,
+> and keeps existing non-native directories on `fjall_compatibility`. CLI,
+> `vyrmd`, and Connectome share that selector and expose its decision.
+> Operators can now run `vyrm storage migrate|status|rollback`; ordinary opens
+> deny active migration markers so a cutover gap cannot initialize empty state.
+> **Package workflow gate (2026-08-20).** Canonical bun/pnpm/npm/yarn event
+> identities now bind to a strict project-owned `.vyrm/workflows.toml` rather
+> than merely being journaled after execution. Preflight captures the declared
+> scope's runtime `ReadStamp`; pre-tool combines reasoning authorization,
+> zero-lag routing freshness, exact direct argv, instance scope, and manifest
+> SHA-256 into a fail-closed decision. Post-tool stores only safe command
+> metadata plus exact command/response digests and atomically commits the
+> temporal status claim, runtime change, outcome, and audit. Memory/Fjall/native
+> evidence is identical. See `docs/package-workflows.md`.
+> **Temporal workbench gate (2026-08-20).** Connectome now derives a bounded
+> global event stream directly from authoritative runtime changes across all
+> scopes and preserves each cursor, commit identity, mutation digest, full
+> mutation, and available hash-chained audit envelope. Six aligned semantic
+> lanes support freeze, scrub, rewind, forward, and exact inspection without a
+> second telemetry truth. These are persisted logical mutations, not physical
+> WAL micro-events or inferred private model reasoning. Snapshot-to-delta
+> transport and controlled frontier-provider evaluation remain open.
+> **Fjall/AI physical audit (2026-08-20).** The pinned Fjall 3.1.8 source and
+> current upstream were compared to native `vyrm-kv`. Fjall remains ahead in
+> generic background maintenance, backpressure, leveled compaction, filters,
+> per-keyspace tuning, and concurrency. Vyrm's first justified specialization
+> now resolves current hot memtable point reads and multi-gets before immutable
+> blocks while preserving historical MVCC fallback. A cache-traffic regression
+> and isolated hot-control benchmark are green; the local five-trial cell is
+> 2.261× Fjall throughput and 0.379× Fjall p95. This is not a general database
+> claim. See `docs/vyrmkv-fjall-ai-audit.md` for the ordered remaining gates.
+> The product handoff, canonical package-event grammar, alpha release gates,
+> deployment/update tiers, and separate SurrealDB/Qdrant proof protocols are
+> frozen in `docs/clyffy-kernel-alpha.md`.
+
+> **M4 unified-data overlay (2026-08-19).** The local executable gate is closed.
+> Canonical vector, series, geo, and object-reference mutations now join the
+> same atomic cursor/hash-chain commit as claims, records, relations, and
+> events. Each accepted commit atomically persists latest-value indexes,
+> deterministic projection work, chained audit, and an idempotent outcome.
+> `vyrmDS::DataRuntime` implements stage → verify → commit visibility over a
+> synced local content-addressed store and a capability-explicit S3-compatible
+> adapter. Three-engine mixed-family rollback/reopen tests, publication/commit
+> fault injection, quarantine, orphan reclamation, and local/S3 semantic
+> differential are green. Live cloud transport certification and automatic
+> retention-aware object GC are deployment work. See
+> `docs/vyrmds-object-contract.md`; the M5 overlay below records the next gate.
+
+> **M5 vector/search overlay (2026-08-19).** The local semantic and evidence
+> gate is closed. `vyrm-vector` now supplies the borrowing exact
+> dense/sparse/multivector oracle, bounded typed filters, immutable exact
+> segments, deterministic dense HNSW with filter-aware admission and exact
+> reranking, a freshness-aware planner/executor, unified CAS generation
+> lifecycle, scalar-quantization experiment, portable fixture, backend
+> differential, recall gate, and eight-generation update/delete/reopen/
+> replacement soak. The retained 10k×128 profile reaches 0.98 recall@10 at
+> `ef=256` while exposing a 3.90× JSON-artifact overhead; this is a local
+> baseline, not a Qdrant superiority claim. Compact binary/mmap, SIMD/GPU,
+> sparse/multivector ANN, embeddings, and external comparison remain gated.
+> See `docs/vyrm-vector-search.md`.
+
+> **M6 embedding/edge overlay (2026-08-19).** The local kernel gate is closed.
+> `vyrm-embed` now provides source-digest/model/read-stamp-bound jobs, two-read
+> inference race detection, final commit CAS, and a no-network local FastEmbed
+> adapter behind an optional feature. Search requests and projections can bind
+> exact model identity. Compact dense v1 adds authenticated aligned `f32`, true
+> read-only mmap, atomic publication, and scalar/AVX2 parity. Accelerator output
+> is untrusted until byte-identical to the CPU artifact; fallback is explicit.
+> `vyrm-edge` supplies one-call offline embed/search and retained 10k×128
+> binary/RSS/artifact/latency evidence. No physical GPU or real-model quality
+> result is claimed. See `docs/vyrm-embedding-edge.md`.
+
+> **M7 cluster-contract overlay (2026-08-19).** The first protocol/simulation
+> slice is executable. `vyrm-cluster` freezes canonical three-zone placement,
+> consistency requests, partial-order snapshot vectors, route evidence,
+> snapshot-plus-WAL transfer, metadata-indexed resharding, and an explicit M7
+> denial for cross-shard writes. Its deterministic single-term/per-shard model
+> injects partition, delay, duplication, reorder, crash, restart, clock skew,
+> and disk loss, and enumerates quorum paths against every tolerated single
+> disk loss. This is not a production consensus, networking, election, or
+> Multi-AZ claim. See `docs/vyrm-cluster-m7.md`.
+
+> **M7 real-consensus overlay (2026-08-19).** OpenRaft `0.9.25` is pinned behind
+> an opt-in feature and adapted to authoritative VyrmKV storage. Votes, logs,
+> committed pointers, application state, and snapshots survive the upstream
+> conformance suite. A real four-node in-process run covers election, quorum
+> writes, log-purged snapshot catch-up, majority-side failover, post-failover
+> commit, and voter replacement. Command application binds shard, placement
+> epoch, full idempotency identity, payload digest, and optional commit-index
+> CAS. Production transport, unified `RuntimeCommit` dispatch, bounded state,
+> independent-process chaos, and Multi-AZ evidence remain open.
+
+> **M7 physical-snapshot prerequisite (2026-08-19).** VyrmKV snapshot-bundle
+> v1 now exports a flush-bounded manifest plus every authenticated immutable
+> segment in a deterministic binary envelope. Installation validates the full
+> closure, syncs content-addressed segments and an empty continuation WAL, then
+> atomically advances a new local manifest rather than importing the source's
+> history. Round-trip, corruption/truncation/stale denial, idempotent reinstall,
+> target replacement, reopen, continued writes, and crash/storage-full tests at
+> all three install boundaries are green. This froze the physical prerequisite
+> consumed by adapter v3 in the following overlay.
+
+> **M7 transferable-runtime overlay (2026-08-19).** Adapter format `v3` now
+> gives canonical state and node-local Raft history separate VyrmKV ownership
+> domains. Votes, logs, committed/purged cursors, and the content-addressed
+> current-snapshot cache remain local; the applied cursor and canonical runtime
+> mutations remain atomic in the transferable state database. OpenRaft builds
+> and installs authenticated snapshot-bundle v1 bytes, binds metadata and
+> snapshot id before manifest publication, and preserves the target vote.
+> Upstream storage conformance plus corrupt/forged/stale/duplicate/reopen tests
+> pass. A real four-node run snapshots a `RuntimeCommit`, purges the leader log,
+> catches up a new learner, and reopens the runtime truth on all four nodes.
+
+> **M7 epoch/retention overlay (2026-08-19).** Adapter format `v4` makes
+> placement initialization and advance an explicit replicated operation. Epoch
+> 1 must match the applied OpenRaft voter canonical ids and zones; later epochs
+> must be exact successors and bind the same way. Normal operations can no
+> longer establish an epoch implicitly, and later voter-binding changes
+> invalidate it until the next placement transition while learner-only metadata
+> does not. Full identity responses are retained for exactly 4,096 applied-log
+> positions, with deterministic pruning in the state machine and its snapshots;
+> canonical runtime commit identity remains independently durable.
+> Initialization, successor, skipped/stale, membership mismatch/rebinding,
+> duplicate, retention-boundary, snapshot, and reopen evidence pass.
+
+> **M7 authenticated-transport overlay (2026-08-19).** The opt-in
+> `openraft-transport` feature implements real TCP RPCs over TLS 1.3 mutual
+> authentication. Transport v1 binds one exact SPIFFE-style URI identity to the
+> CA-validated leaf, statically authorizes numeric/canonical node pairs, binds
+> cluster/shard/source/target/request digest and the inner Raft vote source, and
+> enforces bounded frames, client hard TTLs, ingress lifetime, and concurrent
+> admission. A four-node loopback run elects and replicates over this transport,
+> transfers a physical runtime snapshot to a post-purge learner, and denies
+> certificate/envelope confusion and authenticated vote-source forgery.
+> Independent-process chaos, rotation/revocation, production telemetry, and
+> Multi-AZ evidence remain open.
+
+> **M7 process-isolation overlay (2026-08-19).** The feature-gated
+> `vyrm-cluster-node` executable opens one durable shard root, validates its own
+> canonical SPIFFE leaf before readiness, and serves the authenticated OpenRaft
+> transport. A bounded/versioned/request-correlated JSON-lines lifecycle
+> protocol stays on inherited stdin/stdout rather than exposing an
+> unauthenticated network admin port. A four-OS-process black-box run now covers
+> abrupt crash/restart and catch-up, leader failover and commit, controlled
+> bidirectional transport isolation of the live leader, majority-side election
+> and commit, healing/reconciliation, log-purged physical snapshot catch-up,
+> certificate/node confusion denial, and corrupt `CURRENT` refusal. Five
+> consecutive stress repetitions pass. This is process-isolation evidence on
+> one host, not independent-host, credential-lifecycle, production telemetry,
+> bounded-memory snapshot, or Multi-AZ certification.
+
+> **M7 credential-lifecycle overlay (2026-08-19).** `VyrmTlsReloader` atomically
+> replaces one complete leaf/key/trust-root/CRL state at an exact-successor local
+> generation; every new outbound and inbound one-RPC TLS connection snapshots
+> the latest state. CRLs use rustls WebPKI with end-entity checks, unknown status
+> denial, and expiration enforcement. Real-TCP evidence passes leaf hot reload,
+> stale-generation denial, two-root overlap, migration to a second CA, old-root
+> retirement, and revoked/retired leaf denial without restarting Raft. The
+> four-process matrix rotates live identities, distributes a CRL, proves an old
+> leaf cannot rejoin after restart, reapplies the full credential set, then
+> completes partition/heal and snapshot recovery. The delivery surface is
+> deliberately compatible with SPIFFE's complete streamed SVID/bundle/CRL
+> replacement model, but the actual Workload API client, automatic issuance,
+> and durable external supervisor generation remain open.
+
+> **M7 canonical-runtime overlay (2026-08-19).** Adapter format `v2` first added a
+> typed `runtime_commit` operation. `NativeEngine` now exposes a validated
+> no-write plan, allowing canonical mutations, audit/outbox work, the Raft
+> applied cursor, response, and idempotency record to publish in one
+> authoritative VyrmKV WAL frame. Reopen, duplicate, stale-cursor denial, and
+> same-frame differentials are green. A real three-voter run reopens identical
+> canonical runtime truth through `NativeEngine` on every voter. Runtime-bearing
+> snapshots are now transferred by adapter v4's physical ownership split and
+> the opt-in authenticated transport. One-host process-isolation chaos now
+> passes through the node runner; hot file-fed credential lifecycle also passes,
+> while independent-host faults, automatic workload issuance, and Multi-AZ
+> evidence remain open.
 
 ## 1 · Grounding result
 
@@ -52,13 +332,13 @@ absence, not recollection.
 | §13.2 | Content-addressed objects | **Missing** | absent |
 | §14 | Clyffy consumer | **Missing** | absent |
 
-Implemented and verified: 118 tests, clippy clean at `-D warnings`. Known
-flake, observed once on 2026-08-11: `durability.rs::
-an_unflushed_index_is_as_empty_as_the_claims_it_indexes` found 37 recovered
-claims where it expects 0 — the test presumes an unflushed write is absent
-after a clean reopen, but a clean close can land journal bytes via the page
-cache, so the premise is not guaranteed. To be tightened when `vyrm-store` is
-next touched (Step R item: index persistence).
+Implemented and verified: 118 tests, clippy clean at `-D warnings`. The former
+`durability.rs::an_unflushed_index_is_as_empty_as_the_claims_it_indexes` flake
+was resolved on 2026-08-19. The group-commit worker could observe a non-empty
+queue before entering its timed wait and commit without a full batch, elapsed
+delay, or explicit flush. The worker now carries an explicit flush-request bit
+and waits for one of the documented triggers; a direct long-delay test and
+repeated SIGKILL durability runs cover the boundary.
 
 ## 2 · Findings from this audit
 

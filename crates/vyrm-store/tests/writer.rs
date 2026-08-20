@@ -73,6 +73,31 @@ fn elapsed_delay_commits_without_an_explicit_flush() {
 }
 
 #[test]
+fn pending_claims_do_not_commit_before_a_trigger() {
+    let (_dir, store) = store();
+    let writer = Writer::spawn(
+        Arc::clone(&store),
+        WriterConfig {
+            flush_delay: Duration::from_secs(3600),
+            max_batch: 512,
+            queue_capacity: 4096,
+        },
+    );
+    for i in 0..64 {
+        writer.submit(claim(i)).unwrap();
+    }
+
+    // Give the worker ample opportunity to observe the non-empty queue. It
+    // must still wait because no size, delay, or explicit-flush trigger fired.
+    std::thread::sleep(Duration::from_millis(50));
+    assert_eq!(store.sequence().unwrap(), 0);
+    assert_eq!(writer.durable_through(), 0);
+
+    writer.flush().unwrap();
+    assert_eq!(store.sequence().unwrap(), 64);
+}
+
+#[test]
 fn a_lone_claim_reaches_durability_within_a_bound_set_by_the_delay() {
     // The property that makes flush_delay meaningful for sparse arrival: a
     // single claim with no follow-up traffic must not wait indefinitely for a

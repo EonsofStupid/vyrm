@@ -1,0 +1,89 @@
+{
+  "comment": "M4 portable values; changes require an explicit wire-version decision",
+  "commit": {
+    "actor": "agent:golden",
+    "at": 1100,
+    "expected_cursor": 7,
+    "mutations": [
+      {
+        "mutation": "vector",
+        "vector": {
+          "kind": "embedding",
+          "id": "doc-1-title",
+          "subject": { "kind": "entity", "id": "doc-1" },
+          "field": "title",
+          "valid_from": 1000,
+          "value": { "kind": "dense", "values": [0.25, -0.5, 0.75] },
+          "properties": {}
+        }
+      },
+      {
+        "mutation": "series_sample",
+        "sample": {
+          "kind": "sample",
+          "id": "doc-1-score-1000",
+          "series": { "kind": "entity", "id": "doc-1" },
+          "observed_at": 1000,
+          "value": { "type": "decimal", "value": "42.125" },
+          "properties": {}
+        }
+      },
+      {
+        "mutation": "geo",
+        "geo": {
+          "kind": "location",
+          "id": "doc-1-region",
+          "subject": { "kind": "entity", "id": "doc-1" },
+          "field": "region",
+          "valid_from": 1000,
+          "valid_to": 2000,
+          "value": {
+            "kind": "bounding_box",
+            "southwest": { "longitude": -123.0, "latitude": 37.0 },
+            "northeast": { "longitude": -122.0, "latitude": 38.0 }
+          },
+          "properties": {}
+        }
+      },
+      {
+        "mutation": "object",
+        "object": {
+          "kind": "object",
+          "id": "source",
+          "subject": { "kind": "entity", "id": "doc-1" },
+          "sha256": "6b94be64314982ce8c55d1580e305112d36ae3eee6f85446f8b95c4b9b1df880",
+          "length": 19,
+          "media_type": "text/plain",
+          "receipt": {
+            "backend": "local",
+            "key": "objects/sha256/6b/6b94be64314982ce8c55d1580e305112d36ae3eee6f85446f8b95c4b9b1df880",
+            "etag": "6b94be64314982ce8c55d1580e305112d36ae3eee6f85446f8b95c4b9b1df880"
+          },
+          "properties": {}
+        }
+      }
+    ],
+    "scope": "instance:golden"
+  },
+  "commit_digest": "26e4a21ab968a20320e7386a28bc2fa9fcbe69d4f5ee347b4dddf24bfacf332a",
+  "first_projection_work": {
+    "contract_version": 1,
+    "id": "02b48d44baa378568ecadafa508319a235c2ed1e40632dcadbb0012f97a244c8",
+    "scope": "instance:golden",
+    "source_cursor": 8,
+    "commit_id": "26e4a21ab968a20320e7386a28bc2fa9fcbe69d4f5ee347b4dddf24bfacf332a",
+    "commit_ordinal": 0,
+    "family": "vector"
+  },
+  "sparse_vector": {
+    "kind": "sparse",
+    "dimensions": 8,
+    "indices": [1, 4, 7],
+    "values": [0.5, -1.0, 2.0]
+  },
+  "multi_vector": {
+    "kind": "multi_dense",
+    "dimensions": 2,
+    "vectors": [[1.0, 0.0], [0.0, 1.0]]
+  }
+}

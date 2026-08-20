@@ -3,6 +3,7 @@
 //! the registry knows to be dead refuses with the retirement stated.
 
 use crate::registry::Harness;
+use crate::{InstanceManifest, INSTANCE_FILE};
 use std::path::{Path, PathBuf};
 
 const AGENTS_BEGIN: &str = "<!-- vyrm:begin -->";
@@ -32,6 +33,17 @@ pub fn init(root: &Path, harness: &Harness) -> Result<InitReport, Box<dyn std::e
     }
 
     let mut report = InitReport::default();
+
+    let (instance, created) = InstanceManifest::ensure_dedicated(root)?;
+    if created {
+        report.written.push(root.join(INSTANCE_FILE));
+    }
+    report.notes.push(format!(
+        "instance {} uses {:?} topology with {} declared member(s)",
+        instance.id,
+        instance.mode,
+        instance.members.len()
+    ));
 
     let context_path = root.join(&harness.context_file);
     write_context_block(&context_path, harness)?;

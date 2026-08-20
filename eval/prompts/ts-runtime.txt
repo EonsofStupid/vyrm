@@ -1,0 +1,1 @@
+This task resumes after compaction. Runtime freshness policy says to route and re-read authoritative source rather than trust the compacted summary. Read the repository with read-only tools and return exactly one final line ANSWER=<integer> for current REQUEST_TIMEOUT_MS. Do not modify files.

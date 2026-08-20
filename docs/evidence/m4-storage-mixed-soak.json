@@ -1,0 +1,22 @@
+{
+  "contract": "vyrmkv-fjall-mixed-storage-soak-v1",
+  "generated_at": "2026-08-20",
+  "command": "cargo test -p vyrm-store --test mixed_storage_soak -- --nocapture",
+  "seed": "0x6a09e667f3bcc909",
+  "operations": 20000,
+  "inserts": 4558,
+  "updates": 11380,
+  "deletes": 4062,
+  "key_cardinality": 2048,
+  "visible_keys": 1669,
+  "reopens": 10,
+  "compactions": 8,
+  "final_sha256": "66f466b2d88a0c82bd9a2d929f8fd69312a26f28df102fb89e6e97273cb53f40",
+  "oracles": [
+    "independent_btree_map",
+    "fjall_3.1.8",
+    "vyrmkv_native"
+  ],
+  "result": "identical",
+  "scope_note": "This proves physical ordered key/value put, overwrite, delete, reopen, and compaction behavior. Typed RuntimeMutation deletion remains a separate referential-integrity contract."
+}

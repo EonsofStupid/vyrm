@@ -7,6 +7,7 @@
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use vyrm_store::{Engine, PersistentBackend, PersistentEngine, Store};
 
 fn vyrm(db: &Path, args: &[&str]) -> (bool, String, String) {
     let output = Command::new(env!("CARGO_BIN_EXE_vyrm"))
@@ -47,6 +48,49 @@ fn a_claim_can_be_asserted_and_resolved() {
     let (ok, out, err) = vyrm(&db, &["as-of", "--subject", "wp3", "--predicate", "status", "--at", "2000"]);
     assert!(ok, "as-of failed: {err}");
     assert!(out.contains("in_progress"), "unexpected output: {out}");
+
+    let (ok, out, err) = vyrm(&db, &["status", "--json"]);
+    assert!(ok, "status failed: {err}");
+    let status: serde_json::Value = serde_json::from_str(&out).unwrap();
+    assert_eq!(status["storage_backend"], "vyrmkv_native");
+}
+
+#[test]
+fn storage_migration_runs_offline_and_exposes_status_and_rollback() {
+    let root = tempfile::tempdir().unwrap();
+    let db = root.path().join("storage-migration");
+    let fjall = Store::open(&db).unwrap();
+    Engine::put_projection(&fjall, "cli-migration", b"preserved").unwrap();
+    drop(fjall);
+
+    let (ok, out, err) = vyrm(&db, &["storage", "migrate", "--json"]);
+    assert!(ok, "storage migrate failed: {err}");
+    let report: serde_json::Value = serde_json::from_str(&out).unwrap();
+    assert_eq!(report["phase"], "complete");
+    assert_eq!(
+        PersistentEngine::open(&db).unwrap().backend(),
+        PersistentBackend::Native
+    );
+
+    let (ok, out, err) = vyrm(&db, &["storage", "status", "--json"]);
+    assert!(ok, "storage status failed: {err}");
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&out).unwrap()["phase"],
+        "complete"
+    );
+
+    let (ok, out, err) = vyrm(&db, &["storage", "rollback", "--json"]);
+    assert!(ok, "storage rollback failed: {err}");
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&out).unwrap()["phase"],
+        "rolled_back"
+    );
+    let restored = PersistentEngine::open(&db).unwrap();
+    assert_eq!(restored.backend(), PersistentBackend::FjallCompatibility);
+    assert_eq!(
+        restored.get_projection("cli-migration").unwrap(),
+        Some(b"preserved".to_vec())
+    );
 }
 
 #[test]
@@ -178,6 +222,32 @@ fn an_absent_claim_is_reported_rather_than_treated_as_an_error() {
 }
 
 #[test]
+fn reasoning_contract_rejects_skips_and_is_queryable_as_typed_json() {
+    let db = scratch("reasoning-contract");
+    let goal = r#"{"kind":"goal","statement":"ship it","acceptance":["tests pass"]}"#;
+    let (ok, out, err) = vyrm(
+        &db,
+        &["reasoning", "record", "--run", "r1", "--payload", goal],
+    );
+    assert!(ok, "goal failed: {err}");
+    assert!(out.contains("recorded goal #1"));
+
+    let skipped = r#"{"kind":"attempt","summary":"guess","actions":[]}"#;
+    let (ok, _, err) = vyrm(
+        &db,
+        &["reasoning", "record", "--run", "r1", "--payload", skipped],
+    );
+    assert!(!ok, "an attempt cannot skip the plan stage");
+    assert!(err.contains("invalid while reasoning run is NeedsPlan"));
+
+    let (_, out, _) = vyrm(&db, &["reasoning", "show", "--run", "r1", "--json"]);
+    let value: serde_json::Value = serde_json::from_str(&out).unwrap();
+    assert_eq!(value["state"], "needs_plan");
+    assert_eq!(value["events"][0]["payload"]["kind"], "goal");
+    assert_eq!(value["events"][0]["digest"].as_str().unwrap().len(), 64);
+}
+
+#[test]
 fn recall_returns_current_claims_and_records_the_ledger_entry() {
     let db = scratch("recall-ledger");
     vyrm(&db, &["assert", "--subject", "wp3", "--predicate", "status", "--object", "tested",
@@ -237,7 +307,8 @@ fn grounding_is_operable_and_divergence_halts_until_reset() {
 
     let (ok, out, err) = vyrm(&db, &["rebuild"]);
     assert!(ok, "rebuild failed: {err}");
-    assert!(out.contains("watermark 0 -> 2"), "unexpected output: {out}");
+    // The successor adds an immutable retirement correction and the new claim.
+    assert!(out.contains("watermark 0 -> 3"), "unexpected output: {out}");
 
     let (ok, out, err) = vyrm(&db, &["ground"]);
     assert!(ok, "ground failed: {err}");
@@ -247,7 +318,7 @@ fn grounding_is_operable_and_divergence_halts_until_reset() {
     // Induce §8.3's divergence by corrupting the stored blob between binary
     // invocations, bypassing the projection's own write path.
     {
-        let store = vyrm_store::Store::open(&db).expect("open store");
+        let store = PersistentEngine::open(&db).expect("open store");
         let bytes = store
             .get_projection(vyrm_store::CURRENT_PROJECTION)
             .unwrap()

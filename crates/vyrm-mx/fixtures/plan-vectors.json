@@ -1,0 +1,85 @@
+{
+  "source": "FROM record:document AT VALID 100 KNOWN 4 PROJECT id LIMIT 5 EXPLAIN CONTRACT",
+  "plan": {
+    "logical": {
+      "contract_version": 1,
+      "read": {
+        "contract_version": 1,
+        "scope": "instance:golden",
+        "schema_revision": 1,
+        "catalog_revision": 1,
+        "commit_cursor": 4,
+        "head_digest": "1111111111111111111111111111111111111111111111111111111111111111",
+        "manifest_id": "338388a17b0b54e1fba9fb30f7b5632a8a4eab4367dfce88d10c7d4f1950e5fd"
+      },
+      "schema_revision": 1,
+      "operators": [
+        {
+          "operator": "scan",
+          "source": {
+            "family": "record",
+            "kind": "document"
+          }
+        },
+        {
+          "operator": "temporal",
+          "valid_at": 100,
+          "known_at_cursor": 4
+        },
+        {
+          "operator": "project",
+          "projection": {
+            "kind": "fields",
+            "fields": [
+              "id"
+            ]
+          }
+        },
+        {
+          "operator": "limit",
+          "rows": 5
+        }
+      ]
+    },
+    "operators": [
+      {
+        "operator": "authoritative_log_scan",
+        "through_cursor": 4,
+        "exact": true,
+        "stable_order": "global_cursor"
+      },
+      {
+        "operator": "reference_evaluate"
+      }
+    ],
+    "explanation": {
+      "contract": {
+        "read_manifest": "338388a17b0b54e1fba9fb30f7b5632a8a4eab4367dfce88d10c7d4f1950e5fd",
+        "scope": "instance:golden",
+        "valid_at": 100,
+        "known_at_cursor": 4,
+        "schema_revision": 1,
+        "exact": true,
+        "deterministic_order": "identity_ascending",
+        "network_required": false,
+        "gpu_required": false,
+        "authorization_boundary": "scope:instance:golden"
+      },
+      "candidates": [
+        {
+          "name": "authoritative_log_scan",
+          "selected": true,
+          "exact": true,
+          "reason": "replays the immutable log at the captured read stamp"
+        },
+        {
+          "name": "derived_projection",
+          "selected": false,
+          "exact": false,
+          "reason": "rejected: no projection generation and grounding proof supplied"
+        }
+      ]
+    },
+    "digest": "bcd75afccd54e6435027bcc1b44a623d2992ac02e2267a789dcf29ad63e59b00"
+  }
+}

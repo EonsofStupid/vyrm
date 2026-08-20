@@ -20,12 +20,30 @@
 
 pub mod hook;
 pub mod init;
+pub mod instance;
+pub mod policy;
 pub mod preflight;
+pub mod reasoning;
 pub mod registry;
+pub mod routing;
 pub mod stack;
+pub mod workflow;
 
 pub use hook::{handle, HookContext, HookEvent, HookResponse};
-pub use init::{init, InitReport};
+pub use init::{init, InitReport, STORE_DIR};
+pub use instance::{
+    InstanceBinding, InstanceManifest, InstanceMode, INSTANCE_FILE, INSTANCE_FORMAT,
+};
+pub use policy::{evaluate_tool, ContractDifferential, ToolPolicy};
 pub use preflight::{preflight, Preflight};
+pub use reasoning::{
+    active_reasoning_run, reasoning_run, reasoning_runs, record_reasoning, REASONING_SCOPE,
+};
 pub use registry::{Harness, Registry, Verification, VERIFICATION_TTL_MS};
-pub use stack::{detect, StackProfile};
+pub use routing::{ensure_routing_fresh, load_routing, reset_routing, RoutingReady};
+pub use stack::{detect, package_run_event, PackageManager, PackageRunEvent, StackProfile};
+pub use workflow::{
+    resolve_package_command, VerificationPolicy, WorkflowAuthorization, WorkflowCatalog,
+    WorkflowDecision, WorkflowDifferential, WorkflowManifest, WorkflowObservation,
+    WorkflowPreflight, WorkflowRule, WorkflowStatus, WORKFLOW_FILE, WORKFLOW_FORMAT,
+};
