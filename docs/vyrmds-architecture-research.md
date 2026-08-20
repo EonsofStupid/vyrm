@@ -526,8 +526,12 @@ optional stable revision, exact/HNSW/IVFFlat controls, results, and idempotent
 vector-outbox work. WAL LSN is explicitly supporting evidence rather than a
 query snapshot. A reference exact adapter and writer prove semantic validation
 and retry-once behavior; node spans and Connectome expose the bounded evidence.
-Live PostgreSQL repeatable-read/catalog capture, revision-control tables,
-filtered ANN differentials, TLS, and update/delete/restart tests remain open.
+The opt-in live transport now implements repeatable-read snapshot/catalog/plan
+capture, revision and idempotency control tables, typed upsert/delete, and a
+digest-pinned CI endpoint differential for exact/HNSW/IVFFlat, isolation,
+freshness, retry, and reconnect. Typed payload filters, certificate-backed TLS
+endpoint proof, process restart, concurrency/failure injection, and retained
+performance evidence remain open.
 
 ## Immediate next implementation slice
 

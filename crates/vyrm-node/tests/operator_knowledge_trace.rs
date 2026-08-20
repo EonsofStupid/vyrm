@@ -498,6 +498,7 @@ fn traced_outbox_retry_applies_external_payload_once() {
         .map(|trace| trace.encoded.as_str())
         .collect::<String>();
     assert!(!encoded.contains("doc-2"));
+    assert!(encoded.contains("upsert_vector"));
     assert!(traces[2].attributes.contains_key("applied_now"));
     assert_eq!(
         traces[6].attributes.get("idempotent_replay"),

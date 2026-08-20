@@ -13,6 +13,14 @@ use vyrm_core::{
 };
 use vyrm_vector::{EmbeddingModelBinding, ScoreMetric, SearchMode, SearchRequest, VectorRuntime};
 
+#[cfg(feature = "pgvector-postgres")]
+mod pgvector_postgres;
+#[cfg(feature = "pgvector-postgres")]
+pub use pgvector_postgres::{
+    PgvectorDeletePayload, PgvectorDeployment, PgvectorLiveAdapter, PgvectorSyncPayload,
+    PGVECTOR_LIVE_IMPLEMENTATION_VERSION,
+};
+
 pub const OPERATOR_KNOWLEDGE_CONTRACT_VERSION: u16 = 1;
 const MAX_NAME_BYTES: usize = 160;
 const MAX_HITS: usize = 100_000;
@@ -217,6 +225,11 @@ impl OperatorSearchControls {
                 }
             }
             OperatorAccessPath::IvfFlat => {
+                if self.iterative_scan == IterativeScanMode::StrictOrder {
+                    return invalid(
+                        "IVFFlat operator search supports off or relaxed-order iteration only",
+                    );
+                }
                 bounded_positive("ivfflat probes", self.ivfflat_probes, 1_000_000)?;
                 bounded_positive("ivfflat max_probes", self.ivfflat_max_probes, 1_000_000)?;
                 if let (Some(probes), Some(max_probes)) =
@@ -336,6 +349,9 @@ impl OperatorPlanEvidence {
         if self.selected_path == OperatorAccessPath::Exact && self.filter_applied_after_ann {
             return invalid("exact operator search cannot report post-ANN filtering");
         }
+        if self.selected_path == OperatorAccessPath::Exact && !self.ordering_exact {
+            return invalid("exact operator search must report exact ordering");
+        }
         Ok(())
     }
 }
@@ -385,6 +401,7 @@ pub trait OperatorKnowledgeAdapter {
 #[serde(rename_all = "snake_case")]
 pub enum OperatorSyncOperation {
     UpsertVector,
+    DeleteVector,
 }
 
 /// Idempotent work derived from Vyrm's already-committed projection outbox.
@@ -413,6 +430,37 @@ impl OperatorSyncWork {
         source_change_digest: impl Into<String>,
         payload_digest: impl Into<String>,
     ) -> Result<Self> {
+        Self::for_vector_operation(
+            binding,
+            source,
+            source_change_digest,
+            payload_digest,
+            OperatorSyncOperation::UpsertVector,
+        )
+    }
+
+    pub fn for_vector_delete(
+        binding: &OperatorKnowledgeBinding,
+        source: &ProjectionWork,
+        source_change_digest: impl Into<String>,
+        payload_digest: impl Into<String>,
+    ) -> Result<Self> {
+        Self::for_vector_operation(
+            binding,
+            source,
+            source_change_digest,
+            payload_digest,
+            OperatorSyncOperation::DeleteVector,
+        )
+    }
+
+    fn for_vector_operation(
+        binding: &OperatorKnowledgeBinding,
+        source: &ProjectionWork,
+        source_change_digest: impl Into<String>,
+        payload_digest: impl Into<String>,
+        operation: OperatorSyncOperation,
+    ) -> Result<Self> {
         binding.validate()?;
         source.validate()?;
         if source.family != ProjectionFamily::Vector || source.scope != binding.scope {
@@ -433,7 +481,7 @@ impl OperatorSyncWork {
             source_outbox_id: source.id.to_string(),
             source_change_digest,
             payload_digest,
-            operation: OperatorSyncOperation::UpsertVector,
+            operation,
         };
         work.id = work.expected_id()?;
         work.validate()?;
@@ -682,6 +730,16 @@ pub fn execute_operator_search<A: OperatorKnowledgeAdapter>(
     if result.plan.controls != request.controls {
         return invalid("operator adapter reported controls other than the sealed request");
     }
+    for pair in result.hits.windows(2) {
+        let left = &pair[0];
+        let right = &pair[1];
+        if left.score.total_cmp(&right.score).is_lt()
+            || (left.score.total_cmp(&right.score).is_eq()
+                && (&left.external_id, &left.subject_id) > (&right.external_id, &right.subject_id))
+        {
+            return invalid("operator adapter returned hits outside canonical best-first order");
+        }
+    }
     if let Some(expected) = &request.expected_stable_revision {
         if result.revision.stable_revision.as_ref() != Some(expected) {
             return invalid("operator source revision is stale");
@@ -813,6 +871,11 @@ impl PgvectorRelation {
         Ok(())
     }
 
+    pub fn digest(&self) -> Result<String> {
+        self.validate()?;
+        content_digest(b"vyrm-pgvector-relation-v1\0", self)
+    }
+
     pub fn build_search(
         &self,
         metric: ScoreMetric,
@@ -843,7 +906,7 @@ impl PgvectorRelation {
             ScoreMetric::Euclidean | ScoreMetric::Manhattan => "distance * -1.0",
         };
         let inner = format!(
-            "SELECT {id}::text AS external_id, {subject}::text AS subject_id, {vector} {operator} $1::vector AS distance FROM {schema}.{relation} WHERE {tenant}::text = $2 ORDER BY {vector} {operator} $1::vector LIMIT $3"
+            "SELECT {id}::text AS external_id, {subject}::text AS subject_id, {vector} {operator} $1::text::vector AS distance FROM {schema}.{relation} WHERE {tenant}::text = $2 ORDER BY {vector} {operator} $1::text::vector LIMIT $3"
         );
         let search_sql = format!(
             "SELECT external_id, subject_id, {score} AS score FROM ({inner}) AS vyrm_ranked ORDER BY distance ASC, external_id ASC"
@@ -855,6 +918,7 @@ impl PgvectorRelation {
                 settings.push(("enable_bitmapscan".into(), "off".into()));
             }
             OperatorAccessPath::Hnsw => {
+                settings.push(("enable_seqscan".into(), "off".into()));
                 push_setting(&mut settings, "hnsw.ef_search", controls.hnsw_ef_search);
                 push_setting(
                     &mut settings,
@@ -867,6 +931,7 @@ impl PgvectorRelation {
                 ));
             }
             OperatorAccessPath::IvfFlat => {
+                settings.push(("enable_seqscan".into(), "off".into()));
                 push_setting(&mut settings, "ivfflat.probes", controls.ivfflat_probes);
                 push_setting(
                     &mut settings,
@@ -1000,13 +1065,14 @@ mod tests {
         assert!(plan
             .search_sql
             .contains("\"operator data\".\"knowledge\"\"items\""));
-        assert!(plan.search_sql.contains("$1::vector"));
+        assert!(plan.search_sql.contains("$1::text::vector"));
         assert!(plan.search_sql.contains("$2"));
         assert!(plan.search_sql.contains("LIMIT $3"));
         assert!(!plan.search_sql.contains("strict_order"));
         assert_eq!(
             plan.settings,
             [
+                ("enable_seqscan".into(), "off".into()),
                 ("hnsw.ef_search".into(), "80".into()),
                 ("hnsw.max_scan_tuples".into(), "20000".into()),
                 ("hnsw.iterative_scan".into(), "strict_order".into()),
@@ -1039,6 +1105,9 @@ mod tests {
         };
         let mut controls = controls;
         controls.ivfflat_max_probes = Some(100);
+        controls.iterative_scan = IterativeScanMode::StrictOrder;
+        assert!(controls.validate().is_err());
+        controls.iterative_scan = IterativeScanMode::RelaxedOrder;
         let error = relation
             .build_search(ScoreMetric::Manhattan, &controls)
             .unwrap_err();

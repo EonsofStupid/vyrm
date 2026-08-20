@@ -44,6 +44,10 @@ Vyrm provides:
   evidence, explicit vector-kind and path-specific metric capabilities,
   exact/HNSW/IVFFlat controls and fallback, parameterized SQL shapes, and
   idempotent vector-outbox work without a cross-store ACID claim;
+- an opt-in live pgvector transport with repeatable-read snapshot/catalog
+  capture, atomic project revisions and applied-work receipts, exact/HNSW/
+  IVFFlat plan inspection, typed upsert/delete payloads, reconnect recovery,
+  and a TLS-only production connector that rejects downgrade-capable modes;
 - optimistic concurrency that rejects stale writers instead of losing updates;
 - content-addressed read stamps, persisted snapshot leases, and replay that is
   bounded to the exact captured cursor/hash/schema state;
@@ -229,7 +233,7 @@ measurement contract.
 |---|---|
 | `vyrm-core` | Claim, reasoning, typed runtime graph, durable trace, traversal, and differential contracts; serde-only boundary |
 | `vyrm-store` | `vyrmDS` coordination plus native `vyrmKV`, transitional Fjall, and memory adapters; unified atomic commits, content-addressed objects, outbox/audit, sequences, projections |
-| `vyrm-operator` | External operator-knowledge contracts, exact reference adapter, pgvector SQL planning, and idempotent outbox synchronization |
+| `vyrm-operator` | External operator-knowledge contracts, exact reference adapter, optional live pgvector transport, SQL planning, and idempotent upsert/delete synchronization |
 | `vyrm-graph` | Parsing, incremental freshness, grounding, source routing |
 | `vyrm-node` | Runtime lifecycle, instance binding, policy, append-only reasoning composition |
 | `vyrm-cli` | Operator surface |

@@ -228,10 +228,22 @@ not roadmap language.
   identity; the reference writer proves retry returns the same revision without
   reapplying payload. Traced search/sync, foreign-project and stale-revision
   denial, payload substitution, privacy, Memory/Fjall/native parity, native
-  reopen, and Connectome search-lane tests are green. A live PostgreSQL client,
-  TLS/authentication, control-table migration, exact/ANN endpoint differential,
-  and update/delete/restart certification remain open and no live pgvector
-  performance claim is made.
+  reopen, and Connectome search-lane tests are green.
+- The opt-in `pgvector-postgres` feature now implements the first live endpoint
+  gate. Its non-secret deployment and typed upsert/delete payloads have golden
+  JSON. Explicit control migration binds source identity and per-project stable
+  revision. Search uses one read-only repeatable-read transaction to capture
+  the PostgreSQL snapshot, supporting WAL position, extension/relation/column/
+  index catalog, `EXPLAIN (FORMAT JSON)` path, stable revision, and bounded
+  results. Synchronization uses a serializable project advisory lock and one
+  transaction for row mutation, revision increment, and stored replay receipt.
+  A digest-pinned PostgreSQL 18/pgvector 0.8.6 CI service verifies ordered
+  exact/HNSW/IVFFlat parity, project/source/cursor isolation, stale revision,
+  update/delete, retry-once, and reconnect. The production connector requires
+  `sslmode=require` with certificate/hostname validation, but an actual TLS
+  endpoint handshake, typed payload-expression filters, server process restart,
+  concurrent serialization recovery, and performance evidence remain open. No
+  live pgvector superiority claim is made.
 - M3 native storage has passed its first strict local promotion baseline in the
   standalone `vyrm-kv` crate. WAL v1
   now has frozen CRC32C file/frame formats, atomic batch sequence ranges,
@@ -381,7 +393,7 @@ artifact even on failure.
   denial, observer safety, secret non-persistence, visual projection, crash
   recovery, and Memory/Fjall/native parity are tested. Storage/projection/
   vector/embedding/provider/cluster emission, causal rendering, export,
-  retention enforcement, and the live pgvector transport remain open. See
+  retention enforcement, and full pgvector promotion remain open. See
   `docs/runtime-tracing-operator-knowledge.md`.
 
 ## Product and instance boundary

@@ -10,6 +10,20 @@ permissions:
 jobs:
   verify:
     runs-on: ubuntu-latest
+    services:
+      pgvector:
+        image: pgvector/pgvector@sha256:1d50c689b0a6511b9ea0a15615281c81a59fd04a08eb35057ec8646fb3a2118a
+        env:
+          POSTGRES_USER: vyrm_test
+          POSTGRES_PASSWORD: vyrm_test_password
+          POSTGRES_DB: vyrm_operator_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U vyrm_test -d vyrm_operator_test"
+          --health-interval 2s
+          --health-timeout 5s
+          --health-retries 20
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -17,6 +31,9 @@ jobs:
           components: clippy
       - uses: Swatinem/rust-cache@v2
       - name: Test workspace
+        env:
+          VYRM_PGVECTOR_TEST_URL: postgresql://vyrm_test:vyrm_test_password@127.0.0.1:5432/vyrm_operator_test?sslmode=disable
+          VYRM_PGVECTOR_TEST_DISPOSABLE: "1"
         run: cargo test --workspace --all-features --locked
       - name: Deny warnings
         run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings

@@ -8,8 +8,8 @@ use vyrm_core::{
 use vyrm_operator::{
     execute_operator_search, execute_operator_sync as apply_operator_sync, IterativeScanMode,
     OperatorAccessPath, OperatorKnowledgeAdapter, OperatorKnowledgeBinding,
-    OperatorKnowledgeWriter, OperatorSearchRequest, OperatorSearchResult, OperatorSyncReceipt,
-    OperatorSyncWork,
+    OperatorKnowledgeWriter, OperatorSearchRequest, OperatorSearchResult, OperatorSyncOperation,
+    OperatorSyncReceipt, OperatorSyncWork,
 };
 use vyrm_store::Engine;
 
@@ -89,6 +89,10 @@ where
             (
                 "source_cursor".into(),
                 RuntimeValue::Unsigned(work.source_cursor),
+            ),
+            (
+                "operation".into(),
+                RuntimeValue::String(sync_operation_name(work.operation).into()),
             ),
         ]),
     )?;
@@ -522,6 +526,13 @@ fn path_name(path: OperatorAccessPath) -> &'static str {
         OperatorAccessPath::Exact => "exact",
         OperatorAccessPath::Hnsw => "hnsw",
         OperatorAccessPath::IvfFlat => "ivfflat",
+    }
+}
+
+fn sync_operation_name(operation: OperatorSyncOperation) -> &'static str {
+    match operation {
+        OperatorSyncOperation::UpsertVector => "upsert_vector",
+        OperatorSyncOperation::DeleteVector => "delete_vector",
     }
 }
 

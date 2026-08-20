@@ -2,10 +2,10 @@
 
 Status: contract, conflict-safe recorder, instance bootstrap, lifecycle, query,
 native-storage-read, projection-publication, vector-search, and embedding-commit
-slices implemented. The portable operator-knowledge/search/sync boundary is
-implemented; live pgvector transport certification remains pending alongside
-provider, tool-execution, cluster, and export coverage. Repository state was
-verified 2026-08-20.
+slices implemented. The portable operator boundary and first live pgvector
+functional gate are implemented; production TLS/failure/scale promotion remains
+pending alongside provider, tool-execution, cluster, and export coverage.
+Repository state was verified 2026-08-20.
 
 ## Why this is a kernel feature
 
@@ -187,8 +187,25 @@ unsupported cross-product fails closed. It builds quoted/parameterized pgvector
 query shapes for exact, HNSW, and IVFFlat operation. `vyrm-node` adds paired
 durable search/execute and sync/apply spans with `OperatorKnowledge` and projection
 links. The reference writer proves idempotent replay. This is an executable
-port and conformance oracle, not yet a claim that a live PostgreSQL connection,
-catalog inspector, revision-control table, or TLS deployment has passed.
+port and conformance oracle.
+
+The opt-in `pgvector-postgres` feature now adds a real synchronous endpoint.
+Its serializable control migration fixes source identity and project revision;
+search captures `pg_current_snapshot()`, supporting WAL LSN, extension version,
+relation OID, ordered column/index definitions, JSON `EXPLAIN`, stable revision,
+and results inside one read-only repeatable-read transaction. Typed upsert and
+delete payloads apply under a project advisory lock in one transaction with the
+revision increment and persisted idempotency receipt. Connection secrets and
+root certificates stay outside serialized deployment state. The production
+constructor requires `sslmode=require` and certificate/hostname validation.
+
+The CI endpoint uses a digest-pinned PostgreSQL 18/pgvector 0.8.6 service and
+proves ordered exact/HNSW/IVFFlat parity, tenant/source/future-cursor exclusion,
+stale-revision denial, update/delete, replay, and reconnect. It deliberately
+uses a disposable non-TLS loopback client, so a certificate-backed endpoint
+handshake, typed payload-expression filters, process restart, concurrent
+serialization recovery, and retained performance evidence remain promotion
+requirements.
 
 The official [pgvector v0.8.6 repository](https://github.com/pgvector/pgvector/tree/v0.8.6)
 documents that exact search is the default; HNSW and IVFFlat trade recall for
@@ -246,9 +263,11 @@ superiority claim.
 5. OTLP/JSON export round-trips without changing Vyrm identity or leaking
    content outside policy.
 6. Portable operator contract, exact oracle, project/model/revision denial,
-   safe SQL planning, traced execution, and outbox retry — complete. Live
-   pgvector passes project isolation, repeatable-read/catalog capture,
-   exact-versus-filtered-ANN, model-space, stale-revision, delete/update,
-   restart, and authenticated transport tests — open.
+   safe SQL planning, traced execution, and outbox retry — complete. First live
+   pgvector functional gate—repeatable-read/catalog capture, ordered exact/ANN,
+   model/tenant/cursor isolation, stable revision, update/delete, reconnect, and
+   retry—is complete and CI-enforced. Typed payload filters, process restart,
+   concurrent failure recovery, authenticated endpoint TLS, and performance
+   evidence remain open.
 7. HelixDB/Vyrm fixtures publish correctness, task outcome, recall, throughput,
    p50/p95/p99, RSS/disk, startup/recovery, trace completeness, and raw trials.

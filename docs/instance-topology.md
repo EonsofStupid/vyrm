@@ -51,8 +51,11 @@ The portable boundary is now executable in `vyrm-operator`: immutable
 project/member and source/tenant/model bindings, snapshot/catalog/stable-revision
 evidence, exact/HNSW/IVFFlat controls, bounded results, safe pgvector SQL shapes,
 and idempotent vector-outbox work. A live PostgreSQL connection and deployment
-still require repeatable-read capture, catalog inspection, project revision
-control, TLS/authentication, and endpoint differentials before promotion.
+now have repeatable-read snapshot/catalog capture, project revision controls,
+typed upsert/delete work, and exact/HNSW/IVFFlat endpoint differentials behind
+an opt-in feature. Certificate-backed TLS endpoint, process-restart, concurrent
+failure injection, typed payload filters, and scale evidence remain before
+promotion.
 
 ## Upstream capability adoption
 

@@ -1163,11 +1163,19 @@ These apply to every step and are not restated per step.
   second time. Three-engine, foreign-project, stale-revision, payload,
   privacy, native-reopen, and Connectome tests are green. This is not a second
   canonical store and does not claim a cross-Vyrm/Postgres transaction.
-- **Next operator gate:** implement and certify the live PostgreSQL transport,
-  repeatable-read snapshot capture, catalog/plan inspection, stable project
-  revision/control tables, exact-versus-ANN differential, update/delete/restart,
-  and authenticated TLS deployment against pgvector. The portable gate does
-  not substitute for that endpoint evidence.
+- **Complete at the first live pgvector gate:** the opt-in PostgreSQL transport
+  captures snapshot, WAL-supporting, catalog/column/index, plan, and stable
+  project-revision evidence in repeatable-read transactions. Serializable
+  project-locked synchronization atomically applies typed vector upserts or
+  deletes, advances revision, and records the exact replay receipt. A pinned
+  PostgreSQL 18/pgvector 0.8.6 CI service checks tenant/source/cursor isolation,
+  ordered exact/HNSW/IVFFlat parity, stale revision denial, update/delete,
+  idempotent replay, and reconnect recovery.
+- **Next operator promotion gate:** add typed payload-expression SQL filters,
+  a certificate-backed TLS endpoint test, PostgreSQL process-restart/failure
+  injection, concurrent-writer/serialization retry tests, and retained
+  latency/recall/resource evidence. The live functional gate does not yet prove
+  production security, scale, or competitive performance.
 - **Competitive gate:** publish direct HelixDB fixtures only after the same
   project `init → run → query → inspect`, dynamic query/SDK parity, index
   lifecycle, and trace-completeness surfaces exist.
