@@ -329,10 +329,17 @@ artifact even on failure.
   start/annotation/finish phases, bounded typed attributes, data classes, and
   exact causal links for runtime/read/plan/projection/workflow/provider and
   external operator-knowledge coordinates. Trace events enter the ordinary
-  scoped, hash-chained runtime log; a Memory/Fjall/native differential proves
-  identical serialized mutations. Full subsystem emission, Connectome causal
-  rendering, export, retention enforcement, and the pgvector adapter remain
-  open. See `docs/runtime-tracing-operator-knowledge.md`.
+  scoped, hash-chained runtime log through a cursor-CAS recorder that repairs
+  the strict schema atomically with the first event. `vyrm init` records the
+  contract and a bounded initialization annotation. Hooks and the shared MCP
+  lifecycle path durably write start before dispatch and finish afterward,
+  including explicit denial outcomes; an interrupted native span remains
+  incomplete after reopen. Connectome classifies the events into its existing
+  semantic lanes. Schema migration, concurrency, initialization, denial,
+  visual projection, crash recovery, and Memory/Fjall/native parity are tested.
+  Query/plan/storage/projection/vector/embedding/provider/cluster emission,
+  causal rendering, export, retention enforcement, and the pgvector adapter
+  remain open. See `docs/runtime-tracing-operator-knowledge.md`.
 
 ## Product and instance boundary
 

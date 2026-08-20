@@ -32,7 +32,9 @@ Vyrm provides:
 - one hash-chained global runtime cursor with resumable, scope-filtered replay;
 - bounded persisted runtime traces with W3C-width identities and typed links to
   reasoning runs, cursors, read stamps, snapshots, plans, projections,
-  workflows, providers, and external operator-knowledge revisions;
+  workflows, providers, and external operator-knowledge revisions; project
+  initialization installs their strict schema, while lifecycle hooks/MCP write
+  separate durable start and finish events so crashes remain visible;
 - optimistic concurrency that rejects stale writers instead of losing updates;
 - content-addressed read stamps, persisted snapshot leases, and replay that is
   bounded to the exact captured cursor/hash/schema state;

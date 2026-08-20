@@ -7,8 +7,8 @@
 
 use crate::{
     Error, Millis, ProjectionStamp, ReadStamp, Result, RuntimeEvent, RuntimeEventSchema,
-    RuntimeProperties, RuntimePropertySchema, RuntimeType, RuntimeValue, RuntimeValueType,
-    SnapshotId,
+    RuntimeProperties, RuntimePropertySchema, RuntimeSchemaRegistry, RuntimeType, RuntimeValue,
+    RuntimeValueType, SnapshotId,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -452,6 +452,20 @@ impl RuntimeTraceEvent {
             ..RuntimeEventSchema::default()
         }
     }
+
+    /// Installs or repairs the canonical trace event declaration in a schema
+    /// under construction. The caller owns schema revision allocation because
+    /// that compare-and-swap must occur against its storage engine's exact
+    /// read stamp.
+    pub fn register_schema(registry: &mut RuntimeSchemaRegistry) -> Result<bool> {
+        let kind = Self::event_type()?;
+        let schema = Self::event_schema();
+        if registry.events.get(&kind) == Some(&schema) {
+            return Ok(false);
+        }
+        registry.events.insert(kind, schema);
+        Ok(true)
+    }
 }
 
 fn validate_hex_identity(kind: &'static str, value: &str, width: usize) -> Result<()> {
@@ -785,6 +799,17 @@ mod tests {
         assert_eq!(
             RuntimeTraceEvent::event_schema().properties["links"].value_type,
             RuntimeValueType::List
+        );
+    }
+
+    #[test]
+    fn schema_registration_is_strict_and_idempotent() {
+        let mut registry = RuntimeSchemaRegistry::empty(1, "trace bootstrap");
+        assert!(RuntimeTraceEvent::register_schema(&mut registry).unwrap());
+        assert!(!RuntimeTraceEvent::register_schema(&mut registry).unwrap());
+        assert_eq!(
+            registry.events[&RuntimeTraceEvent::event_type().unwrap()],
+            RuntimeTraceEvent::event_schema()
         );
     }
 

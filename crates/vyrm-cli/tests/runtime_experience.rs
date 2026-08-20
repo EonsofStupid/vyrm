@@ -7,6 +7,7 @@
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use vyrm_core::{RuntimeMutation, RuntimeValue, ScopeId};
 use vyrm_store::{Engine, PersistentEngine};
 
 fn vyrm(db: &Path, args: &[&str], stdin_json: Option<&str>) -> (bool, String, String) {
@@ -272,6 +273,39 @@ fn init_writes_real_wiring_idempotently_and_refuses_a_dead_harness() {
     let (ok, out, err) = vyrm(&db, &["init", "--harness", "claude-code", "--root", root_str], None);
     assert!(ok, "init failed: {err}");
     assert!(out.contains("wrote"), "nothing written: {out}");
+    assert!(
+        out.contains("runtime trace contract ready"),
+        "trace bootstrap was not reported: {out}"
+    );
+
+    {
+        let store = PersistentEngine::open(&db).unwrap();
+        let scope = ScopeId::new(vyrm_node::REASONING_SCOPE).unwrap();
+        let schema = store.runtime_schema(&scope).unwrap().unwrap();
+        assert!(schema
+            .events
+            .contains_key(&vyrm_core::RuntimeTraceEvent::event_type().unwrap()));
+        let trace = store
+            .runtime_changes_since(0, usize::MAX, Some(&scope))
+            .unwrap()
+            .changes
+            .into_iter()
+            .find_map(|change| match change.mutation {
+                RuntimeMutation::Event { event } if event.kind.as_str() == "runtime_trace" => {
+                    Some(event)
+                }
+                _ => None,
+            })
+            .expect("init must persist its trace event");
+        assert_eq!(
+            trace.properties["phase"],
+            RuntimeValue::String("annotation".into())
+        );
+        assert_eq!(
+            trace.properties["outcome"],
+            RuntimeValue::String("ok".into())
+        );
+    }
 
     let instance = std::fs::read_to_string(root.join(".vyrm/instance.toml")).unwrap();
     assert!(instance.contains("format = 1"));

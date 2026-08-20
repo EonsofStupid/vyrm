@@ -1125,10 +1125,17 @@ These apply to every step and are not restated per step.
   W3C-width identity, lifecycle validation, bounded attributes, data classes,
   and typed causal links. Serialize through ordinary runtime events and prove
   Memory/Fjall/native parity.
-- **Next:** install the trace schema through project initialization, then emit
-  it across lifecycle, `vyrmQL`, `vyrmMX`, VyrmKV, projection/vector/embedding,
-  provider/tool, and cluster boundaries. Connectome must distinguish complete
-  logical evidence from sampled physical detail.
+- **Complete:** add the cursor-CAS recorder with atomic schema repair, install
+  it through project initialization, and emit separate lifecycle start/finish
+  evidence through the shared hook/MCP path. Denials are classified, a crash
+  leaves a reopen-visible incomplete span, and Connectome maps durable trace
+  domains into its temporal lanes. Schema repair, concurrent writers,
+  initialization, denial, native reopen, visual projection, and all three
+  engines have executable coverage.
+- **Next:** emit the contract across `vyrmQL`, `vyrmMX`, VyrmKV,
+  projection/vector/embedding, provider/tool, and cluster boundaries.
+  Connectome must then distinguish complete logical evidence from sampled
+  physical detail and derive causal trees and critical paths.
 - **Then:** implement a project-scoped pgvector operator-knowledge adapter with
   captured source revision, exact/model-space oracle, filtered ANN controls,
   stale denial/fallback, and idempotent outbox. It is not a second canonical

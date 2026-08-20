@@ -1,6 +1,7 @@
 # Runtime tracing and operator-knowledge boundary
 
-Status: contract slice implemented, execution coverage and pgvector adapter
+Status: contract, conflict-safe recorder, instance bootstrap, and lifecycle
+slice implemented; wider execution coverage and the pgvector adapter remain
 pending. Research and repository state were verified 2026-08-20.
 
 ## Why this is a kernel feature
@@ -24,6 +25,21 @@ replay path as all other runtime truth. A three-engine differential proves the
 serialized trace mutation is identical through memory, Fjall compatibility,
 and native VyrmKV. A checked-in v1 JSON vector freezes the portable trace and
 stored-runtime-event shapes.
+
+`vyrm-node` now owns the conflict-safe persistence bridge. It reads the exact
+scope stamp, installs or repairs the canonical trace schema in the same commit
+as the first event, and retries only observed cursor conflicts. `vyrm init`
+records a bounded `instance.init` annotation after wiring the checkout.
+Lifecycle hooks—including the shared `vyrm_lifecycle` MCP path—commit a start
+before dispatch and a separate finish afterward. Denials are explicit outcomes;
+input is represented by digest and byte count rather than persisted raw content.
+If the process dies between the commits, native reopen exposes the unmatched
+start as an incomplete span.
+
+Connectome's existing authoritative Temporal stream classifies these durable
+events into its reasoning, workflow, routing, search, model, and storage lanes.
+This is initial lane-level visibility, not yet the causal-tree, critical-path,
+fan-out, or sampled-versus-complete interface described below.
 
 This follows the useful part of the
 [OpenTelemetry trace model and database semantic conventions](https://opentelemetry.io/docs/specs/semconv/db/database-spans/)
@@ -153,13 +169,18 @@ superiority claim.
 
 ## Promotion gates
 
-1. Trace contract and three-engine persistence differential — complete.
-2. Trace schema installed by every new project instance and migrated explicitly
-   for existing instances.
-3. Lifecycle/query/plan/storage/projection/vector/provider boundaries emit
-   paired start/finish evidence and crash leaves an honest incomplete span.
+1. Trace contract, conflict-safe recorder, schema repair, and three-engine
+   persistence differential — complete.
+2. Trace schema installed by every newly initialized project instance —
+   complete. A dedicated operator migration command for untouched existing
+   instances remains open; their first recorded trace repairs the schema
+   atomically.
+3. Lifecycle emits paired start/finish evidence, records denials, and preserves
+   incomplete spans across native reopen — complete. Query, plan, storage,
+   projection, vector, embedding, provider, and cluster emission remain open.
 4. Connectome renders causal trace trees, critical path, fan-out, cache/IO/token
-   mass, stale/fallback decisions, and sampled-versus-complete status.
+   mass, stale/fallback decisions, and sampled-versus-complete status. Basic
+   durable-event lane classification is complete; the richer analysis is open.
 5. OTLP/JSON export round-trips without changing Vyrm identity or leaking
    content outside policy.
 6. pgvector adapter passes project-isolation, exact-oracle, filtered ANN,

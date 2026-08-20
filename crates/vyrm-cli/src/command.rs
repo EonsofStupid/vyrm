@@ -618,7 +618,7 @@ pub fn execute(store: &PersistentEngine, command: &Command, reader: &Reader, now
                         registry.all().iter().map(|h| h.name.as_str()).collect::<Vec<_>>().join(", ")
                     )
                 })?;
-            let report = vyrm_node::init(root, adapter)?;
+            let report = vyrm_node::init(store, root, adapter, now)?;
             let mut lines: Vec<String> = report
                 .written
                 .iter()

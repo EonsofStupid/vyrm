@@ -408,6 +408,31 @@ fn describe_mutation(mutation: &RuntimeMutation) -> (&'static str, String, Strin
                 format!("{} → {}", relation.from.id, relation.to.id),
             )
         }
+        RuntimeMutation::Event { event } if event.kind.as_str() == "runtime_trace" => {
+            let domain =
+                runtime_string(&event.properties, "domain").unwrap_or_else(|| "unknown".into());
+            let family = match domain.as_str() {
+                "reasoning" => "reasoning",
+                "lifecycle" | "tool" => "workflow",
+                "query" | "planning" => "routing",
+                "projection" | "search" | "embedding" => "search",
+                "model" => "model",
+                "storage" | "adapter" | "cluster" => "storage",
+                _ => "storage",
+            };
+            let phase =
+                runtime_string(&event.properties, "phase").unwrap_or_else(|| "unknown".into());
+            let outcome =
+                runtime_string(&event.properties, "outcome").unwrap_or_else(|| "unknown".into());
+            let duration = runtime_unsigned(&event.properties, "duration_micros")
+                .map_or_else(|| "open".into(), |value| format!("{value} µs"));
+            (
+                family,
+                format!("trace_{phase}"),
+                runtime_string(&event.properties, "name").unwrap_or_else(|| "runtime trace".into()),
+                format!("{domain}; {outcome}; {duration}"),
+            )
+        }
         RuntimeMutation::Event { event } => {
             let stage = runtime_string(&event.properties, "stage");
             let family = match stage.as_deref() {
@@ -467,6 +492,13 @@ fn describe_mutation(mutation: &RuntimeMutation) -> (&'static str, String, Strin
 fn runtime_string(properties: &vyrm_core::RuntimeProperties, name: &str) -> Option<String> {
     match properties.get(name) {
         Some(RuntimeValue::String(value) | RuntimeValue::Digest(value)) => Some(value.clone()),
+        _ => None,
+    }
+}
+
+fn runtime_unsigned(properties: &vyrm_core::RuntimeProperties, name: &str) -> Option<u64> {
+    match properties.get(name) {
+        Some(RuntimeValue::Unsigned(value)) => Some(*value),
         _ => None,
     }
 }

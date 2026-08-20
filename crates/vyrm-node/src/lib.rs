@@ -27,6 +27,7 @@ pub mod reasoning;
 pub mod registry;
 pub mod routing;
 pub mod stack;
+pub mod trace;
 pub mod workflow;
 
 pub use hook::{handle, HookContext, HookEvent, HookResponse};
@@ -42,6 +43,7 @@ pub use reasoning::{
 pub use registry::{Harness, Registry, Verification, VERIFICATION_TTL_MS};
 pub use routing::{ensure_routing_fresh, load_routing, reset_routing, RoutingReady};
 pub use stack::{detect, package_run_event, PackageManager, PackageRunEvent, StackProfile};
+pub use trace::{install_runtime_trace_contract, record_runtime_trace, TraceIdentity};
 pub use workflow::{
     resolve_package_command, VerificationPolicy, WorkflowAuthorization, WorkflowCatalog,
     WorkflowDecision, WorkflowDifferential, WorkflowManifest, WorkflowObservation,
