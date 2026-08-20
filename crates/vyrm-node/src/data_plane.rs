@@ -20,7 +20,7 @@ use vyrm_mx::Catalog;
 use vyrm_store::Engine;
 use vyrm_vector::{
     AccessPathKind, PreparedVectorSearch, ScoreMetric, SearchExecution, SearchMode, SearchRequest,
-    VectorArtifact, VectorProjectionDescriptor, VectorQuery, VectorRuntime,
+    VectorQuery, VectorRuntime,
 };
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -542,73 +542,6 @@ pub fn execute_traced_vector_search<E: Engine>(
     })
 }
 
-pub fn publish_traced_vector_artifact<E: Engine>(
-    store: &E,
-    runtime: &mut VectorRuntime,
-    expected_catalog_revision: u64,
-    artifact: VectorArtifact,
-    actor: &str,
-    at: Millis,
-) -> Result<u64, Box<dyn std::error::Error>> {
-    let descriptor = artifact.descriptor();
-    descriptor.validate()?;
-    let scope = descriptor.scope().clone();
-    let stamp = descriptor.stamp().clone();
-    let read = store.runtime_read_stamp(&scope)?;
-    let revision = expected_catalog_revision.to_be_bytes();
-    let generation = stamp.generation.to_be_bytes();
-    let identity = TraceIdentity::derive(&[
-        scope.as_str().as_bytes(),
-        stamp.id.as_str().as_bytes(),
-        &generation,
-        &revision,
-    ])?;
-    let mut links = vec![TraceLink::Read { stamp: read }];
-    if let Ok(Some(run)) = active_reasoning_run(store) {
-        links.push(TraceLink::ReasoningRun {
-            run_id: run.id().to_owned(),
-        });
-    }
-    let span = DurableTraceSpan::start(
-        store,
-        scope,
-        actor,
-        identity,
-        None,
-        TraceDomain::Projection,
-        "vector.projection.publish",
-        at,
-        TraceDataClass::Control,
-        links,
-        projection_attributes(&descriptor, expected_catalog_revision),
-    )?;
-    match runtime.publish(expected_catalog_revision, artifact) {
-        Ok(catalog_revision) => {
-            span.finish(
-                store,
-                TraceOutcome::Ok,
-                vec![TraceLink::Projection { stamp }],
-                RuntimeProperties::from([(
-                    "catalog_revision".into(),
-                    RuntimeValue::Unsigned(catalog_revision),
-                )]),
-            )?;
-            Ok(catalog_revision)
-        }
-        Err(error) => {
-            let rendered = error.to_string();
-            let (class, outcome) = vector_error_class(&rendered);
-            span.finish(
-                store,
-                outcome,
-                Vec::new(),
-                error_attributes("publication", class, &rendered),
-            )?;
-            Err(error.into())
-        }
-    }
-}
-
 fn vector_request_attributes(
     request: &SearchRequest,
     request_digest: &str,
@@ -937,49 +870,6 @@ fn vector_execution_attributes(
                 }
                 .into(),
             ),
-        ),
-    ])
-}
-
-fn projection_attributes(
-    descriptor: &VectorProjectionDescriptor,
-    expected_catalog_revision: u64,
-) -> RuntimeProperties {
-    let stamp = descriptor.stamp();
-    RuntimeProperties::from([
-        (
-            "projection_id".into(),
-            RuntimeValue::String(stamp.id.to_string()),
-        ),
-        (
-            "projection_kind".into(),
-            RuntimeValue::String(
-                match descriptor {
-                    VectorProjectionDescriptor::ExactSegment { .. } => "exact_segment",
-                    VectorProjectionDescriptor::Hnsw { .. } => "hnsw",
-                }
-                .into(),
-            ),
-        ),
-        (
-            "generation".into(),
-            RuntimeValue::Unsigned(stamp.generation),
-        ),
-        (
-            "source_cursor".into(),
-            RuntimeValue::Unsigned(stamp.source_cursor),
-        ),
-        (
-            "config_digest".into(),
-            RuntimeValue::Digest(stamp.config_digest.clone()),
-        ),
-        (
-            "artifact_digest".into(),
-            RuntimeValue::Digest(stamp.artifact_digest.clone()),
-        ),
-        (
-            "expected_catalog_revision".into(),
-            RuntimeValue::Unsigned(expected_catalog_revision),
         ),
     ])
 }

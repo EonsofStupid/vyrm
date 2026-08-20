@@ -156,13 +156,14 @@
       [active ? 'violet' : 'mint', 'Reasoning contract', active ? `${active.id} · ${active.state}` : 'no active run', `${runs.length} total run(s)`],
       [health.last_grounded_at ? 'mint' : 'amber', 'Last grounding', health.last_grounded_at ? ago(health.last_grounded_at) : 'not yet grounded', 'differential evidence'],
       [health.retention_pins ? 'violet' : 'mint', 'Snapshot retention', `${health.snapshot_leases} live lease(s)`, health.oldest_retained_cursor == null ? 'no pinned cursor' : `cursor ≥ ${health.oldest_retained_cursor}`],
+      [health.vector_artifacts ? 'violet' : 'amber', 'Vector artifact catalog', `${health.vector_artifacts} durable generation(s)`, `revision ${health.vector_catalog_revision}`],
     ];
     $('#main').innerHTML = pageHead('Runtime overview', 'A live, read-only view of the instance’s memory, reasoning contract, source projection, and operational evidence.', `<span class="badge ${health.state}"><span class="status-dot ${health.state === 'ready' ? '' : health.state}"></span>${health.state}</span>`) + `
       <section class="metrics">
         ${metric('Current claims', health.current_claims, `${health.subjects} subjects`)}
         ${metric('Claim sequence', health.claim_sequence, `projection at ${health.projection_watermark}`)}
         ${metric('Indexed source', health.indexed_files, `${health.indexed_symbols} symbols`)}
-        ${metric('Activity', invocations.length, `${runs.length} reasoning runs`)}
+        ${metric('Vector artifacts', health.vector_artifacts, `catalog revision ${health.vector_catalog_revision}`)}
       </section>
       <section class="overview-grid">
         <article class="panel"><div class="panel-head"><h2>Active reasoning run</h2><span>${active ? active.state : 'IDLE'}</span></div><div class="panel-body">${active ? timeline(active.events.slice(-7)) : empty('No active run', 'A goal begins the next externally auditable reasoning sequence.')}</div></article>

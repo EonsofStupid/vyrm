@@ -1157,8 +1157,17 @@ These apply to every step and are not restated per step.
   longest-root/child candidate without summing nested durations, and exports
   only control-class evidence by default. Full read/projection link maps now
   retain every stamp field required for reconstruction. Storage-write and
-  cluster boundary coverage, OTLP translation, persistent vector artifact
-  catalogs, and retained trace-regression histories remain open.
+  cluster boundary coverage, OTLP translation, and retained trace-regression
+  histories remain open.
+- **Complete for authoritative local vector artifact publication:** codec kind
+  is explicit for exact JSON, compact dense, and HNSW artifacts. Publication
+  stages content-addressed bytes, then commits a strict typed catalog record
+  and its verified object reference in one `vyrmDS` transaction before the
+  serving view changes. Reopen replays contiguous catalog revisions and
+  verifies record/object commit identity, descriptor equality, media type,
+  digest, length, and decoded artifact bytes. Native reopen, missing-object
+  denial, stale-publisher isolation, and Connectome catalog inspection are
+  executable. Cross-node catalog replication remains an M7 deployment gate.
 - **Complete at the portable operator-knowledge gate:** `vyrm-operator` freezes
   project/member/config/source/relation/tenant/model bindings, PostgreSQL
   snapshot plus optional stable-revision evidence, exact/HNSW/IVFFlat controls,

@@ -272,8 +272,12 @@ superiority claim.
    and embedding inference/atomic commit now emit observer-safe causal spans —
    complete at the local M3–M6 boundary. Provider roots and observable
    model/tool-envelope coverage are complete for Connectome prompt flights.
-   Cluster emission, storage-write coverage outside embedding commit, and
-   persistent vector artifact-catalog publication remain open.
+   Vector artifact publication now emits the same projection span around an
+   authoritative `vyrmDS` transition: staged exact/compact/HNSW bytes plus a
+   typed catalog record and verified object reference commit atomically before
+   serving changes, and restart reconstruction fails closed. Cluster emission,
+   storage-write coverage outside this projection/embedding path, and
+   cross-node catalog replication remain open.
 4. Connectome renders causal trace trees, critical path, fan-out, cache/IO/token
    mass, stale/fallback decisions, and sampled-versus-complete status. Causal
    lifecycle reconstruction, integrity diagnostics, measured critical

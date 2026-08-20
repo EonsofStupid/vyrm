@@ -11,7 +11,7 @@ use vyrm_embed::{
 use vyrm_node::{
     execute_traced_embedding, execute_traced_vector_search, publish_traced_vector_artifact,
 };
-use vyrm_store::{Engine, MemoryEngine, NativeEngine, Store};
+use vyrm_store::{DataRuntime, Engine, LocalObjectStore, MemoryEngine, NativeEngine, Store};
 use vyrm_vector::{
     HnswConfig, HnswIndex, ScoreMetric, SearchMode, SearchRequest, VectorCandidate, VectorQuery,
     VectorRuntime,
@@ -249,6 +249,8 @@ fn vector_search_is_causal_private_and_equal_across_all_engines() {
 fn projection_publication_and_approximate_selection_remain_fresh_across_trace_events() {
     let store = MemoryEngine::new();
     let candidates = fixture(&store);
+    let objects = tempfile::tempdir().unwrap();
+    let data = DataRuntime::new(store, LocalObjectStore::open(objects.path()).unwrap());
     let mut runtime = VectorRuntime::new(candidates.clone()).unwrap();
     let hnsw = HnswIndex::build(
         HnswConfig {
@@ -270,14 +272,18 @@ fn projection_publication_and_approximate_selection_remain_fresh_across_trace_ev
     )
     .unwrap();
     assert_eq!(
-        publish_traced_vector_artifact(&store, &mut runtime, 0, hnsw.into(), "operator:test", 100,)
-            .unwrap(),
+        publish_traced_vector_artifact(&data, &mut runtime, 0, hnsw.into(), "operator:test", 100,)
+            .unwrap()
+            .catalog_revision,
         1
     );
     let search = execute_traced_vector_search(
-        &store,
+        data.engine(),
         &runtime,
-        &request(&store, SearchMode::RequireApproximate { exact_rerank: 2 }),
+        &request(
+            data.engine(),
+            SearchMode::RequireApproximate { exact_rerank: 2 },
+        ),
         16,
         "operator:test",
         101,
@@ -288,7 +294,7 @@ fn projection_publication_and_approximate_selection_remain_fresh_across_trace_ev
         search.prepared.plan().selected.kind,
         vyrm_vector::AccessPathKind::Hnsw
     );
-    let traces = trace_views(&store);
+    let traces = trace_views(data.engine());
     assert_eq!(traces[0].name, "vector.projection.publish");
     assert_eq!(traces[1].outcome, "ok");
     assert_eq!(

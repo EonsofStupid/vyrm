@@ -493,6 +493,7 @@ dependencies = [
  "vyrm-node",
  "vyrm-ql",
  "vyrm-store",
+ "vyrm-vector",
 ]
 
 [[package]]

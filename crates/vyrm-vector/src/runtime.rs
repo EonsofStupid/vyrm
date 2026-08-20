@@ -18,7 +18,64 @@ pub enum VectorArtifact {
     Hnsw(HnswIndex),
 }
 
+/// Exact on-disk codec identity for a cataloged vector artifact. A projection
+/// descriptor alone cannot distinguish the JSON exact segment from the compact
+/// dense representation because both intentionally plan as `ExactSegment`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum VectorArtifactKind {
+    ExactSegment,
+    CompactDense,
+    Hnsw,
+}
+
+impl VectorArtifactKind {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::ExactSegment => "exact_segment",
+            Self::CompactDense => "compact_dense",
+            Self::Hnsw => "hnsw",
+        }
+    }
+
+    pub const fn media_type(self) -> &'static str {
+        match self {
+            Self::ExactSegment => "application/vnd.vyrm.vector-exact-segment+json",
+            Self::CompactDense => "application/vnd.vyrm.vector-compact-dense",
+            Self::Hnsw => "application/vnd.vyrm.vector-hnsw+json",
+        }
+    }
+}
+
 impl VectorArtifact {
+    pub const fn kind(&self) -> VectorArtifactKind {
+        match self {
+            Self::ExactSegment(_) => VectorArtifactKind::ExactSegment,
+            Self::CompactDense(_) => VectorArtifactKind::CompactDense,
+            Self::Hnsw(_) => VectorArtifactKind::Hnsw,
+        }
+    }
+
+    pub fn as_bytes(&self) -> &[u8] {
+        match self {
+            Self::ExactSegment(segment) => segment.as_bytes(),
+            Self::CompactDense(segment) => segment.as_bytes(),
+            Self::Hnsw(index) => index.as_bytes(),
+        }
+    }
+
+    pub fn from_bytes(kind: VectorArtifactKind, bytes: &[u8]) -> Result<Self> {
+        match kind {
+            VectorArtifactKind::ExactSegment => {
+                ImmutableVectorSegment::from_bytes(bytes).map(Self::ExactSegment)
+            }
+            VectorArtifactKind::CompactDense => {
+                CompactDenseSegment::from_bytes(bytes).map(Self::CompactDense)
+            }
+            VectorArtifactKind::Hnsw => HnswIndex::from_bytes(bytes).map(Self::Hnsw),
+        }
+    }
+
     pub fn descriptor(&self) -> VectorProjectionDescriptor {
         match self {
             Self::ExactSegment(segment) => segment.descriptor().clone().into(),
@@ -458,5 +515,58 @@ mod tests {
             .unwrap();
         assert_eq!(exact.plan.selected.kind, AccessPathKind::ExactScan);
         assert_eq!(exact.hits[0].reference.id.as_str(), "a");
+    }
+
+    #[test]
+    fn every_artifact_codec_round_trips_with_exact_descriptor_identity() {
+        let scope = ScopeId::new("instance:vector-codecs").unwrap();
+        let values = vec![
+            candidate(&scope, 1, "a", vec![1.0, 0.0]),
+            candidate(&scope, 2, "b", vec![0.0, 1.0]),
+        ];
+        let segment_config = VectorSegmentConfig {
+            id: ProjectionId::new("vector:exact:codec").unwrap(),
+            scope: scope.clone(),
+            field: "body".into(),
+            dimensions: 2,
+            metric: ScoreMetric::Dot,
+            embedding_model: None,
+            filter_properties: BTreeSet::new(),
+        };
+        let exact = VectorArtifact::from(
+            ImmutableVectorSegment::build(segment_config.clone(), 1, 2, values.clone()).unwrap(),
+        );
+        let compact = VectorArtifact::from(
+            CompactDenseSegment::build(segment_config, 1, 2, values.clone()).unwrap(),
+        );
+        let hnsw = VectorArtifact::from(
+            HnswIndex::build(
+                HnswConfig {
+                    id: ProjectionId::new("vector:hnsw:codec").unwrap(),
+                    scope,
+                    field: "body".into(),
+                    dimensions: 2,
+                    metric: ScoreMetric::Dot,
+                    embedding_model: None,
+                    m: 2,
+                    ef_construction: 4,
+                    max_level: 3,
+                    seed: 11,
+                    filter_properties: BTreeSet::new(),
+                },
+                1,
+                2,
+                values,
+            )
+            .unwrap(),
+        );
+
+        for artifact in [exact, compact, hnsw] {
+            let reopened =
+                VectorArtifact::from_bytes(artifact.kind(), artifact.as_bytes()).unwrap();
+            assert_eq!(reopened.kind(), artifact.kind());
+            assert_eq!(reopened.descriptor(), artifact.descriptor());
+            assert_eq!(reopened.as_bytes(), artifact.as_bytes());
+        }
     }
 }

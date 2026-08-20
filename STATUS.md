@@ -213,9 +213,13 @@ not roadmap language.
   Connectome search/embedding/storage lane tests are green. Connectome prompt
   flights now add provider roots plus digest-only model/tool envelope evidence,
   and the Causal traces lens reconstructs lifecycle integrity and measured
-  bottleneck candidates. Cluster spans, broader storage-write coverage,
-  persistent vector artifact catalogs, OTLP translation, and cross-run resource
-  analysis remain open.
+  bottleneck candidates. Projection publication now stages exact/compact/HNSW
+  bytes and atomically commits their strict catalog record plus verified object
+  reference before changing the serving view; native reopen reconstructs the
+  catalog and fails closed on missing or mismatched bytes. Connectome exposes
+  the typed generations without raw vectors. Cluster spans, broader
+  storage-write coverage, OTLP translation, and cross-run resource analysis
+  remain open.
 - The portable operator-knowledge gate is now executable in `vyrm-operator`.
   One immutable binding fixes instance/member, Vyrm scope, adapter/config,
   external source/relation/tenant, model space, dimensions, and projection
@@ -401,8 +405,8 @@ artifact even on failure.
   migration, concurrency, initialization, denial, observer safety, secret
   non-persistence, causal visualization, crash recovery, and Memory/Fjall/
   native parity are tested. Storage-write/cluster coverage, OTLP translation,
-  persistent trace histories/regression budgets, artifact catalogs, and full
-  pgvector promotion remain open. See
+  persistent trace histories/regression budgets, cross-node artifact-catalog
+  replication, and full pgvector promotion remain open. See
   `docs/runtime-tracing-operator-knowledge.md`.
 
 ## Product and instance boundary

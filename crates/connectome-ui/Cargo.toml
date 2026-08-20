@@ -12,6 +12,7 @@ vyrm-ql = { path = "../vyrm-ql" }
 vyrm-mx = { path = "../vyrm-mx" }
 vyrm-node = { path = "../vyrm-node" }
 vyrm-store = { path = "../vyrm-store" }
+vyrm-vector = { path = "../vyrm-vector" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tiny_http = "0.12"

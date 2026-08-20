@@ -54,6 +54,18 @@ filters raise estimated graph cost because traversal still needs non-matching
 nodes for navigation; the reference planner uses a conservative four-unit
 navigation multiplier.
 
+The in-process coordinator is not durable truth. Node publication explicitly
+records the artifact codec (`exact_segment`, `compact_dense`, or `hnsw`), stages
+its content-addressed bytes, and then commits a strict `vector_artifact` record
+with the verified object reference in one `vyrmDS` transaction. Only a
+successful commit replaces the serving view. Restart reconstructs catalog
+revision order from the typed log, proves record and object shared a commit,
+loads verified bytes through the object port, decodes the declared codec, and
+requires exact descriptor equality. Revision gaps, stale publishers, missing
+objects, digest/length differences, and codec substitution fail closed.
+Connectome exposes the bounded catalog metadata and receipts without raw vector
+payloads.
+
 ## Evidence
 
 Reproduce the retained fixed-seed profile with:

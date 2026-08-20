@@ -22,6 +22,7 @@ use vyrm_mx::{BoundQuery, Catalog, ExecutionBudget, Parameters, PhysicalPlan, Qu
 use vyrm_node::{InstanceBinding, InstanceMode};
 use vyrm_ql::Query;
 use vyrm_store::{Engine, Invocation, PersistentEngine, ProjectionStatus};
+use vyrm_vector::VectorArtifactCatalogEntry;
 
 const INDEX: &str = include_str!("../static/index.html");
 const CSS: &str = include_str!("../static/app.css");
@@ -39,6 +40,7 @@ pub struct Snapshot {
     pub flights: Vec<Flight>,
     pub temporal_events: Vec<TemporalEventView>,
     pub traces: TraceExportView,
+    pub vector_artifacts: Vec<VectorArtifactCatalogEntry>,
     pub schema: Option<RuntimeSchemaRegistry>,
     pub capabilities: CapabilitiesView,
     pub graph: GraphView,
@@ -77,6 +79,8 @@ pub struct HealthView {
     pub snapshot_leases: usize,
     pub retention_pins: usize,
     pub oldest_retained_cursor: Option<u64>,
+    pub vector_artifacts: usize,
+    pub vector_catalog_revision: u64,
 }
 
 #[derive(Debug, Serialize)]
@@ -309,6 +313,8 @@ pub fn snapshot(
     let flights = flight::stored_flights(store)?;
     let temporal_events = temporal_events(store, 512)?;
     let traces = runtime_traces(store, &binding.manifest.id, 512, &["control"])?;
+    let instance_scope = ScopeId::new(binding.manifest.id.clone())?;
+    let vector_artifacts = vyrm_node::vector_artifact_catalog_entries(store, &instance_scope)?;
     let graph = build_graph(
         &binding.manifest.id,
         &claims,
@@ -343,6 +349,10 @@ pub fn snapshot(
         snapshot_leases: retention.snapshots.len(),
         retention_pins: retention.pins.len(),
         oldest_retained_cursor: retention.pins.iter().map(|pin| pin.minimum_cursor).min(),
+        vector_artifacts: vector_artifacts.len(),
+        vector_catalog_revision: vector_artifacts
+            .last()
+            .map_or(0, |entry| entry.catalog_revision),
     };
 
     Ok(Snapshot {
@@ -364,6 +374,7 @@ pub fn snapshot(
         flights,
         temporal_events,
         traces,
+        vector_artifacts,
         schema,
         capabilities: CapabilitiesView {
             runners_enabled: false,
@@ -1359,6 +1370,19 @@ fn respond(
                 Ok(traces) => json_response(StatusCode(200), &traces),
                 Err(error) => json_response(
                     StatusCode(400),
+                    &serde_json::json!({"error":error.to_string()}),
+                ),
+            }
+        }
+        "/api/runtime/vector-artifacts" => {
+            let params = query_params(query);
+            match requested_scope(&params, Some(&binding.manifest.id))
+                .and_then(required_scope)
+                .and_then(|scope| vyrm_node::vector_artifact_catalog_entries(store, &scope))
+            {
+                Ok(entries) => json_response(StatusCode(200), &entries),
+                Err(error) => json_response(
+                    StatusCode(500),
                     &serde_json::json!({"error":error.to_string()}),
                 ),
             }

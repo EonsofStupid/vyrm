@@ -18,8 +18,8 @@
 //! model's discipline. Writes ride Buffered durability and never block the
 //! turn; recall is the only synchronous path.
 
-pub mod hook;
 pub mod data_plane;
+pub mod hook;
 pub mod init;
 pub mod instance;
 pub mod operator_knowledge;
@@ -31,13 +31,14 @@ pub mod registry;
 pub mod routing;
 pub mod stack;
 pub mod trace;
+pub mod vector_catalog;
 pub mod workflow;
 
-pub use hook::{handle, HookContext, HookEvent, HookResponse};
 pub use data_plane::{
-    execute_traced_embedding, execute_traced_vector_search, publish_traced_vector_artifact,
-    TracedEmbeddingExecution, TracedVectorSearch,
+    execute_traced_embedding, execute_traced_vector_search, TracedEmbeddingExecution,
+    TracedVectorSearch,
 };
+pub use hook::{handle, HookContext, HookEvent, HookResponse};
 pub use init::{init, InitReport, STORE_DIR};
 pub use instance::{
     InstanceBinding, InstanceManifest, InstanceMode, INSTANCE_FILE, INSTANCE_FORMAT,
@@ -60,6 +61,10 @@ pub use routing::{ensure_routing_fresh, load_routing, reset_routing, RoutingRead
 pub use stack::{detect, package_run_event, PackageManager, PackageRunEvent, StackProfile};
 pub use trace::{
     install_runtime_trace_contract, record_runtime_trace, DurableTraceSpan, TraceIdentity,
+};
+pub use vector_catalog::{
+    publish_traced_vector_artifact, reopen_vector_runtime, vector_artifact_catalog_entries,
+    VectorArtifactPublication,
 };
 pub use workflow::{
     resolve_package_command, VerificationPolicy, WorkflowAuthorization, WorkflowCatalog,

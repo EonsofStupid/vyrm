@@ -39,6 +39,11 @@ Vyrm provides:
   and embedding-inference/commit trace trees; native reads include bounded
   manifest/memtable/segment/cache/block deltas, while raw queries, parameters,
   vectors, filters, and embedding source bytes remain outside persisted traces;
+- authoritative per-project vector artifact catalogs: exact, compact-dense, and
+  HNSW bytes are content-addressed first, then their strict catalog record and
+  verified object reference commit atomically through `vyrmDS`; restart
+  reconstruction rejects revision gaps, substituted descriptors, non-atomic
+  bindings, corruption, and missing objects before serving;
 - a retention-filtered causal trace workbench that reconstructs complete,
   incomplete, summary, and invalid lifecycles from the authoritative log,
   identifies a non-double-counted measured critical-path candidate, and joins
@@ -113,7 +118,7 @@ The workbench has no authentication. Keep remote binding on a trusted network
 or tunnel the loopback address over SSH. Frontier runners remain disabled
 unless `--enable-runners` is also explicit.
 
-Connectome provides ten lenses:
+Connectome provides eleven lenses:
 
 | Lens | Purpose |
 |---|---|
@@ -136,6 +141,7 @@ The local API also exposes the authoritative persistence layer:
 | `GET /api/changes?after=N&limit=N&scope=...` | Resume the verified global runtime changefeed, optionally restricted to one scope |
 | `GET /api/runtime/events?limit=N` | Read the newest bounded, audit-attached temporal event projection |
 | `GET /api/runtime/traces?limit=N&classes=control` | Export bounded per-project causal traces; operator/content classes require explicit inclusion |
+| `GET /api/runtime/vector-artifacts?scope=...` | Inspect typed artifact generations, projection/config/source coordinates, object receipts, byte digests, and catalog revisions without returning raw vectors |
 | `GET /api/runtime/schema?scope=...` | Read the active persisted schema revision for one scope |
 | `GET /api/runtime/retention` | Inspect live snapshot leases and their logical GC retention pins |
 | `GET /api/runtime/query?scope=...&ql=...` | Parse, bind, explain, and execute an exact bitemporal `vyrmQL` query |
