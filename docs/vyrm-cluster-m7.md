@@ -136,7 +136,7 @@ the installed immutable image disk-resident behind a database-wide bounded
 decoded-block cache; transfer and query residency therefore have separate
 executable RSS bounds.
 
-## Authenticated transport v1
+## Authenticated transport v2
 
 The separate `openraft-transport` feature adds real TCP transport without
 putting async, TLS, or X.509 dependencies in the default contract/simulator or
@@ -146,10 +146,14 @@ CA-validated server certificate. The leaf must contain exactly one SPIFFE-style
 URI SAN derived from a configured trust domain plus canonical digests of the
 cluster and node ids; DNS/IP endpoint validation still runs independently.
 
-Transport envelope v1 additionally binds the protocol version, cluster, shard,
+Transport envelope v2 additionally binds the protocol version, cluster, shard,
 numeric and canonical source/target identities, serialized request digest, and
 the source carried inside the OpenRaft vote. A static authorization map prevents
 a trusted certificate from relabeling itself as another numeric Raft node.
+The v2 envelope also carries one narrowly typed internal `RuntimeCommit` RPC.
+It accepts only the configured project scope, validates the canonical command,
+and follows the current leader through the same authenticated node map; it is
+not a general administrative or cross-project write endpoint.
 Frames are rejected above 16 MiB before allocation, client work honors
 OpenRaft's hard TTL, ingress work has a 30-second lifetime, and the listener
 admits at most 256 concurrent RPCs. One RPC is sent per TLS connection; no
@@ -199,7 +203,8 @@ roots. It:
 4. snapshots and purges every voter so a leadership change cannot bypass
    recovery through an unpurged log, starts the fourth process as a learner,
    and proves its applied state, persisted snapshot cursor, artifact bytes,
-   authenticated manifest, and terminal transfer receipt;
+   authenticated manifest, terminal transfer receipt, and consensus-applied
+   transfer trace tail;
 5. denies readiness when a node-four config is paired with node three's trusted
    leaf; and
 6. shuts down the learner, corrupts its VyrmKV `CURRENT` pointer, and proves
@@ -385,16 +390,31 @@ adapter that maps these into one `cluster.artifact_transfer` start/finish span
 with causal `cluster.artifact_chunk` annotations. The existing synchronous
 wrapper retains its `object.replicate` storage child. Normalized causal traces
 are tested across Memory, Fjall, and native engines and are consumable by
-Connectome. A clustered deployment must route the observer's commits through
-its consensus write path; a direct local engine write is not represented as a
-replicated commit.
+Connectome. The real node runtime now prepares that canonical trace commit from
+one exact native read/schema snapshot and routes it to the current Raft leader.
+Cursor conflicts alone retry; foreign scope, authentication, validation, or
+consensus failures stay fail-closed. The four-process post-purge test proves the
+same trace changes on all voters and the fresh learner and proves serialized
+trace mutations contain no transferred object bytes. The direct local adapter
+remains explicitly local and is not represented as a replicated commit.
+
+The receiver reconstructs its session inventory from authenticated manifests,
+partial files, state, and receipts on restart. Admission caps active sessions
+and reserves the complete still-missing object closure before accepting work,
+so partial progress cannot oversubscribe the receiver. A global lifecycle lock
+serializes admission/GC while distinct session locks permit concurrent chunk
+work. Stale incomplete sessions and completed receipts have explicit retention
+and count bounds; GC validates every digest-scoped target, rejects symlinks and
+unexpected entries, and deletes only transfer metadata. Completion idempotency
+therefore has a documented retention window while immutable object bytes remain
+content-addressed. Deterministic-clock tests cover quota refusal, stale reclaim,
+restart reconstruction, receipt replay/expiry, and distinct-session concurrency.
 
 The synchronous S3-compatible port has the same verify-before-publish
 semantics, but currently materializes one object because its transport contract
-does not expose multipart streaming. The Raft transport has bounded chunk flow
-control and resumable cancellation; session quota/GC, concurrent-session
-scheduling, multipart S3, retained large-closure soak, and independent-machine
-chaos remain required before calling this production artifact replication.
+does not expose multipart streaming. Multipart S3, retained large-closure soak,
+production admission telemetry, and independent-machine chaos remain required
+before calling this production artifact replication.
 
 ## What is not yet claimed
 
@@ -423,9 +443,10 @@ control v2 accepts typed runtime commits and denies a foreign scope.
 
 The next M7 slice must extend that passing one-host process matrix to independent
 hosts and real network/disk fault mechanisms, connect the passing credential
-state machine to an attested Workload API source, route durable transfer traces
-through clustered consensus, and retain production telemetry. File-backed,
-bounded-memory snapshot creation/receipt and resumable scoped artifact transfer
-are closed for the fixture, but larger retained segment/query/closure soak
-evidence is still required before high-volume cluster claims.
+state machine to an attested Workload API source, and retain production
+telemetry. File-backed, bounded-memory snapshot creation/receipt, resumable
+scoped artifact transfer, bounded receiver lifecycle, and consensus-replicated
+transfer traces are closed for the fixture, but larger retained
+segment/query/closure soak evidence is still required before high-volume
+cluster claims.
 Only that evidence can advance a Multi-AZ claim.

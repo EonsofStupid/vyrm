@@ -176,11 +176,9 @@ fn artifact_manifest_binds_project_read_plan_objects_and_receipt() {
     )
     .unwrap();
     receipt.validate(&manifest).unwrap();
-    ArtifactTransferObservation::prepared(&manifest, 1, 18)
-        .unwrap()
-        .validate()
-        .unwrap();
-    ArtifactTransferObservation::progress(
+    let prepared = ArtifactTransferObservation::prepared(&manifest, 1, 18).unwrap();
+    prepared.validate().unwrap();
+    let progress = ArtifactTransferObservation::progress(
         &manifest,
         1,
         19,
@@ -191,9 +189,8 @@ fn artifact_manifest_binds_project_read_plan_objects_and_receipt() {
             complete: true,
         },
     )
-    .unwrap()
-    .validate()
     .unwrap();
+    progress.validate().unwrap();
     let completed =
         ArtifactTransferObservation::completed(&manifest, 1, 20, 1_000, &receipt).unwrap();
     completed.validate().unwrap();
@@ -204,6 +201,19 @@ fn artifact_manifest_binds_project_read_plan_objects_and_receipt() {
         Some(vyrm_core::digest::sha256_hex(b"secret failure"))
     );
     assert!(!serde_json::to_string(&failed)
+        .unwrap()
+        .contains("secret failure"));
+    let prepared_trace = artifact_transfer_trace_event(&prepared).unwrap();
+    let progress_trace = artifact_transfer_trace_event(&progress).unwrap();
+    let completed_trace = artifact_transfer_trace_event(&completed).unwrap();
+    let failed_trace = artifact_transfer_trace_event(&failed).unwrap();
+    assert_eq!(prepared_trace.name, "cluster.artifact_transfer");
+    assert_eq!(prepared_trace.trace_id, completed_trace.trace_id);
+    assert_eq!(prepared_trace.span_id, completed_trace.span_id);
+    assert_eq!(progress_trace.name, "cluster.artifact_chunk");
+    assert_eq!(progress_trace.parent_span_id, Some(prepared_trace.span_id));
+    assert_eq!(failed_trace.outcome, vyrm_core::TraceOutcome::Error);
+    assert!(!serde_json::to_string(&failed_trace)
         .unwrap()
         .contains("secret failure"));
 

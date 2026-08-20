@@ -6,11 +6,13 @@
 //! executable safe to supervise while Clyffy grows a separately authenticated
 //! management plane.
 
+use crate::transport::VyrmConsensusCommitError;
 use crate::{
+    artifact_transfer_trace_event, ArtifactTransferObservation, ArtifactTransferObserver,
     ArtifactTransferReceiver, ClusterError, ClusterId, NodeId, Result as ClusterResult, ShardId,
     ShardPlacement, VyrmRaftCommand, VyrmRaftNetworkFactory, VyrmRaftNode, VyrmRaftResponse,
-    VyrmRaftStore, VyrmRaftTlsServer, VyrmTlsGeneration, VyrmTlsMaterial, VyrmTlsReloader,
-    VyrmTransportBinding, VyrmTransportGate, VyrmTransportTrust,
+    VyrmRaftStateMachine, VyrmRaftStore, VyrmRaftTlsServer, VyrmTlsGeneration, VyrmTlsMaterial,
+    VyrmTlsReloader, VyrmTransportBinding, VyrmTransportGate, VyrmTransportTrust,
 };
 use openraft::metrics::Metric;
 use openraft::{Config, Raft, SnapshotPolicy};
@@ -22,7 +24,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::TcpListener;
@@ -33,8 +35,144 @@ pub const VYRM_NODE_CONTROL_VERSION: u16 = 2;
 pub const VYRM_NODE_MAX_CONFIG_BYTES: u64 = 1024 * 1024;
 pub const VYRM_NODE_MAX_CONTROL_LINE_BYTES: usize = 1024 * 1024;
 const LEARNER_CATCH_UP_TIMEOUT: Duration = Duration::from_secs(10);
+const CONSENSUS_TRACE_COMMIT_RETRIES: usize = 16;
+const CONSENSUS_TRACE_ROUTE_RETRIES: usize = 32;
 
 type VyrmRaft = Raft<crate::VyrmRaftTypeConfig>;
+
+struct ConsensusArtifactTransferObserver {
+    raft: Arc<OnceLock<VyrmRaft>>,
+    state_machine: VyrmRaftStateMachine,
+    network: VyrmRaftNetworkFactory,
+    nodes: BTreeMap<u64, VyrmRaftNode>,
+    local_node_id: u64,
+    project_scope: ScopeId,
+    actor: String,
+}
+
+impl ConsensusArtifactTransferObserver {
+    async fn submit(
+        &self,
+        raft: &VyrmRaft,
+        command: VyrmRaftCommand,
+    ) -> ClusterResult<openraft::raft::ClientWriteResponse<crate::VyrmRaftTypeConfig>> {
+        let mut last_error: Option<String> = None;
+        for _ in 0..CONSENSUS_TRACE_ROUTE_RETRIES {
+            let metrics = raft.metrics().borrow().clone();
+            let Some(leader) = metrics.current_leader else {
+                last_error = Some("no current leader".into());
+                tokio::time::sleep(Duration::from_millis(25)).await;
+                continue;
+            };
+            let result = if leader == self.local_node_id {
+                match raft.client_write(command.clone()).await {
+                    Ok(response) => Ok(response),
+                    Err(error)
+                        if matches!(
+                            error.api_error(),
+                            Some(openraft::error::ClientWriteError::ForwardToLeader(_))
+                        ) =>
+                    {
+                        Err(VyrmConsensusCommitError::ForwardToLeader)
+                    }
+                    Err(error) if error.fatal().is_some() => {
+                        Err(VyrmConsensusCommitError::Unavailable(error.to_string()))
+                    }
+                    Err(error) => Err(VyrmConsensusCommitError::Rejected(error.to_string())),
+                }
+            } else {
+                let node = self.nodes.get(&leader).ok_or_else(|| {
+                    ClusterError::Unavailable(format!(
+                        "current leader {leader} is absent from the node inventory"
+                    ))
+                })?;
+                self.network
+                    .submit_runtime_commit(leader, node, command.clone())
+                    .await
+            };
+            match result {
+                Ok(response) => return Ok(response),
+                Err(VyrmConsensusCommitError::ForwardToLeader) => {
+                    last_error = Some("leader changed while routing".into());
+                    tokio::time::sleep(Duration::from_millis(25)).await;
+                }
+                Err(VyrmConsensusCommitError::Rejected(error)) => {
+                    return Err(ClusterError::Denied(error))
+                }
+                Err(VyrmConsensusCommitError::Unavailable(error)) => {
+                    return Err(ClusterError::Unavailable(error))
+                }
+            }
+        }
+        Err(ClusterError::Unavailable(format!(
+            "consensus trace could not route to a stable leader after {CONSENSUS_TRACE_ROUTE_RETRIES} attempts: {}",
+            last_error.unwrap_or_else(|| "no routing evidence".into())
+        )))
+    }
+
+    async fn commit(&self, observation: ArtifactTransferObservation) -> ClusterResult<()> {
+        observation.validate()?;
+        if observation.scope != self.project_scope {
+            return Err(ClusterError::Denied(
+                "artifact trace scope differs from the configured project".into(),
+            ));
+        }
+        let event = artifact_transfer_trace_event(&observation)?;
+        let event_digest = vyrm_core::digest::sha256_hex(
+            &serde_json::to_vec(&event)
+                .map_err(|error| ClusterError::Invalid(error.to_string()))?,
+        );
+        let raft = self.raft.get().cloned().ok_or_else(|| {
+            ClusterError::Unavailable("consensus trace writer is not attached to Raft".into())
+        })?;
+        let mut last_conflict = None;
+        for _ in 0..CONSENSUS_TRACE_COMMIT_RETRIES {
+            let (read, schema) = self
+                .state_machine
+                .runtime_commit_context(&observation.scope)?;
+            let commit = event
+                .prepare_commit(&read, schema.as_ref(), &self.actor)
+                .map_err(|error| ClusterError::Invalid(error.to_string()))?;
+            let request_id = format!("artifact-trace:{event_digest}:{}", commit.expected_cursor);
+            let command = VyrmRaftCommand::runtime_commit(
+                request_id,
+                observation.shard,
+                observation.placement_epoch,
+                None,
+                commit,
+            )?;
+            let response = self.submit(&raft, command).await?;
+            if response.data.accepted && response.data.runtime_outcome.is_some() {
+                return Ok(());
+            }
+            if response
+                .data
+                .reason
+                .contains("runtime commit conflict: expected cursor")
+            {
+                last_conflict = Some(response.data.reason);
+                continue;
+            }
+            return Err(ClusterError::Denied(format!(
+                "consensus artifact trace commit was rejected: {}",
+                response.data.reason
+            )));
+        }
+        Err(ClusterError::Unavailable(format!(
+            "consensus artifact trace exhausted {CONSENSUS_TRACE_COMMIT_RETRIES} cursor retries: {}",
+            last_conflict.unwrap_or_else(|| "no conflict evidence".into())
+        )))
+    }
+}
+
+impl ArtifactTransferObserver for ConsensusArtifactTransferObserver {
+    fn observe(
+        &self,
+        observation: ArtifactTransferObservation,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ClusterResult<()>> + Send + '_>> {
+        Box::pin(self.commit(observation))
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -278,6 +416,7 @@ pub async fn run_vyrm_node(config: VyrmNodeConfig) -> ClusterResult<()> {
     let (log, state_machine) = VyrmRaftStore::open(&config.data_root, config.shard)?;
     let application_objects = state_machine.application_objects();
     let artifact_receiver = ArtifactTransferReceiver::open(application_objects.clone())?;
+    let raft_slot = Arc::new(OnceLock::new());
     let network = VyrmRaftNetworkFactory::new_reloadable_with_artifacts(
         binding.clone(),
         credentials.clone(),
@@ -286,6 +425,16 @@ pub async fn run_vyrm_node(config: VyrmNodeConfig) -> ClusterResult<()> {
         application_objects,
         config.project_scope.clone(),
     )?;
+    let trace_observer = Arc::new(ConsensusArtifactTransferObserver {
+        raft: Arc::clone(&raft_slot),
+        state_machine: state_machine.clone(),
+        network: network.clone(),
+        nodes: config.nodes.clone(),
+        local_node_id: config.raft_node_id,
+        project_scope: config.project_scope.clone(),
+        actor: format!("cluster:artifact-transfer:{}", config.raft_node_id),
+    });
+    let network = network.with_artifact_observer(trace_observer);
     let raft_config = Arc::new(
         Config {
             snapshot_policy: SnapshotPolicy::Never,
@@ -305,6 +454,9 @@ pub async fn run_vyrm_node(config: VyrmNodeConfig) -> ClusterResult<()> {
     )
     .await
     .map_err(|error| ClusterError::Unavailable(error.to_string()))?;
+    raft_slot.set(raft.clone()).map_err(|_| {
+        ClusterError::Unavailable("consensus trace writer was attached more than once".into())
+    })?;
     let listener = TcpListener::bind(&config.raft_listen)
         .await
         .map_err(|error| ClusterError::Unavailable(format!("bind Raft transport: {error}")))?;
@@ -315,6 +467,7 @@ pub async fn run_vyrm_node(config: VyrmNodeConfig) -> ClusterResult<()> {
         credentials.clone(),
         transport_gate.clone(),
         artifact_receiver,
+        config.project_scope.clone(),
     )?;
     let server_task = tokio::spawn(async move { server.serve(listener).await });
 

@@ -22,10 +22,10 @@ use vyrm_cluster::{
     VYRM_NODE_CONTROL_VERSION,
 };
 use vyrm_core::{
-    ObjectReference, RuntimeCommit, RuntimeMutation, RuntimeRecordSchema, RuntimeSchemaRegistry,
-    RuntimeType, ScopeId,
+    ObjectReference, RuntimeChange, RuntimeCommit, RuntimeMutation, RuntimeRecordSchema,
+    RuntimeSchemaRegistry, RuntimeType, RuntimeValue, ScopeId,
 };
-use vyrm_store::LocalObjectStore;
+use vyrm_store::{Engine, LocalObjectStore, NativeEngine};
 
 const SHARD: ShardId = ShardId(11);
 
@@ -295,7 +295,12 @@ fn independent_processes_recover_fail_over_snapshot_and_reject_corruption() {
         let mut voters = [&mut node1, &mut node2, &mut node3];
         snapshot_purge_and_add_learner(&mut voters, partition_index, 4)
     };
-    wait_applied(&mut node4, partition_index);
+    let consensus_trace_tail = [&mut node1, &mut node2, &mut node3]
+        .into_iter()
+        .filter_map(|node| node.status().last_log_index)
+        .max()
+        .unwrap();
+    wait_applied(&mut node4, consensus_trace_tail);
     wait_snapshot(&mut node4, snapshot_index);
     let learner_objects =
         LocalObjectStore::open(fixture.data_roots[&4].join("application-objects")).unwrap();
@@ -350,6 +355,26 @@ fn independent_processes_recover_fail_over_snapshot_and_reject_corruption() {
     );
 
     node4.shutdown();
+    let learner_changes = project_changes(&fixture.data_roots[&4]);
+    let trace_events = learner_changes
+        .iter()
+        .filter_map(|change| match &change.mutation {
+            RuntimeMutation::Event { event } if event.kind.as_str() == "runtime_trace" => {
+                event.properties.get("name")
+            }
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert!(trace_events
+        .iter()
+        .any(|name| **name == RuntimeValue::String("cluster.artifact_transfer".into())));
+    assert!(trace_events
+        .iter()
+        .any(|name| **name == RuntimeValue::String("cluster.artifact_chunk".into())));
+    assert!(!serde_json::to_vec(&learner_changes)
+        .unwrap()
+        .windows(64)
+        .any(|window| window == &artifact_bytes[..64]));
     let current = fixture.data_roots[&4].join("CURRENT");
     let mut corrupt = fs::read(&current).unwrap();
     corrupt.push(0xff);
@@ -362,6 +387,21 @@ fn independent_processes_recover_fail_over_snapshot_and_reject_corruption() {
     node1.shutdown();
     node2.shutdown();
     node3.shutdown();
+    for id in 1..=3 {
+        assert_eq!(
+            project_changes(&fixture.data_roots[&id]),
+            learner_changes,
+            "voter {id} and the post-purge learner must retain identical consensus trace truth"
+        );
+    }
+}
+
+fn project_changes(root: &Path) -> Vec<RuntimeChange> {
+    let engine = NativeEngine::open(root).unwrap();
+    engine
+        .runtime_changes_since(0, usize::MAX, Some(&project_scope()))
+        .unwrap()
+        .changes
 }
 
 fn wait_for_leader(node: &mut ProcessNode, expected: u64) {
@@ -502,6 +542,7 @@ fn snapshot_purge_and_add_learner(
 ) -> u64 {
     let deadline = Instant::now() + Duration::from_secs(30);
     let mut next_trigger = Instant::now();
+    let mut last_add_reply = None;
     loop {
         let statuses = voter_statuses(voters);
         if Instant::now() >= next_trigger {
@@ -545,12 +586,13 @@ fn snapshot_purge_and_add_learner(
                         assert_eq!(reply.value, Some(VyrmNodeResult::Ack));
                         return snapshot_index;
                     }
+                    last_add_reply = Some(reply);
                 }
             }
         }
         assert!(
             Instant::now() < deadline,
-            "voters did not snapshot, purge, and add the learner: {statuses:?}"
+            "voters did not snapshot, purge, and add the learner: {statuses:?}; last add reply: {last_add_reply:?}"
         );
         thread::sleep(Duration::from_millis(50));
     }

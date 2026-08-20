@@ -2,8 +2,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 use vyrm_cluster::{
     prepare_artifact_transfer, transfer_artifacts, ArtifactObjectProgress,
-    ArtifactTransferObservation, ArtifactTransferObserver, NodeId, ReplicaTransferPlan, ShardId,
-    ShardReadStamp, CLUSTER_CONTRACT_VERSION,
+    ArtifactTransferObservation, NodeId, ReplicaTransferPlan, ShardId, ShardReadStamp,
+    CLUSTER_CONTRACT_VERSION,
 };
 use vyrm_core::{
     DataTransaction, RuntimeCommit, RuntimeMutation, RuntimeRecordSchema, RuntimeSchemaRegistry,
@@ -212,10 +212,10 @@ fn transport_observations_persist_as_one_causal_project_trace() {
     let observer =
         DurableArtifactTransferObserver::new(Arc::clone(&engine), "cluster:transport").unwrap();
     observer
-        .observe(ArtifactTransferObservation::prepared(&manifest, 1, 20).unwrap())
+        .observe_sync(ArtifactTransferObservation::prepared(&manifest, 1, 20).unwrap())
         .unwrap();
     observer
-        .observe(
+        .observe_sync(
             ArtifactTransferObservation::progress(
                 &manifest,
                 1,
@@ -231,7 +231,9 @@ fn transport_observations_persist_as_one_causal_project_trace() {
         )
         .unwrap();
     observer
-        .observe(ArtifactTransferObservation::completed(&manifest, 1, 22, 2_000, &receipt).unwrap())
+        .observe_sync(
+            ArtifactTransferObservation::completed(&manifest, 1, 22, 2_000, &receipt).unwrap(),
+        )
         .unwrap();
 
     let trace = traces(engine.as_ref());

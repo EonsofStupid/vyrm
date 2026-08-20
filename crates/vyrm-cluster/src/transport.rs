@@ -1,6 +1,6 @@
 //! Mutually authenticated, bounded OpenRaft RPC transport.
 //!
-//! Transport v1 uses one request per TLS connection, disables application
+//! Transport v2 uses one request per TLS connection, disables application
 //! bearer credentials, and binds the TLS URI SAN to the canonical cluster/node
 //! identity carried by the replicated membership. OpenRaft retains ownership of
 //! retry, ordering, duplicate, and chunked-snapshot semantics.
@@ -9,17 +9,18 @@ use crate::{
     ArtifactTransferManifest, ArtifactTransferObservation, ArtifactTransferObserver,
     ArtifactTransferReceipt, ArtifactTransferReceiver, ArtifactTransferRpc,
     ArtifactTransferRpcResult, ClusterError, ClusterId, NodeId, Result as ClusterResult, ShardId,
-    VyrmRaftNode, VyrmRaftStateMachine, VyrmRaftTypeConfig, ARTIFACT_TRANSFER_CHUNK_MAX_BYTES,
+    VyrmRaftCommand, VyrmRaftNode, VyrmRaftStateMachine, VyrmRaftTypeConfig,
+    ARTIFACT_TRANSFER_CHUNK_MAX_BYTES,
 };
 use openraft::error::{
-    Fatal, InstallSnapshotError, NetworkError, RPCError, RaftError, RemoteError, ReplicationClosed,
-    StreamingError, Timeout, Unreachable,
+    ClientWriteError, Fatal, InstallSnapshotError, NetworkError, RPCError, RaftError, RemoteError,
+    ReplicationClosed, StreamingError, Timeout, Unreachable,
 };
 use openraft::network::snapshot_transport::{Chunked, SnapshotTransport};
 use openraft::network::{RPCOption, RPCTypes, RaftNetwork, RaftNetworkFactory};
 use openraft::raft::{
-    AppendEntriesRequest, AppendEntriesResponse, InstallSnapshotRequest, InstallSnapshotResponse,
-    SnapshotResponse, VoteRequest, VoteResponse,
+    AppendEntriesRequest, AppendEntriesResponse, ClientWriteResponse, InstallSnapshotRequest,
+    InstallSnapshotResponse, SnapshotResponse, VoteRequest, VoteResponse,
 };
 use openraft::{OptionalSend, Raft, Snapshot, Vote};
 use rustls::client::WebPkiServerVerifier;
@@ -44,11 +45,12 @@ use vyrm_store::LocalObjectStore;
 use x509_parser::extensions::GeneralName;
 use x509_parser::prelude::{FromDer, X509Certificate};
 
-pub const VYRM_RAFT_TRANSPORT_VERSION: u16 = 1;
+pub const VYRM_RAFT_TRANSPORT_VERSION: u16 = 2;
 pub const VYRM_RAFT_MAX_RPC_FRAME_BYTES: usize = 16 * 1024 * 1024;
 pub const VYRM_RAFT_MAX_IN_FLIGHT_RPCS: usize = 256;
 pub const VYRM_RAFT_SERVER_RPC_TIMEOUT: Duration = Duration::from_secs(30);
 pub const VYRM_ARTIFACT_RPC_TIMEOUT: Duration = Duration::from_secs(30);
+pub const VYRM_CONSENSUS_COMMIT_RPC_TIMEOUT: Duration = Duration::from_secs(5);
 
 fn now_millis() -> u64 {
     SystemTime::now()
@@ -63,6 +65,34 @@ type AppendResult = std::result::Result<AppendEntriesResponse<u64>, RaftError<u6
 type SnapshotResult =
     std::result::Result<InstallSnapshotResponse<u64>, RaftError<u64, InstallSnapshotError>>;
 type VoteResult = std::result::Result<VoteResponse<u64>, RaftError<u64>>;
+type ConsensusRaftError = RaftError<u64, ClientWriteError<u64, VyrmRaftNode>>;
+type ConsensusCommitResult =
+    std::result::Result<ClientWriteResponse<VyrmRaftTypeConfig>, ConsensusCommitWireError>;
+
+#[derive(Debug, Serialize, Deserialize)]
+enum ConsensusCommitWireError {
+    Denied(String),
+    Raft(ConsensusRaftError),
+}
+
+#[derive(Debug)]
+pub enum VyrmConsensusCommitError {
+    ForwardToLeader,
+    Rejected(String),
+    Unavailable(String),
+}
+
+impl fmt::Display for VyrmConsensusCommitError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::ForwardToLeader => formatter.write_str("consensus leader changed while routing"),
+            Self::Rejected(error) => write!(formatter, "consensus commit rejected: {error}"),
+            Self::Unavailable(error) => write!(formatter, "consensus commit unavailable: {error}"),
+        }
+    }
+}
+
+impl std::error::Error for VyrmConsensusCommitError {}
 
 #[derive(Debug, Clone)]
 pub struct VyrmTransportGate {
@@ -335,13 +365,13 @@ struct VyrmArtifactSource {
     attempt_counter: Arc<AtomicU64>,
 }
 
-fn observe_artifact(
+async fn observe_artifact(
     source: &VyrmArtifactSource,
     observation: ArtifactTransferObservation,
 ) -> ClusterResult<()> {
     observation.validate()?;
     match &source.observer {
-        Some(observer) => observer.observe(observation),
+        Some(observer) => observer.observe(observation).await,
         None => Ok(()),
     }
 }
@@ -411,6 +441,18 @@ impl VyrmRaftNetworkFactory {
             source.observer = Some(observer);
         }
         self
+    }
+
+    pub async fn submit_runtime_commit(
+        &self,
+        target: u64,
+        node: &VyrmRaftNode,
+        command: VyrmRaftCommand,
+    ) -> std::result::Result<ClientWriteResponse<VyrmRaftTypeConfig>, VyrmConsensusCommitError>
+    {
+        let mut factory = self.clone();
+        let client = factory.new_client(target, node).await;
+        client.submit_runtime_commit(command).await
     }
 }
 
@@ -564,6 +606,53 @@ fn artifact_hydration_required(
 }
 
 impl VyrmRaftNetworkClient {
+    async fn submit_runtime_commit(
+        &self,
+        command: VyrmRaftCommand,
+    ) -> std::result::Result<ClientWriteResponse<VyrmRaftTypeConfig>, VyrmConsensusCommitError>
+    {
+        command
+            .validate()
+            .map_err(|error| VyrmConsensusCommitError::Rejected(error.to_string()))?;
+        if !matches!(
+            command.operation,
+            crate::VyrmRaftOperation::RuntimeCommit { .. }
+        ) {
+            return Err(VyrmConsensusCommitError::Rejected(
+                "internal consensus route accepts only runtime commits".into(),
+            ));
+        }
+        let response = tokio::time::timeout(
+            VYRM_CONSENSUS_COMMIT_RPC_TIMEOUT,
+            self.call::<std::io::Error>(WireRequest::RuntimeCommit(Box::new(command))),
+        )
+        .await
+        .map_err(|_| {
+            VyrmConsensusCommitError::Unavailable("consensus commit RPC timed out".into())
+        })?
+        .map_err(|error| VyrmConsensusCommitError::Unavailable(error.to_string()))?;
+        match response {
+            WireResponse::RuntimeCommit(Ok(response)) => Ok(response),
+            WireResponse::RuntimeCommit(Err(ConsensusCommitWireError::Raft(error)))
+                if matches!(
+                    error.api_error(),
+                    Some(ClientWriteError::ForwardToLeader(_))
+                ) =>
+            {
+                Err(VyrmConsensusCommitError::ForwardToLeader)
+            }
+            WireResponse::RuntimeCommit(Err(ConsensusCommitWireError::Denied(error))) => {
+                Err(VyrmConsensusCommitError::Rejected(error))
+            }
+            WireResponse::RuntimeCommit(Err(ConsensusCommitWireError::Raft(error))) => {
+                Err(VyrmConsensusCommitError::Rejected(error.to_string()))
+            }
+            _ => Err(VyrmConsensusCommitError::Unavailable(
+                "consensus commit response kind did not match request".into(),
+            )),
+        }
+    }
+
     fn next_artifact_attempt(&self) -> ClusterResult<u64> {
         let source = self.artifact_source.as_ref().ok_or_else(|| {
             ClusterError::Unavailable("artifact transfer source is not configured".into())
@@ -605,22 +694,26 @@ impl VyrmRaftNetworkClient {
         observe_artifact(
             &source,
             ArtifactTransferObservation::prepared(&manifest, attempt, now_millis())?,
-        )?;
+        )
+        .await?;
         let started = Instant::now();
         match self
             .transfer_artifact_manifest(&source, &manifest, attempt)
             .await
         {
-            Ok(receipt) => observe_artifact(
-                &source,
-                ArtifactTransferObservation::completed(
-                    &manifest,
-                    attempt,
-                    now_millis(),
-                    started.elapsed().as_micros().min(u128::from(u64::MAX)) as u64,
-                    &receipt,
-                )?,
-            ),
+            Ok(receipt) => {
+                observe_artifact(
+                    &source,
+                    ArtifactTransferObservation::completed(
+                        &manifest,
+                        attempt,
+                        now_millis(),
+                        started.elapsed().as_micros().min(u128::from(u64::MAX)) as u64,
+                        &receipt,
+                    )?,
+                )
+                .await
+            }
             Err(error) => {
                 let rendered = error.to_string();
                 let observation = ArtifactTransferObservation::failed(
@@ -630,7 +723,7 @@ impl VyrmRaftNetworkClient {
                     started.elapsed().as_micros().min(u128::from(u64::MAX)) as u64,
                     &rendered,
                 )?;
-                if let Err(observer_error) = observe_artifact(&source, observation) {
+                if let Err(observer_error) = observe_artifact(&source, observation).await {
                     return Err(ClusterError::Unavailable(format!(
                         "{rendered}; artifact failure observation: {observer_error}"
                     )));
@@ -745,7 +838,8 @@ impl VyrmRaftNetworkClient {
                 observe_artifact(
                     source,
                     ArtifactTransferObservation::progress(manifest, attempt, now_millis(), &next)?,
-                )?;
+                )
+                .await?;
                 state = next;
             }
         }
@@ -865,6 +959,7 @@ pub struct VyrmRaftTlsServer {
     gate: VyrmTransportGate,
     reloader: Option<VyrmTlsReloader>,
     artifacts: Option<ArtifactTransferReceiver>,
+    project_scope: Option<ScopeId>,
 }
 
 impl VyrmRaftTlsServer {
@@ -894,6 +989,7 @@ impl VyrmRaftTlsServer {
             gate,
             reloader: None,
             artifacts: None,
+            project_scope: None,
         })
     }
 
@@ -920,6 +1016,7 @@ impl VyrmRaftTlsServer {
             gate,
             reloader: Some(credentials),
             artifacts: None,
+            project_scope: None,
         })
     }
 
@@ -930,9 +1027,11 @@ impl VyrmRaftTlsServer {
         credentials: VyrmTlsReloader,
         gate: VyrmTransportGate,
         artifacts: ArtifactTransferReceiver,
+        project_scope: ScopeId,
     ) -> ClusterResult<Self> {
         let mut server = Self::new_reloadable(binding, trust, raft, credentials, gate)?;
         server.artifacts = Some(artifacts);
+        server.project_scope = Some(project_scope);
         Ok(server)
     }
 
@@ -989,6 +1088,33 @@ impl VyrmRaftTlsServer {
                     .map_err(|error| error.to_string()),
                 None => Err("artifact transport is not configured on this node".into()),
             }),
+            WireRequest::RuntimeCommit(command) => {
+                let result = (|| {
+                    command.validate().map_err(|error| error.to_string())?;
+                    let Some(scope) = &self.project_scope else {
+                        return Err("consensus runtime commit transport is not configured".into());
+                    };
+                    let crate::VyrmRaftOperation::RuntimeCommit { commit } = &command.operation
+                    else {
+                        return Err("consensus route accepts only runtime commits".into());
+                    };
+                    if &commit.scope != scope {
+                        return Err(
+                            "consensus runtime commit scope differs from the configured project"
+                                .into(),
+                        );
+                    }
+                    Ok(())
+                })();
+                WireResponse::RuntimeCommit(match result {
+                    Ok(()) => self
+                        .raft
+                        .client_write(*command)
+                        .await
+                        .map_err(ConsensusCommitWireError::Raft),
+                    Err(error) => Err(ConsensusCommitWireError::Denied(error)),
+                })
+            }
         };
         write_frame(&mut stream, &response).await
     }
@@ -1085,6 +1211,7 @@ enum WireRequest {
     Snapshot(InstallSnapshotRequest<VyrmRaftTypeConfig>),
     Vote(VoteRequest<u64>),
     Artifact(ArtifactTransferRpc),
+    RuntimeCommit(Box<VyrmRaftCommand>),
 }
 
 impl WireRequest {
@@ -1094,6 +1221,7 @@ impl WireRequest {
             Self::Snapshot(request) => request.vote.leader_id().voted_for(),
             Self::Vote(request) => request.vote.leader_id().voted_for(),
             Self::Artifact(_) => None,
+            Self::RuntimeCommit(_) => None,
         }
     }
 }
@@ -1105,6 +1233,7 @@ enum WireResponse {
     Snapshot(SnapshotResult),
     Vote(VoteResult),
     Artifact(std::result::Result<ArtifactTransferRpcResult, String>),
+    RuntimeCommit(ConsensusCommitResult),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

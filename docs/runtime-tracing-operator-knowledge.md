@@ -4,8 +4,9 @@ Status: contract, conflict-safe recorder, instance bootstrap, lifecycle, query,
 native-storage-read, projection-publication, vector-search, embedding-commit,
 provider/tool-envelope, causal-analysis, and data-class export slices
 implemented. Cluster artifact transfer now has a typed observation port and a
-durable project-trace adapter. The portable operator boundary and first live
-pgvector functional gate are implemented; production TLS/failure/scale
+consensus-backed, project-scoped trace route in the real node runtime. The
+portable operator boundary and first live pgvector functional gate are
+implemented; production TLS/failure/scale
 promotion remains pending alongside storage-write, broader cluster operations,
 OTLP, and retained-regression coverage.
 Repository state was verified 2026-08-20.
@@ -32,8 +33,8 @@ serialized trace mutation is identical through memory, Fjall compatibility,
 and native VyrmKV. A checked-in v1 JSON vector freezes the portable trace and
 stored-runtime-event shapes.
 
-`vyrm-node` now owns the conflict-safe persistence bridge. It reads the exact
-scope stamp, installs or repairs the canonical trace schema in the same commit
+`vyrm-core` owns the conflict-safe commit builder. It binds the exact scope
+stamp and current schema, installing or repairing the canonical trace schema in the same commit
 as the first event, and retries only observed cursor conflicts. `vyrm init`
 records a bounded `instance.init` annotation after wiring the checkout.
 Lifecycle hooks—including the shared `vyrm_lifecycle` MCP path—commit a start
@@ -146,12 +147,16 @@ manifest, source/target, shard, placement epoch, exact read and grounded
 snapshot, offsets, duration, transfer totals, and terminal receipt/error digest.
 Attempt ordinals are monotonic per source transport factory, including across
 OpenRaft client recreation; `(source, attempt)` is the retry identity.
-`DurableArtifactTransferObserver` maps these to a
+The canonical projection maps these to a
 `cluster.artifact_transfer` lifecycle and child chunk annotations. Observer
 failure blocks snapshot activation. Raw bytes and raw error text never enter
-the trace. In a clustered deployment the observer's runtime commits must cross
-Raft; the adapter explicitly does not turn an unreplicated local write into a
-consensus claim.
+the trace. The real cluster observer prepares the runtime commit against one
+exact native state-machine view, then submits it locally or follows the current
+leader through an authenticated, project-scoped internal RPC. The real mTLS and
+four-process tests prove foreign-project denial, failover routing, learner
+catch-up, identical voter/learner trace state, and byte privacy. The synchronous
+`DurableArtifactTransferObserver` remains an honest local adapter; it does not
+turn an unreplicated engine write into a consensus claim.
 
 High-volume physical events require sampling or aggregation policy. Logical
 mutation and denial evidence must not be sampled. Credentials, authorization

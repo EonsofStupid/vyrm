@@ -10,13 +10,115 @@ use std::fs::{self, File, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock, Weak};
+use std::time::{SystemTime, UNIX_EPOCH};
 use vyrm_core::{RuntimeMutation, ScopeId};
 use vyrm_store::{Engine, Error as StoreError, ImmutableObjectStore, LocalObjectStore};
 
 const REPLAY_PAGE: usize = 4_096;
 const TRANSFER_SESSION_DIRECTORY: &str = "transfer-sessions-v1";
+const TRANSFER_SESSION_STATE_FILE: &str = "session.json";
+const TRANSFER_SESSION_STATE_VERSION: u16 = 1;
 static PUBLISH_ORDINAL: AtomicU64 = AtomicU64::new(1);
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ArtifactTransferSessionPolicy {
+    pub max_active_sessions: usize,
+    pub max_reserved_bytes: u64,
+    pub stale_incomplete_after_millis: u64,
+    pub completed_receipt_retention_millis: u64,
+    pub max_retained_receipts: usize,
+}
+
+impl Default for ArtifactTransferSessionPolicy {
+    fn default() -> Self {
+        Self {
+            max_active_sessions: 64,
+            max_reserved_bytes: 64 * 1024 * 1024 * 1024,
+            stale_incomplete_after_millis: 24 * 60 * 60 * 1_000,
+            completed_receipt_retention_millis: 7 * 24 * 60 * 60 * 1_000,
+            max_retained_receipts: 4_096,
+        }
+    }
+}
+
+impl ArtifactTransferSessionPolicy {
+    pub fn validate(&self) -> Result<()> {
+        if self.max_active_sessions == 0
+            || self.max_active_sessions > 65_536
+            || self.max_reserved_bytes == 0
+            || self.stale_incomplete_after_millis == 0
+            || self.completed_receipt_retention_millis == 0
+            || self.max_retained_receipts == 0
+            || self.max_retained_receipts > 1_000_000
+        {
+            return Err(ClusterError::Invalid(
+                "artifact session policy is outside its bounded contract".into(),
+            ));
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ArtifactTransferSessionInventory {
+    pub active_sessions: usize,
+    pub reserved_bytes: u64,
+    pub partial_bytes: u64,
+    pub retained_receipts: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ArtifactTransferGcReport {
+    pub scanned_sessions: usize,
+    pub removed_incomplete: usize,
+    pub removed_completed: usize,
+    pub reclaimed_partial_bytes: u64,
+    pub remaining: ArtifactTransferSessionInventory,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ArtifactTransferSessionState {
+    version: u16,
+    manifest_digest: String,
+    last_activity_at: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    completed_at: Option<u64>,
+}
+
+impl ArtifactTransferSessionState {
+    fn active(manifest_digest: String, now: u64) -> Self {
+        Self {
+            version: TRANSFER_SESSION_STATE_VERSION,
+            manifest_digest,
+            last_activity_at: now,
+            completed_at: None,
+        }
+    }
+
+    fn validate(&self, expected_digest: &str) -> Result<()> {
+        if self.version != TRANSFER_SESSION_STATE_VERSION || self.manifest_digest != expected_digest
+        {
+            return Err(ClusterError::Denied(
+                "artifact session state differs from its directory identity".into(),
+            ));
+        }
+        Ok(())
+    }
+}
+
+struct SessionInventoryEntry {
+    digest: String,
+    path: PathBuf,
+    state: ArtifactTransferSessionState,
+    complete: bool,
+    reserved_bytes: u64,
+    partial_bytes: u64,
+}
 
 /// Captures every immutable object reference visible at one exact project read
 /// and binds its digest closure into the replica transfer plan.
@@ -132,19 +234,33 @@ where
 pub struct ArtifactTransferReceiver {
     store: LocalObjectStore,
     sessions: PathBuf,
-    serial: Arc<Mutex<()>>,
+    policy: ArtifactTransferSessionPolicy,
+    lifecycle: Arc<RwLock<()>>,
+    session_locks: Arc<Mutex<BTreeMap<String, Weak<Mutex<()>>>>>,
 }
 
 impl ArtifactTransferReceiver {
     pub fn open(store: LocalObjectStore) -> Result<Self> {
+        Self::open_with_policy(store, ArtifactTransferSessionPolicy::default())
+    }
+
+    pub fn open_with_policy(
+        store: LocalObjectStore,
+        policy: ArtifactTransferSessionPolicy,
+    ) -> Result<Self> {
+        policy.validate()?;
         let sessions = store.root().join(TRANSFER_SESSION_DIRECTORY);
         fs::create_dir_all(&sessions).map_err(cluster_io_error)?;
         sync_directory(&sessions)?;
-        Ok(Self {
+        let receiver = Self {
             store,
             sessions,
-            serial: Arc::new(Mutex::new(())),
-        })
+            policy,
+            lifecycle: Arc::new(RwLock::new(())),
+            session_locks: Arc::new(Mutex::new(BTreeMap::new())),
+        };
+        receiver.collect_garbage(receiver_now_millis())?;
+        Ok(receiver)
     }
 
     pub fn store(&self) -> &LocalObjectStore {
@@ -157,14 +273,28 @@ impl ArtifactTransferReceiver {
         local_target: &NodeId,
         request: ArtifactTransferRpc,
     ) -> Result<ArtifactTransferRpcResult> {
+        self.handle_at(
+            authenticated_source,
+            local_target,
+            request,
+            receiver_now_millis(),
+        )
+    }
+
+    pub fn handle_at(
+        &self,
+        authenticated_source: &NodeId,
+        local_target: &NodeId,
+        request: ArtifactTransferRpc,
+        now: u64,
+    ) -> Result<ArtifactTransferRpcResult> {
         request.validate()?;
-        let _guard = self
-            .serial
-            .lock()
-            .map_err(|_| ClusterError::Unavailable("artifact receiver lock is poisoned".into()))?;
         match request.operation {
             ArtifactTransferOperation::Begin { manifest } => {
-                self.begin(authenticated_source, local_target, *manifest)
+                let _lifecycle = self.lifecycle.write().map_err(lock_error)?;
+                let lock = self.session_lock(&manifest.manifest_digest)?;
+                let _session = lock.lock().map_err(lock_error)?;
+                self.begin(authenticated_source, local_target, *manifest, now)
             }
             ArtifactTransferOperation::Chunk {
                 manifest_digest,
@@ -172,23 +302,34 @@ impl ArtifactTransferReceiver {
                 offset,
                 bytes,
                 ..
-            } => self.chunk(
-                authenticated_source,
-                local_target,
-                &manifest_digest,
-                &sha256,
-                offset,
-                &bytes,
-            ),
+            } => {
+                let _lifecycle = self.lifecycle.read().map_err(lock_error)?;
+                let lock = self.session_lock(&manifest_digest)?;
+                let _session = lock.lock().map_err(lock_error)?;
+                self.chunk(
+                    (authenticated_source, local_target),
+                    &manifest_digest,
+                    &sha256,
+                    offset,
+                    &bytes,
+                    now,
+                )
+            }
             ArtifactTransferOperation::Complete {
                 manifest_digest,
                 completed_at,
-            } => self.complete(
-                authenticated_source,
-                local_target,
-                &manifest_digest,
-                completed_at,
-            ),
+            } => {
+                let _lifecycle = self.lifecycle.read().map_err(lock_error)?;
+                let lock = self.session_lock(&manifest_digest)?;
+                let _session = lock.lock().map_err(lock_error)?;
+                self.complete(
+                    authenticated_source,
+                    local_target,
+                    &manifest_digest,
+                    completed_at,
+                    now,
+                )
+            }
         }
     }
 
@@ -197,9 +338,14 @@ impl ArtifactTransferReceiver {
         source: &NodeId,
         target: &NodeId,
         manifest: ArtifactTransferManifest,
+        now: u64,
     ) -> Result<ArtifactTransferRpcResult> {
         validate_peers(&manifest, source, target)?;
+        self.collect_garbage_locked(now)?;
         let directory = self.session_directory(&manifest.manifest_digest);
+        if !directory.exists() {
+            self.admit(&manifest, now)?;
+        }
         fs::create_dir_all(&directory).map_err(cluster_io_error)?;
         let manifest_path = directory.join("manifest.json");
         if manifest_path.exists() {
@@ -212,6 +358,7 @@ impl ArtifactTransferReceiver {
         } else {
             publish_json(&manifest_path, &manifest)?;
         }
+        self.touch_session(&directory, &manifest.manifest_digest, now, false)?;
         let objects = distinct_objects(&manifest)
             .into_iter()
             .map(|(sha256, expected_length)| self.progress(&directory, &sha256, expected_length))
@@ -224,16 +371,16 @@ impl ArtifactTransferReceiver {
 
     fn chunk(
         &self,
-        source: &NodeId,
-        target: &NodeId,
+        peers: (&NodeId, &NodeId),
         manifest_digest: &str,
         sha256: &str,
         offset: u64,
         bytes: &[u8],
+        now: u64,
     ) -> Result<ArtifactTransferRpcResult> {
         let directory = self.session_directory(manifest_digest);
         let manifest = read_manifest(&directory.join("manifest.json"))?;
-        validate_peers(&manifest, source, target)?;
+        validate_peers(&manifest, peers.0, peers.1)?;
         if manifest.manifest_digest != manifest_digest {
             return Err(ClusterError::Denied(
                 "artifact chunk session differs from its persisted manifest".into(),
@@ -289,6 +436,7 @@ impl ArtifactTransferReceiver {
             fs::remove_file(&part).map_err(cluster_io_error)?;
             sync_directory(&directory)?;
         }
+        self.touch_session(&directory, manifest_digest, now, false)?;
         Ok(ArtifactTransferRpcResult::ChunkAccepted {
             manifest_digest: manifest_digest.to_owned(),
             object: self.progress(&directory, sha256, expected_length)?,
@@ -301,6 +449,7 @@ impl ArtifactTransferReceiver {
         target: &NodeId,
         manifest_digest: &str,
         completed_at: u64,
+        now: u64,
     ) -> Result<ArtifactTransferRpcResult> {
         let directory = self.session_directory(manifest_digest);
         let manifest = read_manifest(&directory.join("manifest.json"))?;
@@ -314,6 +463,7 @@ impl ArtifactTransferReceiver {
         if receipt_path.exists() {
             let receipt: ArtifactTransferReceipt = read_json(&receipt_path, "artifact receipt")?;
             receipt.validate(&manifest)?;
+            self.touch_session(&directory, manifest_digest, now, true)?;
             return Ok(ArtifactTransferRpcResult::Completed { receipt });
         }
         let mut accounted = BTreeSet::new();
@@ -345,6 +495,7 @@ impl ArtifactTransferReceiver {
             .collect::<Result<Vec<_>>>()?;
         let receipt = ArtifactTransferReceipt::new(&manifest, objects, completed_at)?;
         publish_json(&receipt_path, &receipt)?;
+        self.touch_session(&directory, manifest_digest, now, true)?;
         Ok(ArtifactTransferRpcResult::Completed { receipt })
     }
 
@@ -389,7 +540,7 @@ impl ArtifactTransferReceiver {
             });
         }
         let part = directory.join(format!("{sha256}.part"));
-        let next_offset = match fs::metadata(&part) {
+        let next_offset = match fs::symlink_metadata(&part) {
             Ok(metadata) if metadata.is_file() => metadata.len(),
             Ok(_) => {
                 return Err(ClusterError::Denied(
@@ -415,6 +566,302 @@ impl ArtifactTransferReceiver {
     fn session_directory(&self, manifest_digest: &str) -> PathBuf {
         self.sessions.join(manifest_digest)
     }
+
+    fn session_lock(&self, manifest_digest: &str) -> Result<Arc<Mutex<()>>> {
+        let mut locks = self.session_locks.lock().map_err(lock_error)?;
+        locks.retain(|_, lock| lock.strong_count() > 0);
+        if let Some(lock) = locks.get(manifest_digest).and_then(Weak::upgrade) {
+            return Ok(lock);
+        }
+        let lock = Arc::new(Mutex::new(()));
+        locks.insert(manifest_digest.to_owned(), Arc::downgrade(&lock));
+        Ok(lock)
+    }
+
+    fn touch_session(
+        &self,
+        directory: &Path,
+        manifest_digest: &str,
+        now: u64,
+        completed: bool,
+    ) -> Result<()> {
+        let path = directory.join(TRANSFER_SESSION_STATE_FILE);
+        let mut state = if path.exists() {
+            let state: ArtifactTransferSessionState = read_json(&path, "artifact session state")?;
+            state.validate(manifest_digest)?;
+            state
+        } else {
+            ArtifactTransferSessionState::active(manifest_digest.to_owned(), now)
+        };
+        state.last_activity_at = now;
+        if completed && state.completed_at.is_none() {
+            state.completed_at = Some(now);
+        }
+        publish_json(&path, &state)
+    }
+
+    fn admit(&self, manifest: &ArtifactTransferManifest, now: u64) -> Result<()> {
+        let entries = self.session_entries(now)?;
+        let inventory = summarize_sessions(&entries)?;
+        if inventory.active_sessions >= self.policy.max_active_sessions {
+            return Err(ClusterError::Unavailable(format!(
+                "artifact receiver active-session quota {} is exhausted",
+                self.policy.max_active_sessions
+            )));
+        }
+        let reservation = self.manifest_reserved_bytes(manifest)?;
+        let next = inventory
+            .reserved_bytes
+            .checked_add(reservation)
+            .ok_or_else(|| ClusterError::Unavailable("artifact reservation overflowed".into()))?;
+        if next > self.policy.max_reserved_bytes {
+            return Err(ClusterError::Unavailable(format!(
+                "artifact receiver reserved-byte quota {} would be exceeded",
+                self.policy.max_reserved_bytes
+            )));
+        }
+        Ok(())
+    }
+
+    fn manifest_reserved_bytes(&self, manifest: &ArtifactTransferManifest) -> Result<u64> {
+        distinct_objects(manifest)
+            .into_iter()
+            .try_fold(0u64, |total, (sha256, length)| {
+                let needed = match self.store.verify(&sha256) {
+                    Ok(verified) if verified.length == length => 0,
+                    Ok(verified) => {
+                        return Err(ClusterError::Invalid(format!(
+                            "target object {sha256} has length {}, expected {length}",
+                            verified.length
+                        )))
+                    }
+                    Err(StoreError::ObjectMissing(_)) | Err(StoreError::ObjectCorrupt { .. }) => {
+                        length
+                    }
+                    Err(error) => return Err(cluster_store_error(error)),
+                };
+                total.checked_add(needed).ok_or_else(|| {
+                    ClusterError::Invalid("artifact manifest reservation overflowed".into())
+                })
+            })
+    }
+
+    pub fn session_inventory(&self, now: u64) -> Result<ArtifactTransferSessionInventory> {
+        let _lifecycle = self.lifecycle.write().map_err(lock_error)?;
+        summarize_sessions(&self.session_entries(now)?)
+    }
+
+    pub fn collect_garbage(&self, now: u64) -> Result<ArtifactTransferGcReport> {
+        let _lifecycle = self.lifecycle.write().map_err(lock_error)?;
+        self.collect_garbage_locked(now)
+    }
+
+    fn collect_garbage_locked(&self, now: u64) -> Result<ArtifactTransferGcReport> {
+        let entries = self.session_entries(now)?;
+        let scanned_sessions = entries.len();
+        let mut remove = BTreeSet::new();
+        for entry in &entries {
+            if !entry.complete
+                && now.saturating_sub(entry.state.last_activity_at)
+                    >= self.policy.stale_incomplete_after_millis
+            {
+                remove.insert(entry.digest.clone());
+            }
+            if entry.complete
+                && now.saturating_sub(
+                    entry
+                        .state
+                        .completed_at
+                        .unwrap_or(entry.state.last_activity_at),
+                ) >= self.policy.completed_receipt_retention_millis
+            {
+                remove.insert(entry.digest.clone());
+            }
+        }
+        let mut retained = entries
+            .iter()
+            .filter(|entry| entry.complete && !remove.contains(&entry.digest))
+            .collect::<Vec<_>>();
+        retained.sort_by_key(|entry| {
+            (
+                entry
+                    .state
+                    .completed_at
+                    .unwrap_or(entry.state.last_activity_at),
+                entry.digest.as_str(),
+            )
+        });
+        let excess = retained
+            .len()
+            .saturating_sub(self.policy.max_retained_receipts);
+        for entry in retained.into_iter().take(excess) {
+            remove.insert(entry.digest.clone());
+        }
+
+        let mut removed_incomplete = 0usize;
+        let mut removed_completed = 0usize;
+        let mut reclaimed_partial_bytes = 0u64;
+        for entry in entries
+            .iter()
+            .filter(|entry| remove.contains(&entry.digest))
+        {
+            if entry.complete {
+                removed_completed += 1;
+            } else {
+                removed_incomplete += 1;
+            }
+            reclaimed_partial_bytes = reclaimed_partial_bytes
+                .checked_add(entry.partial_bytes)
+                .ok_or_else(|| {
+                    ClusterError::Unavailable("artifact GC byte count overflowed".into())
+                })?;
+            remove_session_directory(&self.sessions, &entry.path, &entry.digest)?;
+        }
+        if !remove.is_empty() {
+            sync_directory(&self.sessions)?;
+            let mut locks = self.session_locks.lock().map_err(lock_error)?;
+            for digest in &remove {
+                locks.remove(digest);
+            }
+        }
+        let remaining = summarize_sessions(&self.session_entries(now)?)?;
+        Ok(ArtifactTransferGcReport {
+            scanned_sessions,
+            removed_incomplete,
+            removed_completed,
+            reclaimed_partial_bytes,
+            remaining,
+        })
+    }
+
+    fn session_entries(&self, now: u64) -> Result<Vec<SessionInventoryEntry>> {
+        let mut entries = Vec::new();
+        for entry in fs::read_dir(&self.sessions).map_err(cluster_io_error)? {
+            let entry = entry.map_err(cluster_io_error)?;
+            let file_type = entry.file_type().map_err(cluster_io_error)?;
+            let digest = entry
+                .file_name()
+                .into_string()
+                .map_err(|_| ClusterError::Denied("artifact session name is not UTF-8".into()))?;
+            if !file_type.is_dir() || !is_sha256(&digest) {
+                return Err(ClusterError::Denied(
+                    "artifact session root contains an unexpected entry".into(),
+                ));
+            }
+            let path = entry.path();
+            let manifest = read_manifest(&path.join("manifest.json"))?;
+            if manifest.manifest_digest != digest {
+                return Err(ClusterError::Denied(
+                    "artifact session directory differs from its manifest".into(),
+                ));
+            }
+            let receipt_path = path.join("receipt.json");
+            let complete = match fs::symlink_metadata(&receipt_path) {
+                Ok(metadata) if metadata.file_type().is_file() => true,
+                Ok(_) => {
+                    return Err(ClusterError::Denied(
+                        "artifact receipt is not a regular file".into(),
+                    ))
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
+                Err(error) => return Err(cluster_io_error(error)),
+            };
+            if complete {
+                let receipt: ArtifactTransferReceipt =
+                    read_json(&receipt_path, "artifact receipt")?;
+                receipt.validate(&manifest)?;
+            }
+            let state_path = path.join(TRANSFER_SESSION_STATE_FILE);
+            let state_existed = state_path.exists();
+            let mut state_changed = !state_existed;
+            let mut state = if state_existed {
+                let state: ArtifactTransferSessionState =
+                    read_json(&state_path, "artifact session state")?;
+                state.validate(&digest)?;
+                state
+            } else {
+                ArtifactTransferSessionState::active(digest.clone(), now)
+            };
+            if complete && state.completed_at.is_none() {
+                state.completed_at = Some(now);
+                state_changed = true;
+            } else if !complete && state.completed_at.is_some() {
+                return Err(ClusterError::Denied(
+                    "artifact session claims completion without a receipt".into(),
+                ));
+            }
+            if state_changed {
+                publish_json(&state_path, &state)?;
+            }
+
+            let expected = distinct_objects(&manifest);
+            let mut partial_bytes = 0u64;
+            for child in fs::read_dir(&path).map_err(cluster_io_error)? {
+                let child = child.map_err(cluster_io_error)?;
+                let name = child.file_name().into_string().map_err(|_| {
+                    ClusterError::Denied("artifact session entry is not UTF-8".into())
+                })?;
+                let child_type = child.file_type().map_err(cluster_io_error)?;
+                if name == "manifest.json"
+                    || name == "receipt.json"
+                    || name == TRANSFER_SESSION_STATE_FILE
+                    || (name.ends_with(".transferred")
+                        && expected.contains_key(name.trim_end_matches(".transferred")))
+                {
+                    if !child_type.is_file() {
+                        return Err(ClusterError::Denied(
+                            "artifact session metadata is not a regular file".into(),
+                        ));
+                    }
+                    continue;
+                }
+                if let Some(sha256) = name.strip_suffix(".part") {
+                    let Some(expected_length) = expected.get(sha256) else {
+                        return Err(ClusterError::Denied(
+                            "artifact session part is absent from its manifest".into(),
+                        ));
+                    };
+                    let metadata = child.metadata().map_err(cluster_io_error)?;
+                    if !child_type.is_file() || metadata.len() > *expected_length {
+                        return Err(ClusterError::Denied(
+                            "artifact session part is outside its manifest bound".into(),
+                        ));
+                    }
+                    partial_bytes = partial_bytes.checked_add(metadata.len()).ok_or_else(|| {
+                        ClusterError::Unavailable("artifact partial byte count overflowed".into())
+                    })?;
+                    continue;
+                }
+                if name.starts_with('.') && name.ends_with(".pending") && child_type.is_file() {
+                    fs::remove_file(child.path()).map_err(cluster_io_error)?;
+                    continue;
+                }
+                return Err(ClusterError::Denied(
+                    "artifact session contains an unexpected entry".into(),
+                ));
+            }
+            if complete && partial_bytes != 0 {
+                return Err(ClusterError::Denied(
+                    "completed artifact session retains partial bytes".into(),
+                ));
+            }
+            let reserved_bytes = if complete {
+                0
+            } else {
+                self.manifest_reserved_bytes(&manifest)?
+            };
+            entries.push(SessionInventoryEntry {
+                digest,
+                path,
+                state,
+                complete,
+                reserved_bytes,
+                partial_bytes,
+            });
+        }
+        entries.sort_by(|left, right| left.digest.cmp(&right.digest));
+        Ok(entries)
+    }
 }
 
 fn distinct_objects(manifest: &ArtifactTransferManifest) -> BTreeMap<String, u64> {
@@ -423,6 +870,81 @@ fn distinct_objects(manifest: &ArtifactTransferManifest) -> BTreeMap<String, u64
         .iter()
         .map(|object| (object.sha256.clone(), object.length))
         .collect()
+}
+
+fn summarize_sessions(
+    entries: &[SessionInventoryEntry],
+) -> Result<ArtifactTransferSessionInventory> {
+    let mut active_sessions = 0usize;
+    let mut reserved_bytes = 0u64;
+    let mut partial_bytes = 0u64;
+    let mut retained_receipts = 0usize;
+    for entry in entries {
+        if entry.complete {
+            retained_receipts = retained_receipts.checked_add(1).ok_or_else(|| {
+                ClusterError::Unavailable("artifact receipt count overflowed".into())
+            })?;
+        } else {
+            active_sessions = active_sessions.checked_add(1).ok_or_else(|| {
+                ClusterError::Unavailable("artifact session count overflowed".into())
+            })?;
+            reserved_bytes = reserved_bytes
+                .checked_add(entry.reserved_bytes)
+                .ok_or_else(|| {
+                    ClusterError::Unavailable("artifact reserved byte count overflowed".into())
+                })?;
+        }
+        partial_bytes = partial_bytes
+            .checked_add(entry.partial_bytes)
+            .ok_or_else(|| {
+                ClusterError::Unavailable("artifact partial byte count overflowed".into())
+            })?;
+    }
+    Ok(ArtifactTransferSessionInventory {
+        active_sessions,
+        reserved_bytes,
+        partial_bytes,
+        retained_receipts,
+    })
+}
+
+fn remove_session_directory(root: &Path, path: &Path, digest: &str) -> Result<()> {
+    if !is_sha256(digest)
+        || path.parent() != Some(root)
+        || path.file_name() != Some(digest.as_ref())
+    {
+        return Err(ClusterError::Denied(
+            "artifact GC target is outside the session root".into(),
+        ));
+    }
+    let metadata = fs::symlink_metadata(path).map_err(cluster_io_error)?;
+    if !metadata.file_type().is_dir() || metadata.file_type().is_symlink() {
+        return Err(ClusterError::Denied(
+            "artifact GC target is not a session directory".into(),
+        ));
+    }
+    fs::remove_dir_all(path).map_err(cluster_io_error)
+}
+
+fn is_sha256(value: &str) -> bool {
+    value.len() == 64
+        && value
+            .as_bytes()
+            .iter()
+            .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+}
+
+fn receiver_now_millis() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis()
+        .try_into()
+        .unwrap_or(u64::MAX)
+}
+
+fn lock_error<T>(error: std::sync::PoisonError<T>) -> ClusterError {
+    ClusterError::Unavailable(format!("artifact session lock was poisoned: {error}"))
 }
 
 fn validate_peers(
@@ -446,7 +968,7 @@ fn read_manifest(path: &Path) -> Result<ArtifactTransferManifest> {
 }
 
 fn read_json<T: serde::de::DeserializeOwned>(path: &Path, label: &str) -> Result<T> {
-    let metadata = fs::metadata(path).map_err(|error| {
+    let metadata = fs::symlink_metadata(path).map_err(|error| {
         if error.kind() == std::io::ErrorKind::NotFound {
             ClusterError::NotFound(format!("{label} session is absent"))
         } else {

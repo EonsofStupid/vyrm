@@ -719,6 +719,34 @@ pub struct NativeRuntimeCommitPlan {
     operations: Vec<Mutation>,
 }
 
+/// Reads the exact native cursor/schema pair needed to prepare a runtime
+/// transaction outside `NativeEngine` while retaining one database snapshot.
+/// Coordinators use this before submitting the resulting commit through their
+/// own durability boundary (for example, a Raft log).
+pub fn native_runtime_commit_context(
+    database: &Database,
+    scope: &ScopeId,
+) -> Result<(ReadStamp, Option<RuntimeSchemaRegistry>)> {
+    let snapshot = database.snapshot();
+    let read = native_read_stamp(database, snapshot, scope)?;
+    let schema = get_json(
+        database,
+        snapshot,
+        keyspaces::RUNTIME_SCHEMAS,
+        scope.as_str().as_bytes(),
+    )?;
+    if schema
+        .as_ref()
+        .map(|value: &RuntimeSchemaRegistry| value.revision)
+        != read.schema_revision
+    {
+        return Err(Error::Substrate(
+            "native runtime schema differs from its read stamp".into(),
+        ));
+    }
+    Ok((read, schema))
+}
+
 impl NativeRuntimeCommitPlan {
     pub fn outcome(&self) -> &RuntimeCommitOutcome {
         &self.outcome

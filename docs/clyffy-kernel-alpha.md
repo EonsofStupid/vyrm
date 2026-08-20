@@ -164,10 +164,13 @@ measured local results, never universal superiority.
    artifacts now cross the real mTLS/process learner path through durable
    resumable sessions before activation; the target independently verifies the
    snapshot's complete object closure. Typed fail-closed transfer observations
-   have a durable causal-trace adapter. Independent-host and hardware chaos,
-   larger retained closure workloads, session quota/GC, clustered trace-commit
-   wiring, automatic SPIFFE issuance/streaming, durable supervisor generation,
-   production telemetry, and Multi-AZ evidence remain open.
+   now route bounded causal trace commits through the current Raft leader and
+   prove identical voter/learner trace state after purge and failover. Receiver
+   admission, durable inventory reconstruction, stale-session/receipt GC, and
+   distinct-session concurrency are bounded and tested. Independent-host and
+   hardware chaos, larger retained closure workloads, automatic SPIFFE
+   issuance/streaming, durable supervisor generation, production telemetry,
+   and Multi-AZ evidence remain open.
 8. **Local gate complete:** declared package workflows now bind preflight,
    pre-tool freshness/authorization, and post-tool atomic evidence across the
    shared hook/MCP handler. A durable cross-process authorization lease remains

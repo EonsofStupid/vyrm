@@ -3,13 +3,11 @@
 use crate::{active_reasoning_run, DurableTraceSpan, TraceIdentity};
 use std::sync::Arc;
 use vyrm_cluster::{
-    transfer_artifacts, ArtifactTransferManifest, ArtifactTransferObservation,
-    ArtifactTransferObservationPhase, ArtifactTransferObserver, ArtifactTransferReceipt,
-    ClusterError,
+    artifact_transfer_trace_event, transfer_artifacts, ArtifactTransferManifest,
+    ArtifactTransferObservation, ArtifactTransferObserver, ArtifactTransferReceipt, ClusterError,
 };
 use vyrm_core::{
-    Millis, RuntimeProperties, RuntimeTraceEvent, RuntimeValue, SnapshotId, TraceDataClass,
-    TraceDomain, TraceLink, TraceOutcome,
+    Millis, RuntimeProperties, RuntimeValue, TraceDataClass, TraceDomain, TraceLink, TraceOutcome,
 };
 use vyrm_store::{Engine, ImmutableObjectStore};
 
@@ -36,14 +34,26 @@ where
         }
         Ok(Self { store, actor })
     }
+
+    pub fn observe_sync(
+        &self,
+        observation: ArtifactTransferObservation,
+    ) -> vyrm_cluster::Result<()> {
+        record_artifact_transfer_observation(self.store.as_ref(), &self.actor, observation)
+    }
 }
 
 impl<E> ArtifactTransferObserver for DurableArtifactTransferObserver<E>
 where
     E: Engine + Send + Sync + 'static,
 {
-    fn observe(&self, observation: ArtifactTransferObservation) -> vyrm_cluster::Result<()> {
-        record_artifact_transfer_observation(self.store.as_ref(), &self.actor, observation)
+    fn observe(
+        &self,
+        observation: ArtifactTransferObservation,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = vyrm_cluster::Result<()>> + Send + '_>>
+    {
+        let result = self.observe_sync(observation);
+        Box::pin(std::future::ready(result))
     }
 }
 
@@ -52,176 +62,7 @@ pub fn record_artifact_transfer_observation<E: Engine>(
     actor: &str,
     observation: ArtifactTransferObservation,
 ) -> vyrm_cluster::Result<()> {
-    observation.validate()?;
-    let attempt = observation.attempt.to_be_bytes();
-    let identity = TraceIdentity::derive(&[
-        observation.scope.as_str().as_bytes(),
-        observation.manifest_digest.as_bytes(),
-        observation.source.as_str().as_bytes(),
-        observation.target.as_str().as_bytes(),
-        &attempt,
-    ])
-    .map_err(cluster_trace_error)?;
-    let links = vec![
-        TraceLink::Read {
-            stamp: observation.read.clone(),
-        },
-        TraceLink::Snapshot {
-            snapshot_id: SnapshotId::new(format!(
-                "raft:{}:{}:{}:{}",
-                observation.shard.0,
-                observation.grounded_snapshot.term,
-                observation.grounded_snapshot.commit_index,
-                observation.grounded_snapshot.state_digest
-            ))
-            .map_err(|error| ClusterError::Invalid(error.to_string()))?,
-            cursor: observation.read.commit_cursor,
-        },
-    ];
-    let mut attributes = RuntimeProperties::from([
-        (
-            "manifest_digest".into(),
-            RuntimeValue::Digest(observation.manifest_digest.clone()),
-        ),
-        (
-            "source_node".into(),
-            RuntimeValue::String(observation.source.to_string()),
-        ),
-        (
-            "target_node".into(),
-            RuntimeValue::String(observation.target.to_string()),
-        ),
-        (
-            "attempt".into(),
-            RuntimeValue::Unsigned(observation.attempt),
-        ),
-        ("shard".into(), RuntimeValue::Unsigned(observation.shard.0)),
-        (
-            "placement_epoch".into(),
-            RuntimeValue::Unsigned(observation.placement_epoch),
-        ),
-        (
-            "snapshot_term".into(),
-            RuntimeValue::Unsigned(observation.grounded_snapshot.term),
-        ),
-        (
-            "snapshot_commit_index".into(),
-            RuntimeValue::Unsigned(observation.grounded_snapshot.commit_index),
-        ),
-        (
-            "snapshot_state_digest".into(),
-            RuntimeValue::Digest(observation.grounded_snapshot.state_digest.clone()),
-        ),
-        (
-            "object_references".into(),
-            RuntimeValue::Unsigned(observation.object_references),
-        ),
-        (
-            "distinct_objects".into(),
-            RuntimeValue::Unsigned(observation.distinct_objects),
-        ),
-    ]);
-    for (name, value) in [
-        observation
-            .object_digest
-            .clone()
-            .map(|value| ("object_digest", RuntimeValue::Digest(value))),
-        observation
-            .next_offset
-            .map(|value| ("next_offset", RuntimeValue::Unsigned(value))),
-        observation
-            .expected_length
-            .map(|value| ("expected_length", RuntimeValue::Unsigned(value))),
-        observation
-            .receipt_digest
-            .clone()
-            .map(|value| ("receipt_digest", RuntimeValue::Digest(value))),
-        observation
-            .error_digest
-            .clone()
-            .map(|value| ("error_digest", RuntimeValue::Digest(value))),
-    ]
-    .into_iter()
-    .flatten()
-    {
-        attributes.insert(name.into(), value);
-    }
-    if observation.phase == ArtifactTransferObservationPhase::Completed {
-        attributes.insert(
-            "transferred_objects".into(),
-            RuntimeValue::Unsigned(observation.transferred_objects),
-        );
-        attributes.insert(
-            "transferred_bytes".into(),
-            RuntimeValue::Unsigned(observation.transferred_bytes),
-        );
-    }
-    let event = match observation.phase {
-        ArtifactTransferObservationPhase::Prepared => RuntimeTraceEvent::start(
-            identity.trace_id,
-            identity.span_id,
-            None,
-            TraceDomain::Cluster,
-            "cluster.artifact_transfer",
-            observation.at,
-            TraceDataClass::Control,
-            links,
-            attributes,
-        ),
-        ArtifactTransferObservationPhase::ChunkAccepted => {
-            let offset = observation.next_offset.unwrap_or_default().to_be_bytes();
-            let child = identity
-                .child(&[
-                    b"cluster.artifact_chunk",
-                    observation
-                        .object_digest
-                        .as_deref()
-                        .unwrap_or_default()
-                        .as_bytes(),
-                    &offset,
-                ])
-                .map_err(cluster_trace_error)?;
-            RuntimeTraceEvent::annotation(
-                child.trace_id,
-                child.span_id,
-                Some(identity.span_id),
-                TraceDomain::Storage,
-                "cluster.artifact_chunk",
-                observation.at,
-                TraceOutcome::Ok,
-                TraceDataClass::Control,
-                links,
-                attributes,
-            )
-        }
-        ArtifactTransferObservationPhase::Completed => RuntimeTraceEvent::finish(
-            identity.trace_id,
-            identity.span_id,
-            None,
-            TraceDomain::Cluster,
-            "cluster.artifact_transfer",
-            observation.at,
-            observation.duration_micros.unwrap_or_default(),
-            TraceOutcome::Ok,
-            TraceDataClass::Control,
-            links,
-            attributes,
-        ),
-        ArtifactTransferObservationPhase::Failed => RuntimeTraceEvent::finish(
-            identity.trace_id,
-            identity.span_id,
-            None,
-            TraceDomain::Cluster,
-            "cluster.artifact_transfer",
-            observation.at,
-            observation.duration_micros.unwrap_or_default(),
-            TraceOutcome::Error,
-            TraceDataClass::Control,
-            links,
-            attributes,
-        ),
-    }
-    .map_err(|error| ClusterError::Invalid(error.to_string()))?;
+    let event = artifact_transfer_trace_event(&observation)?;
     crate::record_runtime_trace(store, &observation.scope, actor, event)
         .map(|_| ())
         .map_err(cluster_trace_error)

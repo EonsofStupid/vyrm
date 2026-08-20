@@ -20,13 +20,14 @@ use vyrm_cluster::{
     build_vyrm_tls_configs, ArtifactTransferObservation, ArtifactTransferObservationPhase,
     ArtifactTransferObserver, ArtifactTransferReceiver, ClusterId, NodeId, PlacementPolicy,
     ReplicaPlacement, ReplicaRole, ShardId, ShardPlacement, VyrmRaftCommand,
-    VyrmRaftNetworkFactory, VyrmRaftNode, VyrmRaftStore, VyrmRaftTlsServer, VyrmTlsMaterial,
-    VyrmTlsReloader, VyrmTransportBinding, VyrmTransportGate, VyrmTransportTrust, ZoneId,
-    CLUSTER_CONTRACT_VERSION,
+    VyrmRaftNetworkFactory, VyrmRaftNode, VyrmRaftStateMachine, VyrmRaftStore, VyrmRaftTlsServer,
+    VyrmTlsMaterial, VyrmTlsReloader, VyrmTransportBinding, VyrmTransportGate, VyrmTransportTrust,
+    ZoneId, CLUSTER_CONTRACT_VERSION,
 };
 use vyrm_core::{
     ObjectReference, RuntimeCommit, RuntimeMutation, RuntimeRecordSchema, RuntimeSchemaRegistry,
-    RuntimeType, ScopeId,
+    RuntimeTraceEvent, RuntimeType, ScopeId, SpanId, TraceDataClass, TraceDomain, TraceId,
+    TraceOutcome,
 };
 use vyrm_store::LocalObjectStore;
 
@@ -37,6 +38,7 @@ struct TestNode {
     raft: VyrmRaft,
     server: JoinHandle<()>,
     objects: LocalObjectStore,
+    state_machine: VyrmRaftStateMachine,
 }
 
 #[derive(Default)]
@@ -45,9 +47,15 @@ struct RecordingArtifactObserver {
 }
 
 impl ArtifactTransferObserver for RecordingArtifactObserver {
-    fn observe(&self, observation: ArtifactTransferObservation) -> vyrm_cluster::Result<()> {
-        self.observations.lock().unwrap().push(observation);
-        Ok(())
+    fn observe(
+        &self,
+        observation: ArtifactTransferObservation,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = vyrm_cluster::Result<()>> + Send + '_>>
+    {
+        Box::pin(async move {
+            self.observations.lock().unwrap().push(observation);
+            Ok(())
+        })
     }
 }
 
@@ -134,7 +142,7 @@ fn mutual_tls_transport_replicates_and_denies_identity_confusion() {
             )
             .unwrap()
             .with_artifact_observer(artifact_observer.clone());
-            let raft = Raft::new(id, Arc::clone(&config), network, log, state_machine)
+            let raft = Raft::new(id, Arc::clone(&config), network, log, state_machine.clone())
                 .await
                 .unwrap();
             let tls_server = VyrmRaftTlsServer::new_reloadable_with_artifacts(
@@ -144,6 +152,7 @@ fn mutual_tls_transport_replicates_and_denies_identity_confusion() {
                 reloader.clone(),
                 gate,
                 receiver,
+                project_scope.clone(),
             )
             .unwrap();
             let listener = listeners.remove(&id).unwrap();
@@ -157,6 +166,7 @@ fn mutual_tls_transport_replicates_and_denies_identity_confusion() {
                     raft,
                     server,
                     objects,
+                    state_machine,
                 },
             );
             reloaders.insert(id, reloader);
@@ -288,6 +298,77 @@ fn mutual_tls_transport_replicates_and_denies_identity_confusion() {
                 .await
                 .unwrap();
         }
+        let (trace_read, trace_schema) = running[&1]
+            .state_machine
+            .runtime_commit_context(&project_scope)
+            .unwrap();
+        let trace_event = RuntimeTraceEvent::annotation(
+            TraceId::new("1".repeat(32)).unwrap(),
+            SpanId::new("2".repeat(16)).unwrap(),
+            None,
+            TraceDomain::Cluster,
+            "cluster.consensus_route",
+            11,
+            TraceOutcome::Ok,
+            TraceDataClass::Control,
+            Vec::new(),
+            Default::default(),
+        )
+        .unwrap();
+        let trace_commit = trace_event
+            .prepare_commit(&trace_read, trace_schema.as_ref(), "cluster:route-test")
+            .unwrap();
+        let route = VyrmRaftNetworkFactory::new_reloadable(
+            binding(trust_domain, &cluster, 2),
+            reloaders[&2].clone(),
+            VyrmTransportGate::enabled(),
+        )
+        .unwrap();
+        let routed = route
+            .submit_runtime_commit(
+                1,
+                &nodes[&1],
+                VyrmRaftCommand::runtime_commit(
+                    "tls-consensus-route-1",
+                    ShardId(7),
+                    1,
+                    Some(runtime_response.log_id.index),
+                    trace_commit.clone(),
+                )
+                .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert!(routed.data.accepted);
+        for id in 1..=3 {
+            running[&id]
+                .raft
+                .wait(Some(Duration::from_secs(5)))
+                .ge(
+                    Metric::AppliedIndex(Some(routed.log_id.index)),
+                    "authenticated internal runtime commit route",
+                )
+                .await
+                .unwrap();
+        }
+        let mut foreign = trace_commit;
+        foreign.scope = ScopeId::new("instance:foreign-route").unwrap();
+        let denied = route
+            .submit_runtime_commit(
+                1,
+                &nodes[&1],
+                VyrmRaftCommand::runtime_commit(
+                    "tls-consensus-route-foreign",
+                    ShardId(7),
+                    1,
+                    Some(routed.log_id.index),
+                    foreign,
+                )
+                .unwrap(),
+            )
+            .await
+            .unwrap_err();
+        assert!(denied.to_string().contains("configured project"));
 
         let rotated_node_one = test_tls_material(
             &ca,
@@ -314,7 +395,7 @@ fn mutual_tls_transport_replicates_and_denies_identity_confusion() {
                     "tls-probe-after-hot-rotation",
                     ShardId(7),
                     1,
-                    Some(runtime_response.log_id.index),
+                    Some(routed.log_id.index),
                     b"hot-rotation-without-raft-restart".to_vec(),
                 )
                 .unwrap(),

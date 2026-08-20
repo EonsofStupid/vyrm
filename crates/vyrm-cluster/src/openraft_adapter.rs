@@ -32,14 +32,18 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::task::{Context, Poll};
 use tokio::io::{AsyncRead, AsyncSeek, AsyncWrite, ReadBuf};
-use vyrm_core::{digest::sha256_hex, ObjectReference, RuntimeCommit, RuntimeCommitOutcome};
+use vyrm_core::{
+    digest::sha256_hex, ObjectReference, ReadStamp, RuntimeCommit, RuntimeCommitOutcome,
+    RuntimeSchemaRegistry, ScopeId,
+};
 use vyrm_kv::{
     Database, Durability, Mutation, SnapshotBundleFile, WriteBatch, SNAPSHOT_BUNDLE_MAX_BYTES,
 };
 use vyrm_store::{
-    native_runtime_commit_outcome, native_snapshot_all_object_references,
-    native_snapshot_artifact_view, native_snapshot_object_references,
-    prepare_native_runtime_commit, Error as StoreError, LocalObjectStore,
+    native_runtime_commit_context, native_runtime_commit_outcome,
+    native_snapshot_all_object_references, native_snapshot_artifact_view,
+    native_snapshot_object_references, prepare_native_runtime_commit, Error as StoreError,
+    LocalObjectStore,
 };
 
 const ADAPTER_FORMAT_VERSION: u16 = 4;
@@ -1043,6 +1047,23 @@ impl RaftStateMachine<VyrmRaftTypeConfig> for VyrmRaftStateMachine {
 impl VyrmRaftStateMachine {
     pub fn application_objects(&self) -> LocalObjectStore {
         self.application_objects.clone()
+    }
+
+    /// Returns one internally consistent canonical read/schema pair for a
+    /// coordinator that will submit the resulting runtime transaction through
+    /// Raft rather than writing the state database directly.
+    pub fn runtime_commit_context(
+        &self,
+        scope: &ScopeId,
+    ) -> ClusterResult<(ReadStamp, Option<RuntimeSchemaRegistry>)> {
+        let database = lock_database(
+            &self.state_database,
+            ErrorSubject::StateMachine,
+            ErrorVerb::Read,
+        )
+        .map_err(|error| ClusterError::Unavailable(error.to_string()))?;
+        native_runtime_commit_context(&database, scope)
+            .map_err(|error| ClusterError::Unavailable(error.to_string()))
     }
 
     /// Returns the metadata of the exact authenticated snapshot persisted by

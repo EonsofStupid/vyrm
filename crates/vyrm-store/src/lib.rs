@@ -48,7 +48,7 @@ pub use migration::{
     rollback_fjall_migration, MigrationFault, MigrationInventory, MigrationPhase, MigrationReport,
 };
 pub use native::{
-    native_database_artifact_view, native_runtime_commit_outcome,
+    native_database_artifact_view, native_runtime_commit_context, native_runtime_commit_outcome,
     native_snapshot_all_object_references, native_snapshot_artifact_view,
     native_snapshot_object_references, prepare_native_runtime_commit, NativeEngine,
     NativeRuntimeCommitPlan,

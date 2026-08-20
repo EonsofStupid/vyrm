@@ -6,9 +6,9 @@
 //! tests and replays remain deterministic.
 
 use crate::{
-    Error, Millis, ProjectionStamp, ReadStamp, Result, RuntimeEvent, RuntimeEventSchema,
-    RuntimeProperties, RuntimePropertySchema, RuntimeSchemaRegistry, RuntimeType, RuntimeValue,
-    RuntimeValueType, SnapshotId,
+    Error, Millis, ProjectionStamp, ReadStamp, Result, RuntimeCommit, RuntimeEvent,
+    RuntimeEventSchema, RuntimeMutation, RuntimeProperties, RuntimePropertySchema,
+    RuntimeSchemaRegistry, RuntimeType, RuntimeValue, RuntimeValueType, SnapshotId,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -466,6 +466,57 @@ impl RuntimeTraceEvent {
         registry.events.insert(kind, schema);
         Ok(true)
     }
+
+    /// Prepares the one canonical runtime commit used by both local engines
+    /// and consensus-backed trace writers. Schema installation/repair and the
+    /// event share the caller's exact read cursor CAS.
+    pub fn prepare_commit(
+        &self,
+        read: &ReadStamp,
+        current_schema: Option<&RuntimeSchemaRegistry>,
+        actor: &str,
+    ) -> Result<RuntimeCommit> {
+        self.validate()?;
+        read.validate()?;
+        if actor.trim().is_empty() {
+            return invalid("runtime trace actor must not be empty");
+        }
+        if current_schema.map(|schema| schema.revision) != read.schema_revision {
+            return invalid("runtime trace schema does not match its read stamp");
+        }
+
+        let mut mutations = Vec::new();
+        let mut registry = current_schema
+            .cloned()
+            .unwrap_or_else(|| RuntimeSchemaRegistry::empty(1, "install runtime trace contract"));
+        if Self::register_schema(&mut registry)? {
+            if let Some(current) = current_schema {
+                registry.revision =
+                    current
+                        .revision
+                        .checked_add(1)
+                        .ok_or_else(|| Error::InvalidRuntime {
+                            reason:
+                                "runtime schema revision overflow while installing trace contract"
+                                    .into(),
+                        })?;
+                registry.migration = "install canonical runtime trace contract".into();
+            }
+            mutations.push(RuntimeMutation::Schema { registry });
+        }
+        mutations.push(RuntimeMutation::Event {
+            event: self.clone().into_runtime_event()?,
+        });
+        let commit = RuntimeCommit {
+            scope: read.scope.clone(),
+            at: self.at,
+            actor: actor.to_owned(),
+            expected_cursor: read.commit_cursor,
+            mutations,
+        };
+        commit.validate()?;
+        Ok(commit)
+    }
 }
 
 fn validate_hex_identity(kind: &'static str, value: &str, width: usize) -> Result<()> {
@@ -858,6 +909,63 @@ mod tests {
             registry.events[&RuntimeTraceEvent::event_type().unwrap()],
             RuntimeTraceEvent::event_schema()
         );
+    }
+
+    #[test]
+    fn trace_commit_preparation_atomically_installs_schema_and_binds_the_read() {
+        let scope = crate::ScopeId::new("instance:trace-commit").unwrap();
+        let read = ReadStamp::new(scope.clone(), None, 0, 0, None).unwrap();
+        let event = RuntimeTraceEvent::start(
+            trace_id(),
+            span_id(),
+            None,
+            TraceDomain::Cluster,
+            "cluster.artifact_transfer",
+            10,
+            TraceDataClass::Control,
+            Vec::new(),
+            RuntimeProperties::new(),
+        )
+        .unwrap();
+        let bootstrap = event
+            .prepare_commit(&read, None, "cluster:transport")
+            .unwrap();
+        assert_eq!(bootstrap.scope, scope);
+        assert_eq!(bootstrap.expected_cursor, 0);
+        assert!(matches!(
+            bootstrap.mutations[0],
+            RuntimeMutation::Schema { .. }
+        ));
+        assert!(matches!(
+            bootstrap.mutations[1],
+            RuntimeMutation::Event { .. }
+        ));
+
+        let RuntimeMutation::Schema { registry } = &bootstrap.mutations[0] else {
+            unreachable!()
+        };
+        let installed_read =
+            ReadStamp::new(scope, Some(1), 0, 2, Some(bootstrap.digest())).unwrap();
+        let event_only = event
+            .prepare_commit(&installed_read, Some(registry), "cluster:transport")
+            .unwrap();
+        assert_eq!(event_only.mutations.len(), 1);
+        assert!(matches!(
+            event_only.mutations[0],
+            RuntimeMutation::Event { .. }
+        ));
+
+        let stale = ReadStamp::new(
+            installed_read.scope.clone(),
+            Some(2),
+            0,
+            installed_read.commit_cursor,
+            installed_read.head_digest.clone(),
+        )
+        .unwrap();
+        assert!(event
+            .prepare_commit(&stale, Some(registry), "cluster:transport")
+            .is_err());
     }
 
     #[test]

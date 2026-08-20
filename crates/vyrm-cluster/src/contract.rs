@@ -2,6 +2,8 @@ use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
+use std::future::Future;
+use std::pin::Pin;
 use vyrm_core::{
     digest::sha256_hex, ObjectReceipt, ObjectReference, ReadStamp, RuntimeRef, ScopeId,
 };
@@ -775,7 +777,10 @@ impl ArtifactTransferObservation {
 /// Implementations must be thread-safe because OpenRaft can replicate several
 /// learners concurrently.
 pub trait ArtifactTransferObserver: Send + Sync {
-    fn observe(&self, observation: ArtifactTransferObservation) -> Result<()>;
+    fn observe(
+        &self,
+        observation: ArtifactTransferObservation,
+    ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + '_>>;
 }
 
 impl ArtifactTransferRpc {

@@ -1,11 +1,13 @@
 #![cfg(feature = "object-transfer")]
 
 use std::collections::BTreeSet;
+use std::sync::{Arc, Barrier};
+use std::time::{SystemTime, UNIX_EPOCH};
 use vyrm_cluster::{
     prepare_artifact_transfer, transfer_artifacts, ArtifactTransferOperation,
-    ArtifactTransferReceiver, ArtifactTransferRpc, ArtifactTransferRpcResult, NodeId,
-    ReplicaTransferPlan, ShardId, ShardReadStamp, ARTIFACT_TRANSFER_CHUNK_MAX_BYTES,
-    CLUSTER_CONTRACT_VERSION,
+    ArtifactTransferReceiver, ArtifactTransferRpc, ArtifactTransferRpcResult,
+    ArtifactTransferSessionPolicy, NodeId, ReplicaTransferPlan, ShardId, ShardReadStamp,
+    ARTIFACT_TRANSFER_CHUNK_MAX_BYTES, CLUSTER_CONTRACT_VERSION,
 };
 use vyrm_core::{
     DataTransaction, RuntimeCommit, RuntimeMutation, RuntimeProperties, RuntimeRecord,
@@ -33,6 +35,35 @@ fn transfer_plan() -> ReplicaTransferPlan {
         wal_from_exclusive: 12,
         wal_through_inclusive: 12,
         artifact_digests: BTreeSet::new(),
+    }
+}
+
+fn manifest_for(
+    root: &std::path::Path,
+    label: &str,
+    bytes: &[u8],
+) -> vyrm_cluster::ArtifactTransferManifest {
+    let source = source_runtime(
+        MemoryEngine::new(),
+        LocalObjectStore::open(root.join(format!("source-{label}"))).unwrap(),
+        bytes,
+    );
+    prepare_artifact_transfer(transfer_plan(), source.engine(), &scope()).unwrap()
+}
+
+fn policy(
+    max_active_sessions: usize,
+    max_reserved_bytes: u64,
+    stale_incomplete_after_millis: u64,
+    completed_receipt_retention_millis: u64,
+    max_retained_receipts: usize,
+) -> ArtifactTransferSessionPolicy {
+    ArtifactTransferSessionPolicy {
+        max_active_sessions,
+        max_reserved_bytes,
+        stale_incomplete_after_millis,
+        completed_receipt_retention_millis,
+        max_retained_receipts,
     }
 }
 
@@ -349,4 +380,241 @@ fn chunk_sessions_bind_authenticated_peers_and_discard_corrupt_completed_parts()
         panic!("restart did not return progress")
     };
     assert_eq!(objects[0].next_offset, 0);
+}
+
+#[test]
+fn session_admission_enforces_count_and_reserved_byte_quotas_then_gc_reclaims_stale_work() {
+    let root = tempfile::tempdir().unwrap();
+    let first = manifest_for(root.path(), "quota-first", b"12345678");
+    let second = manifest_for(root.path(), "quota-second", b"abcdefgh");
+    let target = LocalObjectStore::open(root.path().join("target-quota")).unwrap();
+    let receiver =
+        ArtifactTransferReceiver::open_with_policy(target, policy(1, 12, 10, 100, 10)).unwrap();
+
+    receiver
+        .handle_at(
+            &first.plan.source,
+            &first.plan.target,
+            ArtifactTransferRpc::begin(first.clone()).unwrap(),
+            100,
+        )
+        .unwrap();
+    let inventory = receiver.session_inventory(105).unwrap();
+    assert_eq!(inventory.active_sessions, 1);
+    assert_eq!(inventory.reserved_bytes, 8);
+    assert!(receiver
+        .handle_at(
+            &second.plan.source,
+            &second.plan.target,
+            ArtifactTransferRpc::begin(second.clone()).unwrap(),
+            105,
+        )
+        .unwrap_err()
+        .to_string()
+        .contains("active-session quota"));
+
+    let report = receiver.collect_garbage(110).unwrap();
+    assert_eq!(report.removed_incomplete, 1);
+    assert_eq!(report.remaining.active_sessions, 0);
+    receiver
+        .handle_at(
+            &second.plan.source,
+            &second.plan.target,
+            ArtifactTransferRpc::begin(second.clone()).unwrap(),
+            110,
+        )
+        .unwrap();
+
+    let byte_limited = ArtifactTransferReceiver::open_with_policy(
+        LocalObjectStore::open(root.path().join("target-byte-quota")).unwrap(),
+        policy(2, 12, 1_000, 1_000, 10),
+    )
+    .unwrap();
+    byte_limited
+        .handle_at(
+            &first.plan.source,
+            &first.plan.target,
+            ArtifactTransferRpc::begin(first.clone()).unwrap(),
+            200,
+        )
+        .unwrap();
+    assert!(byte_limited
+        .handle_at(
+            &second.plan.source,
+            &second.plan.target,
+            ArtifactTransferRpc::begin(second.clone()).unwrap(),
+            201,
+        )
+        .unwrap_err()
+        .to_string()
+        .contains("reserved-byte quota"));
+}
+
+#[test]
+fn completed_receipts_are_idempotent_until_bounded_retention_gc() {
+    let root = tempfile::tempdir().unwrap();
+    let bytes = b"receipt retention bytes";
+    let manifest = manifest_for(root.path(), "receipt", bytes);
+    let target = LocalObjectStore::open(root.path().join("target-receipt")).unwrap();
+    let receiver =
+        ArtifactTransferReceiver::open_with_policy(target.clone(), policy(2, 1_024, 100, 10, 2))
+            .unwrap();
+    receiver
+        .handle_at(
+            &manifest.plan.source,
+            &manifest.plan.target,
+            ArtifactTransferRpc::begin(manifest.clone()).unwrap(),
+            100,
+        )
+        .unwrap();
+    receiver
+        .handle_at(
+            &manifest.plan.source,
+            &manifest.plan.target,
+            ArtifactTransferRpc::chunk(
+                manifest.manifest_digest.clone(),
+                manifest.objects[0].sha256.clone(),
+                0,
+                bytes.to_vec(),
+            )
+            .unwrap(),
+            101,
+        )
+        .unwrap();
+    let completed = receiver
+        .handle_at(
+            &manifest.plan.source,
+            &manifest.plan.target,
+            ArtifactTransferRpc::complete(manifest.manifest_digest.clone(), 77).unwrap(),
+            102,
+        )
+        .unwrap();
+    assert_eq!(
+        receiver.session_inventory(105).unwrap().retained_receipts,
+        1
+    );
+    assert_eq!(
+        receiver
+            .handle_at(
+                &manifest.plan.source,
+                &manifest.plan.target,
+                ArtifactTransferRpc::complete(manifest.manifest_digest.clone(), 999).unwrap(),
+                105,
+            )
+            .unwrap(),
+        completed
+    );
+    let report = receiver.collect_garbage(112).unwrap();
+    assert_eq!(report.removed_completed, 1);
+    assert_eq!(report.remaining.retained_receipts, 0);
+    assert_eq!(target.get(&manifest.objects[0]).unwrap(), bytes);
+}
+
+#[test]
+fn restart_recovers_inventory_and_distinct_sessions_accept_chunks_concurrently() {
+    let root = tempfile::tempdir().unwrap();
+    let first_bytes = vec![0x11; 64 * 1024];
+    let second_bytes = vec![0x22; 96 * 1024];
+    let first = manifest_for(root.path(), "concurrent-first", &first_bytes);
+    let second = manifest_for(root.path(), "concurrent-second", &second_bytes);
+    let target = LocalObjectStore::open(root.path().join("target-concurrent")).unwrap();
+    let now: u64 = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_millis()
+        .try_into()
+        .unwrap();
+    let session_policy = policy(4, 1_024 * 1_024, 60_000, 60_000, 4);
+    let receiver =
+        ArtifactTransferReceiver::open_with_policy(target.clone(), session_policy.clone()).unwrap();
+    for manifest in [&first, &second] {
+        receiver
+            .handle_at(
+                &manifest.plan.source,
+                &manifest.plan.target,
+                ArtifactTransferRpc::begin(manifest.clone()).unwrap(),
+                now,
+            )
+            .unwrap();
+    }
+    let restarted =
+        ArtifactTransferReceiver::open_with_policy(target.clone(), session_policy).unwrap();
+    let inventory = restarted.session_inventory(now + 1).unwrap();
+    assert_eq!(inventory.active_sessions, 2);
+    assert_eq!(
+        inventory.reserved_bytes,
+        (first_bytes.len() + second_bytes.len()) as u64
+    );
+
+    let barrier = Arc::new(Barrier::new(3));
+    let jobs = [
+        (first.clone(), first_bytes.clone()),
+        (second.clone(), second_bytes.clone()),
+    ]
+    .into_iter()
+    .map(|(manifest, bytes)| {
+        let receiver = restarted.clone();
+        let barrier = Arc::clone(&barrier);
+        std::thread::spawn(move || {
+            barrier.wait();
+            receiver
+                .handle_at(
+                    &manifest.plan.source,
+                    &manifest.plan.target,
+                    ArtifactTransferRpc::chunk(
+                        manifest.manifest_digest.clone(),
+                        manifest.objects[0].sha256.clone(),
+                        0,
+                        bytes,
+                    )
+                    .unwrap(),
+                    now + 2,
+                )
+                .unwrap()
+        })
+    })
+    .collect::<Vec<_>>();
+    barrier.wait();
+    for job in jobs {
+        let ArtifactTransferRpcResult::ChunkAccepted { object, .. } = job.join().unwrap() else {
+            panic!("chunk did not return progress")
+        };
+        assert!(object.complete);
+    }
+    assert_eq!(target.get(&first.objects[0]).unwrap(), first_bytes);
+    assert_eq!(target.get(&second.objects[0]).unwrap(), second_bytes);
+}
+
+#[cfg(unix)]
+#[test]
+fn session_inventory_denies_symlinked_partial_state() {
+    use std::os::unix::fs::symlink;
+
+    let root = tempfile::tempdir().unwrap();
+    let manifest = manifest_for(root.path(), "symlink", b"symlink fixture");
+    let target = LocalObjectStore::open(root.path().join("target-symlink")).unwrap();
+    let receiver = ArtifactTransferReceiver::open(target.clone()).unwrap();
+    receiver
+        .handle_at(
+            &manifest.plan.source,
+            &manifest.plan.target,
+            ArtifactTransferRpc::begin(manifest.clone()).unwrap(),
+            100,
+        )
+        .unwrap();
+    let external = root.path().join("outside-part");
+    std::fs::write(&external, b"outside").unwrap();
+    let part = target
+        .root()
+        .join("transfer-sessions-v1")
+        .join(&manifest.manifest_digest)
+        .join(format!("{}.part", manifest.objects[0].sha256));
+    symlink(&external, part).unwrap();
+
+    assert!(receiver
+        .session_inventory(101)
+        .unwrap_err()
+        .to_string()
+        .contains("outside its manifest bound"));
+    assert_eq!(std::fs::read(external).unwrap(), b"outside");
 }

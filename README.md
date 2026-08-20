@@ -98,8 +98,11 @@ Vyrm provides:
   target independently scans the authenticated VyrmKV snapshot and denies
   activation if any referenced bytes are missing or corrupt. Typed bounded
   observations expose attempts, progress, duration, counts, bytes, and receipt
-  identities without persisting object content; `vyrm-node` can commit them as
-  causal project traces through an injected fail-closed observer;
+  identities without persisting object content; `vyrm-node` commits them as
+  causal project traces through the current Raft leader. Restart-reconstructed
+  receiver inventories enforce active-session/reserved-byte quotas, bounded
+  receipt retention and stale-session GC while allowing distinct sessions to
+  transfer concurrently;
 - identical lifecycle semantics through hooks, CLI, and MCP;
 - isolated per-platform instances with explicit store/root binding.
 

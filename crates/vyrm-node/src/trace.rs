@@ -222,11 +222,15 @@ fn commit_trace<E: Engine>(
             continue;
         }
 
-        let mut mutations = Vec::new();
-        let mut registry = current
-            .clone()
-            .unwrap_or_else(|| RuntimeSchemaRegistry::empty(1, "install runtime trace contract"));
-        if RuntimeTraceEvent::register_schema(&mut registry)? {
+        let commit = if let Some(event) = &event {
+            event.prepare_commit(&read, current.as_ref(), actor)?
+        } else {
+            let mut registry = current.clone().unwrap_or_else(|| {
+                RuntimeSchemaRegistry::empty(1, "install runtime trace contract")
+            });
+            if !RuntimeTraceEvent::register_schema(&mut registry)? {
+                return Ok(None);
+            }
             if let Some(current) = &current {
                 registry.revision = current
                     .revision
@@ -234,23 +238,13 @@ fn commit_trace<E: Engine>(
                     .ok_or("runtime schema revision overflow while installing trace contract")?;
                 registry.migration = "install canonical runtime trace contract".into();
             }
-            mutations.push(RuntimeMutation::Schema { registry });
-        }
-        if let Some(event) = &event {
-            mutations.push(RuntimeMutation::Event {
-                event: event.clone().into_runtime_event()?,
-            });
-        }
-        if mutations.is_empty() {
-            return Ok(None);
-        }
-
-        let commit = RuntimeCommit {
-            scope: scope.clone(),
-            at,
-            actor: actor.to_owned(),
-            expected_cursor: read.commit_cursor,
-            mutations,
+            RuntimeCommit {
+                scope: scope.clone(),
+                at,
+                actor: actor.to_owned(),
+                expected_cursor: read.commit_cursor,
+                mutations: vec![RuntimeMutation::Schema { registry }],
+            }
         };
         match store.commit_runtime(&commit) {
             Ok(outcome) => return Ok(Some(outcome)),
