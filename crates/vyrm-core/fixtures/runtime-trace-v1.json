@@ -1,0 +1,108 @@
+{
+  "event": {
+    "contract_version": 1,
+    "trace_id": "0123456789abcdef0123456789abcdef",
+    "span_id": "0123456789abcdef",
+    "phase": "finish",
+    "domain": "adapter",
+    "name": "operator.pgvector.search",
+    "at": 1001,
+    "duration_micros": 840,
+    "outcome": "ok",
+    "data_class": "operator",
+    "links": [
+      {
+        "kind": "operator_knowledge",
+        "adapter": "pgvector",
+        "project_id": "vyrm",
+        "source_revision": "postgres-lsn:0/16B6C50"
+      }
+    ],
+    "attributes": {
+      "result_count": {
+        "type": "unsigned",
+        "value": 7
+      }
+    }
+  },
+  "runtime_event": {
+    "kind": "runtime_trace",
+    "properties": {
+      "at": {
+        "type": "unsigned",
+        "value": 1001
+      },
+      "attributes": {
+        "type": "map",
+        "value": {
+          "result_count": {
+            "type": "unsigned",
+            "value": 7
+          }
+        }
+      },
+      "contract_version": {
+        "type": "unsigned",
+        "value": 1
+      },
+      "data_class": {
+        "type": "string",
+        "value": "operator"
+      },
+      "domain": {
+        "type": "string",
+        "value": "adapter"
+      },
+      "duration_micros": {
+        "type": "unsigned",
+        "value": 840
+      },
+      "links": {
+        "type": "list",
+        "value": [
+          {
+            "type": "map",
+            "value": {
+              "adapter": {
+                "type": "string",
+                "value": "pgvector"
+              },
+              "kind": {
+                "type": "string",
+                "value": "operator_knowledge"
+              },
+              "project_id": {
+                "type": "string",
+                "value": "vyrm"
+              },
+              "source_revision": {
+                "type": "string",
+                "value": "postgres-lsn:0/16B6C50"
+              }
+            }
+          }
+        ]
+      },
+      "name": {
+        "type": "string",
+        "value": "operator.pgvector.search"
+      },
+      "outcome": {
+        "type": "string",
+        "value": "ok"
+      },
+      "phase": {
+        "type": "string",
+        "value": "finish"
+      },
+      "span_id": {
+        "type": "string",
+        "value": "0123456789abcdef"
+      },
+      "trace_id": {
+        "type": "string",
+        "value": "0123456789abcdef0123456789abcdef"
+      }
+    }
+  }
+}

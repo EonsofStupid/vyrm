@@ -15,10 +15,13 @@ use crate::stack;
 use crate::workflow::{resolve_package_command, WorkflowDecision, WorkflowObservation};
 use crate::{evaluate_tool, ToolPolicy};
 use serde_json::Value;
+use std::time::Instant;
 use vyrm_core::{
-    recall, resolve_as_of, Check, CheckStatus, Claim, Evidence, Millis, Predicate, Producer,
-    Reader, ReasoningPayload, ReasoningState, RecallQuery, RuntimeCommit, RuntimeEventSchema,
-    RuntimeMutation, RuntimeSchemaRegistry, RuntimeType, Subject,
+    digest, recall, resolve_as_of, Check, CheckStatus, Claim, Evidence, Millis, Predicate,
+    Producer, Reader, ReasoningPayload, ReasoningState, RecallQuery, RuntimeCommit,
+    RuntimeEventSchema, RuntimeMutation, RuntimeProperties, RuntimeSchemaRegistry,
+    RuntimeTraceEvent, RuntimeType, RuntimeValue, ScopeId, Subject, TraceDataClass, TraceDomain,
+    TraceLink, TraceOutcome,
 };
 use vyrm_store::{Effectiveness, Engine, ProjectionStatus, RecallOutcome};
 
@@ -86,6 +89,116 @@ pub fn handle<E: Engine>(
     event: HookEvent,
     input: &Value,
 ) -> Result<HookResponse, Box<dyn std::error::Error>> {
+    let binding = crate::InstanceBinding::discover(ctx.root)?;
+    binding.require_runtime_ready()?;
+    let scope = ScopeId::new(crate::REASONING_SCOPE)?;
+    let read = ctx.store.runtime_read_stamp(&scope)?;
+    let input_bytes = serde_json::to_vec(input)?;
+    let input_digest = digest::sha256_hex(&input_bytes);
+    let at_bytes = ctx.now.to_be_bytes();
+    let cursor_bytes = read.commit_cursor.to_be_bytes();
+    let identity = crate::TraceIdentity::derive(&[
+        binding.manifest.id.as_bytes(),
+        event.name().as_bytes(),
+        input_digest.as_bytes(),
+        &at_bytes,
+        &cursor_bytes,
+    ])?;
+    let actor = format!("hook:{}", ctx.harness.unwrap_or("unknown"));
+    let mut links = vec![TraceLink::Read { stamp: read }];
+    if let Ok(Some(run)) = active_reasoning_run(ctx.store) {
+        links.push(TraceLink::ReasoningRun {
+            run_id: run.id().to_owned(),
+        });
+    }
+    let common = RuntimeProperties::from([
+        ("event".into(), RuntimeValue::String(event.name().into())),
+        (
+            "harness".into(),
+            RuntimeValue::String(ctx.harness.unwrap_or("unknown").into()),
+        ),
+        ("input_digest".into(), RuntimeValue::Digest(input_digest)),
+        (
+            "input_bytes".into(),
+            RuntimeValue::Unsigned(input_bytes.len() as u64),
+        ),
+    ]);
+    let start = RuntimeTraceEvent::start(
+        identity.trace_id.clone(),
+        identity.span_id.clone(),
+        None,
+        TraceDomain::Lifecycle,
+        format!("lifecycle.{}", event.name()),
+        ctx.now,
+        TraceDataClass::Control,
+        links.clone(),
+        common.clone(),
+    )?;
+    let start_outcome = crate::record_runtime_trace(ctx.store, &scope, &actor, start)?;
+
+    let started = Instant::now();
+    let dispatch = handle_inner(ctx, event, input, &binding);
+    let elapsed = started.elapsed();
+    let trace_outcome = match &dispatch {
+        Ok(response) if response_denied(response) => TraceOutcome::Denied,
+        Ok(_) => TraceOutcome::Ok,
+        Err(_) => TraceOutcome::Error,
+    };
+    let mut finish_links = links;
+    finish_links.push(TraceLink::RuntimeCursor {
+        cursor: ctx.store.runtime_cursor()?,
+    });
+    let mut finish_attributes = common;
+    finish_attributes.insert(
+        "start_cursor".into(),
+        RuntimeValue::Unsigned(start_outcome.last_cursor),
+    );
+    finish_attributes.insert(
+        "response_bytes".into(),
+        RuntimeValue::Unsigned(
+            dispatch
+                .as_ref()
+                .map_or(0, |response| response.stdout.len() as u64),
+        ),
+    );
+    let duration_micros = elapsed.as_micros().min(u128::from(u64::MAX)) as u64;
+    let finished_at = ctx
+        .now
+        .saturating_add(elapsed.as_millis().min(u128::from(u64::MAX)) as u64);
+    let finish = RuntimeTraceEvent::finish(
+        identity.trace_id,
+        identity.span_id,
+        None,
+        TraceDomain::Lifecycle,
+        format!("lifecycle.{}", event.name()),
+        finished_at,
+        duration_micros,
+        trace_outcome,
+        TraceDataClass::Control,
+        finish_links,
+        finish_attributes,
+    )?;
+    let trace_finish = crate::record_runtime_trace(ctx.store, &scope, &actor, finish);
+    match (dispatch, trace_finish) {
+        (Ok(response), Ok(_)) => Ok(response),
+        (Err(error), Ok(_)) => Err(error),
+        (Ok(_), Err(trace_error)) => Err(format!(
+            "lifecycle operation completed but its finish trace was not durable: {trace_error}"
+        )
+        .into()),
+        (Err(error), Err(trace_error)) => Err(format!(
+            "lifecycle operation failed: {error}; its finish trace also failed: {trace_error}"
+        )
+        .into()),
+    }
+}
+
+fn handle_inner<E: Engine>(
+    ctx: &HookContext<'_, E>,
+    event: HookEvent,
+    input: &Value,
+    binding: &crate::InstanceBinding,
+) -> Result<HookResponse, Box<dyn std::error::Error>> {
     let HookContext {
         store,
         root,
@@ -94,8 +207,6 @@ pub fn handle<E: Engine>(
         now,
         budget,
     } = *ctx;
-    let binding = crate::InstanceBinding::discover(root)?;
-    binding.require_runtime_ready()?;
     match event {
         HookEvent::SessionStart => {
             let Preflight {
@@ -241,7 +352,7 @@ pub fn handle<E: Engine>(
                         .pointer("/tool_input/command")
                         .and_then(Value::as_str)
                         .unwrap_or("");
-                    match resolve_package_command(root, &binding, command) {
+                    match resolve_package_command(root, binding, command) {
                         Ok(WorkflowDecision::NotPackage) => None,
                         Ok(WorkflowDecision::Allow(authorization)) => {
                             match authorization.establish_freshness(&ready) {
@@ -373,7 +484,7 @@ pub fn handle<E: Engine>(
                 .pointer("/tool_input/command")
                 .and_then(Value::as_str)
                 .unwrap_or("");
-            match resolve_package_command(root, &binding, command)? {
+            match resolve_package_command(root, binding, command)? {
                 WorkflowDecision::Allow(authorization) => {
                     let response = input.get("tool_response").unwrap_or(&Value::Null);
                     let observation = WorkflowObservation::capture(
@@ -485,6 +596,19 @@ pub fn handle<E: Engine>(
             ..HookResponse::default()
         }),
     }
+}
+
+fn response_denied(response: &HookResponse) -> bool {
+    serde_json::from_str::<Value>(&response.stdout)
+        .ok()
+        .and_then(|value| {
+            value
+                .pointer("/hookSpecificOutput/permissionDecision")
+                .and_then(Value::as_str)
+                .map(str::to_owned)
+        })
+        .as_deref()
+        == Some("deny")
 }
 
 fn superseding_claim_mutations<E: Engine>(

@@ -1,6 +1,6 @@
 use vyrm_core::{
-    AuditEnvelope, ClaimReader, Predicate, Reader, ReasoningPayload, RuntimeMutation, ScopeId,
-    Subject,
+    AuditDecision, ClaimReader, Predicate, Reader, ReasoningPayload, RuntimeMutation, RuntimeValue,
+    ScopeId, Subject,
 };
 use vyrm_node::{
     handle, preflight, record_reasoning, HookContext, HookEvent, InstanceManifest,
@@ -11,9 +11,38 @@ use vyrm_store::{Engine, MemoryEngine, NativeEngine, Store};
 #[derive(Debug, PartialEq)]
 struct Evidence {
     observation: WorkflowObservation,
-    audit: AuditEnvelope,
+    audit_request_id: String,
+    audit_scope: ScopeId,
+    audit_outcome_cursor: Option<u64>,
+    audit_previous_present: bool,
+    traces: Vec<(String, String)>,
     cursor: u64,
     sequence: u64,
+}
+
+fn lifecycle_traces<E: Engine>(store: &E) -> Vec<(String, String)> {
+    store
+        .runtime_changes_since(
+            0,
+            usize::MAX,
+            Some(&ScopeId::new(vyrm_node::REASONING_SCOPE).unwrap()),
+        )
+        .unwrap()
+        .changes
+        .into_iter()
+        .filter_map(|change| match change.mutation {
+            RuntimeMutation::Event { event } if event.kind.as_str() == "runtime_trace" => {
+                let RuntimeValue::String(phase) = &event.properties["phase"] else {
+                    panic!("trace phase has the wrong type")
+                };
+                let RuntimeValue::String(outcome) = &event.properties["outcome"] else {
+                    panic!("trace outcome has the wrong type")
+                };
+                Some((phase.clone(), outcome.clone()))
+            }
+            _ => None,
+        })
+        .collect()
 }
 
 fn project(parent: &std::path::Path, id: &str, with_manifest: bool) -> std::path::PathBuf {
@@ -131,11 +160,17 @@ fn exercise<E: Engine>(store: &E, root: &std::path::Path) -> Evidence {
         .runtime_audit(&change.commit_id)
         .unwrap()
         .expect("atomic workflow audit");
+    audit.validate().unwrap();
     assert_eq!(audit.scope, scope);
+    assert_eq!(audit.decision, AuditDecision::Allow);
 
     Evidence {
         observation,
-        audit,
+        audit_request_id: audit.request_id,
+        audit_scope: audit.scope,
+        audit_outcome_cursor: audit.outcome_cursor,
+        audit_previous_present: audit.previous_digest.is_some(),
+        traces: lifecycle_traces(store),
         cursor: store.runtime_cursor().unwrap(),
         sequence: store.sequence().unwrap(),
     }
@@ -159,6 +194,15 @@ fn workflow_preflight_gate_and_atomic_evidence_match_all_engines() {
     assert_eq!(memory, native);
     assert_eq!(memory.observation.status, WorkflowStatus::Passed);
     assert_eq!(memory.sequence, 1);
+    assert_eq!(
+        memory.traces,
+        [
+            ("start".into(), "running".into()),
+            ("finish".into(), "ok".into()),
+            ("start".into(), "running".into()),
+            ("finish".into(), "ok".into()),
+        ]
+    );
 }
 
 #[test]
@@ -183,6 +227,13 @@ fn hook_denies_package_execution_when_project_policy_is_absent() {
     let denied = handle(&ctx, HookEvent::PreToolUse, &input).unwrap();
     assert!(denied.stdout.contains("permissionDecision"));
     assert!(denied.stdout.contains("workflows.toml"));
+    assert_eq!(
+        lifecycle_traces(&store),
+        [
+            ("start".into(), "running".into()),
+            ("finish".into(), "denied".into()),
+        ]
+    );
 
     let flight = preflight(&store, &root, Some("test"), &reader, 5, 1_500).unwrap();
     assert!(flight

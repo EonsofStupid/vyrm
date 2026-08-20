@@ -397,9 +397,22 @@ fn wait_for_snapshot(node: &mut ProcessNode, at_least: u64) -> u64 {
 
 fn wait_for_purge(node: &mut ProcessNode, at_least: u64) {
     let deadline = Instant::now() + Duration::from_secs(10);
+    let mut next_trigger = Instant::now();
     loop {
         if node.status().purged_index >= Some(at_least) {
             return;
+        }
+        // OpenRaft acknowledges an external purge trigger when it is queued.
+        // A leader may defer the physical purge while a replication task owns
+        // the requested log range, and no later progress notification is
+        // guaranteed after that task releases it. Reasserting the idempotent
+        // trigger makes the process-level completion contract deterministic.
+        if Instant::now() >= next_trigger {
+            assert_eq!(
+                node.command(&VyrmNodeCommand::PurgeLog { index: at_least }),
+                VyrmNodeResult::Ack
+            );
+            next_trigger = Instant::now() + Duration::from_millis(250);
         }
         assert!(Instant::now() < deadline, "snapshot log was not purged");
         thread::sleep(Duration::from_millis(50));

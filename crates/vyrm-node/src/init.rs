@@ -5,6 +5,11 @@
 use crate::registry::Harness;
 use crate::{InstanceManifest, INSTANCE_FILE};
 use std::path::{Path, PathBuf};
+use vyrm_core::{
+    Millis, RuntimeProperties, RuntimeTraceEvent, RuntimeValue, ScopeId, TraceDataClass,
+    TraceDomain, TraceLink, TraceOutcome,
+};
+use vyrm_store::Engine;
 
 const AGENTS_BEGIN: &str = "<!-- vyrm:begin -->";
 const AGENTS_END: &str = "<!-- vyrm:end -->";
@@ -22,7 +27,12 @@ pub struct InitReport {
 
 /// Wires `root` for `harness`. Errors on a retired harness; otherwise writes
 /// the context-file block, plus hook wiring where the harness supports it.
-pub fn init(root: &Path, harness: &Harness) -> Result<InitReport, Box<dyn std::error::Error>> {
+pub fn init<E: Engine>(
+    store: &E,
+    root: &Path,
+    harness: &Harness,
+    at: Millis,
+) -> Result<InitReport, Box<dyn std::error::Error>> {
     if let Some(when) = &harness.retired {
         return Err(format!(
             "harness {} was retired ({when}); refusing to wire a dead harness. \
@@ -71,6 +81,45 @@ pub fn init(root: &Path, harness: &Harness) -> Result<InitReport, Box<dyn std::e
     report.notes.push(format!(
         "add `{}` (and `.vyrm/`) to .gitignore: the store is per-checkout state",
         STORE_DIR
+    ));
+
+    let scope = ScopeId::new(crate::REASONING_SCOPE)?;
+    let read = store.runtime_read_stamp(&scope)?;
+    let at_bytes = at.to_be_bytes();
+    let cursor_bytes = read.commit_cursor.to_be_bytes();
+    let identity = crate::TraceIdentity::derive(&[
+        instance.id.as_bytes(),
+        harness.name.as_bytes(),
+        &at_bytes,
+        &cursor_bytes,
+    ])?;
+    let trace = RuntimeTraceEvent::annotation(
+        identity.trace_id,
+        identity.span_id,
+        None,
+        TraceDomain::Lifecycle,
+        "instance.init",
+        at,
+        TraceOutcome::Ok,
+        TraceDataClass::Control,
+        vec![TraceLink::Read { stamp: read }],
+        RuntimeProperties::from([
+            (
+                "instance_id".into(),
+                RuntimeValue::String(instance.id.clone()),
+            ),
+            ("harness".into(), RuntimeValue::String(harness.name.clone())),
+            ("manifest_created".into(), RuntimeValue::Bool(created)),
+            (
+                "files_written".into(),
+                RuntimeValue::Unsigned(report.written.len() as u64),
+            ),
+        ]),
+    )?;
+    let outcome = crate::record_runtime_trace(store, &scope, "operator:init", trace)?;
+    report.notes.push(format!(
+        "runtime trace contract ready at cursor {}",
+        outcome.last_cursor
     ));
     Ok(report)
 }
