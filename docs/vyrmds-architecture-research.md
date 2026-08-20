@@ -518,9 +518,17 @@ segment-v3 blocks, optimized SHA-256, streaming immutable reads, self-serving
 native sequence values, and fresh steady-state probes moved every measured cell
 green while preserving correctness. The local M3 gap is closed; a nine-trial
 small-batch/standard/read-heavy/sustained matrix also passes. Next reproduce it
-under CI, add mixed update/delete soak, and rehearse existing-store migration.
+under remote CI. The local mixed update/delete gate now passes 20,000 operations
+with 10 reopens and 8 compactions against Fjall and an independent model. The
+existing-store rehearsal copies all 18 canonical keyspaces through an
+authenticated streaming archive, verifies invisible native staging, resumes at
+seven durable/rename boundaries, retains Fjall, and denies rollback after
+native divergence. See `docs/vyrmkv-migration.md` and
+`docs/evidence/m4-storage-mixed-soak.json`.
 The runtime default decision is implemented through `PersistentEngine`: missing
 paths become native, native `CURRENT` paths reopen native, and existing
-non-native paths remain compatibility-bound. Fjall source removal waits for the
-remaining gates. Do not infer SurrealDB or Qdrant superiority from this
+non-native paths remain compatibility-bound until the explicit migration.
+Fjall source removal waits for remote reproduction and a compatibility-
+retirement release. Typed runtime deletion remains a separate referential-
+integrity contract. Do not infer SurrealDB or Qdrant superiority from this
 Fjall-scoped result.

@@ -6,8 +6,8 @@
 //! restart and never guesses that an existing store can be reinterpreted.
 
 use crate::{
-    Durability, Engine, Error, Invocation, InvocationInput, NativeEngine, RecallOutcome,
-    RemovalReport, Result, Store,
+    migration_status, Durability, Engine, Error, Invocation, InvocationInput, MigrationPhase,
+    NativeEngine, RecallOutcome, RemovalReport, Result, Store,
 };
 use std::path::Path;
 use vyrm_core::{
@@ -40,6 +40,16 @@ impl PersistentEngine {
     /// Opens a stable on-disk identity. Missing paths become native stores;
     /// existing non-native directories remain Fjall until an explicit migration.
     pub fn open(path: &Path) -> Result<Self> {
+        if let Some(report) = migration_status(path)? {
+            match report.phase {
+                MigrationPhase::Complete | MigrationPhase::RolledBack => {}
+                phase => {
+                    return Err(Error::Migration(format!(
+                        "database has an active {phase:?} migration; resume or roll it back"
+                    )))
+                }
+            }
+        }
         let empty = path.exists()
             && path.is_dir()
             && std::fs::read_dir(path)

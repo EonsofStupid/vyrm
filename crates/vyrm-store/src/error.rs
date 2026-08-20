@@ -41,6 +41,8 @@ pub enum Error {
     ReadStampMismatch(String),
     /// Object-tier I/O or capability error.
     Object(String),
+    /// Explicit storage migration failed closed.
+    Migration(String),
     /// A referenced immutable object is absent.
     ObjectMissing(String),
     /// Stored bytes do not match their content address.
@@ -91,6 +93,7 @@ impl fmt::Display for Error {
                 write!(f, "runtime read stamp does not match retained state: {id}")
             }
             Error::Object(message) => write!(f, "object store: {message}"),
+            Error::Migration(message) => write!(f, "storage migration: {message}"),
             Error::ObjectMissing(digest) => write!(f, "object missing: {digest}"),
             Error::ObjectCorrupt { expected, actual } => write!(
                 f,

@@ -7,7 +7,7 @@
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use vyrm_store::{Engine, PersistentEngine};
+use vyrm_store::{Engine, PersistentBackend, PersistentEngine, Store};
 
 fn vyrm(db: &Path, args: &[&str]) -> (bool, String, String) {
     let output = Command::new(env!("CARGO_BIN_EXE_vyrm"))
@@ -53,6 +53,44 @@ fn a_claim_can_be_asserted_and_resolved() {
     assert!(ok, "status failed: {err}");
     let status: serde_json::Value = serde_json::from_str(&out).unwrap();
     assert_eq!(status["storage_backend"], "vyrmkv_native");
+}
+
+#[test]
+fn storage_migration_runs_offline_and_exposes_status_and_rollback() {
+    let root = tempfile::tempdir().unwrap();
+    let db = root.path().join("storage-migration");
+    let fjall = Store::open(&db).unwrap();
+    Engine::put_projection(&fjall, "cli-migration", b"preserved").unwrap();
+    drop(fjall);
+
+    let (ok, out, err) = vyrm(&db, &["storage", "migrate", "--json"]);
+    assert!(ok, "storage migrate failed: {err}");
+    let report: serde_json::Value = serde_json::from_str(&out).unwrap();
+    assert_eq!(report["phase"], "complete");
+    assert_eq!(
+        PersistentEngine::open(&db).unwrap().backend(),
+        PersistentBackend::Native
+    );
+
+    let (ok, out, err) = vyrm(&db, &["storage", "status", "--json"]);
+    assert!(ok, "storage status failed: {err}");
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&out).unwrap()["phase"],
+        "complete"
+    );
+
+    let (ok, out, err) = vyrm(&db, &["storage", "rollback", "--json"]);
+    assert!(ok, "storage rollback failed: {err}");
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&out).unwrap()["phase"],
+        "rolled_back"
+    );
+    let restored = PersistentEngine::open(&db).unwrap();
+    assert_eq!(restored.backend(), PersistentBackend::FjallCompatibility);
+    assert_eq!(
+        restored.get_projection("cli-migration").unwrap(),
+        Some(b"preserved".to_vec())
+    );
 }
 
 #[test]

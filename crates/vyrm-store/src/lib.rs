@@ -28,6 +28,7 @@ mod error;
 mod gc;
 mod invocation;
 mod keyspaces;
+mod migration;
 mod native;
 mod object;
 mod persistent;
@@ -42,6 +43,10 @@ pub use error::{Error, Result};
 pub use gc::{PairStatus, RemovalReport, Verdict};
 pub use invocation::{Effectiveness, Invocation, InvocationInput, Outcome, RecallOutcome, Trigger};
 pub use keyspaces::Durability;
+pub use migration::{
+    migrate_fjall_to_native, migrate_fjall_to_native_with_fault, migration_status,
+    rollback_fjall_migration, MigrationFault, MigrationInventory, MigrationPhase, MigrationReport,
+};
 pub use native::{
     native_runtime_commit_outcome, prepare_native_runtime_commit, NativeEngine,
     NativeRuntimeCommitPlan,

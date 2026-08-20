@@ -1,7 +1,7 @@
 # vyrmKV promotion benchmark
 
-Status: strict local M3 four-profile matrix passes; remote repetition and safe
-backend migration remain open.
+Status: strict local M3 four-profile matrix, physical mixed-mutation soak, and
+safe backend migration rehearsal pass; remote performance repetition remains.
 
 The benchmark runs Fjall and native `vyrmKV` in separate fresh child processes.
 Both receive the same valid claim corpus, authoritative batch boundaries, and
@@ -86,4 +86,27 @@ The scheduled/manual workflow runs the same four profiles with
 `--require-promotion` and preserves one artifact per profile. This matrix spans
 corpus size, batch size, read count, and range width. It still uses an append
 then bounded-replay claim corpus; update/delete mixtures, long-duration soak,
-and migration rehearsal remain separate gates before Fjall code removal.
+and long-duration/remote repetition remain separate gates before Fjall code
+removal. The finite mixed-mutation and migration gates are now recorded below.
+
+## Physical mutation and migration gates
+
+The checked-in `mixed_storage_soak` applies 20,000 deterministic operations
+(4,558 inserts, 11,380 overwrites, and 4,062 deletes) over 2,048 keys. It forces
+10 native/Fjall reopens and 8 native compactions and compares both stores to an
+independent `BTreeMap` after every fifth batch. All three finish with 1,669
+visible keys and SHA-256
+`66f466b2d88a0c82bd9a2d929f8fd69312a26f28df102fb89e6e97273cb53f40`.
+Evidence: [`m4-storage-mixed-soak.json`](evidence/m4-storage-mixed-soak.json).
+
+The migration matrix exports one synced cross-keyspace Fjall snapshot into the
+authenticated `VYRMIG01` stream, imports bounded native batches into an absent
+staging sibling, verifies exact bytes and semantic reopen, and then cuts over
+with two parent-synced renames. Tests interrupt and resume after export, import,
+verification, both source/cutover rename gaps, source move, and cutover. They
+also deny unknown keyspaces, corrupt/truncated archives, and rollback after
+post-cutover native writes. See [`vyrmkv-migration.md`](vyrmkv-migration.md).
+
+This is a physical ordered-key/value deletion result. It does not claim a typed
+runtime entity-deletion contract, which must define relation and projection
+effects before it can be added safely.

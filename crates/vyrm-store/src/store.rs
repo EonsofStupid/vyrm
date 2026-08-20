@@ -119,6 +119,68 @@ impl Store {
         &self.path
     }
 
+    /// Writes one durable, cross-keyspace snapshot for the explicit
+    /// Fjall-to-vyrmKV migration path. Kept crate-private so ordinary runtime
+    /// code cannot accidentally treat the compatibility adapter as an export
+    /// API.
+    pub(crate) fn export_migration_archive(&self, path: &Path) -> Result<crate::MigrationInventory> {
+        self.db.persist(fjall::PersistMode::SyncAll)?;
+
+        let known: BTreeSet<&str> = keyspaces::ALL.into_iter().collect();
+        let mut present = BTreeSet::new();
+        for name in self.db.list_keyspace_names() {
+            let name = name.as_ref();
+            if !known.contains(name) {
+                return Err(Error::Migration(format!(
+                    "source contains unknown keyspace {name:?}; refusing an incomplete migration"
+                )));
+            }
+            present.insert(name.to_owned());
+        }
+        for name in keyspaces::ALL {
+            if !present.contains(name) {
+                return Err(Error::Migration(format!(
+                    "source is missing canonical keyspace {name:?}"
+                )));
+            }
+        }
+
+        let snapshot = self.db.read_tx();
+        let mut writer = crate::migration::ArchiveWriter::create(path)?;
+        for (ordinal, name) in keyspaces::ALL.into_iter().enumerate() {
+            let keyspace = self.migration_keyspace(name);
+            for item in snapshot.iter(keyspace) {
+                let (key, value) = item.into_inner()?;
+                writer.record(ordinal, key.as_ref(), value.as_ref())?;
+            }
+        }
+        writer.finish()
+    }
+
+    fn migration_keyspace(&self, name: &str) -> &SingleWriterTxKeyspace {
+        match name {
+            keyspaces::CLAIMS => &self.claims,
+            keyspaces::SEQUENCE_INDEX => &self.sequence_index,
+            keyspaces::ACCESS => &self.access,
+            keyspaces::META => &self.meta,
+            keyspaces::INVOCATIONS => &self.invocations,
+            keyspaces::PROJECTIONS => &self.projections,
+            keyspaces::RUNTIME_CHANGES => &self.runtime_changes,
+            keyspaces::RUNTIME_RECORDS => &self.runtime_records,
+            keyspaces::RUNTIME_RELATIONS => &self.runtime_relations,
+            keyspaces::RUNTIME_VECTORS => &self.runtime_vectors,
+            keyspaces::RUNTIME_SERIES => &self.runtime_series,
+            keyspaces::RUNTIME_GEO => &self.runtime_geo,
+            keyspaces::RUNTIME_OBJECTS => &self.runtime_objects,
+            keyspaces::RUNTIME_OUTBOX => &self.runtime_outbox,
+            keyspaces::RUNTIME_AUDIT => &self.runtime_audit,
+            keyspaces::RUNTIME_COMMITS => &self.runtime_commits,
+            keyspaces::RUNTIME_SCHEMAS => &self.runtime_schemas,
+            keyspaces::RUNTIME_SNAPSHOTS => &self.runtime_snapshots,
+            _ => unreachable!("keyspace was validated against keyspaces::ALL"),
+        }
+    }
+
     /// Stores a derived projection under a name, replacing any prior value.
     ///
     /// Buffered durability: a projection is derivable from its sources, so a

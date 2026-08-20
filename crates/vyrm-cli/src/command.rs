@@ -199,6 +199,11 @@ pub enum Command {
         #[command(subcommand)]
         action: HarnessAction,
     },
+    /// Offline storage migration and recovery operations.
+    Storage {
+        #[command(subcommand)]
+        action: StorageAction,
+    },
 }
 
 #[derive(Subcommand, Debug, Clone)]
@@ -235,6 +240,16 @@ pub enum HarnessAction {
     Status,
 }
 
+#[derive(Subcommand, Debug, Clone)]
+pub enum StorageAction {
+    /// Start or resume the explicit Fjall-to-vyrmKV migration.
+    Migrate,
+    /// Inspect the durable migration marker without opening the database.
+    Status,
+    /// Restore the retained Fjall source if native has not diverged.
+    Rollback,
+}
+
 impl Command {
     /// Stable name used in the invocation record.
     pub fn name(&self) -> &'static str {
@@ -259,6 +274,9 @@ impl Command {
             Command::Reasoning { action: ReasoningAction::Show { .. } } => "reasoning-show",
             Command::Harness { action: HarnessAction::Audit { .. } } => "harness-audit",
             Command::Harness { action: HarnessAction::Status } => "harness-status",
+            Command::Storage { action: StorageAction::Migrate } => "storage-migrate",
+            Command::Storage { action: StorageAction::Status } => "storage-status",
+            Command::Storage { action: StorageAction::Rollback } => "storage-rollback",
         }
     }
 
@@ -351,8 +369,47 @@ impl Command {
                 vec![format!("name={name}"), format!("evidence={evidence}")]
             }
             Command::Harness { action: HarnessAction::Status } => Vec::new(),
+            Command::Storage { .. } => Vec::new(),
         }
     }
+}
+
+/// Executes commands that must run before the normal persistent Engine is
+/// opened. Migration deliberately takes exclusive ownership of the database
+/// directory and therefore cannot travel through the invocation wrapper.
+pub fn execute_offline(
+    db: &std::path::Path,
+    command: &Command,
+    now: Millis,
+    json: bool,
+) -> Option<Result<Execution, Box<dyn std::error::Error>>> {
+    let action = match command {
+        Command::Storage { action } => action,
+        _ => return None,
+    };
+    Some((|| {
+        let report = match action {
+            StorageAction::Migrate => Some(vyrm_store::migrate_fjall_to_native(db, now)?),
+            StorageAction::Status => vyrm_store::migration_status(db)?,
+            StorageAction::Rollback => Some(vyrm_store::rollback_fjall_migration(db)?),
+        };
+        let text = if json {
+            serde_json::to_string_pretty(&report)?
+        } else if let Some(report) = report {
+            format!(
+                "storage migration {:?}: {} entries / {} bytes / sha256 {}\nFjall backup: {}\nArchive: {}",
+                report.phase,
+                report.inventory.entries,
+                report.inventory.payload_bytes,
+                report.inventory.archive_sha256,
+                report.fjall_backup.display(),
+                report.archive.display(),
+            )
+        } else {
+            "no storage migration marker".into()
+        };
+        Ok(text.into())
+    })())
 }
 
 /// Executes one command.
@@ -546,7 +603,8 @@ pub fn execute(store: &PersistentEngine, command: &Command, reader: &Reader, now
         | Command::Outcome { .. }
         | Command::Ledger { .. }
         | Command::Preflight { .. }
-        | Command::Hook { .. } => {
+        | Command::Hook { .. }
+        | Command::Storage { .. } => {
             unreachable!("handled above with an early return")
         }
 

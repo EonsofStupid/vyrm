@@ -201,12 +201,17 @@ checked-in five-trial workload has native ahead in write/read throughput,
 write/read p95, maintained recovery, steady RSS, and disk while preserving
 correctness. A nine-trial small-batch/standard/read-heavy/sustained matrix also
 passes every cell. These are scoped append/replay M3 results, not a general
-database-superiority claim; mixed-mutation soak and safe migration remain.
+database-superiority claim. A separate 20,000-operation physical differential
+now proves put/overwrite/delete behavior across reopen and compaction against
+both Fjall and an independent ordered-map oracle.
 The canonical `PersistentEngine` now creates native stores for missing paths and
 reopens them by their authenticated `CURRENT` marker. CLI, `vyrmd`, and
 Connectome use that selector. Existing non-native directories remain on the
 explicit `fjall_compatibility` path until migration; no bytes are guessed or
-silently converted. Native access/removal evidence and the invocation/
+silently converted. `vyrm storage migrate|status|rollback` provides an
+authenticated, resumable 18-keyspace migration with invisible staging,
+retained Fjall/archive evidence, divergence-safe rollback, and fail-closed
+normal opens during cutover. Native access/removal evidence and the invocation/
 effectiveness ledger now match Fjall and survive reopen, so the default does not
 drop trigger-optimization evidence.
 

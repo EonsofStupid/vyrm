@@ -118,10 +118,12 @@ measured local results, never universal superiority.
 2. **Complete:** atomic hash-chained audit/runtime commits and deny-by-default
    reasoning/lifecycle differentials.
 3. **Local gate passed:** native `vyrmKV` behind the same semantic, query,
-   crash, storage-full, compaction, and benchmark harness. Reproduce its strict
-   Fjall matrix remotely and add mixed mutation/migration soak before removing
-   the oracle. New CLI/MCP/workbench stores already select native; existing
-   non-native directories remain explicitly compatibility-bound.
+   crash, storage-full, compaction, and benchmark harness. Its 20,000-operation
+   mixed physical mutation differential and resumable/rollback-safe 18-keyspace
+   migration rehearsal pass locally. Reproduce the strict Fjall performance
+   matrix remotely before retiring the compatibility oracle. New
+   CLI/MCP/workbench stores select native; existing non-native directories move
+   only through `vyrm storage migrate`.
 4. **Complete at the local M4 gate:** unified vector/series/geo/object
    mutations, verified content-addressed publication, atomic outbox/audit, and
    idempotent retry. Live S3 endpoint certification remains deployment evidence.

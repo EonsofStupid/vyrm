@@ -101,12 +101,21 @@ disagree, `SPEC.md` is authoritative and this document is wrong.
 > CI and broader workload matrices reproduce the result. A second nine-trial
 > small-batch/standard/read-heavy/sustained matrix now passes every strict cell;
 > the sparse index holds byte ranges into canonical segment storage rather than
-> duplicate heap keys. Remote repetition, mixed mutation soak, and migration
-> rehearsal gate Fjall source removal—not another append/replay microbenchmark.
+> duplicate heap keys. The deterministic physical mutation gate now adds
+> 20,000 puts/overwrites/deletes across 10 reopens and 8 compactions, with
+> byte-identical Fjall/native/independent-model state. The offline migration
+> rehearsal now authenticates all 18 keyspaces, stages and verifies native
+> bytes, resumes seven interruption boundaries, retains Fjall, and refuses
+> rollback after native divergence. Remote benchmark repetition and an explicit
+> compatibility-retirement release remain before Fjall source removal—not
+> another append/replay microbenchmark. Typed entity deletion is separately
+> unresolved because referential integrity belongs in the runtime contract.
 > The default switch itself is now safe and explicit: `PersistentEngine` creates
 > native stores for missing paths, reopens native by authenticated `CURRENT`,
 > and keeps existing non-native directories on `fjall_compatibility`. CLI,
 > `vyrmd`, and Connectome share that selector and expose its decision.
+> Operators can now run `vyrm storage migrate|status|rollback`; ordinary opens
+> deny active migration markers so a cutover gap cannot initialize empty state.
 > The product handoff, canonical package-event grammar, alpha release gates,
 > deployment/update tiers, and separate SurrealDB/Qdrant proof protocols are
 > frozen in `docs/clyffy-kernel-alpha.md`.

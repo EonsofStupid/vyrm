@@ -57,6 +57,31 @@ pub const RUNTIME_SCHEMAS: &str = "runtime_schemas";
 /// retention machinery yet.
 pub const RUNTIME_SNAPSHOTS: &str = "runtime_snapshots";
 
+/// Every logical keyspace owned by the persistent Engine contract, in the
+/// canonical order used by storage migration archives. Adding a keyspace is a
+/// format decision: migrations deny unknown source keyspaces and therefore
+/// cannot silently omit newly introduced state.
+pub const ALL: [&str; 18] = [
+    CLAIMS,
+    SEQUENCE_INDEX,
+    ACCESS,
+    META,
+    INVOCATIONS,
+    PROJECTIONS,
+    RUNTIME_CHANGES,
+    RUNTIME_RECORDS,
+    RUNTIME_RELATIONS,
+    RUNTIME_VECTORS,
+    RUNTIME_SERIES,
+    RUNTIME_GEO,
+    RUNTIME_OBJECTS,
+    RUNTIME_OUTBOX,
+    RUNTIME_AUDIT,
+    RUNTIME_COMMITS,
+    RUNTIME_SCHEMAS,
+    RUNTIME_SNAPSHOTS,
+];
+
 /// Key under which the claim sequence watermark is recorded.
 pub const SEQUENCE_WATERMARK: &[u8] = b"watermark/claims/sequence";
 
