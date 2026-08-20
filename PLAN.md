@@ -125,6 +125,14 @@ disagree, `SPEC.md` is authoritative and this document is wrong.
 > metadata plus exact command/response digests and atomically commits the
 > temporal status claim, runtime change, outcome, and audit. Memory/Fjall/native
 > evidence is identical. See `docs/package-workflows.md`.
+> **Temporal workbench gate (2026-08-20).** Connectome now derives a bounded
+> global event stream directly from authoritative runtime changes across all
+> scopes and preserves each cursor, commit identity, mutation digest, full
+> mutation, and available hash-chained audit envelope. Six aligned semantic
+> lanes support freeze, scrub, rewind, forward, and exact inspection without a
+> second telemetry truth. These are persisted logical mutations, not physical
+> WAL micro-events or inferred private model reasoning. Snapshot-to-delta
+> transport and controlled frontier-provider evaluation remain open.
 > The product handoff, canonical package-event grammar, alpha release gates,
 > deployment/update tiers, and separate SurrealDB/Qdrant proof protocols are
 > frozen in `docs/clyffy-kernel-alpha.md`.

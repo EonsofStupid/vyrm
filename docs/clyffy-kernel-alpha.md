@@ -166,7 +166,11 @@ measured local results, never universal superiority.
    pre-tool freshness/authorization, and post-tool atomic evidence across the
    shared hook/MCP handler. A durable cross-process authorization lease remains
    part of the distributed-coordinator gate, not this local claim.
-9. Extend truthful temporal visualization across storage, search, and workflow
-   events and continue controlled provider evaluations.
+9. **Temporal workbench slice complete:** Connectome projects the bounded global
+   persisted mutation stream into reasoning, routing, workflow, model/flight,
+   search, and storage/data lanes. Freeze, scrub, rewind, forward, and inspection
+   retain the exact cursor, scope, mutation digest, full mutation, and available
+   hash-chained audit envelope. Cursor-delta transport and controlled provider
+   evaluations remain open.
 10. Cut the Vyrm alpha manifest; only then scaffold the separate Clyffy master
    repository and its signed tier/update system.

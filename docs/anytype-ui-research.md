@@ -45,6 +45,7 @@ contract differential before execution.
 ```text
 instance sidebar          active lens                         inspector
 ├─ Overview               health + active run                selected object
+├─ Temporal stream        scoped mutation lanes + clock      mutation + audit
 ├─ Graph                  local/global runtime map            identity
 ├─ Runs                   typed event timeline                provenance
 ├─ Claims                 current claim table                 validity
@@ -54,7 +55,7 @@ instance sidebar          active lens                         inspector
 
 The top command field searches across all loaded objects and doubles as the
 route query in the Routes lens. Keyboard navigation is first-class: `/` focuses
-search; `g`, `r`, `c`, and `a` open the main lenses.
+search; `t`, `g`, `r`, `c`, and `a` open the main lenses.
 
 ## Implemented workbench
 
@@ -75,6 +76,9 @@ local Rust process as its instance-bound API. It currently provides:
   controls and explicit observable-only boundaries;
 - aligned event-mass lanes for context, model envelopes, tools, and outcomes,
   with click-to-freeze packets and complete captured-envelope expansion;
+- a bounded global temporal stream over persisted reasoning, routing, workflow,
+  model/flight, search, storage, and data mutations, with first/rewind/play/
+  forward/latest controls and mutation-plus-audit inspection;
 - same-prompt baseline comparison for context, provider tokens, tools, latency,
   and acceptance.
 
@@ -86,8 +90,10 @@ an explicit warning-bearing override for remote binding.
 
 ## Evolution path
 
-1. Replace five-second full snapshots with sequence-cursor runtime deltas. Flight
-   events already use a separate 750 ms lightweight feed.
+1. Replace five-second full snapshots with sequence-cursor runtime deltas. The
+   global temporal stream is already cursor-ordered but is delivered as the
+   newest bounded snapshot; flight events use a separate 750 ms lightweight
+   feed.
 2. Add saved, instance-specific lenses without turning those preferences into
    authoritative runtime truth.
 3. Move graph layout/rendering to a worker and WebGL only after node-count and

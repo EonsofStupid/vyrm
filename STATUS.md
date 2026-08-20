@@ -164,6 +164,14 @@ not roadmap language.
   explicit unauthenticated-transport override. Its read API now exposes
   resumable changes, graph-at-cursor/valid-time snapshots, and exact graph
   differentials for freeze/scrub tooling.
+- The workbench's Temporal stream projects the newest bounded authoritative
+  runtime mutations across all scopes into six semantic lanes. First, rewind,
+  freeze, forward, latest, scrub, and packet inspection retain each global
+  cursor, scope, commit identity, mutation digest, full mutation, and available
+  hash-chained audit envelope. It does not invent physical WAL events,
+  unpersisted query activity, or hidden model reasoning. Remote browser access
+  is executable through explicit `--bind ... --allow-remote`; it remains
+  unauthenticated and is suitable only for a trusted network or SSH tunnel.
 - The workbench adds a Schema lens and `GET /api/runtime/schema`, making the
   active revision, migration, types, property rules, subject constraints, and
   edge cardinality visible instead of leaving enforcement buried in code.
@@ -296,11 +304,14 @@ artifact even on failure.
   `docs/vyrm-vector-search.md`, `docs/vyrm-embedding-edge.md`, and
   `docs/vyrm-cluster-m7.md`.
 
-- JavaScript application-run claims now use script-sensitive canonical event
+- JavaScript application-run claims use script-sensitive canonical event
   subjects such as `package:bun:test`, `package:pnpm:run:typecheck`, and
-  `package:npm:run:test-unit`. They are observed through the existing post-tool
-  lifecycle; workflow declarations and pre-tool enforcement against these
-  identities are the next trigger layer, not silently implied by naming alone.
+  `package:npm:run:test-unit`. A strict project-owned workflow manifest now
+  declares exact direct argv, scope, projection, freshness, and verification
+  policy. Preflight captures its scoped read stamp, pre-tool denies undeclared,
+  stale, shell-composed, or unauthorized execution, and post-tool atomically
+  commits the safe observation, temporal claim, runtime outcome, and audit.
+  A durable cross-process authorization lease remains open.
 
 ## Product and instance boundary
 

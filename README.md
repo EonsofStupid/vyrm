@@ -80,11 +80,23 @@ cargo run -p connectome-ui -- --root .
 # http://127.0.0.1:4387
 ```
 
-Connectome provides nine lenses:
+To inspect it from another machine on a trusted network, bind explicitly and
+open `http://HOST_OR_IP:4387` in the remote browser:
+
+```bash
+cargo run -p connectome-ui -- --root . --bind 0.0.0.0:4387 --allow-remote
+```
+
+The workbench has no authentication. Keep remote binding on a trusted network
+or tunnel the loopback address over SSH. Frontier runners remain disabled
+unless `--enable-runners` is also explicit.
+
+Connectome provides ten lenses:
 
 | Lens | Purpose |
 |---|---|
 | Prompt flights | Launch, replay, freeze, inspect, and compare prompt experiments |
+| Temporal stream | Freeze and scrub persisted mutations across instance scopes with their change and audit evidence |
 | Schema | Inspect the persisted type, property, endpoint, uniqueness, and cardinality contract |
 | Query lab | Parse, bind, explain, and execute exact bitemporal `vyrmQL` reads |
 | Overview | Runtime health, freshness, grounding, and active work |
@@ -98,13 +110,21 @@ The local API also exposes the authoritative persistence layer:
 
 | Endpoint | Purpose |
 |---|---|
-| `GET /api/changes?after=N&limit=N` | Resume the verified runtime changefeed |
-| `GET /api/runtime/schema` | Read the active persisted schema revision for this instance scope |
+| `GET /api/changes?after=N&limit=N&scope=...` | Resume the verified global runtime changefeed, optionally restricted to one scope |
+| `GET /api/runtime/events?limit=N` | Read the newest bounded, audit-attached temporal event projection |
+| `GET /api/runtime/schema?scope=...` | Read the active persisted schema revision for one scope |
 | `GET /api/runtime/retention` | Inspect live snapshot leases and their logical GC retention pins |
-| `GET /api/runtime/query?ql=...` | Parse, bind, explain, and execute an exact bitemporal `vyrmQL` query |
-| `GET /api/runtime/graph?valid_at=T&cursor=N` | Freeze the typed graph at valid time and transaction cursor |
-| `GET /api/runtime/diff?from=A&to=B&valid_at=T` | Inspect exact structural change between cursors |
+| `GET /api/runtime/query?scope=...&ql=...` | Parse, bind, explain, and execute an exact bitemporal `vyrmQL` query |
+| `GET /api/runtime/graph?scope=...&valid_at=T&cursor=N` | Freeze one scoped typed graph at valid time and transaction cursor |
+| `GET /api/runtime/diff?scope=...&from=A&to=B&valid_at=T` | Inspect exact scoped structural change between cursors |
 | `POST /api/demos/prompt-strength` | Persist a deterministic weak/strong trace pair for temporal playback |
+
+The temporal stream is a read-only projection of the newest 512 authoritative
+runtime mutations in the snapshot (up to 4,096 through the event API), not an
+independent telemetry store. It attaches the full mutation and available
+hash-chained audit envelope. The lanes describe persisted logical mutations;
+they do not imply physical WAL micro-events, unpersisted search execution, or
+private model chain-of-thought.
 
 At the Rust port today, `MemoryEngine` and the transitional Fjall adapter expose
 the same versioned read-stamp, snapshot, and data-transaction semantics. The

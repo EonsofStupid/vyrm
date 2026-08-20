@@ -52,6 +52,34 @@ test('prompt flights can be launched, frozen, expanded, and compared', async ({ 
   await expect(page.locator('#inspector-body')).toContainText('prompt flight event');
 });
 
+test('global temporal evidence can be frozen rewound and inspected', async ({ page, request }) => {
+  const seeded = await request.post(`${baseURL}/api/flights`, {
+    data: {
+      prompt: 'Persist a flight so its runtime mutations enter the global evidence stream.',
+      provider: 'observe',
+      context_mode: 'fresh',
+      budget: 512,
+      acceptance_marker: '',
+      reasoning_profile: 'default',
+    },
+  });
+  expect(seeded.ok()).toBeTruthy();
+
+  await page.goto(`${baseURL}/#stream`);
+  await expect(page.getByRole('heading', { name: 'Temporal evidence stream' })).toBeVisible();
+  await expect(page.locator('.stream-lane')).toHaveCount(6);
+  await expect(page.locator('.stream-packet')).not.toHaveCount(0);
+  await page.getByTitle('First mutation').click();
+  await expect(page.locator('.stream-event-detail')).toContainText('cursor');
+  await page.getByTitle('Fast-forward mutations').click();
+  await expect(page.getByTitle('Play or freeze stream')).toContainText('Freeze time');
+  await page.locator('.stream-packet').last().click();
+  await expect(page.getByTitle('Play or freeze stream')).toContainText('Resume time');
+  await page.getByRole('button', { name: 'Inspect mutation + audit' }).click();
+  await expect(page.locator('#inspector-body')).toContainText('runtime mutation');
+  await expect(page.locator('#inspector-body')).toContainText('Audit digest');
+});
+
 test('reasoning profiles expose exact effort and bidirectional event playback', async ({ page }) => {
   await page.goto(`${baseURL}/#flight`);
   await page.locator('[data-prompt-preset="strong"]').click();

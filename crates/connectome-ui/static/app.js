@@ -1,7 +1,7 @@
 (() => {
   'use strict';
 
-  const views = new Set(['overview', 'flight', 'graph', 'schema', 'query', 'runs', 'claims', 'routes', 'activity']);
+  const views = new Set(['overview', 'flight', 'stream', 'graph', 'schema', 'query', 'runs', 'claims', 'routes', 'activity']);
   const initialView = location.hash.slice(1);
   const promptPresets = {
     weak: 'Make this better.',
@@ -27,6 +27,11 @@
     flightDirection: 1,
     flightTimer: null,
     flightPollTimer: null,
+    streamCursor: null,
+    streamPlaying: false,
+    streamDirection: 1,
+    streamSpeed: 1,
+    streamTimer: null,
     refreshTimer: null,
     promptDraft: promptPresets.strong,
     flightSettings: { context: 'pruned', provider: 'codex', budget: 1500, acceptance: '', reasoning: 'default' },
@@ -116,6 +121,7 @@
     $('#crumb-view').textContent = state.view;
     $('#run-count').textContent = data.runs.length;
     $('#flight-count').textContent = data.flights.length;
+    $('#stream-count').textContent = data.temporal_events.length;
     $('#claim-count').textContent = data.claims.length;
     $('#file-count').textContent = data.files.length;
     $('#schema-count').textContent = data.schema
@@ -128,7 +134,7 @@
   function render() {
     if (!state.data) return;
     updateChrome();
-    const renderers = { overview: renderOverview, flight: renderFlight, graph: renderGraph, schema: renderSchema, query: renderQuery, runs: renderRuns, claims: renderClaims, routes: renderRoutes, activity: renderActivity };
+    const renderers = { overview: renderOverview, flight: renderFlight, stream: renderStream, graph: renderGraph, schema: renderSchema, query: renderQuery, runs: renderRuns, claims: renderClaims, routes: renderRoutes, activity: renderActivity };
     (renderers[state.view] || renderOverview)();
     renderInspector();
   }
@@ -521,6 +527,122 @@
     }, 850 / state.flightSpeed);
   }
 
+  function renderStream() {
+    const events = state.data.temporal_events || [];
+    if (!events.length) {
+      $('#main').innerHTML = pageHead('Temporal evidence stream', 'Freeze and inspect persisted runtime mutations across every scope.')
+        + empty('No runtime mutations', 'The authoritative changefeed has not committed an event yet.');
+      return;
+    }
+    let index = state.streamCursor == null
+      ? events.length - 1
+      : events.findIndex((event) => event.cursor === state.streamCursor);
+    if (index < 0) index = Math.max(0, events.length - 1);
+    const current = events[index];
+    state.streamCursor = current.cursor;
+    const windowSize = window.matchMedia('(max-width: 760px)').matches ? 72 : 160;
+    const windowStart = Math.max(0, Math.min(index - Math.floor(windowSize / 2), events.length - windowSize));
+    const visualEvents = events.slice(windowStart, windowStart + windowSize);
+    const lanes = [
+      ['reasoning', 'REASONING CONTRACT'],
+      ['routing', 'CONTEXT + ROUTING'],
+      ['workflow', 'WORKFLOW POLICY'],
+      ['model', 'MODEL + FLIGHTS'],
+      ['search', 'VECTOR + SEARCH'],
+      ['storage', 'STORAGE + DATA'],
+    ];
+    $('#main').innerHTML = pageHead(
+      'Temporal evidence stream',
+      'One global cursor across every runtime scope. Each mark is a persisted mutation with its commit, digest, and audit envelope attached.',
+      `<span class="badge ready">head ${human(state.data.health.runtime_cursor)}</span>`
+    ) + `
+      <section class="stream-shell">
+        <div class="stream-controls" aria-label="Temporal playback">
+          <button type="button" id="stream-start" class="transport-button" title="First mutation">⏮ First</button>
+          <button type="button" id="stream-rewind" class="transport-button" title="Rewind mutations">◀ Rewind</button>
+          <button type="button" id="stream-play" class="transport-button primary" title="Play or freeze stream">${state.streamPlaying ? '❚❚ Freeze time' : '▶ Resume time'}</button>
+          <button type="button" id="stream-forward" class="transport-button" title="Fast-forward mutations">Forward ▶</button>
+          <button type="button" id="stream-end" class="transport-button" title="Latest mutation">Latest ⏭</button>
+          <label class="scrubber"><span>cursor ${current.cursor}</span><input id="stream-scrub" type="range" min="0" max="${events.length - 1}" value="${index}"><b>${events.length} persisted mutations</b></label>
+          <select id="stream-speed" aria-label="Temporal playback speed"><option value="0.5" ${state.streamSpeed === .5 ? 'selected' : ''}>0.5×</option><option value="1" ${state.streamSpeed === 1 ? 'selected' : ''}>1×</option><option value="2" ${state.streamSpeed === 2 ? 'selected' : ''}>2×</option><option value="4" ${state.streamSpeed === 4 ? 'selected' : ''}>4×</option><option value="8" ${state.streamSpeed === 8 ? 'selected' : ''}>8×</option></select>
+        </div>
+        <div class="stream-river" aria-label="Persisted runtime mutations by evidence family">
+          <div class="stream-axis"><span>cursor ${visualEvents[0].cursor}</span><b>GLOBAL AUTHORITATIVE CHANGEFEED · ${windowStart + 1}–${windowStart + visualEvents.length} OF ${events.length}</b><span>cursor ${visualEvents.at(-1).cursor}</span></div>
+          ${lanes.map(([lane, label]) => `<div class="stream-lane"><label>${label}</label><div class="stream-track">${visualEvents.map((event, visibleIndex) => streamLane(event.family) === lane ? `<button type="button" data-stream-event="${windowStart + visibleIndex}" class="stream-packet family-${escapeHtml(lane)} ${event.cursor === current.cursor ? 'active' : ''}" aria-label="cursor ${event.cursor}: ${escapeHtml(event.label)}"><i></i></button>` : '<span></span>').join('')}</div></div>`).join('')}
+        </div>
+        ${streamMicroEvent(current, index, events.length)}
+        <div class="stream-filmstrip">${events.map((event, eventIndex) => `<button type="button" data-stream-frame="${eventIndex}" class="stream-frame ${event.cursor === current.cursor ? 'active' : ''}"><span>${event.cursor}</span><i class="family-${escapeHtml(streamLane(event.family))}"></i><b>${escapeHtml(event.label)}</b><small>${escapeHtml(event.scope)}</small></button>`).join('')}</div>
+      </section>`;
+    bindStreamControls(events, index);
+  }
+
+  function streamLane(family) {
+    if (['memory', 'data', 'storage'].includes(family)) return 'storage';
+    return family;
+  }
+
+  function streamMicroEvent(event, index, total) {
+    const audit = event.audit;
+    return `<article class="stream-event-detail">
+      <header><div><span class="eyebrow">FROZEN MUTATION · ${escapeHtml(event.family)}</span><h2>${escapeHtml(event.label)}</h2></div><div class="event-clock"><strong>cursor ${event.cursor}</strong><span>commit mutation ${event.commit_ordinal + 1}</span></div></header>
+      <div class="event-data-strip"><div><span>scope</span><strong>${escapeHtml(event.scope)}</strong></div><div><span>action</span><strong>${escapeHtml(event.action)}</strong></div><div><span>timeline</span><strong>${index + 1}/${total}</strong></div><div><span>audit</span><strong>${audit ? audit.decision : 'missing'}</strong></div></div>
+      <p>${escapeHtml(event.detail)}</p>
+      <dl class="payload-breakdown"><div><dt>actor</dt><dd>${escapeHtml(event.actor)}</dd></div><div><dt>commit</dt><dd>${escapeHtml(event.commit_id)}</dd></div><div><dt>change digest</dt><dd>${escapeHtml(event.digest)}</dd></div><div><dt>audit digest</dt><dd>${escapeHtml(audit?.digest || 'not found')}</dd></div></dl>
+      <footer><span>${new Date(event.at).toLocaleString()}</span><span>${audit ? 'hash-chained audit attached' : 'audit unavailable'}</span><button type="button" id="inspect-stream-event">Inspect mutation + audit</button></footer>
+    </article>`;
+  }
+
+  function bindStreamControls(events, index) {
+    $('#stream-start')?.addEventListener('click', () => freezeStreamAt(events, 0));
+    $('#stream-end')?.addEventListener('click', () => freezeStreamAt(events, events.length - 1));
+    $('#stream-rewind')?.addEventListener('click', () => playStream(-1));
+    $('#stream-forward')?.addEventListener('click', () => playStream(1));
+    $('#stream-play')?.addEventListener('click', () => {
+      state.streamPlaying = !state.streamPlaying;
+      renderStream();
+      scheduleStreamStep();
+    });
+    $('#stream-scrub')?.addEventListener('input', (event) => freezeStreamAt(events, Number(event.target.value)));
+    $('#stream-speed')?.addEventListener('change', (event) => { state.streamSpeed = Number(event.target.value); scheduleStreamStep(); });
+    $$('[data-stream-event], [data-stream-frame]').forEach((button) => button.addEventListener('click', () => {
+      const target = Number(button.dataset.streamEvent ?? button.dataset.streamFrame);
+      freezeStreamAt(events, target);
+    }));
+    $('#inspect-stream-event')?.addEventListener('click', () => select(`runtime-change:${events[index].cursor}`));
+    scheduleStreamStep();
+  }
+
+  function freezeStreamAt(events, index) {
+    state.streamPlaying = false;
+    state.streamCursor = events[Math.max(0, Math.min(events.length - 1, index))].cursor;
+    clearTimeout(state.streamTimer);
+    renderStream();
+  }
+
+  function playStream(direction) {
+    state.streamDirection = direction;
+    state.streamPlaying = true;
+    renderStream();
+    scheduleStreamStep();
+  }
+
+  function scheduleStreamStep() {
+    clearTimeout(state.streamTimer);
+    if (!state.streamPlaying || state.view !== 'stream') return;
+    state.streamTimer = setTimeout(() => {
+      const events = state.data.temporal_events || [];
+      const current = events.findIndex((event) => event.cursor === state.streamCursor);
+      const next = current + state.streamDirection;
+      if (next >= 0 && next < events.length) {
+        state.streamCursor = events[next].cursor;
+        renderStream();
+      } else {
+        state.streamPlaying = false;
+        renderStream();
+      }
+    }, 850 / state.streamSpeed);
+  }
+
   function renderSchema() {
     const schema = state.data.schema;
     if (!schema) {
@@ -762,6 +884,7 @@
     if (id.startsWith('event:')) return state.data.runs.flatMap((run) => run.events).find((item) => `event:${item.run_id}:${item.ordinal}` === id);
     if (id.startsWith('file:')) return state.data.files.find((item) => `file:${item.path}` === id) || state.data.graph.nodes.find((item) => item.id === id);
     if (id.startsWith('invocation:')) return state.data.invocations.find((item) => `invocation:${item.ordinal}` === id);
+    if (id.startsWith('runtime-change:')) return state.data.temporal_events.find((item) => `runtime-change:${item.cursor}` === id);
     if (id.startsWith('flight-event:')) {
       const [, , flightId, ordinal] = id.match(/^(flight-event):(.*):(\d+)$/) || [];
       const flight = state.data.flights.find((item) => item.id === flightId);
@@ -785,6 +908,7 @@
     if (object.events) return [['Type', 'reasoning run'], ['Run', object.id], ['State', object.state], ['Complete', object.complete], ['Transitions', object.events.length]];
     if (object.payload) return [['Type', 'reasoning event'], ['Transition', object.payload.kind], ['Run', object.run_id], ['Ordinal', object.ordinal], ['Actor', object.actor], ['Digest', object.digest, 'digest'], ['Summary', eventSummary(object)]];
     if (object.command) return [['Type', 'invocation'], ['Command', object.command], ['Ordinal', object.ordinal], ['Trigger', object.trigger], ['Outcome', object.outcome], ['Duration', `${object.duration_ms} ms`], ['Detail', object.detail || '—']];
+    if (object.commit_id && object.cursor != null) return [['Type', 'runtime mutation'], ['Cursor', object.cursor], ['Family', object.family], ['Action', object.action], ['Scope', object.scope], ['Actor', object.actor], ['Commit', object.commit_id], ['Change digest', object.digest, 'digest'], ['Audit digest', object.audit?.digest || 'missing', 'digest'], ['Detail', object.detail]];
     if (object.stage && object.kind) return [['Type', 'prompt flight event'], ['Stage', object.stage], ['Kind', object.kind], ['Ordinal', object.ordinal], ['Elapsed', `${object.elapsed_ms} ms`], ['Label', object.label], ['Detail', object.detail]];
     if (object.path) return [['Type', 'indexed file'], ['Path', object.path], ['Language', object.language], ['Lines', object.lines], ['Symbols', object.symbols], ['Terms', object.terms]];
     return [['Type', node?.kind || object.kind || 'object'], ['Identity', node?.id || object.id], ['State', node?.state || object.state || '—'], ['Detail', node?.detail || object.detail || '—']];
@@ -841,6 +965,7 @@
     if (key === 's') navigate('schema');
     if (key === 'q') navigate('query');
     if (key === 'f') navigate('flight');
+    if (key === 't') navigate('stream');
     if (key === 'r') navigate('runs');
     if (key === 'c') navigate('claims');
     if (key === 'a') navigate('activity');

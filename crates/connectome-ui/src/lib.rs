@@ -14,8 +14,9 @@ use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tiny_http::{Header, Method, Request, Response, Server, StatusCode};
 use vyrm_core::{
-    resolve_as_of, Claim, ClaimSource, ReasoningEvent, ReasoningPayload, RetentionPin,
-    RuntimeGraphSnapshot, RuntimeSchemaRegistry, ScopeId, SnapshotHandle,
+    resolve_as_of, AuditEnvelope, Claim, ClaimSource, ReasoningEvent, ReasoningPayload,
+    RetentionPin, RuntimeGraphSnapshot, RuntimeMutation, RuntimeSchemaRegistry, RuntimeValue,
+    ScopeId, SnapshotHandle,
 };
 use vyrm_mx::{BoundQuery, Catalog, ExecutionBudget, Parameters, PhysicalPlan, QueryExecution};
 use vyrm_node::{InstanceBinding, InstanceMode};
@@ -36,6 +37,7 @@ pub struct Snapshot {
     pub files: Vec<FileView>,
     pub invocations: Vec<Invocation>,
     pub flights: Vec<Flight>,
+    pub temporal_events: Vec<TemporalEventView>,
     pub schema: Option<RuntimeSchemaRegistry>,
     pub capabilities: CapabilitiesView,
     pub graph: GraphView,
@@ -114,6 +116,26 @@ pub struct FileView {
     pub lines: usize,
     pub symbols: usize,
     pub terms: usize,
+}
+
+/// A bounded read-only lens over one authoritative runtime change. The full
+/// mutation and its hash-chained audit envelope stay attached so the UI never
+/// substitutes decorative telemetry for persisted evidence.
+#[derive(Debug, Clone, Serialize)]
+pub struct TemporalEventView {
+    pub cursor: u64,
+    pub commit_id: String,
+    pub commit_ordinal: u64,
+    pub scope: String,
+    pub at: u64,
+    pub actor: String,
+    pub family: &'static str,
+    pub action: String,
+    pub label: String,
+    pub detail: String,
+    pub digest: String,
+    pub mutation: RuntimeMutation,
+    pub audit: Option<AuditEnvelope>,
 }
 
 #[derive(Debug, Default, Serialize)]
@@ -215,6 +237,7 @@ pub fn snapshot(
     };
     let invocations = store.invocations_since(0)?;
     let flights = flight::stored_flights(store)?;
+    let temporal_events = temporal_events(store, 512)?;
     let graph = build_graph(
         &binding.manifest.id,
         &claims,
@@ -268,6 +291,7 @@ pub fn snapshot(
         files,
         invocations,
         flights,
+        temporal_events,
         schema,
         capabilities: CapabilitiesView {
             runners_enabled: false,
@@ -275,6 +299,176 @@ pub fn snapshot(
         },
         graph,
     })
+}
+
+/// Returns the newest persisted runtime mutations in global cursor order.
+/// Scope is deliberately not filtered: reasoning/prompt flights still use the
+/// portable legacy scope while project-owned workflows use the instance ID.
+pub fn temporal_events(
+    store: &PersistentEngine,
+    limit: usize,
+) -> Result<Vec<TemporalEventView>, Box<dyn std::error::Error>> {
+    let limit = limit.clamp(1, 4_096);
+    let head = store.runtime_cursor()?;
+    let after = head.saturating_sub(limit as u64);
+    let page = store.runtime_changes_since(after, limit, None)?;
+    let mut audits = BTreeMap::<String, Option<AuditEnvelope>>::new();
+    let mut events = Vec::with_capacity(page.changes.len());
+    for change in page.changes {
+        let audit = match audits.get(&change.commit_id) {
+            Some(audit) => audit.clone(),
+            None => {
+                let audit = store.runtime_audit(&change.commit_id)?;
+                audits.insert(change.commit_id.clone(), audit.clone());
+                audit
+            }
+        };
+        let (family, action, label, detail) = describe_mutation(&change.mutation);
+        events.push(TemporalEventView {
+            cursor: change.cursor,
+            commit_id: change.commit_id,
+            commit_ordinal: change.commit_ordinal,
+            scope: change.scope.as_str().to_owned(),
+            at: change.at,
+            actor: change.actor,
+            family,
+            action,
+            label,
+            detail,
+            digest: change.digest,
+            mutation: change.mutation,
+            audit,
+        });
+    }
+    Ok(events)
+}
+
+fn describe_mutation(mutation: &RuntimeMutation) -> (&'static str, String, String, String) {
+    match mutation {
+        RuntimeMutation::Claim { claim } if claim.subject.as_str().starts_with("package:") => {
+            let observation = serde_json::from_str::<vyrm_node::WorkflowObservation>(&claim.object);
+            let detail = observation.map_or_else(
+                |_| format!("{} = {}", claim.predicate, claim.object),
+                |observation| {
+                    format!(
+                        "status={:?}; exit={}; manifest={}",
+                        observation.status,
+                        observation
+                            .exit_code
+                            .map_or_else(|| "unreported".into(), |code| code.to_string()),
+                        observation.manifest_digest
+                    )
+                },
+            );
+            (
+                "workflow",
+                "claim".into(),
+                claim.subject.as_str().to_owned(),
+                detail,
+            )
+        }
+        RuntimeMutation::Claim { claim } => (
+            "memory",
+            "claim".into(),
+            format!("{} · {}", claim.subject, claim.predicate),
+            claim.object.clone(),
+        ),
+        RuntimeMutation::Schema { registry } => (
+            "storage",
+            "schema".into(),
+            format!("schema revision {}", registry.revision),
+            registry.migration.clone(),
+        ),
+        RuntimeMutation::Record { record } => {
+            let kind = record.reference.kind.as_str();
+            let family = if kind.starts_with("reasoning_") {
+                "reasoning"
+            } else if kind.starts_with("prompt_flight") {
+                "model"
+            } else {
+                "storage"
+            };
+            (
+                family,
+                "record".into(),
+                format!("{}:{}", kind, record.reference.id),
+                format!("{} typed properties", record.properties.len()),
+            )
+        }
+        RuntimeMutation::Relation { relation } => {
+            let family = if relation.reference.kind.as_str().starts_with("reasoning_") {
+                "reasoning"
+            } else {
+                "storage"
+            };
+            (
+                family,
+                "relation".into(),
+                relation.reference.kind.as_str().to_owned(),
+                format!("{} → {}", relation.from.id, relation.to.id),
+            )
+        }
+        RuntimeMutation::Event { event } => {
+            let stage = runtime_string(&event.properties, "stage");
+            let family = match stage.as_deref() {
+                Some("context" | "recall" | "routing") => "routing",
+                Some("tools") => "workflow",
+                Some("outcome") => "reasoning",
+                _ if event.kind.as_str().starts_with("reasoning_") => "reasoning",
+                _ if event.kind.as_str().starts_with("prompt_flight") => "model",
+                _ => "storage",
+            };
+            let label = runtime_string(&event.properties, "kind")
+                .unwrap_or_else(|| event.kind.as_str().to_owned());
+            (
+                family,
+                "event".into(),
+                label,
+                stage.map_or_else(
+                    || format!("{} typed properties", event.properties.len()),
+                    |stage| format!("{stage} stage; {} typed properties", event.properties.len()),
+                ),
+            )
+        }
+        RuntimeMutation::Vector { vector } => (
+            "search",
+            "vector".into(),
+            format!("{}:{}", vector.reference.kind, vector.reference.id),
+            format!(
+                "{} dimensions; model={}",
+                vector.value.dimensions(),
+                vector
+                    .provenance
+                    .as_ref()
+                    .map_or("supplied", |provenance| provenance.model.as_str())
+            ),
+        ),
+        RuntimeMutation::SeriesSample { sample } => (
+            "data",
+            "series_sample".into(),
+            format!("{}:{}", sample.reference.kind, sample.reference.id),
+            format!("observed_at={}", sample.observed_at),
+        ),
+        RuntimeMutation::Geo { geo } => (
+            "data",
+            "geo".into(),
+            format!("{}:{}", geo.reference.kind, geo.reference.id),
+            "geospatial value".into(),
+        ),
+        RuntimeMutation::Object { object } => (
+            "storage",
+            "object".into(),
+            format!("{}:{}", object.reference.kind, object.reference.id),
+            format!("{} bytes · {}", object.length, object.sha256),
+        ),
+    }
+}
+
+fn runtime_string(properties: &vyrm_core::RuntimeProperties, name: &str) -> Option<String> {
+    match properties.get(name) {
+        Some(RuntimeValue::String(value) | RuntimeValue::Digest(value)) => Some(value.clone()),
+        _ => None,
+    }
 }
 
 pub fn runtime_retention(
@@ -676,13 +870,12 @@ fn respond(
                 .and_then(|value| value.parse().ok())
                 .unwrap_or(256usize)
                 .clamp(1, 4_096);
-            match ScopeId::new("instance:default").and_then(|scope| {
+            let result = requested_scope(&params, None).and_then(|scope| {
                 store
-                    .runtime_changes_since(after, limit, Some(&scope))
-                    .map_err(|error| vyrm_core::Error::InvalidRuntime {
-                        reason: error.to_string(),
-                    })
-            }) {
+                    .runtime_changes_since(after, limit, scope.as_ref())
+                    .map_err(|error| -> Box<dyn std::error::Error> { error.into() })
+            });
+            match result {
                 Ok(page) => json_response(StatusCode(200), &page),
                 Err(error) => json_response(
                     StatusCode(500),
@@ -690,23 +883,40 @@ fn respond(
                 ),
             }
         }
-        "/api/runtime/schema" => match ScopeId::new(vyrm_node::REASONING_SCOPE)
-            .map_err(|error| error.into())
-            .and_then(|scope| {
-                store
-                    .runtime_schema(&scope)
-                    .map_err(|error| -> Box<dyn std::error::Error> { error.into() })
-            }) {
-            Ok(Some(schema)) => json_response(StatusCode(200), &schema),
-            Ok(None) => json_response(
-                StatusCode(404),
-                &serde_json::json!({"error":"runtime schema is not installed for this scope"}),
-            ),
-            Err(error) => json_response(
-                StatusCode(500),
-                &serde_json::json!({"error":error.to_string()}),
-            ),
-        },
+        "/api/runtime/events" => {
+            let params = query_params(query);
+            let limit = params
+                .get("limit")
+                .and_then(|value| value.parse().ok())
+                .unwrap_or(512usize)
+                .clamp(1, 4_096);
+            match temporal_events(store, limit) {
+                Ok(events) => json_response(StatusCode(200), &events),
+                Err(error) => json_response(
+                    StatusCode(500),
+                    &serde_json::json!({"error":error.to_string()}),
+                ),
+            }
+        }
+        "/api/runtime/schema" => {
+            match requested_scope(&query_params(query), Some(vyrm_node::REASONING_SCOPE))
+                .and_then(required_scope)
+                .and_then(|scope| {
+                    store
+                        .runtime_schema(&scope)
+                        .map_err(|error| -> Box<dyn std::error::Error> { error.into() })
+                }) {
+                Ok(Some(schema)) => json_response(StatusCode(200), &schema),
+                Ok(None) => json_response(
+                    StatusCode(404),
+                    &serde_json::json!({"error":"runtime schema is not installed for this scope"}),
+                ),
+                Err(error) => json_response(
+                    StatusCode(500),
+                    &serde_json::json!({"error":error.to_string()}),
+                ),
+            }
+        }
         "/api/runtime/retention" => match runtime_retention(store, now()) {
             Ok(retention) => json_response(StatusCode(200), &retention),
             Err(error) => json_response(
@@ -737,8 +947,8 @@ fn respond(
                     &serde_json::json!({"error":"ql query parameter is required"}),
                 )
             } else {
-                match ScopeId::new(vyrm_node::REASONING_SCOPE)
-                    .map_err(|error| -> Box<dyn std::error::Error> { error.into() })
+                match requested_scope(&params, Some(vyrm_node::REASONING_SCOPE))
+                    .and_then(required_scope)
                     .and_then(|scope| runtime_query(store, scope, source, &budget))
                 {
                     Ok(result) => json_response(StatusCode(200), &result),
@@ -756,8 +966,8 @@ fn respond(
                 .and_then(|value| value.parse().ok())
                 .unwrap_or_else(now);
             let cursor = params.get("cursor").and_then(|value| value.parse().ok());
-            match ScopeId::new("instance:default")
-                .map_err(|error| error.into())
+            match requested_scope(&params, Some(vyrm_node::REASONING_SCOPE))
+                .and_then(required_scope)
                 .and_then(|scope| runtime_graph(store, scope, valid_at, cursor))
             {
                 Ok(graph) => json_response(StatusCode(200), &graph),
@@ -778,8 +988,8 @@ fn respond(
                 .and_then(|value| value.parse().ok())
                 .unwrap_or(0);
             let to = params.get("to").and_then(|value| value.parse().ok());
-            let result = ScopeId::new("instance:default")
-                .map_err(|error| -> Box<dyn std::error::Error> { error.into() })
+            let result = requested_scope(&params, Some(vyrm_node::REASONING_SCOPE))
+                .and_then(required_scope)
                 .and_then(|scope| {
                     let before = runtime_graph(store, scope.clone(), valid_at, Some(from))?;
                     let after = runtime_graph(store, scope, valid_at, to)?;
@@ -844,6 +1054,32 @@ fn query_params(query: &str) -> BTreeMap<String, String> {
         .filter_map(|pair| pair.split_once('='))
         .map(|(key, value)| (percent_decode(key), percent_decode(value)))
         .collect()
+}
+
+fn requested_scope(
+    params: &BTreeMap<String, String>,
+    default: Option<&str>,
+) -> Result<Option<ScopeId>, Box<dyn std::error::Error>> {
+    match params.get("scope").map(String::as_str).or(default) {
+        Some("all") => Ok(None),
+        Some(scope) if !scope.trim().is_empty() => Ok(Some(ScopeId::new(scope.to_owned())?)),
+        Some(_) => Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "runtime scope must not be empty",
+        )
+        .into()),
+        None => Ok(None),
+    }
+}
+
+fn required_scope(scope: Option<ScopeId>) -> Result<ScopeId, Box<dyn std::error::Error>> {
+    scope.ok_or_else(|| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "this runtime endpoint requires one concrete scope",
+        )
+        .into()
+    })
 }
 
 fn percent_decode(value: &str) -> String {

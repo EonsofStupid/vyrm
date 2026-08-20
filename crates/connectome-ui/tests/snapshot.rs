@@ -1,4 +1,7 @@
-use vyrm_core::{Claim, Evidence, Predicate, Producer, ReasoningPayload, Subject};
+use vyrm_core::{
+    Claim, Evidence, Predicate, Producer, ReasoningPayload, RuntimeCommit, RuntimeEventSchema,
+    RuntimeMutation, RuntimeSchemaRegistry, RuntimeType, ScopeId, Subject,
+};
 use vyrm_store::Engine;
 
 #[test]
@@ -63,6 +66,55 @@ fn snapshot_exposes_runtime_objects_without_mutating_the_store() {
     }
     vyrm_node::ensure_routing_fresh(&store, root.path()).unwrap();
     let binding = vyrm_node::InstanceBinding::discover(root.path()).unwrap();
+    let workflow = vyrm_node::WorkflowObservation {
+        contract_version: vyrm_node::WORKFLOW_FORMAT,
+        event: "package:bun:test".into(),
+        manifest_digest: "a".repeat(64),
+        command: "bun test".into(),
+        arguments_supplied: 0,
+        command_digest: "b".repeat(64),
+        response_digest: "c".repeat(64),
+        exit_code: Some(0),
+        status: vyrm_node::WorkflowStatus::Passed,
+        at: 9,
+    };
+    store
+        .commit_runtime(&RuntimeCommit {
+            scope: ScopeId::new(binding.manifest.id.clone()).unwrap(),
+            at: 9,
+            actor: "hook:test".into(),
+            expected_cursor: store.runtime_cursor().unwrap(),
+            mutations: vec![
+                RuntimeMutation::Schema {
+                    registry: {
+                        let mut registry = RuntimeSchemaRegistry::empty(
+                            1,
+                            "install package workflow evidence contract",
+                        );
+                        registry.events.insert(
+                            RuntimeType::new("workflow-observation").unwrap(),
+                            RuntimeEventSchema::default(),
+                        );
+                        registry
+                    },
+                },
+                RuntimeMutation::Claim {
+                    claim: Claim::new(
+                        Subject::new("package:bun:test").unwrap(),
+                        Predicate::new("status").unwrap(),
+                        serde_json::to_string(&workflow).unwrap(),
+                        9,
+                        9,
+                        Producer {
+                            actor: "hook:test".into(),
+                            on_behalf_of: None,
+                            session: None,
+                        },
+                    ),
+                },
+            ],
+        })
+        .unwrap();
     let lease = store
         .open_runtime_snapshot(
             &vyrm_core::ScopeId::new("instance:default").unwrap(),
@@ -76,12 +128,12 @@ fn snapshot_exposes_runtime_objects_without_mutating_the_store() {
 
     assert_eq!(snapshot.instance.mode, "dedicated");
     assert_eq!(snapshot.health.storage_backend, "vyrmkv_native");
-    assert_eq!(snapshot.health.current_claims, 1);
-    assert_eq!(snapshot.health.runtime_cursor, 9);
+    assert_eq!(snapshot.health.current_claims, 2);
+    assert_eq!(snapshot.health.runtime_cursor, 11);
     assert_eq!(snapshot.health.schema_revision, Some(1));
     assert_eq!(snapshot.health.snapshot_leases, 1);
     assert_eq!(snapshot.health.retention_pins, 1);
-    assert_eq!(snapshot.health.oldest_retained_cursor, Some(9));
+    assert_eq!(snapshot.health.oldest_retained_cursor, Some(11));
     let retention = connectome_ui::runtime_retention(&store, 10).unwrap();
     assert_eq!(retention.snapshots, vec![lease.clone()]);
     assert_eq!(retention.pins[0].snapshot_id, lease.id);
@@ -106,6 +158,14 @@ fn snapshot_exposes_runtime_objects_without_mutating_the_store() {
         .nodes
         .iter()
         .any(|node| node.kind == "evidence"));
+    let workflow_event = snapshot
+        .temporal_events
+        .iter()
+        .find(|event| event.family == "workflow")
+        .expect("project-scoped workflow mutation is visible in the global stream");
+    assert_eq!(workflow_event.scope, binding.manifest.id);
+    assert_eq!(workflow_event.label, "package:bun:test");
+    assert!(workflow_event.audit.is_some());
     assert_eq!(
         store.sequence().unwrap(),
         before,
