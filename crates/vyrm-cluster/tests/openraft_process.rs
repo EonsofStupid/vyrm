@@ -188,21 +188,15 @@ fn independent_processes_recover_fail_over_snapshot_and_reject_corruption() {
     wait_applied(&mut node2, second_index);
 
     node1.crash();
-    assert_eq!(node2.command(&VyrmNodeCommand::Elect), VyrmNodeResult::Ack);
-    wait_for_leader(&mut node2, 2);
-    let leadership_log = node2
-        .status()
-        .last_log_index
-        .expect("elected leader has a leadership log");
-    wait_applied(&mut node2, leadership_log);
-    let failover_expected = node2.status().last_applied_index;
-    let failover_index = write_index(node2.command(&VyrmNodeCommand::Probe {
-        request_id: "process-probe-failover".into(),
-        placement_epoch: 1,
-        expected_commit_index: failover_expected,
-        payload: b"new-leader-write".to_vec(),
-    }));
-    wait_applied(&mut node3, failover_index);
+    // Production nodes keep automatic elections enabled. `Elect` accelerates
+    // failover but does not reserve leadership for the triggered survivor, so
+    // continue through whichever eligible node the quorum actually elects.
+    let (failover_index, failover_leader) = elect_and_write(
+        &mut node2,
+        &mut node3,
+        "process-probe-failover",
+        b"new-leader-write",
+    );
 
     node1 = ProcessNode::start(&fixture.configs[&1]);
     let denied = node1.command_reply(&VyrmNodeCommand::WaitApplied {
@@ -219,47 +213,34 @@ fn independent_processes_recover_fail_over_snapshot_and_reject_corruption() {
     });
     wait_applied(&mut node1, failover_index);
 
-    assert_eq!(
-        node2.command(&VyrmNodeCommand::SetTransportEnabled { enabled: false }),
-        VyrmNodeResult::Ack
-    );
-    assert_eq!(node3.command(&VyrmNodeCommand::Elect), VyrmNodeResult::Ack);
-    wait_for_leader(&mut node3, 3);
-    let partition_leadership_log = node3
-        .status()
-        .last_log_index
-        .expect("partition successor has a leadership log");
-    wait_applied(&mut node3, partition_leadership_log);
-    let partition_expected = node3.status().last_applied_index;
-    let partition_index = write_index(node3.command(&VyrmNodeCommand::Probe {
-        request_id: "process-probe-partition".into(),
-        placement_epoch: 1,
-        expected_commit_index: partition_expected,
-        payload: b"quorum-survives-live-leader-isolation".to_vec(),
-    }));
-    wait_applied(&mut node1, partition_index);
-    assert_eq!(
-        node2.command(&VyrmNodeCommand::SetTransportEnabled { enabled: true }),
-        VyrmNodeResult::Ack
-    );
-    wait_applied(&mut node2, partition_index);
+    let (partition_index, partition_leader) = if failover_leader == 2 {
+        isolate_then_elect_and_write(&mut node2, &mut node3, &mut node1)
+    } else {
+        isolate_then_elect_and_write(&mut node3, &mut node2, &mut node1)
+    };
 
+    let snapshot_leader = match partition_leader {
+        1 => &mut node1,
+        2 => &mut node2,
+        3 => &mut node3,
+        other => panic!("unexpected partition leader {other}"),
+    };
     assert_eq!(
-        node3.command(&VyrmNodeCommand::TriggerSnapshot),
+        snapshot_leader.command(&VyrmNodeCommand::TriggerSnapshot),
         VyrmNodeResult::Ack
     );
-    let snapshot_index = wait_for_snapshot(&mut node3, partition_index);
+    let snapshot_index = wait_for_snapshot(snapshot_leader, partition_index);
     assert_eq!(
-        node3.command(&VyrmNodeCommand::PurgeLog {
+        snapshot_leader.command(&VyrmNodeCommand::PurgeLog {
             index: snapshot_index,
         }),
         VyrmNodeResult::Ack
     );
-    wait_for_purge(&mut node3, snapshot_index);
+    wait_for_purge(snapshot_leader, snapshot_index);
 
     let mut node4 = ProcessNode::start(&fixture.configs[&4]);
     assert_eq!(
-        node3.command(&VyrmNodeCommand::AddLearner { node_id: 4 }),
+        snapshot_leader.command(&VyrmNodeCommand::AddLearner { node_id: 4 }),
         VyrmNodeResult::Ack
     );
     wait_applied(&mut node4, partition_index);
@@ -295,6 +276,96 @@ fn wait_for_leader(node: &mut ProcessNode, expected: u64) {
         );
         thread::sleep(Duration::from_millis(50));
     }
+}
+
+fn elect_and_write(
+    preferred: &mut ProcessNode,
+    other: &mut ProcessNode,
+    request_id: &str,
+    payload: &[u8],
+) -> (u64, u64) {
+    let preferred_id = preferred.status().raft_node_id;
+    let other_id = other.status().raft_node_id;
+    assert_eq!(
+        preferred.command(&VyrmNodeCommand::Elect),
+        VyrmNodeResult::Ack
+    );
+    let leader = wait_for_agreed_leader(preferred, other, &[preferred_id, other_id]);
+    let index = if leader == preferred_id {
+        write_from_leader(preferred, other, request_id, payload)
+    } else {
+        write_from_leader(other, preferred, request_id, payload)
+    };
+    (index, leader)
+}
+
+fn isolate_then_elect_and_write(
+    isolated: &mut ProcessNode,
+    preferred: &mut ProcessNode,
+    other: &mut ProcessNode,
+) -> (u64, u64) {
+    assert_eq!(
+        isolated.command(&VyrmNodeCommand::SetTransportEnabled { enabled: false }),
+        VyrmNodeResult::Ack
+    );
+    let (index, leader) = elect_and_write(
+        preferred,
+        other,
+        "process-probe-partition",
+        b"quorum-survives-live-leader-isolation",
+    );
+    assert_eq!(
+        isolated.command(&VyrmNodeCommand::SetTransportEnabled { enabled: true }),
+        VyrmNodeResult::Ack
+    );
+    wait_applied(isolated, index);
+    (index, leader)
+}
+
+fn wait_for_agreed_leader(
+    first: &mut ProcessNode,
+    second: &mut ProcessNode,
+    eligible: &[u64],
+) -> u64 {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        let first_status = first.status();
+        let second_status = second.status();
+        if let Some(leader) = first_status
+            .current_leader
+            .filter(|leader| second_status.current_leader == Some(*leader))
+            .filter(|leader| eligible.contains(leader))
+        {
+            return leader;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "survivors did not agree on an eligible leader; first={first_status:?}; second={second_status:?}"
+        );
+        thread::sleep(Duration::from_millis(50));
+    }
+}
+
+fn write_from_leader(
+    leader: &mut ProcessNode,
+    follower: &mut ProcessNode,
+    request_id: &str,
+    payload: &[u8],
+) -> u64 {
+    let leadership_log = leader
+        .status()
+        .last_log_index
+        .expect("elected leader has a leadership log");
+    wait_applied(leader, leadership_log);
+    let expected = leader.status().last_applied_index;
+    let index = write_index(leader.command(&VyrmNodeCommand::Probe {
+        request_id: request_id.into(),
+        placement_epoch: 1,
+        expected_commit_index: expected,
+        payload: payload.to_vec(),
+    }));
+    wait_applied(follower, index);
+    index
 }
 
 fn wait_applied(node: &mut ProcessNode, index: u64) {
