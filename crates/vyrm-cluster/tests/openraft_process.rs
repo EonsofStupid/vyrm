@@ -213,39 +213,20 @@ fn independent_processes_recover_fail_over_snapshot_and_reject_corruption() {
     });
     wait_applied(&mut node1, failover_index);
 
-    let (partition_index, partition_leader) = if failover_leader == 2 {
+    let partition_index = if failover_leader == 2 {
         isolate_then_elect_and_write(&mut node2, &mut node3, &mut node1)
     } else {
         isolate_then_elect_and_write(&mut node3, &mut node2, &mut node1)
     };
 
-    let snapshot_leader = match partition_leader {
-        1 => &mut node1,
-        2 => &mut node2,
-        3 => &mut node3,
-        other => panic!("unexpected partition leader {other}"),
-    };
-    assert_eq!(
-        snapshot_leader.command(&VyrmNodeCommand::TriggerSnapshot),
-        VyrmNodeResult::Ack
-    );
-    let snapshot_index = wait_for_snapshot(snapshot_leader, partition_index);
-    assert_eq!(
-        snapshot_leader.command(&VyrmNodeCommand::PurgeLog {
-            index: snapshot_index,
-        }),
-        VyrmNodeResult::Ack
-    );
-    wait_for_purge(snapshot_leader, snapshot_index);
-
     let mut node4 = ProcessNode::start(&fixture.configs[&4]);
-    assert_eq!(
-        snapshot_leader.command(&VyrmNodeCommand::AddLearner { node_id: 4 }),
-        VyrmNodeResult::Ack
-    );
+    let snapshot_index = {
+        let mut voters = [&mut node1, &mut node2, &mut node3];
+        snapshot_purge_and_add_learner(&mut voters, partition_index, 4)
+    };
     wait_applied(&mut node4, partition_index);
     assert!(
-        node4.status().snapshot_index.is_some(),
+        node4.status().snapshot_index >= Some(snapshot_index),
         "post-purge learner must catch up from a physical snapshot"
     );
 
@@ -303,12 +284,12 @@ fn isolate_then_elect_and_write(
     isolated: &mut ProcessNode,
     preferred: &mut ProcessNode,
     other: &mut ProcessNode,
-) -> (u64, u64) {
+) -> u64 {
     assert_eq!(
         isolated.command(&VyrmNodeCommand::SetTransportEnabled { enabled: false }),
         VyrmNodeResult::Ack
     );
-    let (index, leader) = elect_and_write(
+    let (index, _) = elect_and_write(
         preferred,
         other,
         "process-probe-partition",
@@ -319,7 +300,7 @@ fn isolate_then_elect_and_write(
         VyrmNodeResult::Ack
     );
     wait_applied(isolated, index);
-    (index, leader)
+    index
 }
 
 fn wait_for_agreed_leader(
@@ -380,43 +361,105 @@ fn wait_applied(node: &mut ProcessNode, index: u64) {
     }
 }
 
-fn wait_for_snapshot(node: &mut ProcessNode, at_least: u64) -> u64 {
-    let deadline = Instant::now() + Duration::from_secs(10);
+fn snapshot_purge_and_add_learner(
+    voters: &mut [&mut ProcessNode],
+    at_least: u64,
+    learner: u64,
+) -> u64 {
+    let deadline = Instant::now() + Duration::from_secs(30);
+    let mut active_leader = None;
+    let mut snapshot_index = None;
+    let mut next_trigger = Instant::now();
     loop {
-        if let Some(index) = node
-            .status()
-            .snapshot_index
-            .filter(|index| *index >= at_least)
-        {
-            return index;
+        let last_statuses = voter_statuses(voters);
+        let Some(leader) = quorum_agreed_leader(&last_statuses) else {
+            assert!(
+                Instant::now() < deadline,
+                "voters did not agree on a leader while preparing snapshot recovery: {last_statuses:?}"
+            );
+            thread::sleep(Duration::from_millis(50));
+            continue;
+        };
+        if active_leader != Some(leader) {
+            active_leader = Some(leader);
+            snapshot_index = None;
+            next_trigger = Instant::now();
         }
-        assert!(Instant::now() < deadline, "snapshot was not published");
+        let leader_status = last_statuses
+            .iter()
+            .find(|status| status.raft_node_id == leader)
+            .expect("agreed leader must be one of the voters");
+        if snapshot_index.is_none() {
+            snapshot_index = leader_status
+                .snapshot_index
+                .filter(|index| *index >= at_least);
+        }
+        if Instant::now() >= next_trigger {
+            let command = match snapshot_index {
+                Some(index) => VyrmNodeCommand::PurgeLog { index },
+                None => VyrmNodeCommand::TriggerSnapshot,
+            };
+            let reply = command_on_voter(voters, leader, &command);
+            if !reply.ok {
+                active_leader = None;
+                thread::sleep(Duration::from_millis(50));
+                continue;
+            }
+            next_trigger = Instant::now() + Duration::from_millis(250);
+        }
+        if let Some(index) = snapshot_index {
+            let current = voter_statuses(voters);
+            if quorum_agreed_leader(&current) == Some(leader)
+                && current
+                    .iter()
+                    .find(|status| status.raft_node_id == leader)
+                    .is_some_and(|status| status.purged_index >= Some(index))
+            {
+                let reply = command_on_voter(
+                    voters,
+                    leader,
+                    &VyrmNodeCommand::AddLearner { node_id: learner },
+                );
+                if reply.ok {
+                    assert_eq!(reply.value, Some(VyrmNodeResult::Ack));
+                    return index;
+                }
+                active_leader = None;
+            }
+        }
+        assert!(
+            Instant::now() < deadline,
+            "current leader did not snapshot, purge, and add the learner: {last_statuses:?}"
+        );
         thread::sleep(Duration::from_millis(50));
     }
 }
 
-fn wait_for_purge(node: &mut ProcessNode, at_least: u64) {
-    let deadline = Instant::now() + Duration::from_secs(10);
-    let mut next_trigger = Instant::now();
-    loop {
-        if node.status().purged_index >= Some(at_least) {
-            return;
-        }
-        // OpenRaft acknowledges an external purge trigger when it is queued.
-        // A leader may defer the physical purge while a replication task owns
-        // the requested log range, and no later progress notification is
-        // guaranteed after that task releases it. Reasserting the idempotent
-        // trigger makes the process-level completion contract deterministic.
-        if Instant::now() >= next_trigger {
-            assert_eq!(
-                node.command(&VyrmNodeCommand::PurgeLog { index: at_least }),
-                VyrmNodeResult::Ack
-            );
-            next_trigger = Instant::now() + Duration::from_millis(250);
-        }
-        assert!(Instant::now() < deadline, "snapshot log was not purged");
-        thread::sleep(Duration::from_millis(50));
+fn voter_statuses(voters: &mut [&mut ProcessNode]) -> Vec<VyrmNodeStatus> {
+    voters.iter_mut().map(|node| node.status()).collect()
+}
+
+fn quorum_agreed_leader(statuses: &[VyrmNodeStatus]) -> Option<u64> {
+    let mut counts = BTreeMap::new();
+    for leader in statuses.iter().filter_map(|status| status.current_leader) {
+        *counts.entry(leader).or_insert(0usize) += 1;
     }
+    counts
+        .into_iter()
+        .find_map(|(leader, count)| (count >= 2).then_some(leader))
+}
+
+fn command_on_voter(
+    voters: &mut [&mut ProcessNode],
+    node_id: u64,
+    command: &VyrmNodeCommand,
+) -> VyrmNodeReply {
+    for node in voters {
+        if node.status().raft_node_id == node_id {
+            return node.command_reply(command);
+        }
+    }
+    panic!("voter inventory did not contain node {node_id}")
 }
 
 fn write_index(result: VyrmNodeResult) -> u64 {
