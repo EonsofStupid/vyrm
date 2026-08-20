@@ -516,8 +516,10 @@ commit emit linked, privacy-bounded spans. Vector freshness advances on its
 projection-family source cursor rather than trace traffic; embedding may rebase
 over trace-only observer writes but denies any intervening data/schema change.
 Connectome proves these audited events reach search and storage lanes. Rich
-causal analysis, provider/cluster coverage, persistent artifact-catalog
-publication, OTLP export, and pgvector remain promotion gates.
+causal lifecycle analysis, control-only JSON export, and Connectome
+provider/tool-envelope coverage are now implemented. Cluster coverage,
+persistent artifact-catalog publication, OTLP translation, and the remaining
+pgvector production gates stay open.
 
 The portable operator-knowledge prerequisite is now implemented separately from
 live endpoint certification. `vyrm-operator` binds project/member, external

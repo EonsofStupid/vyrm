@@ -351,3 +351,125 @@ fn default_path_resolution_is_instance_local_and_foreign_paths_fail() {
     assert!(error.contains("does not belong"));
     assert!(!second.path().join(".vyrm/store").exists());
 }
+
+#[test]
+fn trace_export_is_causal_bounded_and_deny_by_default_for_content() {
+    let root = tempfile::tempdir().unwrap();
+    vyrm_node::InstanceManifest::ensure_dedicated(root.path()).unwrap();
+    let binding = vyrm_node::InstanceBinding::discover(root.path()).unwrap();
+    let store = vyrm_store::PersistentEngine::open(&binding.expected_store()).unwrap();
+    let scope = ScopeId::new(vyrm_node::REASONING_SCOPE).unwrap();
+    let root_identity = vyrm_node::TraceIdentity::derive(&[b"trace-export-root"]).unwrap();
+    let child_identity = root_identity.child(&[b"tool"]).unwrap();
+    for event in [
+        RuntimeTraceEvent::start(
+            root_identity.trace_id.clone(),
+            root_identity.span_id.clone(),
+            None,
+            TraceDomain::Model,
+            "provider.invoke",
+            100,
+            TraceDataClass::Control,
+            Vec::new(),
+            RuntimeProperties::new(),
+        )
+        .unwrap(),
+        RuntimeTraceEvent::start(
+            child_identity.trace_id.clone(),
+            child_identity.span_id.clone(),
+            Some(root_identity.span_id.clone()),
+            TraceDomain::Tool,
+            "provider.tool.command_execution",
+            101,
+            TraceDataClass::Control,
+            Vec::new(),
+            RuntimeProperties::new(),
+        )
+        .unwrap(),
+        RuntimeTraceEvent::finish(
+            child_identity.trace_id,
+            child_identity.span_id.clone(),
+            Some(root_identity.span_id.clone()),
+            TraceDomain::Tool,
+            "provider.tool.command_execution",
+            102,
+            800,
+            TraceOutcome::Ok,
+            TraceDataClass::Control,
+            Vec::new(),
+            RuntimeProperties::new(),
+        )
+        .unwrap(),
+        RuntimeTraceEvent::finish(
+            root_identity.trace_id,
+            root_identity.span_id.clone(),
+            None,
+            TraceDomain::Model,
+            "provider.invoke",
+            103,
+            2_500,
+            TraceOutcome::Ok,
+            TraceDataClass::Control,
+            Vec::new(),
+            RuntimeProperties::new(),
+        )
+        .unwrap(),
+    ] {
+        vyrm_node::record_runtime_trace(&store, &scope, "connectome:test", event).unwrap();
+    }
+    let content_identity = vyrm_node::TraceIdentity::derive(&[b"trace-export-content"]).unwrap();
+    vyrm_node::record_runtime_trace(
+        &store,
+        &scope,
+        "connectome:test",
+        RuntimeTraceEvent::finish(
+            content_identity.trace_id,
+            content_identity.span_id,
+            None,
+            TraceDomain::Model,
+            "provider.content",
+            104,
+            1,
+            TraceOutcome::Ok,
+            TraceDataClass::Content,
+            Vec::new(),
+            RuntimeProperties::new(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+
+    let before = store.runtime_cursor().unwrap();
+    let control =
+        connectome_ui::runtime_traces(&store, &binding.manifest.id, 4_096, &["control"]).unwrap();
+    assert_eq!(control.format, "vyrm-trace-export-v1");
+    assert_eq!(control.included_data_classes, vec!["control"]);
+    assert_eq!(control.events.len(), 4);
+    assert_eq!(control.traces.len(), 1);
+    assert_eq!(control.traces[0].status, "complete");
+    assert_eq!(control.traces[0].critical_path_duration_micros, Some(2_500));
+    assert_eq!(
+        control.traces[0].critical_path_span_ids,
+        vec![
+            root_identity.span_id.to_string(),
+            child_identity.span_id.to_string()
+        ]
+    );
+    assert!(control
+        .events
+        .iter()
+        .all(|event| event.audit_digest.is_some()));
+
+    let content =
+        connectome_ui::runtime_traces(&store, &binding.manifest.id, 4_096, &["content"]).unwrap();
+    assert_eq!(content.events.len(), 1);
+    assert_eq!(content.traces[0].status, "summary");
+    assert!(
+        connectome_ui::runtime_traces(&store, &binding.manifest.id, 4_096, &["unknown"]).is_err()
+    );
+    assert_eq!(
+        store.runtime_cursor().unwrap(),
+        before,
+        "trace analysis and export must remain read-only"
+    );
+}

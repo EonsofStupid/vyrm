@@ -7,7 +7,7 @@ pub use flight::{
 };
 
 use serde::Serialize;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -38,6 +38,7 @@ pub struct Snapshot {
     pub invocations: Vec<Invocation>,
     pub flights: Vec<Flight>,
     pub temporal_events: Vec<TemporalEventView>,
+    pub traces: TraceExportView,
     pub schema: Option<RuntimeSchemaRegistry>,
     pub capabilities: CapabilitiesView,
     pub graph: GraphView,
@@ -136,6 +137,75 @@ pub struct TemporalEventView {
     pub digest: String,
     pub mutation: RuntimeMutation,
     pub audit: Option<AuditEnvelope>,
+}
+
+/// One persisted trace micro-event with its authoritative runtime coordinate.
+/// Raw links and attributes remain typed `RuntimeValue`s so this diagnostic
+/// surface cannot silently weaken a newer trace contract it does not yet know.
+#[derive(Debug, Clone, Serialize)]
+pub struct TraceEventView {
+    pub cursor: u64,
+    pub commit_id: String,
+    pub scope: String,
+    pub actor: String,
+    pub change_digest: String,
+    pub audit_digest: Option<String>,
+    pub trace_id: String,
+    pub span_id: String,
+    pub parent_span_id: Option<String>,
+    pub phase: String,
+    pub domain: String,
+    pub name: String,
+    pub at: u64,
+    pub duration_micros: Option<u64>,
+    pub outcome: String,
+    pub data_class: String,
+    pub links: Vec<RuntimeValue>,
+    pub attributes: BTreeMap<String, RuntimeValue>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct TraceSpanView {
+    pub span_id: String,
+    pub parent_span_id: Option<String>,
+    pub domain: String,
+    pub name: String,
+    pub data_class: String,
+    pub outcome: String,
+    pub status: &'static str,
+    pub started_at: Option<u64>,
+    pub finished_at: Option<u64>,
+    pub duration_micros: Option<u64>,
+    pub event_cursors: Vec<u64>,
+    pub child_span_ids: Vec<String>,
+    pub diagnostics: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct CausalTraceView {
+    pub trace_id: String,
+    pub status: &'static str,
+    pub root_span_ids: Vec<String>,
+    pub critical_path_span_ids: Vec<String>,
+    pub critical_path_duration_micros: Option<u64>,
+    pub spans: Vec<TraceSpanView>,
+    pub diagnostics: Vec<String>,
+}
+
+/// A bounded, retention-filtered export from one physically bound project
+/// store. Control evidence is the default; operator/content classes require an
+/// explicit request so a diagnostic GET cannot accidentally widen retention.
+#[derive(Debug, Clone, Serialize)]
+pub struct TraceExportView {
+    pub format: &'static str,
+    pub instance_id: String,
+    pub runtime_head: u64,
+    pub truncated_before_cursor: Option<u64>,
+    pub included_data_classes: Vec<String>,
+    pub critical_path_basis: &'static str,
+    pub diagnostics: Vec<String>,
+    pub events: Vec<TraceEventView>,
+    pub traces: Vec<CausalTraceView>,
 }
 
 #[derive(Debug, Default, Serialize)]
@@ -238,6 +308,7 @@ pub fn snapshot(
     let invocations = store.invocations_since(0)?;
     let flights = flight::stored_flights(store)?;
     let temporal_events = temporal_events(store, 512)?;
+    let traces = runtime_traces(store, &binding.manifest.id, 512, &["control"])?;
     let graph = build_graph(
         &binding.manifest.id,
         &claims,
@@ -292,6 +363,7 @@ pub fn snapshot(
         invocations,
         flights,
         temporal_events,
+        traces,
         schema,
         capabilities: CapabilitiesView {
             runners_enabled: false,
@@ -341,6 +413,343 @@ pub fn temporal_events(
         });
     }
     Ok(events)
+}
+
+/// Reconstructs causal trace lifecycles from the bounded authoritative change
+/// log. The physical store is already project-bound by `InstanceBinding`; this
+/// method intentionally does not accept an arbitrary filesystem or database.
+pub fn runtime_traces(
+    store: &PersistentEngine,
+    instance_id: &str,
+    limit: usize,
+    included_data_classes: &[&str],
+) -> Result<TraceExportView, Box<dyn std::error::Error>> {
+    let allowed = included_data_classes
+        .iter()
+        .map(|value| value.to_ascii_lowercase())
+        .collect::<BTreeSet<_>>();
+    if allowed.is_empty()
+        || allowed
+            .iter()
+            .any(|value| !matches!(value.as_str(), "control" | "operator" | "content"))
+    {
+        return Err(
+            "trace data classes must be an explicit non-empty subset of control, operator, content"
+                .into(),
+        );
+    }
+
+    let limit = limit.clamp(1, 4_096);
+    let head = store.runtime_cursor()?;
+    let after = head.saturating_sub(limit as u64);
+    let page = store.runtime_changes_since(after, limit, None)?;
+    let mut audits = BTreeMap::<String, Option<AuditEnvelope>>::new();
+    let mut diagnostics = Vec::new();
+    let mut events = Vec::new();
+
+    for change in page.changes {
+        let RuntimeMutation::Event { event } = &change.mutation else {
+            continue;
+        };
+        if event.kind.as_str() != vyrm_core::RUNTIME_TRACE_EVENT_TYPE {
+            continue;
+        }
+        let Some(data_class) = runtime_string(&event.properties, "data_class") else {
+            diagnostics.push(format!(
+                "cursor {} trace event has no typed data_class and was denied from export",
+                change.cursor
+            ));
+            continue;
+        };
+        if !allowed.contains(&data_class) {
+            continue;
+        }
+        let audit = match audits.get(&change.commit_id) {
+            Some(audit) => audit.clone(),
+            None => {
+                let audit = store.runtime_audit(&change.commit_id)?;
+                audits.insert(change.commit_id.clone(), audit.clone());
+                audit
+            }
+        };
+        match trace_event_view(&change, event, audit.as_ref()) {
+            Ok(event) => events.push(event),
+            Err(reason) => diagnostics.push(format!(
+                "cursor {} malformed trace event retained but not analyzed: {reason}",
+                change.cursor
+            )),
+        }
+    }
+    events.sort_by_key(|event| event.cursor);
+    let traces = analyze_traces(&events);
+    Ok(TraceExportView {
+        format: "vyrm-trace-export-v1",
+        instance_id: instance_id.to_owned(),
+        runtime_head: head,
+        truncated_before_cursor: (after > 0).then_some(after.saturating_add(1)),
+        included_data_classes: allowed.into_iter().collect(),
+        critical_path_basis: "longest measured root span followed by its longest measured child at each causal branch; nested durations are never summed",
+        diagnostics,
+        events,
+        traces,
+    })
+}
+
+fn trace_event_view(
+    change: &vyrm_core::RuntimeChange,
+    event: &vyrm_core::RuntimeEvent,
+    audit: Option<&AuditEnvelope>,
+) -> Result<TraceEventView, String> {
+    let required_string = |name| {
+        runtime_string(&event.properties, name)
+            .ok_or_else(|| format!("required string property {name:?} is absent"))
+    };
+    let required_unsigned = |name| {
+        runtime_unsigned(&event.properties, name)
+            .ok_or_else(|| format!("required unsigned property {name:?} is absent"))
+    };
+    let links = match event.properties.get("links") {
+        Some(RuntimeValue::List(values)) => values.clone(),
+        _ => return Err("required list property \"links\" is absent".into()),
+    };
+    let attributes = match event.properties.get("attributes") {
+        Some(RuntimeValue::Map(values)) => values.clone(),
+        _ => return Err("required map property \"attributes\" is absent".into()),
+    };
+    Ok(TraceEventView {
+        cursor: change.cursor,
+        commit_id: change.commit_id.clone(),
+        scope: change.scope.as_str().to_owned(),
+        actor: change.actor.clone(),
+        change_digest: change.digest.clone(),
+        audit_digest: audit.map(|value| value.digest.clone()),
+        trace_id: required_string("trace_id")?,
+        span_id: required_string("span_id")?,
+        parent_span_id: runtime_string(&event.properties, "parent_span_id"),
+        phase: required_string("phase")?,
+        domain: required_string("domain")?,
+        name: required_string("name")?,
+        at: required_unsigned("at")?,
+        duration_micros: runtime_unsigned(&event.properties, "duration_micros"),
+        outcome: required_string("outcome")?,
+        data_class: required_string("data_class")?,
+        links,
+        attributes,
+    })
+}
+
+fn analyze_traces(events: &[TraceEventView]) -> Vec<CausalTraceView> {
+    let mut grouped = BTreeMap::<String, BTreeMap<String, Vec<&TraceEventView>>>::new();
+    for event in events {
+        grouped
+            .entry(event.trace_id.clone())
+            .or_default()
+            .entry(event.span_id.clone())
+            .or_default()
+            .push(event);
+    }
+    let mut traces = grouped
+        .into_iter()
+        .map(|(trace_id, span_events)| {
+            let newest_cursor = span_events
+                .values()
+                .flatten()
+                .map(|event| event.cursor)
+                .max()
+                .unwrap_or(0);
+            (newest_cursor, analyze_trace(trace_id, span_events))
+        })
+        .collect::<Vec<_>>();
+    traces.sort_by(|left, right| {
+        left.0
+            .cmp(&right.0)
+            .then_with(|| left.1.trace_id.cmp(&right.1.trace_id))
+    });
+    traces.into_iter().map(|(_, trace)| trace).collect()
+}
+
+fn analyze_trace(
+    trace_id: String,
+    span_events: BTreeMap<String, Vec<&TraceEventView>>,
+) -> CausalTraceView {
+    let mut spans = Vec::new();
+    for (span_id, mut events) in span_events {
+        events.sort_by_key(|event| event.cursor);
+        let starts = events
+            .iter()
+            .copied()
+            .filter(|event| event.phase == "start")
+            .collect::<Vec<_>>();
+        let finishes = events
+            .iter()
+            .copied()
+            .filter(|event| event.phase == "finish")
+            .collect::<Vec<_>>();
+        let first = events[0];
+        let mut span_diagnostics = Vec::new();
+        if starts.len() > 1 {
+            span_diagnostics.push(format!("{} start events were persisted", starts.len()));
+        }
+        if finishes.len() > 1 {
+            span_diagnostics.push(format!("{} finish events were persisted", finishes.len()));
+        }
+        let lifecycle = starts
+            .first()
+            .copied()
+            .or_else(|| finishes.first().copied())
+            .unwrap_or(first);
+        for event in &events {
+            if event.parent_span_id != lifecycle.parent_span_id
+                || event.domain != lifecycle.domain
+                || event.name != lifecycle.name
+                || event.data_class != lifecycle.data_class
+            {
+                span_diagnostics.push(format!(
+                    "cursor {} disagrees with the span lifecycle identity",
+                    event.cursor
+                ));
+            }
+        }
+        let status = if !span_diagnostics.is_empty() {
+            "invalid"
+        } else if !starts.is_empty() && finishes.is_empty() {
+            "incomplete"
+        } else if starts.is_empty() && !finishes.is_empty() {
+            "summary"
+        } else if !starts.is_empty() && !finishes.is_empty() {
+            "complete"
+        } else {
+            "annotation"
+        };
+        spans.push(TraceSpanView {
+            span_id,
+            parent_span_id: lifecycle.parent_span_id.clone(),
+            domain: lifecycle.domain.clone(),
+            name: lifecycle.name.clone(),
+            data_class: lifecycle.data_class.clone(),
+            outcome: finishes
+                .first()
+                .map_or_else(|| lifecycle.outcome.clone(), |event| event.outcome.clone()),
+            status,
+            started_at: starts.first().map(|event| event.at),
+            finished_at: finishes.first().map(|event| event.at),
+            duration_micros: finishes.first().and_then(|event| event.duration_micros),
+            event_cursors: events.iter().map(|event| event.cursor).collect(),
+            child_span_ids: Vec::new(),
+            diagnostics: span_diagnostics,
+        });
+    }
+    spans.sort_by(|left, right| left.span_id.cmp(&right.span_id));
+    let positions = spans
+        .iter()
+        .enumerate()
+        .map(|(index, span)| (span.span_id.clone(), index))
+        .collect::<BTreeMap<_, _>>();
+    let mut diagnostics = Vec::new();
+    for index in 0..spans.len() {
+        let Some(parent) = spans[index].parent_span_id.clone() else {
+            continue;
+        };
+        if let Some(parent_index) = positions.get(&parent).copied() {
+            let child = spans[index].span_id.clone();
+            spans[parent_index].child_span_ids.push(child);
+        } else {
+            diagnostics.push(format!(
+                "span {} has parent {} outside the retained export window",
+                spans[index].span_id, parent
+            ));
+        }
+    }
+    for span in &mut spans {
+        span.child_span_ids.sort();
+    }
+    for span in &spans {
+        let mut seen = BTreeSet::new();
+        let mut cursor = Some(span.span_id.as_str());
+        while let Some(id) = cursor {
+            if !seen.insert(id.to_owned()) {
+                diagnostics.push(format!("causal parent cycle includes span {id}"));
+                break;
+            }
+            cursor = positions
+                .get(id)
+                .and_then(|index| spans[*index].parent_span_id.as_deref());
+        }
+    }
+    diagnostics.sort();
+    diagnostics.dedup();
+    let mut roots = spans
+        .iter()
+        .filter(|span| {
+            span.parent_span_id
+                .as_ref()
+                .is_none_or(|parent| !positions.contains_key(parent))
+        })
+        .map(|span| span.span_id.clone())
+        .collect::<Vec<_>>();
+    roots.sort();
+    let critical_root = roots.iter().max_by(|left, right| {
+        span_duration(&spans, &positions, left)
+            .cmp(&span_duration(&spans, &positions, right))
+            .then_with(|| right.cmp(left))
+    });
+    let mut critical_path = Vec::new();
+    let mut seen = BTreeSet::new();
+    let mut current = critical_root.cloned();
+    while let Some(span_id) = current {
+        if !seen.insert(span_id.clone()) {
+            break;
+        }
+        critical_path.push(span_id.clone());
+        let span = &spans[positions[&span_id]];
+        current = span
+            .child_span_ids
+            .iter()
+            .max_by(|left, right| {
+                span_duration(&spans, &positions, left)
+                    .cmp(&span_duration(&spans, &positions, right))
+                    .then_with(|| right.cmp(left))
+            })
+            .cloned();
+    }
+    let critical_path_duration_micros =
+        critical_root.and_then(|root| spans[positions[root]].duration_micros);
+    let status = if !diagnostics
+        .iter()
+        .all(|value| value.contains("outside the retained"))
+        || spans.iter().any(|span| span.status == "invalid")
+    {
+        "invalid"
+    } else if spans.iter().any(|span| span.status == "incomplete") {
+        "incomplete"
+    } else if spans
+        .iter()
+        .all(|span| matches!(span.status, "summary" | "annotation"))
+    {
+        "summary"
+    } else {
+        "complete"
+    };
+    CausalTraceView {
+        trace_id,
+        status,
+        root_span_ids: roots,
+        critical_path_span_ids: critical_path,
+        critical_path_duration_micros,
+        spans,
+        diagnostics,
+    }
+}
+
+fn span_duration(
+    spans: &[TraceSpanView],
+    positions: &BTreeMap<String, usize>,
+    span_id: &str,
+) -> u64 {
+    positions
+        .get(span_id)
+        .and_then(|index| spans[*index].duration_micros)
+        .unwrap_or(0)
 }
 
 fn describe_mutation(mutation: &RuntimeMutation) -> (&'static str, String, String, String) {
@@ -926,6 +1335,30 @@ fn respond(
                 Ok(events) => json_response(StatusCode(200), &events),
                 Err(error) => json_response(
                     StatusCode(500),
+                    &serde_json::json!({"error":error.to_string()}),
+                ),
+            }
+        }
+        "/api/runtime/traces" => {
+            let params = query_params(query);
+            let limit = params
+                .get("limit")
+                .and_then(|value| value.parse().ok())
+                .unwrap_or(1_024usize)
+                .clamp(1, 4_096);
+            let requested = params
+                .get("classes")
+                .map(String::as_str)
+                .unwrap_or("control");
+            let classes = requested
+                .split(',')
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .collect::<Vec<_>>();
+            match runtime_traces(store, &binding.manifest.id, limit, &classes) {
+                Ok(traces) => json_response(StatusCode(200), &traces),
+                Err(error) => json_response(
+                    StatusCode(400),
                     &serde_json::json!({"error":error.to_string()}),
                 ),
             }

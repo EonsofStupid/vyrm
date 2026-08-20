@@ -1,7 +1,7 @@
 (() => {
   'use strict';
 
-  const views = new Set(['overview', 'flight', 'stream', 'graph', 'schema', 'query', 'runs', 'claims', 'routes', 'activity']);
+  const views = new Set(['overview', 'flight', 'stream', 'traces', 'graph', 'schema', 'query', 'runs', 'claims', 'routes', 'activity']);
   const initialView = location.hash.slice(1);
   const promptPresets = {
     weak: 'Make this better.',
@@ -32,6 +32,8 @@
     streamDirection: 1,
     streamSpeed: 1,
     streamTimer: null,
+    traceId: null,
+    traceSpanId: null,
     refreshTimer: null,
     promptDraft: promptPresets.strong,
     flightSettings: { context: 'pruned', provider: 'codex', budget: 1500, acceptance: '', reasoning: 'default' },
@@ -122,6 +124,7 @@
     $('#run-count').textContent = data.runs.length;
     $('#flight-count').textContent = data.flights.length;
     $('#stream-count').textContent = data.temporal_events.length;
+    $('#trace-count').textContent = data.traces?.traces?.length || 0;
     $('#claim-count').textContent = data.claims.length;
     $('#file-count').textContent = data.files.length;
     $('#schema-count').textContent = data.schema
@@ -134,7 +137,7 @@
   function render() {
     if (!state.data) return;
     updateChrome();
-    const renderers = { overview: renderOverview, flight: renderFlight, stream: renderStream, graph: renderGraph, schema: renderSchema, query: renderQuery, runs: renderRuns, claims: renderClaims, routes: renderRoutes, activity: renderActivity };
+    const renderers = { overview: renderOverview, flight: renderFlight, stream: renderStream, traces: renderTraces, graph: renderGraph, schema: renderSchema, query: renderQuery, runs: renderRuns, claims: renderClaims, routes: renderRoutes, activity: renderActivity };
     (renderers[state.view] || renderOverview)();
     renderInspector();
   }
@@ -525,6 +528,100 @@
         renderFlightStage();
       }
     }, 850 / state.flightSpeed);
+  }
+
+  function renderTraces() {
+    const bundle = state.data.traces || { traces: [], events: [], diagnostics: [] };
+    const traces = bundle.traces || [];
+    if (!traces.length) {
+      $('#main').innerHTML = pageHead(
+        'Causal trace lab',
+        'Reconstruct complete, incomplete, and summary spans from persisted runtime evidence.'
+      ) + empty('No retained control traces', 'Run a traced query, lifecycle hook, vector operation, or provider flight to create causal evidence.');
+      return;
+    }
+    if (!state.traceId || !traces.some((trace) => trace.trace_id === state.traceId)) {
+      state.traceId = traces.at(-1).trace_id;
+      state.traceSpanId = null;
+    }
+    const trace = traces.find((value) => value.trace_id === state.traceId);
+    const critical = new Set(trace.critical_path_span_ids || []);
+    const spans = trace.spans || [];
+    if (!state.traceSpanId || !spans.some((span) => span.span_id === state.traceSpanId)) {
+      state.traceSpanId = (trace.critical_path_span_ids || [])[0] || spans[0]?.span_id || null;
+    }
+    const selected = spans.find((span) => span.span_id === state.traceSpanId) || spans[0];
+    const positions = new Map(spans.map((span) => [span.span_id, span]));
+    const depthOf = (span) => {
+      let depth = 0;
+      let parent = span.parent_span_id;
+      const seen = new Set([span.span_id]);
+      while (parent && positions.has(parent) && !seen.has(parent)) {
+        seen.add(parent); depth += 1; parent = positions.get(parent).parent_span_id;
+      }
+      return depth;
+    };
+    const ordered = [...spans].sort((left, right) => {
+      const leftCursor = Math.min(...left.event_cursors);
+      const rightCursor = Math.min(...right.event_cursors);
+      return leftCursor - rightCursor || left.span_id.localeCompare(right.span_id);
+    });
+    const maxDuration = Math.max(1, ...spans.map((span) => span.duration_micros || 0));
+    const traceEvents = (bundle.events || []).filter((event) => event.trace_id === trace.trace_id);
+    const selectedEvents = selected
+      ? traceEvents.filter((event) => event.span_id === selected.span_id)
+      : [];
+    const complete = spans.filter((span) => ['complete', 'summary'].includes(span.status)).length;
+    const domainCount = new Set(spans.map((span) => span.domain)).size;
+    $('#main').innerHTML = pageHead(
+      'Causal trace lab',
+      'Measured parent/child lifecycles reconstructed from the project store. Missing finishes and retained-window boundaries stay visible.',
+      `<a class="secondary-button" href="/api/runtime/traces?limit=4096&classes=control" target="_blank" rel="noopener">Export control JSON</a>`
+    ) + `
+      <section class="trace-lab">
+        <div class="trace-summary-strip">
+          <div><span>TRACE STATE</span><strong class="trace-state ${escapeHtml(trace.status)}">${escapeHtml(trace.status)}</strong></div>
+          <div><span>LIFECYCLES</span><strong>${complete}/${spans.length} closed</strong></div>
+          <div><span>DOMAINS</span><strong>${domainCount} observed</strong></div>
+          <div><span>MEASURED ROOT</span><strong>${trace.critical_path_duration_micros == null ? 'open' : `${human(trace.critical_path_duration_micros)} µs`}</strong></div>
+        </div>
+        <div class="trace-history" aria-label="Retained traces">
+          ${traces.slice(-24).reverse().map((value) => {
+            const first = value.spans[0];
+            return `<button type="button" data-trace-id="${escapeHtml(value.trace_id)}" class="${value.trace_id === trace.trace_id ? 'active' : ''}"><i class="trace-state ${escapeHtml(value.status)}"></i><span>${escapeHtml(first?.name || 'trace')}</span><code>${escapeHtml(value.trace_id.slice(0, 8))}</code><b>${value.spans.length}</b></button>`;
+          }).join('')}
+        </div>
+        <section class="causal-stage">
+          <header><div><span class="eyebrow">CAUSAL TOPOLOGY</span><h2>${escapeHtml(trace.trace_id)}</h2></div><span>${escapeHtml(bundle.critical_path_basis || '')}</span></header>
+          <div class="critical-route"><label>MEASURED CRITICAL CANDIDATE</label>${(trace.critical_path_span_ids || []).map((id, index) => {
+            const span = positions.get(id);
+            return `${index ? '<i>→</i>' : ''}<button type="button" data-trace-span="${escapeHtml(id)}">${escapeHtml(span?.name || id)}</button>`;
+          }).join('') || '<span>Unavailable until a measured root is retained.</span>'}</div>
+          <div class="causal-lanes">
+            ${ordered.map((span) => {
+              const depth = depthOf(span);
+              const width = span.duration_micros == null ? 12 : Math.max(12, Math.round((span.duration_micros / maxDuration) * 100));
+              return `<button type="button" data-trace-span="${escapeHtml(span.span_id)}" class="causal-span ${span.span_id === selected?.span_id ? 'active' : ''} ${critical.has(span.span_id) ? 'critical' : ''}" style="--trace-depth:${depth};--trace-width:${width}%">
+                <i></i><span><small>${escapeHtml(span.domain)} · ${escapeHtml(span.status)}</small><strong>${escapeHtml(span.name)}</strong><code>${escapeHtml(span.span_id)}</code></span><b>${span.duration_micros == null ? 'open' : `${human(span.duration_micros)} µs`}</b>
+              </button>`;
+            }).join('')}
+          </div>
+        </section>
+        ${selected ? `<article class="trace-inspection">
+          <header><div><span class="eyebrow">FROZEN SPAN</span><h2>${escapeHtml(selected.name)}</h2></div><span class="badge ${selected.status === 'incomplete' || selected.status === 'invalid' ? 'error' : 'ready'}">${escapeHtml(selected.status)}</span></header>
+          <div class="event-data-strip"><div><span>domain</span><strong>${escapeHtml(selected.domain)}</strong></div><div><span>outcome</span><strong>${escapeHtml(selected.outcome)}</strong></div><div><span>data class</span><strong>${escapeHtml(selected.data_class)}</strong></div><div><span>children</span><strong>${selected.child_span_ids.length}</strong></div></div>
+          <div class="trace-event-list">${selectedEvents.map((event) => `<button type="button" data-trace-cursor="${event.cursor}"><span>cursor ${event.cursor}</span><strong>${escapeHtml(event.phase)}</strong><b>${escapeHtml(event.outcome)}</b><code>${escapeHtml(event.change_digest.slice(0, 12))}…</code></button>`).join('')}</div>
+          ${selected.diagnostics.length ? `<ul>${selected.diagnostics.map((value) => `<li>${escapeHtml(value)}</li>`).join('')}</ul>` : ''}
+        </article>` : ''}
+        ${(trace.diagnostics.length || bundle.diagnostics.length) ? `<section class="trace-diagnostics"><strong>Integrity diagnostics</strong>${[...trace.diagnostics, ...bundle.diagnostics].map((value) => `<p>${escapeHtml(value)}</p>`).join('')}</section>` : ''}
+      </section>`;
+    $$('[data-trace-id]').forEach((button) => button.addEventListener('click', () => {
+      state.traceId = button.dataset.traceId; state.traceSpanId = null; renderTraces();
+    }));
+    $$('[data-trace-span]').forEach((button) => button.addEventListener('click', () => {
+      state.traceSpanId = button.dataset.traceSpan; renderTraces();
+    }));
+    $$('[data-trace-cursor]').forEach((button) => button.addEventListener('click', () => select(`runtime-change:${button.dataset.traceCursor}`)));
   }
 
   function renderStream() {

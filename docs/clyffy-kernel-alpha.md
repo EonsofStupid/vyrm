@@ -174,8 +174,11 @@ measured local results, never universal superiority.
    retain the exact cursor, scope, mutation digest, full mutation, and available
    hash-chained audit envelope. Query/storage, projection/vector, and embedding
    runtime spans now feed those lanes with three-engine and native-reopen proof.
-   Causal-tree/critical-path rendering, provider/cluster span coverage,
-   cursor-delta transport, and controlled provider evaluations remain open.
+   Causal lifecycle reconstruction, integrity diagnostics, a non-summed
+   measured critical candidate, control-only default JSON export, and
+   provider/tool-envelope spans are now complete for the local workbench.
+   Cluster spans, cursor-delta transport, OTLP translation, cross-run resource
+   analysis, and controlled provider evaluations remain open.
 10. **Portable and first live operator-knowledge gates complete:** versioned project/member,
     source/relation/tenant, model, snapshot/revision, path/control, result, and
     idempotent outbox contracts now have an exact reference adapter, safe

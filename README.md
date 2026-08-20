@@ -39,6 +39,10 @@ Vyrm provides:
   and embedding-inference/commit trace trees; native reads include bounded
   manifest/memtable/segment/cache/block deltas, while raw queries, parameters,
   vectors, filters, and embedding source bytes remain outside persisted traces;
+- a retention-filtered causal trace workbench that reconstructs complete,
+  incomplete, summary, and invalid lifecycles from the authoritative log,
+  identifies a non-double-counted measured critical-path candidate, and joins
+  real provider/tool envelopes by digest without retaining their content;
 - a versioned project-scoped operator-knowledge port for external systems such
   as pgvector: exact model/tenant/config binding, snapshot and stable-revision
   evidence, explicit vector-kind and path-specific metric capabilities,
@@ -118,6 +122,7 @@ Connectome provides ten lenses:
 | Schema | Inspect the persisted type, property, endpoint, uniqueness, and cardinality contract |
 | Query lab | Parse, bind, explain, and execute exact bitemporal `vyrmQL` reads |
 | Overview | Runtime health, freshness, grounding, and active work |
+| Causal traces | Parent/child span lifecycles, incomplete work, measured bottleneck candidates, exact cursors, and control-only JSON export |
 | Graph | Selection-centered claim, evidence, run, flight, and source topology |
 | Runs | Typed reasoning timelines |
 | Claims | Current bi-temporal state and provenance |
@@ -130,6 +135,7 @@ The local API also exposes the authoritative persistence layer:
 |---|---|
 | `GET /api/changes?after=N&limit=N&scope=...` | Resume the verified global runtime changefeed, optionally restricted to one scope |
 | `GET /api/runtime/events?limit=N` | Read the newest bounded, audit-attached temporal event projection |
+| `GET /api/runtime/traces?limit=N&classes=control` | Export bounded per-project causal traces; operator/content classes require explicit inclusion |
 | `GET /api/runtime/schema?scope=...` | Read the active persisted schema revision for one scope |
 | `GET /api/runtime/retention` | Inspect live snapshot leases and their logical GC retention pins |
 | `GET /api/runtime/query?scope=...&ql=...` | Parse, bind, explain, and execute an exact bitemporal `vyrmQL` query |
@@ -159,8 +165,11 @@ runtime mutations in the snapshot (up to 4,096 through the event API), not an
 independent telemetry store. It attaches the full mutation and available
 hash-chained audit envelope. The lanes describe persisted logical mutations;
 search, embedding, and storage lanes now include their persisted runtime spans.
-They do not imply per-operation physical WAL micro-events, complete provider or
-cluster coverage, unpersisted activity, or private model chain-of-thought.
+The Causal traces lens rebuilds parent/child lifecycle state and exposes exact
+event/audit coordinates. Armed prompt flights add a durable provider root,
+digest-only observable-envelope annotations, and tool-envelope children. They
+do not imply per-operation physical WAL micro-events, cluster coverage,
+unpersisted activity, or private model chain-of-thought.
 
 At the Rust port today, `MemoryEngine` and the transitional Fjall adapter expose
 the same versioned read-stamp, snapshot, and data-transaction semantics. The

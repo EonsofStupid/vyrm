@@ -1149,10 +1149,16 @@ These apply to every step and are not restated per step.
   schema change. Raw vectors, filters, and source content are never persisted.
   Memory/Fjall/native parity, denial paths, native reopen, and Connectome lane
   projection are green.
-- **Next:** add provider/tool, storage-write, and cluster boundary coverage,
-  then make Connectome distinguish complete logical evidence from bounded
-  physical detail and derive causal trees and critical paths. Persisted vector
-  artifact catalog publication also remains open.
+- **Complete for the local provider/tool and causal-analysis slice:** armed
+  prompt flights persist one measured provider boundary, digest-only observable
+  envelope annotations, and causal tool-envelope children. Connectome rebuilds
+  complete/incomplete/summary/invalid span lifecycles from the authoritative
+  log, retains exact cursor/change/audit coordinates, derives a measured
+  longest-root/child candidate without summing nested durations, and exports
+  only control-class evidence by default. Full read/projection link maps now
+  retain every stamp field required for reconstruction. Storage-write and
+  cluster boundary coverage, OTLP translation, persistent vector artifact
+  catalogs, and retained trace-regression histories remain open.
 - **Complete at the portable operator-knowledge gate:** `vyrm-operator` freezes
   project/member/config/source/relation/tenant/model bindings, PostgreSQL
   snapshot plus optional stable-revision evidence, exact/HNSW/IVFFlat controls,

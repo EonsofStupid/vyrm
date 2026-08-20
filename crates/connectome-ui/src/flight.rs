@@ -13,9 +13,12 @@ use std::time::Instant;
 use vyrm_core::{
     Reader, RuntimeCommit, RuntimeEvent, RuntimeEventSchema, RuntimeMutation, RuntimeProperties,
     RuntimePropertySchema, RuntimeRecord, RuntimeRecordSchema, RuntimeRef, RuntimeSchemaRegistry,
-    RuntimeType, RuntimeValue, RuntimeValueType, ScopeId,
+    RuntimeTraceEvent, RuntimeType, RuntimeValue, RuntimeValueType, ScopeId, TraceDataClass,
+    TraceDomain, TraceLink, TraceOutcome,
 };
-use vyrm_node::{HookContext, HookEvent, InstanceBinding};
+use vyrm_node::{
+    record_runtime_trace, DurableTraceSpan, HookContext, HookEvent, InstanceBinding, TraceIdentity,
+};
 use vyrm_store::{Engine, PersistentEngine};
 
 const FLIGHT_LEDGER: &str = "connectome-flight-ledger-v1";
@@ -199,7 +202,11 @@ pub struct FlightRecorder {
 }
 
 impl FlightRecorder {
-    pub fn new(store: Arc<PersistentEngine>, binding: InstanceBinding, runners_enabled: bool) -> Self {
+    pub fn new(
+        store: Arc<PersistentEngine>,
+        binding: InstanceBinding,
+        runners_enabled: bool,
+    ) -> Self {
         Self {
             store,
             binding,
@@ -488,25 +495,118 @@ impl FlightRecorder {
     }
 
     fn run_provider(&self, id: &str, request: &LaunchFlight, context: &str, started: Instant) {
-        if let Err(error) = self.run_provider_inner(id, request, context, &started) {
-            let _ = self.append_event(
-                id,
-                event(
-                    now(),
-                    started.elapsed().as_millis() as u64,
-                    "outcome",
-                    "provider_error",
-                    "Provider flight failed",
-                    &error.to_string(),
-                    Value::Null,
-                ),
+        let identity = match TraceIdentity::derive(&[
+            b"connectome-provider-flight-v1",
+            self.binding.manifest.id.as_bytes(),
+            id.as_bytes(),
+        ]) {
+            Ok(identity) => identity,
+            Err(error) => {
+                self.fail_provider(id, &started, &format!("provider trace identity: {error}"));
+                return;
+            }
+        };
+        let links = vec![TraceLink::Provider {
+            provider: request.provider.clone(),
+            invocation_id: id.to_owned(),
+        }];
+        let attributes = RuntimeProperties::from([
+            (
+                "context_mode".into(),
+                RuntimeValue::String(format!("{:?}", request.context_mode).to_ascii_lowercase()),
+            ),
+            (
+                "reasoning_effort".into(),
+                RuntimeValue::String(request.reasoning_profile.provider_effort().into()),
+            ),
+            (
+                "prompt_digest".into(),
+                RuntimeValue::Digest(vyrm_core::digest::sha256_hex(request.prompt.as_bytes())),
+            ),
+        ]);
+        let span = match DurableTraceSpan::start(
+            self.store.as_ref(),
+            match ScopeId::new(FLIGHT_SCOPE) {
+                Ok(scope) => scope,
+                Err(error) => {
+                    self.fail_provider(id, &started, &format!("provider trace scope: {error}"));
+                    return;
+                }
+            },
+            format!("connectome:provider:{}", request.provider),
+            identity.clone(),
+            None,
+            TraceDomain::Model,
+            "provider.invoke",
+            now(),
+            TraceDataClass::Control,
+            links,
+            attributes,
+        ) {
+            Ok(span) => span,
+            Err(error) => {
+                self.fail_provider(id, &started, &format!("provider trace start: {error}"));
+                return;
+            }
+        };
+        let result = self.run_provider_inner(id, request, context, &started, &identity);
+        let observed_flight = self.flight(id).ok().flatten();
+        let outcome = if result.is_ok()
+            && observed_flight
+                .as_ref()
+                .is_some_and(|flight| flight.status == FlightStatus::Succeeded)
+        {
+            TraceOutcome::Ok
+        } else {
+            TraceOutcome::Error
+        };
+        let metrics = observed_flight.map(|flight| flight.metrics);
+        let mut finish_attributes = RuntimeProperties::new();
+        if let Some(metrics) = metrics {
+            finish_attributes.insert(
+                "provider_events".into(),
+                RuntimeValue::Unsigned(metrics.provider_events),
             );
-            let _ = self.update(id, |flight| {
-                flight.status = FlightStatus::Failed;
-                flight.metrics.latency_ms = Some(started.elapsed().as_millis() as u64);
-                flight.metrics.acceptance_met = Some(false);
-            });
+            finish_attributes.insert(
+                "tool_calls".into(),
+                RuntimeValue::Unsigned(metrics.tool_calls),
+            );
+            if let Some(value) = metrics.input_tokens {
+                finish_attributes.insert("input_tokens".into(), RuntimeValue::Unsigned(value));
+            }
+            if let Some(value) = metrics.output_tokens {
+                finish_attributes.insert("output_tokens".into(), RuntimeValue::Unsigned(value));
+            }
+            if let Some(value) = metrics.reasoning_tokens {
+                finish_attributes.insert("reasoning_tokens".into(), RuntimeValue::Unsigned(value));
+            }
         }
+        let trace_finish = span.finish(self.store.as_ref(), outcome, Vec::new(), finish_attributes);
+        if let Err(error) = result {
+            self.fail_provider(id, &started, &error.to_string());
+        } else if let Err(error) = trace_finish {
+            self.fail_provider(id, &started, &format!("provider trace finish: {error}"));
+        }
+    }
+
+    fn fail_provider(&self, id: &str, started: &Instant, detail: &str) {
+        let _ = self.append_event(
+            id,
+            event(
+                now(),
+                started.elapsed().as_millis() as u64,
+                "outcome",
+                "provider_error",
+                "Provider flight failed",
+                detail,
+                Value::Null,
+            ),
+        );
+        let _ = self.update(id, |flight| {
+            flight.status = FlightStatus::Failed;
+            flight.metrics.latency_ms = Some(started.elapsed().as_millis() as u64);
+            flight.metrics.acceptance_met = Some(false);
+        });
     }
 
     fn run_provider_inner(
@@ -515,6 +615,7 @@ impl FlightRecorder {
         request: &LaunchFlight,
         context: &str,
         started: &Instant,
+        trace_identity: &TraceIdentity,
     ) -> Result<(), Box<dyn std::error::Error>> {
         let packet = if context.is_empty() {
             request.prompt.clone()
@@ -600,6 +701,19 @@ impl FlightRecorder {
             if stage == "tools" {
                 tool_calls = tool_calls.saturating_add(1);
             }
+            if let Err(error) = self.record_provider_envelope(
+                id,
+                request,
+                trace_identity,
+                provider_events,
+                stage,
+                &kind,
+                &line,
+            ) {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(format!("provider envelope trace: {error}").into());
+            }
             let detail = provider_detail(&value);
             self.append_event(
                 id,
@@ -661,6 +775,71 @@ impl FlightRecorder {
                 },
                 json!({"exit_code": status.code(), "acceptance_marker": request.acceptance_marker}),
             ),
+        )?;
+        Ok(())
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn record_provider_envelope(
+        &self,
+        id: &str,
+        request: &LaunchFlight,
+        trace_identity: &TraceIdentity,
+        ordinal: u64,
+        stage: &str,
+        kind: &str,
+        encoded_envelope: &str,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let provider_link = TraceLink::Provider {
+            provider: request.provider.clone(),
+            invocation_id: id.to_owned(),
+        };
+        let envelope_attributes = RuntimeProperties::from([
+            ("event_ordinal".into(), RuntimeValue::Unsigned(ordinal)),
+            (
+                "provider_event_kind".into(),
+                RuntimeValue::String(truncate(kind, 160)),
+            ),
+            (
+                "envelope_digest".into(),
+                RuntimeValue::Digest(vyrm_core::digest::sha256_hex(encoded_envelope.as_bytes())),
+            ),
+        ]);
+        let trace_event = if stage == "tools" {
+            let ordinal_bytes = ordinal.to_be_bytes();
+            let child = trace_identity.child(&[b"tool-envelope", &ordinal_bytes])?;
+            RuntimeTraceEvent::finish(
+                child.trace_id,
+                child.span_id,
+                Some(trace_identity.span_id.clone()),
+                TraceDomain::Tool,
+                "provider.tool_envelope",
+                now(),
+                0,
+                TraceOutcome::Ok,
+                TraceDataClass::Control,
+                vec![provider_link],
+                envelope_attributes,
+            )?
+        } else {
+            RuntimeTraceEvent::annotation(
+                trace_identity.trace_id.clone(),
+                trace_identity.span_id.clone(),
+                None,
+                TraceDomain::Model,
+                "provider.invoke",
+                now(),
+                TraceOutcome::Running,
+                TraceDataClass::Control,
+                vec![provider_link],
+                envelope_attributes,
+            )?
+        };
+        record_runtime_trace(
+            self.store.as_ref(),
+            &ScopeId::new(FLIGHT_SCOPE)?,
+            &format!("connectome:provider:{}", request.provider),
+            trace_event,
         )?;
         Ok(())
     }
@@ -916,7 +1095,9 @@ fn load_legacy(store: &PersistentEngine) -> Result<Ledger, Box<dyn std::error::E
     Ok(ledger)
 }
 
-fn load_runtime(store: &PersistentEngine) -> Result<(Option<Ledger>, u64), Box<dyn std::error::Error>> {
+fn load_runtime(
+    store: &PersistentEngine,
+) -> Result<(Option<Ledger>, u64), Box<dyn std::error::Error>> {
     let scope = ScopeId::new(FLIGHT_SCOPE)?;
     let observed_head = store.runtime_cursor()?;
     let mut cursor = 0;
@@ -981,7 +1162,9 @@ fn load(store: &PersistentEngine) -> Result<(Ledger, bool, u64), Box<dyn std::er
     }
 }
 
-pub(crate) fn stored_flights(store: &PersistentEngine) -> Result<Vec<Flight>, Box<dyn std::error::Error>> {
+pub(crate) fn stored_flights(
+    store: &PersistentEngine,
+) -> Result<Vec<Flight>, Box<dyn std::error::Error>> {
     Ok(load(store)?.0.flights)
 }
 
@@ -1348,13 +1531,87 @@ mod tests {
     }
 
     #[test]
+    fn provider_envelopes_emit_privacy_bounded_model_and_tool_traces() {
+        let root = tempfile::tempdir().unwrap();
+        vyrm_node::InstanceManifest::ensure_dedicated(root.path()).unwrap();
+        let store =
+            Arc::new(PersistentEngine::open(&root.path().join(vyrm_node::STORE_DIR)).unwrap());
+        let binding = InstanceBinding::discover(root.path()).unwrap();
+        let recorder = FlightRecorder::new(Arc::clone(&store), binding, false);
+        let identity = TraceIdentity::derive(&[b"provider-envelope-test"]).unwrap();
+        let request = LaunchFlight {
+            prompt: "secret prompt".into(),
+            provider: "codex".into(),
+            context_mode: ContextMode::Fresh,
+            budget: 1_500,
+            acceptance_marker: String::new(),
+            reasoning_profile: ReasoningProfile::High,
+        };
+        recorder
+            .record_provider_envelope(
+                "flight-test",
+                &request,
+                &identity,
+                1,
+                "model",
+                "message",
+                r#"{"type":"message","text":"private model output"}"#,
+            )
+            .unwrap();
+        recorder
+            .record_provider_envelope(
+                "flight-test",
+                &request,
+                &identity,
+                2,
+                "tools",
+                "command_execution",
+                r#"{"type":"tool_use","command":"private command"}"#,
+            )
+            .unwrap();
+
+        let page = store.runtime_changes_since(0, 64, None).unwrap();
+        let trace_events = page
+            .changes
+            .iter()
+            .filter_map(|change| match &change.mutation {
+                RuntimeMutation::Event { event }
+                    if event.kind.as_str() == vyrm_core::RUNTIME_TRACE_EVENT_TYPE =>
+                {
+                    Some(event)
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(trace_events.len(), 2);
+        assert_eq!(
+            trace_events[0].properties["domain"],
+            RuntimeValue::String("model".into())
+        );
+        assert_eq!(
+            trace_events[1].properties["domain"],
+            RuntimeValue::String("tool".into())
+        );
+        assert_eq!(
+            trace_events[1].properties["parent_span_id"],
+            RuntimeValue::String(identity.span_id.to_string())
+        );
+        let encoded = serde_json::to_string(&page).unwrap();
+        assert!(!encoded.contains("secret prompt"));
+        assert!(!encoded.contains("private model output"));
+        assert!(!encoded.contains("private command"));
+        assert!(encoded.contains("envelope_digest"));
+    }
+
+    #[test]
     fn fresh_and_pruned_arms_preserve_history_but_change_injected_context() {
         use vyrm_core::{Claim, Predicate, Producer, Subject};
 
         let root = tempfile::tempdir().unwrap();
         std::fs::write(root.path().join("lib.rs"), "pub fn runtime() {}\n").unwrap();
         vyrm_node::InstanceManifest::ensure_dedicated(root.path()).unwrap();
-        let store = Arc::new(PersistentEngine::open(&root.path().join(vyrm_node::STORE_DIR)).unwrap());
+        let store =
+            Arc::new(PersistentEngine::open(&root.path().join(vyrm_node::STORE_DIR)).unwrap());
         Engine::assert(
             store.as_ref(),
             &Claim::new(
@@ -1423,7 +1680,8 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         std::fs::write(root.path().join("lib.rs"), "pub fn runtime() {}\n").unwrap();
         vyrm_node::InstanceManifest::ensure_dedicated(root.path()).unwrap();
-        let store = Arc::new(PersistentEngine::open(&root.path().join(vyrm_node::STORE_DIR)).unwrap());
+        let store =
+            Arc::new(PersistentEngine::open(&root.path().join(vyrm_node::STORE_DIR)).unwrap());
         let binding = InstanceBinding::discover(root.path()).unwrap();
         let recorder = FlightRecorder::new(Arc::clone(&store), binding, false);
 

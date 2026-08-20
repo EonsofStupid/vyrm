@@ -1,10 +1,11 @@
 # Runtime tracing and operator-knowledge boundary
 
 Status: contract, conflict-safe recorder, instance bootstrap, lifecycle, query,
-native-storage-read, projection-publication, vector-search, and embedding-commit
-slices implemented. The portable operator boundary and first live pgvector
-functional gate are implemented; production TLS/failure/scale promotion remains
-pending alongside provider, tool-execution, cluster, and export coverage.
+native-storage-read, projection-publication, vector-search, embedding-commit,
+provider/tool-envelope, causal-analysis, and data-class export slices
+implemented. The portable operator boundary and first live pgvector functional
+gate are implemented; production TLS/failure/scale promotion remains pending
+alongside storage-write, cluster, OTLP, and retained-regression coverage.
 Repository state was verified 2026-08-20.
 
 ## Why this is a kernel feature
@@ -74,12 +75,27 @@ parameter values are returned to the caller but are represented in durable
 trace and invocation state only by content digests, counts, and public plan
 coordinates.
 
-Connectome's existing authoritative Temporal stream classifies these durable
-events into its reasoning, workflow, routing, search, model, and storage lanes.
-Regression coverage proves persisted vector, embedding, and storage events are
-audit-attached and visible through that read-only projection. This is initial
-lane-level visibility, not yet the causal-tree, critical-path, fan-out, or
-sampled-versus-complete interface described below.
+Connectome's authoritative Temporal stream classifies these durable events into
+its reasoning, workflow, routing, search, model, and storage lanes. Its Causal
+traces lens now groups persisted events by trace/span identity, validates
+lifecycle agreement, exposes missing parents and cycles, distinguishes
+complete/incomplete/summary/annotation/invalid spans, and retains each exact
+cursor, change digest, and audit digest. The displayed critical candidate is
+the longest measured root followed by the longest measured child at each
+branch; nested durations are deliberately never summed. The default JSON export
+includes only `control`; `operator` and `content` require explicit data-class
+selection. This is not yet OTLP translation, sampling policy, or a retained
+cross-run regression database.
+
+When runners are explicitly armed, each prompt flight starts one durable
+`provider.invoke` boundary. Observable provider envelopes annotate that span by
+kind, ordinal, and digest; observable tool envelopes become zero-duration
+causal children because their upstream streams do not consistently expose
+paired tool timing. Prompt text, model output, commands, and hidden reasoning
+do not enter the trace. A trace start/finish failure marks the flight failed
+rather than presenting an unobserved success. Full read and projection link
+serialization now retains schema/catalog/head and config/state fields, while
+keeping the original read-cursor alias for v1 consumers.
 
 This follows the useful part of the
 [OpenTelemetry trace model and database semantic conventions](https://opentelemetry.io/docs/specs/semconv/db/database-spans/)
@@ -254,14 +270,19 @@ superiority claim.
    stamp and plan digest, including error and budget-denial finishes — complete.
    Query storage reads, vector plan/execution, vector projection publication,
    and embedding inference/atomic commit now emit observer-safe causal spans —
-   complete at the local M3–M6 boundary. Provider/tool and cluster emission,
-   storage-write coverage outside embedding commit, and persistent vector
-   artifact-catalog publication remain open.
+   complete at the local M3–M6 boundary. Provider roots and observable
+   model/tool-envelope coverage are complete for Connectome prompt flights.
+   Cluster emission, storage-write coverage outside embedding commit, and
+   persistent vector artifact-catalog publication remain open.
 4. Connectome renders causal trace trees, critical path, fan-out, cache/IO/token
-   mass, stale/fallback decisions, and sampled-versus-complete status. Basic
-   durable-event lane classification is complete; the richer analysis is open.
-5. OTLP/JSON export round-trips without changing Vyrm identity or leaking
-   content outside policy.
+   mass, stale/fallback decisions, and sampled-versus-complete status. Causal
+   lifecycle reconstruction, integrity diagnostics, measured critical
+   candidate, exact event drill-down, and responsive visualization are
+   complete. Cross-run fan-out/cache/IO/token mass and explicit sampling
+   completeness remain open.
+5. JSON export preserves Vyrm identities and is deny-by-default for non-control
+   data classes — complete. A formal OTLP translation and round-trip fixture
+   remain open.
 6. Portable operator contract, exact oracle, project/model/revision denial,
    safe SQL planning, traced execution, and outbox retry — complete. First live
    pgvector functional gate—repeatable-read/catalog capture, ordered exact/ANN,

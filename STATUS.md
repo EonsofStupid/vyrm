@@ -210,9 +210,12 @@ not roadmap language.
   records inference and authoritative vector commit separately; it can rebase
   only over valid trace events and denies any intervening data/schema mutation.
   Three-engine parity, failure/denial, privacy, native reopen, and audited
-  Connectome search/embedding/storage lane tests are green. Provider/tool and
-  cluster spans, richer causal rendering, persistent vector artifact catalogs,
-  and the live project-scoped pgvector transport remain open.
+  Connectome search/embedding/storage lane tests are green. Connectome prompt
+  flights now add provider roots plus digest-only model/tool envelope evidence,
+  and the Causal traces lens reconstructs lifecycle integrity and measured
+  bottleneck candidates. Cluster spans, broader storage-write coverage,
+  persistent vector artifact catalogs, OTLP translation, and cross-run resource
+  analysis remain open.
 - The portable operator-knowledge gate is now executable in `vyrm-operator`.
   One immutable binding fixes instance/member, Vyrm scope, adapter/config,
   external source/relation/tenant, model space, dimensions, and projection
@@ -388,12 +391,18 @@ artifact even on failure.
   incomplete after reopen. The explicit query surface adds observer-safe parent
   and child spans for parse/bind, planning, and exact execution; the shared
   consumable span helper now enforces the same finish semantics for lifecycle
-  and queries. Connectome classifies lifecycle and query/planning events into
-  its existing semantic lanes. Schema migration, concurrency, initialization,
-  denial, observer safety, secret non-persistence, visual projection, crash
-  recovery, and Memory/Fjall/native parity are tested. Storage/projection/
-  vector/embedding/provider/cluster emission, causal rendering, export,
-  retention enforcement, and full pgvector promotion remain open. See
+  and queries. Local storage-read/projection/vector/embedding paths and armed
+  prompt-provider/tool envelopes now join the same causal model. Connectome
+  reconstructs complete, incomplete, summary, and invalid lifecycles, exposes
+  exact cursor/change/audit coordinates, renders the longest measured
+  root/child candidate without adding nested durations, and provides an
+  explicit data-class export whose default is control-only. Complete read and
+  projection stamp fields survive persisted link serialization. Schema
+  migration, concurrency, initialization, denial, observer safety, secret
+  non-persistence, causal visualization, crash recovery, and Memory/Fjall/
+  native parity are tested. Storage-write/cluster coverage, OTLP translation,
+  persistent trace histories/regression budgets, artifact catalogs, and full
+  pgvector promotion remain open. See
   `docs/runtime-tracing-operator-knowledge.md`.
 
 ## Product and instance boundary

@@ -582,10 +582,36 @@ fn link_value(link: &TraceLink) -> RuntimeValue {
         TraceLink::Read { stamp } => {
             value.insert("kind".into(), RuntimeValue::String("read".into()));
             value.insert(
+                "contract_version".into(),
+                RuntimeValue::Unsigned(u64::from(stamp.contract_version)),
+            );
+            value.insert(
                 "scope".into(),
                 RuntimeValue::String(stamp.scope.to_string()),
             );
+            if let Some(schema_revision) = stamp.schema_revision {
+                value.insert(
+                    "schema_revision".into(),
+                    RuntimeValue::Unsigned(schema_revision),
+                );
+            }
+            value.insert(
+                "catalog_revision".into(),
+                RuntimeValue::Unsigned(stamp.catalog_revision),
+            );
+            value.insert(
+                "commit_cursor".into(),
+                RuntimeValue::Unsigned(stamp.commit_cursor),
+            );
+            // Retain the original v1 alias for existing consumers while the
+            // exact field name makes the complete stamp reconstructable.
             value.insert("cursor".into(), RuntimeValue::Unsigned(stamp.commit_cursor));
+            if let Some(head_digest) = &stamp.head_digest {
+                value.insert(
+                    "head_digest".into(),
+                    RuntimeValue::Digest(head_digest.clone()),
+                );
+            }
             value.insert(
                 "manifest_id".into(),
                 RuntimeValue::Digest(stamp.manifest_id.clone()),
@@ -611,6 +637,10 @@ fn link_value(link: &TraceLink) -> RuntimeValue {
         }
         TraceLink::Projection { stamp } => {
             value.insert("kind".into(), RuntimeValue::String("projection".into()));
+            value.insert(
+                "contract_version".into(),
+                RuntimeValue::Unsigned(u64::from(stamp.contract_version)),
+            );
             value.insert("id".into(), RuntimeValue::String(stamp.id.to_string()));
             value.insert(
                 "generation".into(),
@@ -621,8 +651,16 @@ fn link_value(link: &TraceLink) -> RuntimeValue {
                 RuntimeValue::Unsigned(stamp.source_cursor),
             );
             value.insert(
+                "config_digest".into(),
+                RuntimeValue::Digest(stamp.config_digest.clone()),
+            );
+            value.insert(
                 "artifact_digest".into(),
                 RuntimeValue::Digest(stamp.artifact_digest.clone()),
+            );
+            value.insert(
+                "state".into(),
+                RuntimeValue::String(projection_state_name(stamp.state).into()),
             );
         }
         TraceLink::Workflow {
@@ -710,6 +748,15 @@ fn domain_name(value: TraceDomain) -> &'static str {
         TraceDomain::Tool => "tool",
         TraceDomain::Adapter => "adapter",
         TraceDomain::Cluster => "cluster",
+    }
+}
+
+fn projection_state_name(value: crate::ProjectionState) -> &'static str {
+    match value {
+        crate::ProjectionState::Building => "building",
+        crate::ProjectionState::Ready => "ready",
+        crate::ProjectionState::Quarantined => "quarantined",
+        crate::ProjectionState::Retiring => "retiring",
     }
 }
 
@@ -831,5 +878,86 @@ mod tests {
             )]),
         );
         assert!(event.is_err());
+    }
+
+    #[test]
+    fn persisted_read_and_projection_links_retain_complete_reconstructable_stamps() {
+        let read = ReadStamp::new(
+            crate::ScopeId::new("instance:trace").unwrap(),
+            Some(7),
+            11,
+            29,
+            Some("a".repeat(64)),
+        )
+        .unwrap();
+        let projection = ProjectionStamp {
+            contract_version: crate::DATA_RUNTIME_CONTRACT_VERSION,
+            id: crate::ProjectionId::new("vector:operator").unwrap(),
+            generation: 3,
+            source_cursor: 29,
+            config_digest: "b".repeat(64),
+            artifact_digest: "c".repeat(64),
+            state: crate::ProjectionState::Ready,
+        };
+        projection.validate().unwrap();
+        let runtime = RuntimeTraceEvent::annotation(
+            trace_id(),
+            span_id(),
+            None,
+            TraceDomain::Projection,
+            "projection.publish",
+            10,
+            TraceOutcome::Ok,
+            TraceDataClass::Control,
+            vec![
+                TraceLink::Read {
+                    stamp: read.clone(),
+                },
+                TraceLink::Projection {
+                    stamp: projection.clone(),
+                },
+            ],
+            RuntimeProperties::new(),
+        )
+        .unwrap()
+        .into_runtime_event()
+        .unwrap();
+        let RuntimeValue::List(links) = &runtime.properties["links"] else {
+            panic!("links must remain a typed list")
+        };
+        let RuntimeValue::Map(read_link) = &links[0] else {
+            panic!("read link must remain a typed map")
+        };
+        assert_eq!(
+            read_link["contract_version"],
+            RuntimeValue::Unsigned(u64::from(read.contract_version))
+        );
+        assert_eq!(
+            read_link["schema_revision"],
+            RuntimeValue::Unsigned(read.schema_revision.unwrap())
+        );
+        assert_eq!(
+            read_link["catalog_revision"],
+            RuntimeValue::Unsigned(read.catalog_revision)
+        );
+        assert_eq!(
+            read_link["commit_cursor"],
+            RuntimeValue::Unsigned(read.commit_cursor)
+        );
+        assert_eq!(
+            read_link["head_digest"],
+            RuntimeValue::Digest(read.head_digest.unwrap())
+        );
+        let RuntimeValue::Map(projection_link) = &links[1] else {
+            panic!("projection link must remain a typed map")
+        };
+        assert_eq!(
+            projection_link["config_digest"],
+            RuntimeValue::Digest(projection.config_digest)
+        );
+        assert_eq!(
+            projection_link["state"],
+            RuntimeValue::String("ready".into())
+        );
     }
 }
