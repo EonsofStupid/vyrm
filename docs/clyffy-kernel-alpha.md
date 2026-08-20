@@ -39,8 +39,7 @@ package:yarn:run:build
 ```
 
 Script identity is preserved so unrelated runs cannot supersede one another.
-The current hook records these as post-tool evidence. The enforcement sequence
-is deliberately staged:
+The local alpha now implements this enforcement sequence:
 
 1. A project-owned workflow manifest declares event, command matcher, required
    scope, required projections, freshness bounds, and verification policy.
@@ -56,6 +55,8 @@ is deliberately staged:
 
 No package-manager hook may infer business meaning from a script name. The
 project manifest supplies that meaning and is versioned evidence itself.
+The frozen manifest, observation envelope, denial matrix, and three-backend
+differential are documented in `docs/package-workflows.md`.
 
 ## Alpha release gates
 
@@ -161,7 +162,10 @@ measured local results, never universal superiority.
    hardware chaos, broader disk-resident segment workloads, automatic SPIFFE
    issuance/streaming, durable supervisor generation, production telemetry,
    and Multi-AZ evidence remain open.
-8. Bind declared package workflows to preflight/pre-tool/post-tool policy.
+8. **Local gate complete:** declared package workflows now bind preflight,
+   pre-tool freshness/authorization, and post-tool atomic evidence across the
+   shared hook/MCP handler. A durable cross-process authorization lease remains
+   part of the distributed-coordinator gate, not this local claim.
 9. Extend truthful temporal visualization across storage, search, and workflow
    events and continue controlled provider evaluations.
 10. Cut the Vyrm alpha manifest; only then scaffold the separate Clyffy master

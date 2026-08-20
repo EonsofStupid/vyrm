@@ -12,6 +12,7 @@
 use crate::registry::{Registry, Verification};
 use crate::routing::{ensure_routing_fresh, RoutingReady};
 use crate::stack;
+use crate::workflow::{WorkflowCatalog, WorkflowPreflight, WORKFLOW_FILE};
 use crate::InstanceBinding;
 use vyrm_core::{recall, Millis, Reader, RecallQuery};
 use vyrm_store::{Effectiveness, Engine, ProjectionStatus, RecallOutcome};
@@ -25,6 +26,9 @@ pub struct Preflight {
     /// `None` means freshness could not be established and `warnings` says
     /// why; the pre-tool gate will deny mutation under the same condition.
     pub routing: Option<RoutingReady>,
+    /// Declared workflow events and the exact runtime read state captured
+    /// before context injection.
+    pub workflows: Vec<WorkflowPreflight>,
     /// Estate and adapter warnings, already included in `context`.
     pub warnings: Vec<String>,
     /// The rendered injection: warnings, then recalled claims with
@@ -55,6 +59,36 @@ pub fn preflight<E: Engine>(
     let mut stacks: Vec<&'static str> = stack::detect(root).iter().map(|s| s.name).collect();
     stacks.extend(stack::frameworks(root));
     let mut warnings = Vec::new();
+    let mut workflows = Vec::new();
+
+    match WorkflowCatalog::load(root) {
+        Ok(Some(catalog)) => {
+            for rule in &catalog.manifest.workflows {
+                if rule.scope != binding.manifest.id {
+                    warnings.push(format!(
+                        "workflow {} declares scope {:?}, but this instance is {:?}",
+                        rule.event, rule.scope, binding.manifest.id
+                    ));
+                    continue;
+                }
+                let scope = vyrm_core::ScopeId::new(rule.scope.clone())?;
+                workflows.push(WorkflowPreflight {
+                    event: rule.event.clone(),
+                    manifest_digest: catalog.digest.clone(),
+                    read: store.runtime_read_stamp(&scope)?,
+                });
+            }
+        }
+        Ok(None) if stacks.iter().any(|stack| matches!(*stack, "bun" | "node")) => {
+            warnings.push(format!(
+                "package workflow policy is absent; package commands are denied until {WORKFLOW_FILE} declares them"
+            ));
+        }
+        Ok(None) => {}
+        Err(error) => warnings.push(format!(
+            "package workflow policy cannot be trusted and package commands are denied: {error}"
+        )),
+    }
 
     // Source routing is part of attunement, not an optional command the model
     // must remember to run. Preflight remains available for recall if this
@@ -134,6 +168,15 @@ pub fn preflight<E: Engine>(
     if let Some(ready) = &routing {
         lines.push(format!("[vyrm] routing: {}", ready.render()));
     }
+    for workflow in &workflows {
+        lines.push(format!(
+            "[vyrm] workflow: {} manifest={} read_cursor={} manifest_id={}",
+            workflow.event,
+            workflow.manifest_digest,
+            workflow.read.commit_cursor,
+            workflow.read.manifest_id,
+        ));
+    }
     for warning in &warnings {
         lines.push(format!("[vyrm] WARNING: {warning}"));
     }
@@ -171,6 +214,7 @@ pub fn preflight<E: Engine>(
     Ok(Preflight {
         stacks,
         routing,
+        workflows,
         warnings,
         context: lines.join("\n"),
         effectiveness,

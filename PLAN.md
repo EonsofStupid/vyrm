@@ -116,6 +116,15 @@ disagree, `SPEC.md` is authoritative and this document is wrong.
 > `vyrmd`, and Connectome share that selector and expose its decision.
 > Operators can now run `vyrm storage migrate|status|rollback`; ordinary opens
 > deny active migration markers so a cutover gap cannot initialize empty state.
+> **Package workflow gate (2026-08-20).** Canonical bun/pnpm/npm/yarn event
+> identities now bind to a strict project-owned `.vyrm/workflows.toml` rather
+> than merely being journaled after execution. Preflight captures the declared
+> scope's runtime `ReadStamp`; pre-tool combines reasoning authorization,
+> zero-lag routing freshness, exact direct argv, instance scope, and manifest
+> SHA-256 into a fail-closed decision. Post-tool stores only safe command
+> metadata plus exact command/response digests and atomically commits the
+> temporal status claim, runtime change, outcome, and audit. Memory/Fjall/native
+> evidence is identical. See `docs/package-workflows.md`.
 > The product handoff, canonical package-event grammar, alpha release gates,
 > deployment/update tiers, and separate SurrealDB/Qdrant proof protocols are
 > frozen in `docs/clyffy-kernel-alpha.md`.

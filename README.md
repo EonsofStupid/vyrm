@@ -188,8 +188,13 @@ For JS/TanStack workflows, successful and failed tool runs are journaled under
 canonical, manager-specific subjects—`package:bun:*`, `package:pnpm:*`,
 `package:npm:*`, and `package:yarn:*`. Script names remain part of the identity,
 so `pnpm run typecheck` and `pnpm run test` do not overwrite each other. These
-events are evidence for later workflow policy; they do not yet constitute a
-package-script allowlist or a pre-execution gate.
+events now cross a project-owned policy gate. `.vyrm/workflows.toml` binds exact
+direct argv to the instance scope, required source-routing projection, strict
+freshness, and verification policy. Preflight injects a scoped `ReadStamp`,
+pre-tool denies absent/corrupt/undeclared or shell-composed package execution,
+and post-tool commits the digest-bound observation, temporal status claim,
+runtime change, outcome, and audit atomically. See
+[`docs/package-workflows.md`](docs/package-workflows.md).
 
 Vyrm owns the storage contract. `vyrm_store::NativeEngine` now implements the
 same `Engine` port as the in-memory reference and transitional Fjall adapter;

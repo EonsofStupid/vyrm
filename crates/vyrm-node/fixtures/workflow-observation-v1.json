@@ -1,0 +1,12 @@
+{
+  "contract_version": 1,
+  "event": "package:bun:test",
+  "manifest_digest": "c941feb240060ac523a72c2ff27503b984748ae17bdf5fecaa4e2b034f30c2e5",
+  "command": "bun test",
+  "arguments_supplied": 1,
+  "command_digest": "96b6ec7d0cea7de279ceced7a5a7037cc076735c6dead685324fb6a463ca87e1",
+  "response_digest": "6041df3e9b345d68be886f995c452395674ea950cd3ca9992c13b64f3aa9cbd0",
+  "exit_code": 0,
+  "status": "passed",
+  "at": 42
+}
