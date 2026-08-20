@@ -144,6 +144,8 @@ Authenticated artifact recovery now emits bounded prepared/chunk/completed/
 failed observations from the source. Each attempt binds project scope,
 manifest, source/target, shard, placement epoch, exact read and grounded
 snapshot, offsets, duration, transfer totals, and terminal receipt/error digest.
+Attempt ordinals are monotonic per source transport factory, including across
+OpenRaft client recreation; `(source, attempt)` is the retry identity.
 `DurableArtifactTransferObserver` maps these to a
 `cluster.artifact_transfer` lifecycle and child chunk annotations. Observer
 failure blocks snapshot activation. Raw bytes and raw error text never enter

@@ -359,7 +359,12 @@ fsynced partial session or harmless unreachable content-addressed bytes.
 OpenRaft now performs hydration once at the full-snapshot lifecycle boundary,
 outside its 200 ms per-chunk deadline, before snapshot byte zero. Every fresh
 full-snapshot attempt reopens the idempotent session rather than trusting a
-process-local success bit. The source authenticates the exact cached physical
+process-local success bit; the first snapshot chunk cannot repeat that
+hydration inside the short chunk deadline. Administrative learner admission
+also does not trust OpenRaft's membership-write response as catch-up evidence:
+Vyrm acknowledges only while the caller remains leader and its replication
+metrics prove the learner matched through the committed membership log. The
+source authenticates the exact cached physical
 snapshot, derives its project closure, and sends only that manifest. Ordinary
 target `install_snapshot` independently scans every canonical object reference
 in the received bundle and verifies local length/digest before activating
@@ -374,7 +379,8 @@ The transport emits a strict `ArtifactTransferObservation` sequence for
 prepared, accepted-chunk, completed, and failed phases. A configured observer
 is fail-closed. Observations carry project scope, attempt, read and grounded
 snapshot coordinates, digests, offsets, duration, counts, and receipt identity;
-they never carry object bytes or raw errors. `vyrm-node` supplies a durable
+source-local attempt ordinals remain monotonic when OpenRaft rebuilds network
+clients. They never carry object bytes or raw errors. `vyrm-node` supplies a durable
 adapter that maps these into one `cluster.artifact_transfer` start/finish span
 with causal `cluster.artifact_chunk` annotations. The existing synchronous
 wrapper retains its `object.replicate` storage child. Normalized causal traces

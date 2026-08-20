@@ -31,7 +31,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::future::Future;
 use std::io;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncSeekExt, AsyncWrite, AsyncWriteExt};
@@ -332,6 +332,7 @@ struct VyrmArtifactSource {
     objects: LocalObjectStore,
     scope: ScopeId,
     observer: Option<Arc<dyn ArtifactTransferObserver>>,
+    attempt_counter: Arc<AtomicU64>,
 }
 
 fn observe_artifact(
@@ -400,6 +401,7 @@ impl VyrmRaftNetworkFactory {
             objects,
             scope,
             observer: None,
+            attempt_counter: Arc::new(AtomicU64::new(0)),
         });
         Ok(factory)
     }
@@ -421,7 +423,6 @@ pub struct VyrmRaftNetworkClient {
     reloader: Option<VyrmTlsReloader>,
     artifact_source: Option<VyrmArtifactSource>,
     hydrated_snapshot: Option<String>,
-    artifact_attempt: u64,
 }
 
 impl RaftNetworkFactory<VyrmRaftTypeConfig> for VyrmRaftNetworkFactory {
@@ -437,7 +438,6 @@ impl RaftNetworkFactory<VyrmRaftTypeConfig> for VyrmRaftNetworkFactory {
             reloader: self.reloader.clone(),
             artifact_source: self.artifact_source.clone(),
             hydrated_snapshot: None,
-            artifact_attempt: 0,
         }
     }
 }
@@ -474,10 +474,16 @@ impl RaftNetwork<VyrmRaftTypeConfig> for VyrmRaftNetworkClient {
         InstallSnapshotResponse<u64>,
         RPCError<u64, VyrmRaftNode, RaftError<u64, InstallSnapshotError>>,
     > {
-        if self.artifact_source.is_some()
-            && (request.offset == 0
-                || self.hydrated_snapshot.as_deref() != Some(&request.meta.snapshot_id))
-        {
+        // `full_snapshot` hydrates the closure once per transfer attempt before
+        // OpenRaft starts its per-chunk deadline. Keep this fallback for direct
+        // `install_snapshot` callers, but never repeat hydration merely because
+        // the first chunk has offset zero: doing so moves even an idempotent
+        // target round-trip back inside OpenRaft's short chunk timeout.
+        if artifact_hydration_required(
+            self.artifact_source.is_some(),
+            self.hydrated_snapshot.as_deref(),
+            &request.meta.snapshot_id,
+        ) {
             let attempt = self
                 .next_artifact_attempt()
                 .map_err(|error| unreachable(error.to_string()))?;
@@ -549,12 +555,28 @@ impl RaftNetwork<VyrmRaftTypeConfig> for VyrmRaftNetworkClient {
     }
 }
 
+fn artifact_hydration_required(
+    artifact_source_enabled: bool,
+    hydrated_snapshot: Option<&str>,
+    requested_snapshot: &str,
+) -> bool {
+    artifact_source_enabled && hydrated_snapshot != Some(requested_snapshot)
+}
+
 impl VyrmRaftNetworkClient {
-    fn next_artifact_attempt(&mut self) -> ClusterResult<u64> {
-        self.artifact_attempt = self.artifact_attempt.checked_add(1).ok_or_else(|| {
-            ClusterError::Unavailable("artifact transfer attempt counter overflowed".into())
+    fn next_artifact_attempt(&self) -> ClusterResult<u64> {
+        let source = self.artifact_source.as_ref().ok_or_else(|| {
+            ClusterError::Unavailable("artifact transfer source is not configured".into())
         })?;
-        Ok(self.artifact_attempt)
+        source
+            .attempt_counter
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |attempt| {
+                attempt.checked_add(1)
+            })
+            .map(|attempt| attempt + 1)
+            .map_err(|_| {
+                ClusterError::Unavailable("artifact transfer attempt counter overflowed".into())
+            })
     }
 
     async fn hydrate_snapshot_artifacts(
@@ -1298,6 +1320,22 @@ mod tests {
             (2, NodeId::new("same-node").unwrap()),
         ])
         .is_err());
+    }
+
+    #[test]
+    fn snapshot_chunks_do_not_repeat_an_already_completed_artifact_hydration() {
+        assert!(artifact_hydration_required(true, None, "snapshot-1"));
+        assert!(artifact_hydration_required(
+            true,
+            Some("snapshot-0"),
+            "snapshot-1"
+        ));
+        assert!(!artifact_hydration_required(
+            true,
+            Some("snapshot-1"),
+            "snapshot-1"
+        ));
+        assert!(!artifact_hydration_required(false, None, "snapshot-1"));
     }
 
     fn binding(cluster: &ClusterId, id: u64) -> VyrmTransportBinding {

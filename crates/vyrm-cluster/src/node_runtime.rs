@@ -32,6 +32,7 @@ pub const VYRM_NODE_CONFIG_VERSION: u16 = 2;
 pub const VYRM_NODE_CONTROL_VERSION: u16 = 2;
 pub const VYRM_NODE_MAX_CONFIG_BYTES: u64 = 1024 * 1024;
 pub const VYRM_NODE_MAX_CONTROL_LINE_BYTES: usize = 1024 * 1024;
+const LEARNER_CATCH_UP_TIMEOUT: Duration = Duration::from_secs(10);
 
 type VyrmRaft = Raft<crate::VyrmRaftTypeConfig>;
 
@@ -465,10 +466,41 @@ async fn execute_command(
                 .get(&node_id)
                 .cloned()
                 .ok_or_else(|| format!("node inventory has no node {node_id}"))?;
-            raft.add_learner(node_id, node, true)
+            let response = raft
+                .add_learner(node_id, node, false)
                 .await
-                .map(|_| VyrmNodeResult::Ack)
-                .map_err(|error| error.to_string())
+                .map_err(|error| error.to_string())?;
+            let membership_log_id = response.log_id;
+            let leader_id = config.raft_node_id;
+            let metrics = raft
+                .wait(Some(LEARNER_CATCH_UP_TIMEOUT))
+                .metrics(
+                    |metrics| {
+                        let lost_leadership = metrics.current_leader != Some(leader_id);
+                        let learner_matched = metrics
+                            .replication
+                            .as_ref()
+                            .and_then(|replication| replication.get(&node_id))
+                            .and_then(Option::as_ref)
+                            .is_some_and(|matched| matched >= &membership_log_id);
+                        lost_leadership || learner_matched
+                    },
+                    "learner must match its committed membership log",
+                )
+                .await
+                .map_err(|error| error.to_string())?;
+            if metrics.current_leader != Some(leader_id) {
+                return Err("leadership changed before learner catch-up was proven".into());
+            }
+            let matched = metrics
+                .replication
+                .as_ref()
+                .and_then(|replication| replication.get(&node_id))
+                .and_then(Option::as_ref);
+            if matched.is_none_or(|matched| matched < &membership_log_id) {
+                return Err("learner catch-up was not proven through its membership log".into());
+            }
+            Ok(VyrmNodeResult::Ack)
         }
         VyrmNodeCommand::ChangeMembership { voters } => raft
             .change_membership(voters, false)

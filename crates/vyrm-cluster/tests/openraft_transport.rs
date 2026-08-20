@@ -542,9 +542,20 @@ fn mutual_tls_transport_replicates_and_denies_identity_confusion() {
             .iter()
             .filter(|observation| observation.target.as_str() == "node-4")
             .collect::<Vec<_>>();
-        assert!(learner_observations.iter().any(|observation| {
-            observation.phase == ArtifactTransferObservationPhase::Prepared
-        }));
+        let prepared = learner_observations
+            .iter()
+            .filter(|observation| observation.phase == ArtifactTransferObservationPhase::Prepared)
+            .collect::<Vec<_>>();
+        assert!(!prepared.is_empty());
+        assert_eq!(
+            prepared
+                .iter()
+                .map(|observation| (observation.source.as_str().to_owned(), observation.attempt))
+                .collect::<BTreeSet<_>>()
+                .len(),
+            prepared.len(),
+            "snapshot retries must retain distinct source-local attempt identities"
+        );
         assert!(
             learner_observations
                 .iter()
@@ -554,9 +565,13 @@ fn mutual_tls_transport_replicates_and_denies_identity_confusion() {
                 .count()
                 >= 2
         );
-        let completed = learner_observations
+        let completed_observations = learner_observations
             .iter()
-            .find(|observation| observation.phase == ArtifactTransferObservationPhase::Completed)
+            .filter(|observation| observation.phase == ArtifactTransferObservationPhase::Completed)
+            .collect::<Vec<_>>();
+        assert_eq!(completed_observations.len(), prepared.len());
+        let completed = completed_observations
+            .last()
             .expect("artifact transfer emits bounded terminal evidence");
         assert!(completed.transferred_objects <= 1);
         assert_eq!(
