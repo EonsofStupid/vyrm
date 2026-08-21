@@ -142,6 +142,23 @@ disagree, `SPEC.md` is authoritative and this document is wrong.
 > and isolated hot-control benchmark are green; the local five-trial cell is
 > 2.261× Fjall throughput and 0.379× Fjall p95. This is not a general database
 > claim. See `docs/vyrmkv-fjall-ai-audit.md` for the ordered remaining gates.
+> **VyrmKV M3.5 maintenance overlay (2026-08-21).** Native compaction no
+> longer materializes every segment into one database-sized map. One step
+> deterministically selects a bounded source/target-level closure, streams a
+> k-way canonical record merge through one decoded block per input, partitions
+> outputs at key boundaries, and publishes them through the existing manifest
+> CAS. Levels above L0 reject overlap. Automatic maintenance retains all MVCC
+> versions because low-level snapshots are not lifetime tracked; explicit
+> compaction alone applies protected-snapshot pruning and preserves tombstones
+> that shadow unselected lower levels. Authenticated v3 validation also derives
+> block-local negative filters that avoid point-miss I/O without changing the
+> wire format. Physical evidence exposes filter probes, L0 debt, compaction
+> byte flow, failures, and peak buffer usage. Unit/failure matrices, the 20,000
+> mixed Fjall/model differential, and the canonical fresh nine-trial standard
+> promotion cell are green; raw evidence is retained at
+> `eval/results/2026-08-21-vyrmkv-m35-standard.json`. Asynchronous
+> immutable-memtable flush and family-aware maintenance remain open; `vyrmMX`
+> stamped access paths follow this bounded substrate.
 > The product handoff, canonical package-event grammar, alpha release gates,
 > deployment/update tiers, and separate SurrealDB/Qdrant proof protocols are
 > frozen in `docs/clyffy-kernel-alpha.md`.

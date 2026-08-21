@@ -48,6 +48,10 @@ pub struct BlockCacheStats {
     pub bytes_loaded: u64,
     /// Cumulative resident bytes produced by successful block decoding.
     pub bytes_decoded: u64,
+    /// Block-local negative-filter probes made before immutable block I/O.
+    pub filter_checks: u64,
+    /// Probes rejected without loading or decoding the corresponding block.
+    pub filter_negatives: u64,
 }
 
 #[derive(Debug)]
@@ -63,6 +67,8 @@ pub(crate) struct BlockCache {
     loads: u64,
     bytes_loaded: u64,
     bytes_decoded: u64,
+    filter_checks: u64,
+    filter_negatives: u64,
 }
 
 #[derive(Debug)]
@@ -86,6 +92,8 @@ pub(crate) fn new_block_cache(capacity_bytes: usize) -> SharedBlockCache {
         loads: 0,
         bytes_loaded: 0,
         bytes_decoded: 0,
+        filter_checks: 0,
+        filter_negatives: 0,
     }))
 }
 
@@ -103,7 +111,20 @@ pub(crate) fn block_cache_stats(cache: &SharedBlockCache) -> BlockCacheStats {
         loads: cache.loads,
         bytes_loaded: cache.bytes_loaded,
         bytes_decoded: cache.bytes_decoded,
+        filter_checks: cache.filter_checks,
+        filter_negatives: cache.filter_negatives,
     }
+}
+
+fn record_filter_probe(cache: &SharedBlockCache, negative: bool) -> Result<()> {
+    let mut cache = cache
+        .lock()
+        .map_err(|_| Error::InvalidSegment("block cache lock poisoned".into()))?;
+    cache.filter_checks = cache.filter_checks.saturating_add(1);
+    if negative {
+        cache.filter_negatives = cache.filter_negatives.saturating_add(1);
+    }
+    Ok(())
 }
 
 #[derive(Debug, Clone)]
@@ -122,10 +143,65 @@ struct BlockDescriptor {
     last_key: Vec<u8>,
 }
 
+#[derive(Debug, Clone)]
+struct BlockFilter {
+    bits: Vec<u64>,
+}
+
 #[derive(Debug)]
 struct DecodedBlock {
     bytes: Vec<u8>,
     record_offsets: Vec<u32>,
+}
+
+impl BlockFilter {
+    const HASH_FUNCTIONS: usize = 7;
+    const BITS_PER_ENTRY: usize = 10;
+
+    fn new(entries: u64) -> Self {
+        let entries = usize::try_from(entries).expect("validated block entry count fits usize");
+        let bits = entries
+            .saturating_mul(Self::BITS_PER_ENTRY)
+            .max(u64::BITS as usize);
+        let words = bits.div_ceil(u64::BITS as usize);
+        Self {
+            bits: vec![0; words],
+        }
+    }
+
+    fn insert(&mut self, key: &[u8]) {
+        for bit in self.positions(key) {
+            self.bits[bit / u64::BITS as usize] |= 1u64 << (bit % u64::BITS as usize);
+        }
+    }
+
+    fn may_contain(&self, key: &[u8]) -> bool {
+        self.positions(key).into_iter().all(|bit| {
+            self.bits[bit / u64::BITS as usize] & (1u64 << (bit % u64::BITS as usize)) != 0
+        })
+    }
+
+    fn positions(&self, key: &[u8]) -> [usize; Self::HASH_FUNCTIONS] {
+        let bit_count = self.bits.len() * u64::BITS as usize;
+        let first = filter_hash(key, 0xcbf2_9ce4_8422_2325);
+        let second = filter_hash(key, 0x9e37_79b9_7f4a_7c15) | 1;
+        std::array::from_fn(|index| {
+            first.wrapping_add((index as u64).wrapping_mul(second)) as usize % bit_count
+        })
+    }
+}
+
+fn filter_hash(key: &[u8], seed: u64) -> u64 {
+    let mut hash = seed;
+    for byte in key {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    hash ^= hash >> 33;
+    hash = hash.wrapping_mul(0xff51_afd7_ed55_8ccd);
+    hash ^= hash >> 33;
+    hash = hash.wrapping_mul(0xc4ce_b9fe_1a85_ec53);
+    hash ^ (hash >> 33)
 }
 
 impl DecodedBlock {
@@ -185,6 +261,7 @@ enum SegmentStorage {
     Blocked {
         source: BlockSource,
         blocks: Vec<BlockDescriptor>,
+        filters: Vec<BlockFilter>,
         cache: SharedBlockCache,
         cache_id: u64,
     },
@@ -215,6 +292,25 @@ struct SparseEntry {
 pub(crate) struct SegmentVersion {
     pub sequence: u64,
     pub value: Option<Vec<u8>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct SegmentRecord {
+    pub key: Vec<u8>,
+    pub version: VersionedValue,
+}
+
+/// Forward-only cursor over one segment's canonical `(key, sequence)` order.
+///
+/// V3 segments retain at most one decoded block in the cursor. This is the
+/// primitive used by compaction to merge immutable segments without first
+/// materializing every key and version in the database.
+pub(crate) struct SegmentRecordCursor<'a> {
+    segment: &'a Segment,
+    legacy_offset: usize,
+    block_index: usize,
+    record_index: usize,
+    loaded_block: Option<Arc<DecodedBlock>>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -410,11 +506,25 @@ impl Segment {
                 let cursor = legacy_seek(records, sparse_index, key);
                 select_version(records, cursor, records.len(), key, read_sequence)
             }
-            SegmentStorage::Blocked { blocks, .. } => {
+            SegmentStorage::Blocked {
+                blocks,
+                filters,
+                cache,
+                ..
+            } => {
                 let mut block_index =
                     blocks.partition_point(|block| block.last_key.as_slice() < key);
                 let mut selected = None;
                 while block_index < blocks.len() {
+                    let negative = !filters[block_index].may_contain(key);
+                    record_filter_probe(cache, negative)?;
+                    if negative {
+                        if blocks[block_index].last_key.as_slice() > key {
+                            break;
+                        }
+                        block_index += 1;
+                        continue;
+                    }
                     let block = self.load_block(block_index)?;
                     if let Some(version) = select_version_block(&block, key, read_sequence)? {
                         if selected
@@ -448,7 +558,12 @@ impl Segment {
                     output[index] = self.get_version(keys[index], read_sequence)?;
                 }
             }
-            SegmentStorage::Blocked { blocks, .. } => {
+            SegmentStorage::Blocked {
+                blocks,
+                filters,
+                cache,
+                ..
+            } => {
                 let mut loaded: Option<(usize, Arc<DecodedBlock>)> = None;
                 for index in order {
                     let key = keys[index];
@@ -462,6 +577,15 @@ impl Segment {
                         blocks.partition_point(|block| block.last_key.as_slice() < key);
                     let mut selected = None;
                     while block_index < blocks.len() {
+                        let negative = !filters[block_index].may_contain(key);
+                        record_filter_probe(cache, negative)?;
+                        if negative {
+                            if blocks[block_index].last_key.as_slice() > key {
+                                break;
+                            }
+                            block_index += 1;
+                            continue;
+                        }
                         let block = match &loaded {
                             Some((loaded_index, block)) if *loaded_index == block_index => {
                                 Arc::clone(block)
@@ -554,26 +678,14 @@ impl Segment {
         self.visible_from(&[], None, read_sequence)
     }
 
-    pub(crate) fn all_versions(&self) -> Result<Vec<(Vec<u8>, Vec<VersionedValue>)>> {
-        let mut output = Vec::<(Vec<u8>, Vec<VersionedValue>)>::new();
-        self.for_each_record(|record| {
-            if output
-                .last()
-                .is_none_or(|(key, _)| key.as_slice() != record.key)
-            {
-                output.push((record.key.to_vec(), Vec::new()));
-            }
-            output
-                .last_mut()
-                .expect("record creates a version group")
-                .1
-                .push(VersionedValue {
-                    sequence: record.sequence,
-                    value: record.value.map(<[u8]>::to_vec),
-                });
-            Ok(())
-        })?;
-        Ok(output)
+    pub(crate) fn record_cursor(&self) -> SegmentRecordCursor<'_> {
+        SegmentRecordCursor {
+            segment: self,
+            legacy_offset: 0,
+            block_index: 0,
+            record_index: 0,
+            loaded_block: None,
+        }
     }
 
     pub fn sparse_index_entries(&self) -> usize {
@@ -647,25 +759,13 @@ impl Segment {
             .collect())
     }
 
-    fn for_each_record(&self, mut visit: impl FnMut(Record<'_>) -> Result<()>) -> Result<()> {
-        match &self.storage {
-            SegmentStorage::Legacy { records, .. } => visit_records(records, &mut visit),
-            SegmentStorage::Blocked { blocks, .. } => {
-                for index in 0..blocks.len() {
-                    let block = self.load_block(index)?;
-                    visit_decoded_records(&block, 0, &mut visit)?;
-                }
-                Ok(())
-            }
-        }
-    }
-
     fn load_block(&self, block_index: usize) -> Result<Arc<DecodedBlock>> {
         let SegmentStorage::Blocked {
             source,
             blocks,
             cache,
             cache_id,
+            ..
         } = &self.storage
         else {
             return invalid("legacy segment has no block table");
@@ -735,6 +835,60 @@ impl Segment {
             cache.maybe_rebuild_order();
         }
         Ok(decoded)
+    }
+}
+
+impl SegmentRecordCursor<'_> {
+    pub(crate) fn next_record(&mut self) -> Result<Option<SegmentRecord>> {
+        match &self.segment.storage {
+            SegmentStorage::Legacy { records, .. } => {
+                if self.legacy_offset >= records.len() {
+                    return Ok(None);
+                }
+                let record = parse_record(
+                    records,
+                    self.legacy_offset,
+                    records.len(),
+                    self.segment.descriptor.minimum_sequence,
+                    self.segment.descriptor.maximum_sequence,
+                )?;
+                self.legacy_offset = record.next;
+                Ok(Some(owned_record(record)))
+            }
+            SegmentStorage::Blocked { blocks, .. } => loop {
+                if self.block_index >= blocks.len() {
+                    return Ok(None);
+                }
+                if self.loaded_block.is_none() {
+                    self.loaded_block = Some(self.segment.load_block(self.block_index)?);
+                    self.record_index = 0;
+                }
+                let block = self.loaded_block.as_ref().expect("block was loaded");
+                if let Some(offset) = block.record_offsets.get(self.record_index) {
+                    let record = parse_record(
+                        &block.bytes,
+                        *offset as usize,
+                        block.bytes.len(),
+                        self.segment.descriptor.minimum_sequence,
+                        self.segment.descriptor.maximum_sequence,
+                    )?;
+                    self.record_index += 1;
+                    return Ok(Some(owned_record(record)));
+                }
+                self.block_index += 1;
+                self.loaded_block = None;
+            },
+        }
+    }
+}
+
+fn owned_record(record: Record<'_>) -> SegmentRecord {
+    SegmentRecord {
+        key: record.key.to_vec(),
+        version: VersionedValue {
+            sequence: record.sequence,
+            value: record.value.map(<[u8]>::to_vec),
+        },
     }
 }
 
@@ -914,11 +1068,12 @@ fn append_record(output: &mut Vec<u8>, key: &[u8], version: &VersionedValue) {
 fn decode_v3_file(path: &Path, physical_bytes: u64, cache: SharedBlockCache) -> Result<Segment> {
     let actual = verify_file_digest(path, physical_bytes)?;
     let mut file = File::open(path)?;
-    let (descriptor, blocks) = read_v3_metadata(&mut file, physical_bytes, actual)?;
+    let (descriptor, blocks, filters) = read_v3_metadata(&mut file, physical_bytes, actual)?;
     build_blocked_segment(
         descriptor,
         BlockSource::File(Arc::new(Mutex::new(file))),
         blocks,
+        filters,
         cache,
     )
 }
@@ -935,11 +1090,12 @@ fn decode_v3_bytes(bytes: Vec<u8>, cache: SharedBlockCache) -> Result<Segment> {
         return invalid("segment content checksum does not match");
     }
     let mut cursor = std::io::Cursor::new(&bytes);
-    let (descriptor, blocks) = read_v3_metadata(&mut cursor, bytes.len() as u64, actual)?;
+    let (descriptor, blocks, filters) = read_v3_metadata(&mut cursor, bytes.len() as u64, actual)?;
     build_blocked_segment(
         descriptor,
         BlockSource::Bytes(Arc::new(bytes)),
         blocks,
+        filters,
         cache,
     )
 }
@@ -956,7 +1112,7 @@ fn validate_v3_slice(bytes: &[u8]) -> Result<SegmentDescriptor> {
         return invalid("segment content checksum does not match");
     }
     let mut cursor = std::io::Cursor::new(bytes);
-    let (descriptor, _) = read_v3_metadata(&mut cursor, bytes.len() as u64, actual)?;
+    let (descriptor, _, _) = read_v3_metadata(&mut cursor, bytes.len() as u64, actual)?;
     Ok(descriptor)
 }
 
@@ -1007,7 +1163,7 @@ fn read_v3_metadata(
     reader: &mut (impl Read + Seek),
     physical_bytes: u64,
     actual: String,
-) -> Result<(SegmentDescriptor, Vec<BlockDescriptor>)> {
+) -> Result<(SegmentDescriptor, Vec<BlockDescriptor>, Vec<BlockFilter>)> {
     let mut header = [0u8; V3_HEADER_BYTES];
     reader.seek(SeekFrom::Start(0))?;
     reader.read_exact(&mut header)?;
@@ -1083,6 +1239,7 @@ fn read_v3_metadata(
             || record_bytes == 0
             || record_bytes > MAX_DECODED_BLOCK_BYTES
             || block_entries == 0
+            || block_entries > (record_bytes / RECORD_HEADER_BYTES) as u64
             || key_len == 0
             || key_len > MAX_KEY_BYTES
             || offset != prior_end
@@ -1140,12 +1297,13 @@ fn validate_v3_blocks(
     mut descriptor: SegmentDescriptor,
     blocks: Vec<BlockDescriptor>,
     declared_record_bytes: u64,
-) -> Result<(SegmentDescriptor, Vec<BlockDescriptor>)> {
+) -> Result<(SegmentDescriptor, Vec<BlockDescriptor>, Vec<BlockFilter>)> {
     let mut observed_entries = 0u64;
     let mut observed_bytes = 0u64;
     let mut previous: Option<(Vec<u8>, u64)> = None;
     let mut first_key = None;
     let mut last_key = None;
+    let mut filters = Vec::with_capacity(blocks.len());
     for block in &blocks {
         reader.seek(SeekFrom::Start(block.offset))?;
         let mut compressed = vec![0u8; block.physical_bytes];
@@ -1154,6 +1312,7 @@ fn validate_v3_blocks(
         let mut cursor = 0;
         let mut block_entries = 0u64;
         let mut block_last = None;
+        let mut filter = BlockFilter::new(block.entries);
         while cursor < records.len() {
             let record = parse_record(
                 &records,
@@ -1166,6 +1325,7 @@ fn validate_v3_blocks(
             first_key.get_or_insert_with(|| record.key.to_vec());
             last_key = Some(record.key.to_vec());
             block_last = Some(record.key.to_vec());
+            filter.insert(record.key);
             block_entries += 1;
             cursor = record.next;
         }
@@ -1180,19 +1340,21 @@ fn validate_v3_blocks(
         observed_bytes = observed_bytes
             .checked_add(records.len() as u64)
             .ok_or_else(|| Error::InvalidSegment("v3 record byte count overflow".into()))?;
+        filters.push(filter);
     }
     if observed_entries != descriptor.entries || observed_bytes != declared_record_bytes {
         return invalid("v3 header counts disagree with block contents");
     }
     descriptor.first_key = first_key.expect("validated v3 is non-empty");
     descriptor.last_key = last_key.expect("validated v3 is non-empty");
-    Ok((descriptor, blocks))
+    Ok((descriptor, blocks, filters))
 }
 
 fn build_blocked_segment(
     descriptor: SegmentDescriptor,
     source: BlockSource,
     blocks: Vec<BlockDescriptor>,
+    filters: Vec<BlockFilter>,
     cache: SharedBlockCache,
 ) -> Result<Segment> {
     Ok(Segment {
@@ -1200,6 +1362,7 @@ fn build_blocked_segment(
         storage: SegmentStorage::Blocked {
             source,
             blocks,
+            filters,
             cache,
             cache_id: CACHE_ID.fetch_add(1, Ordering::Relaxed),
         },

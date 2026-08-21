@@ -15,8 +15,10 @@ flush path. This is
 intentional backpressure: the new batch is not appended until maintenance
 succeeds. One atomic batch is never split; a batch larger than a configured
 limit remains one WAL frame and is reported as oversized. Maintenance counters
-are operational evidence and reset on reopen; WAL, segment, manifest, and
-`CURRENT` remain the canonical persistence truth.
+are operational evidence and reset on reopen. The same evidence reports L0
+count/trigger/debt, automatic compaction count/failures, compacted input/output
+bytes, and peak merge-buffer bytes. WAL, segment, manifest, and `CURRENT`
+remain the canonical persistence truth.
 
 Runtime entry points use `PersistentEngine`: a missing path creates this native
 format, and an authenticated `CURRENT` pointer selects it on reopen. An existing
@@ -102,7 +104,8 @@ only its own `digest` field.
 Every segment descriptor carries its content identity/checksum, key range,
 sequence range, entry count, and byte count. Duplicate identities, inverted
 ranges, empty segments, and segments newer than the manifest's durable sequence
-fail closed.
+fail closed. L0 may overlap by definition; every higher level must contain
+strictly ordered, non-overlapping key ranges.
 
 Immutable segment v3 stores a fixed 64-byte `VYRSEG03` header, independently
 compressed LZ4 record blocks, a bounded `VYRIX003` footer index, and a lowercase
@@ -124,7 +127,13 @@ overlap, and trailing bytes are denied.
 Point reads return owned values and load only candidate blocks. A single
 immutable segment reduces ordered MVCC groups directly into range results;
 multi-segment reads retain the general version merge. Snapshot and compaction
-traversal process blocks sequentially. All immutable
+traversal process blocks sequentially. During authenticated v3 validation Vyrm
+derives one block-local Bloom filter using ten bits per physical entry and seven
+deterministic double-hash probes. These filters are acceleration state derived
+from checksum-verified canonical bytes, not a second persistence truth; a
+negative result skips block load/decode, while positives still execute the
+ordinary exact MVCC path. Probe and negative counts join physical evidence.
+All immutable
 segments in one `Database` share a decoded-block LRU: 4 MiB by default,
 configurable at create/open, with capacity/resident/entry/hit/miss/eviction
 counters exposed by `block_cache_stats`. A block larger than the configured
@@ -199,13 +208,22 @@ commit, purge, and snapshot-cache records live in a separate node-local VyrmKV
 domain and therefore cannot appear in the bundle.
 
 The native `Engine` adapter passes Memory/Fjall/native semantic and exact query
-differentials, including flush/reopen. Compaction retains the newest version
-visible at every explicitly protected physical sequence plus the durable head;
-an obsolete tombstone with no retained older value disappears. Runtime leases
-create physical manifest checkpoints and reconcile them on reopen,
-compaction, release, and expiry. GC validates the complete root inventory,
-then removes only manifests, segments, and WALs unreachable from `CURRENT` or
-a named checkpoint.
+differentials, including flush/reopen. One compaction step selects a bounded,
+deterministic source-level range plus every overlapping target-level segment,
+then performs a k-way merge through forward-only segment cursors. Output is
+split at key boundaries against an 8 MiB default target, retaining at most the
+target plus one key's complete MVCC history in the merge map. Manifest CAS
+publishes all output partitions together.
+
+Explicit compaction retains the newest version visible at every protected
+physical sequence plus the durable head; an obsolete tombstone disappears only
+when no unselected segment can contain the shadowed key. Cooperative automatic
+maintenance deliberately retains every MVCC version because the low-level
+copyable `Snapshot` is not a lifetime-tracked reclamation lease. Runtime leases
+create physical manifest checkpoints and reconcile them on reopen, compaction,
+release, and expiry. GC validates the complete root inventory, then removes
+only manifests, segments, and WALs unreachable from `CURRENT` or a named
+checkpoint.
 
 Deterministic crash and storage-full injection covers the WAL-sync,
 segment-sync, successor-WAL-sync, and manifest-publication flush boundaries,

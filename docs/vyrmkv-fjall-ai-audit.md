@@ -1,6 +1,6 @@
 # Fjall → vyrmKV AI-runtime audit
 
-Status: first executable optimization and benchmark profile, 2026-08-20.
+Status: bounded leveled-maintenance and negative-filter pass, 2026-08-21.
 
 ## Decision
 
@@ -109,11 +109,19 @@ can expose regressions across machines.
    memtable or batch. Crash recovery across the segment/continuation-WAL
    boundary is covered. Retain threshold-crossing burst latency and remote
    sustained evidence as promotion gates.
-3. Add authenticated per-segment negative filters only after point-miss and
-   multi-get fan-out baselines; freeze the format and false-positive policy.
-4. Replace full-materialization, all-to-one compaction with bounded leveled
-   streaming compaction that respects snapshot/checkpoint pins and family
-   retention policy.
+3. **Complete locally:** derive authenticated block-local negative filters from
+   validated v3 bytes using ten bits per physical entry and seven hashes.
+   Deterministic point-miss evidence proves negative probes avoid block loads;
+   false positives retain the exact read path and cannot change results. No
+   wire-format revision was needed because filters are derived acceleration
+   state.
+4. **Complete locally:** replace full-materialization, all-to-one compaction
+   with bounded deterministic level selection, forward-only k-way record merge,
+   key-boundary output partitioning, higher-level non-overlap enforcement,
+   lower-level tombstone protection, and physical maintenance evidence.
+   Automatic steps retain all versions; explicit protected-snapshot compaction
+   is the only pruning path. Asynchronous immutable-memtable flush remains a
+   separate latency gate.
 5. Test family-aware blocks/cache admission and prefix/restart compression
    against the simpler single-space design. Reject it if mixed-family evidence
    does not improve.

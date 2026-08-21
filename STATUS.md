@@ -1,4 +1,4 @@
-# Runtime status — 2026-08-20
+# Runtime status — 2026-08-21
 
 vyrm now implements the complete runtime loop described by the current plan.
 It is pre-release software, but the listed behavior is executable and tested,
@@ -306,8 +306,17 @@ not roadmap language.
   storage-full injection covers each flush and compaction durability boundary,
   followed by reopen and continued writes. Segment v3 adds independently
   authenticated LZ4 blocks, a bounded footer index, runtime tamper denial, and
-  database-wide cache telemetry; explicit v1/v2 readers preserve compatibility,
-  and exact MVCC streaming remains under a Memtable differential. The five-trial
+  database-wide cache telemetry; block-local negative filters are derived while
+  validating those authenticated bytes and skip candidate block I/O without
+  changing the v3 wire format. Explicit v1/v2 readers preserve compatibility,
+  and exact MVCC streaming remains under a Memtable differential. Compaction is
+  now a bounded leveled step rather than an all-segment materialization: it
+  selects deterministic L0/lower-level ranges, merges them through forward-only
+  block cursors, partitions output at key boundaries, enforces non-overlap above
+  L0, and exposes input/output bytes, debt, failures, and peak merge-buffer
+  evidence. Automatic maintenance retains all MVCC history; explicit compaction
+  alone prunes against its protected snapshots, retaining tombstones that still
+  shadow unselected lower levels. The five-trial
   isolated Fjall/native baseline verifies
   correctness and now passes every equal-or-better cell: native is 9.1% ahead
   on write throughput and 67.3% ahead on bounded replay throughput, has lower
@@ -403,8 +412,11 @@ artifact even on failure.
   proves zero segment-cache traffic for current overwrites/tombstones and exact
   historical fallback. A five-trial 8,192-cold/128-hot local profile measured
   2.261× Fjall throughput and 0.379× Fjall p95, narrowly scoped to current hot
-  point reads. Automatic bounded maintenance, negative filters, leveled
-  streaming compaction, and the full mixed AI matrix remain open. See
+  point reads. Cooperative bounded leveled maintenance and authenticated
+  block-local negative filters now pass crash recovery, exact MVCC tests, and
+  the 20,000-operation Fjall/model mutation differential. Asynchronous
+  memtable flush, family-aware maintenance/cache policy, threshold-crossing
+  latency, and the full mixed AI matrix remain open. See
   `docs/vyrmkv-fjall-ai-audit.md`.
 
 - The first persisted runtime-tracing contract is now implemented in the

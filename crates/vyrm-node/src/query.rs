@@ -611,6 +611,51 @@ fn physical_storage_attributes(
                 before.oversized_batches,
                 after.oversized_batches,
             );
+            insert_delta(
+                &mut attributes,
+                "automatic_compactions_delta",
+                before.automatic_compactions,
+                after.automatic_compactions,
+            );
+            insert_delta(
+                &mut attributes,
+                "failed_compactions_delta",
+                before.failed_compactions,
+                after.failed_compactions,
+            );
+            insert_delta(
+                &mut attributes,
+                "compaction_input_bytes_delta",
+                before.compaction_input_bytes,
+                after.compaction_input_bytes,
+            );
+            insert_delta(
+                &mut attributes,
+                "compaction_output_bytes_delta",
+                before.compaction_output_bytes,
+                after.compaction_output_bytes,
+            );
+            insert_counter(
+                &mut attributes,
+                "peak_compaction_buffer_bytes",
+                after.peak_compaction_buffer_bytes,
+            );
+            insert_counter(&mut attributes, "l0_segment_count", after.l0_segment_count);
+            insert_counter(
+                &mut attributes,
+                "l0_compaction_trigger",
+                after.l0_compaction_trigger,
+            );
+            insert_counter(
+                &mut attributes,
+                "compaction_debt_segments",
+                after.compaction_debt_segments,
+            );
+            insert_counter(
+                &mut attributes,
+                "compaction_target_segment_bytes",
+                after.compaction_target_segment_bytes,
+            );
             insert_counter(&mut attributes, "segment_count", after.segment_count);
             insert_counter(&mut attributes, "segment_bytes", after.segment_bytes);
             insert_counter(
@@ -659,6 +704,18 @@ fn physical_storage_attributes(
                 "block_bytes_decoded_delta",
                 before.block_bytes_decoded,
                 after.block_bytes_decoded,
+            );
+            insert_delta(
+                &mut attributes,
+                "filter_checks_delta",
+                before.filter_checks,
+                after.filter_checks,
+            );
+            insert_delta(
+                &mut attributes,
+                "filter_negatives_delta",
+                before.filter_negatives,
+                after.filter_negatives,
             );
         }
         (Err(before_error), Err(after_error)) => {

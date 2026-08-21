@@ -64,6 +64,19 @@ fn native_operator_evidence_matches_fjall_and_survives_reopen() {
     );
     assert_eq!(physical.automatic_flushes, Some(0));
     assert_eq!(physical.maintenance_write_stalls, Some(0));
+    assert_eq!(physical.automatic_compactions, Some(0));
+    assert_eq!(physical.failed_compactions, Some(0));
+    assert_eq!(physical.compaction_input_bytes, Some(0));
+    assert_eq!(physical.compaction_output_bytes, Some(0));
+    assert_eq!(physical.peak_compaction_buffer_bytes, Some(0));
+    assert_eq!(physical.l0_segment_count, Some(0));
+    assert_eq!(physical.compaction_debt_segments, Some(0));
+    assert_eq!(
+        physical.l0_compaction_trigger,
+        Some(DatabaseOptions::default().compaction.l0_compaction_trigger as u64)
+    );
+    assert_eq!(physical.filter_checks, Some(0));
+    assert_eq!(physical.filter_negatives, Some(0));
 
     let reader = Reader::new("agent:clyffy").unwrap();
     let subject = Subject::new("wp3").unwrap();
@@ -146,4 +159,6 @@ fn native_engine_applies_explicit_project_maintenance_bounds() {
     assert_eq!(physical.automatic_flushes, Some(1));
     assert_eq!(physical.maintenance_write_stalls, Some(1));
     assert_eq!(physical.failed_maintenance_flushes, Some(0));
+    assert_eq!(physical.l0_segment_count, Some(1));
+    assert_eq!(physical.compaction_debt_segments, Some(0));
 }

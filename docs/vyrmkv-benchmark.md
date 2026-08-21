@@ -56,6 +56,21 @@ general superiority over Fjall, SurrealDB, Qdrant, or other databases.
 
 Evidence: [`2026-08-19-vyrmkv-baseline.json`](../eval/results/2026-08-19-vyrmkv-baseline.json).
 
+## M3.5 maintenance confirmation
+
+The 2026-08-21 bounded-compaction and negative-filter tree reran the canonical
+standard profile with nine alternating isolated trials. Native passed every
+strict cell at 1.151× write throughput, 1.702× read throughput, 0.788× write
+p95, 0.611× read p95, 0.258× recovery time, 0.855× steady RSS, and 0.310× disk
+relative to Fjall. Correctness passed in every raw trial.
+
+A same-tree three-trial diagnostic failed once because native write p95 was
+1.044× Fjall while the other six performance cells passed. Three trials leave
+only 96 total write-latency samples for this profile, so that diagnostic is
+recorded as undersampling rather than presented as promotion evidence. The
+nine-trial result below is the repository's canonical M3.5 confirmation:
+[`2026-08-21-vyrmkv-m35-standard.json`](../eval/results/2026-08-21-vyrmkv-m35-standard.json).
+
 ## Canonical profile matrix
 
 A second pass uses nine isolated trials per profile. Every profile has at least

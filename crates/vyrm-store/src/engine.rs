@@ -59,6 +59,15 @@ pub struct PhysicalStoreEvidence {
     pub maintenance_write_stalls: Option<u64>,
     pub failed_maintenance_flushes: Option<u64>,
     pub oversized_batches: Option<u64>,
+    pub automatic_compactions: Option<u64>,
+    pub failed_compactions: Option<u64>,
+    pub compaction_input_bytes: Option<u64>,
+    pub compaction_output_bytes: Option<u64>,
+    pub peak_compaction_buffer_bytes: Option<u64>,
+    pub l0_segment_count: Option<u64>,
+    pub l0_compaction_trigger: Option<u64>,
+    pub compaction_debt_segments: Option<u64>,
+    pub compaction_target_segment_bytes: Option<u64>,
     pub segment_count: Option<u64>,
     pub segment_bytes: Option<u64>,
     pub cache_capacity_bytes: Option<u64>,
@@ -70,6 +79,8 @@ pub struct PhysicalStoreEvidence {
     pub block_loads: Option<u64>,
     pub block_bytes_loaded: Option<u64>,
     pub block_bytes_decoded: Option<u64>,
+    pub filter_checks: Option<u64>,
+    pub filter_negatives: Option<u64>,
 }
 
 impl PhysicalStoreEvidence {
@@ -89,6 +100,15 @@ impl PhysicalStoreEvidence {
             maintenance_write_stalls: None,
             failed_maintenance_flushes: None,
             oversized_batches: None,
+            automatic_compactions: None,
+            failed_compactions: None,
+            compaction_input_bytes: None,
+            compaction_output_bytes: None,
+            peak_compaction_buffer_bytes: None,
+            l0_segment_count: None,
+            l0_compaction_trigger: None,
+            compaction_debt_segments: None,
+            compaction_target_segment_bytes: None,
             segment_count: None,
             segment_bytes: None,
             cache_capacity_bytes: None,
@@ -100,6 +120,8 @@ impl PhysicalStoreEvidence {
             block_loads: None,
             block_bytes_loaded: None,
             block_bytes_decoded: None,
+            filter_checks: None,
+            filter_negatives: None,
         }
     }
 }

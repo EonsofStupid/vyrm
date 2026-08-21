@@ -14,6 +14,10 @@ const WAL_DIRECTORY: &str = "wal";
 const SEGMENT_DIRECTORY: &str = "segments";
 pub const DEFAULT_WAL_PAYLOAD_MAX_BYTES: usize = 64 * 1024 * 1024;
 pub const DEFAULT_MEMTABLE_MAX_VERSIONS: usize = 524_288;
+pub const DEFAULT_L0_COMPACTION_TRIGGER: usize = 8;
+pub const DEFAULT_COMPACTION_MAX_INPUT_SEGMENTS: usize = 16;
+pub const DEFAULT_COMPACTION_TARGET_SEGMENT_BYTES: usize = 8 * 1024 * 1024;
+pub const DEFAULT_MAX_COMPACTION_LEVEL: u8 = 6;
 
 /// Synchronous write-path maintenance limits. Crossing either limit stalls the
 /// next writer while the existing WAL-backed memtable is published. This keeps
@@ -45,10 +49,49 @@ impl MaintenancePolicy {
     }
 }
 
+/// Deterministic bounds for one immutable maintenance step. The input bound
+/// prevents a growing database from turning one compaction into an unbounded
+/// all-segment rewrite; the output target is enforced at key boundaries so all
+/// MVCC versions for one key remain together.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CompactionPolicy {
+    pub l0_compaction_trigger: usize,
+    pub max_input_segments: usize,
+    pub target_segment_bytes: usize,
+    pub max_level: u8,
+}
+
+impl Default for CompactionPolicy {
+    fn default() -> Self {
+        Self {
+            l0_compaction_trigger: DEFAULT_L0_COMPACTION_TRIGGER,
+            max_input_segments: DEFAULT_COMPACTION_MAX_INPUT_SEGMENTS,
+            target_segment_bytes: DEFAULT_COMPACTION_TARGET_SEGMENT_BYTES,
+            max_level: DEFAULT_MAX_COMPACTION_LEVEL,
+        }
+    }
+}
+
+impl CompactionPolicy {
+    fn validate(self) -> Result<Self> {
+        if self.l0_compaction_trigger < 2
+            || self.max_input_segments < 2
+            || self.target_segment_bytes == 0
+            || self.max_level == 0
+        {
+            return Err(Error::InvalidConfiguration(
+                "compaction requires an L0 trigger and input bound of at least two, a non-zero output target, and at least one level".into(),
+            ));
+        }
+        Ok(self)
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DatabaseOptions {
     pub block_cache_bytes: usize,
     pub maintenance: MaintenancePolicy,
+    pub compaction: CompactionPolicy,
 }
 
 impl Default for DatabaseOptions {
@@ -56,6 +99,7 @@ impl Default for DatabaseOptions {
         Self {
             block_cache_bytes: crate::DEFAULT_BLOCK_CACHE_BYTES,
             maintenance: MaintenancePolicy::default(),
+            compaction: CompactionPolicy::default(),
         }
     }
 }
@@ -63,6 +107,7 @@ impl Default for DatabaseOptions {
 impl DatabaseOptions {
     fn validate(self) -> Result<Self> {
         self.maintenance.validate()?;
+        self.compaction.validate()?;
         Ok(self)
     }
 }
@@ -77,6 +122,11 @@ pub struct MaintenanceStats {
     pub oversized_batches: u64,
     pub peak_wal_payload_bytes: usize,
     pub peak_memtable_versions: usize,
+    pub automatic_compactions: u64,
+    pub failed_compactions: u64,
+    pub compaction_input_bytes: u64,
+    pub compaction_output_bytes: u64,
+    pub peak_compaction_buffer_bytes: usize,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -93,6 +143,28 @@ pub struct CompactionOutcome {
     pub input_versions: u64,
     pub output_versions: u64,
     pub protected_sequences: Vec<u64>,
+    pub source_level: u8,
+    pub target_level: u8,
+    pub input_bytes: u64,
+    pub output_bytes: u64,
+    pub peak_buffer_bytes: usize,
+    pub history_pruned: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct CompactionCandidate {
+    indices: Vec<usize>,
+    source_level: u8,
+    target_level: u8,
+}
+
+struct CompactionMerge {
+    segments: Vec<Segment>,
+    output_segments: usize,
+    input_versions: u64,
+    output_versions: u64,
+    output_bytes: u64,
+    peak_buffer_bytes: usize,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -183,6 +255,7 @@ pub struct Database {
     segments: Vec<Segment>,
     block_cache: SharedBlockCache,
     maintenance: MaintenancePolicy,
+    compaction: CompactionPolicy,
     maintenance_stats: MaintenanceStats,
     wal_payload_bytes: usize,
 }
@@ -228,6 +301,7 @@ impl Database {
             segments: Vec::new(),
             block_cache: new_block_cache(options.block_cache_bytes),
             maintenance: options.maintenance,
+            compaction: options.compaction,
             maintenance_stats: MaintenanceStats::default(),
             wal_payload_bytes: 0,
         })
@@ -295,6 +369,7 @@ impl Database {
             segments,
             block_cache,
             maintenance: options.maintenance,
+            compaction: options.compaction,
             maintenance_stats,
             wal_payload_bytes,
         })
@@ -364,6 +439,32 @@ impl Database {
                 Ok(Some(_)) => {
                     self.maintenance_stats.automatic_flushes =
                         self.maintenance_stats.automatic_flushes.saturating_add(1);
+                    match self.compact_if_needed(self.manifest.created_at) {
+                        Ok(Some(outcome)) => {
+                            self.maintenance_stats.automatic_compactions = self
+                                .maintenance_stats
+                                .automatic_compactions
+                                .saturating_add(1);
+                            self.maintenance_stats.compaction_input_bytes = self
+                                .maintenance_stats
+                                .compaction_input_bytes
+                                .saturating_add(outcome.input_bytes);
+                            self.maintenance_stats.compaction_output_bytes = self
+                                .maintenance_stats
+                                .compaction_output_bytes
+                                .saturating_add(outcome.output_bytes);
+                            self.maintenance_stats.peak_compaction_buffer_bytes = self
+                                .maintenance_stats
+                                .peak_compaction_buffer_bytes
+                                .max(outcome.peak_buffer_bytes);
+                        }
+                        Ok(None) => {}
+                        Err(error) => {
+                            self.maintenance_stats.failed_compactions =
+                                self.maintenance_stats.failed_compactions.saturating_add(1);
+                            return Err(error);
+                        }
+                    }
                 }
                 Ok(None) => {}
                 Err(error) => {
@@ -737,16 +838,21 @@ impl Database {
         Ok(manifest)
     }
 
-    /// Rewrites every current immutable segment into one canonical level while
-    /// retaining exactly the versions observable at `protected` snapshots and
-    /// at the current durable head. Named checkpoints keep their original
-    /// manifests/segments and are handled independently by garbage collection.
+    /// Executes one deterministic leveled compaction step while retaining
+    /// exactly the versions observable at `protected` snapshots and at the
+    /// current durable head. Input selection is bounded and records are merged
+    /// through forward-only segment cursors. Output is partitioned at key
+    /// boundaries, so the working set is bounded by the configured target plus
+    /// one key's complete MVCC history.
+    ///
+    /// Named checkpoints keep their original manifests and segments and are
+    /// handled independently by garbage collection.
     pub fn compact(
         &mut self,
         protected: &[Snapshot],
         at: u64,
     ) -> Result<Option<CompactionOutcome>> {
-        self.compact_inner(protected, at, None)
+        self.compact_inner(protected, at, None, true, false)
     }
 
     pub fn compact_with_failure(
@@ -756,7 +862,17 @@ impl Database {
         boundary: CompactionBoundary,
         mode: FailureMode,
     ) -> Result<Option<CompactionOutcome>> {
-        self.compact_inner(protected, at, Some((boundary, mode)))
+        self.compact_inner(protected, at, Some((boundary, mode)), true, false)
+    }
+
+    /// Runs one leveled step only when the configured L0 threshold or a lower
+    /// level debt is present. Automatic maintenance conservatively retains all
+    /// MVCC versions because a plain [`Snapshot`] is intentionally copyable and
+    /// cannot act as a lifetime-tracked reclamation lease. Explicit compaction
+    /// supplies the precise protected snapshot set and may prune history.
+    pub fn compact_if_needed(&mut self, at: u64) -> Result<Option<CompactionOutcome>> {
+        self.flush_memtable_inner(at, None)?;
+        self.compact_inner(&[], at, None, false, true)
     }
 
     fn compact_inner(
@@ -764,11 +880,13 @@ impl Database {
         protected: &[Snapshot],
         at: u64,
         failure: Option<(CompactionBoundary, FailureMode)>,
+        force: bool,
+        retain_all_versions: bool,
     ) -> Result<Option<CompactionOutcome>> {
-        self.flush_memtable(at)?;
-        if self.segments.is_empty() {
+        self.flush_memtable_inner(at, None)?;
+        let Some(candidate) = self.select_compaction_candidate(force) else {
             return Ok(None);
-        }
+        };
         let durable = self.manifest.durable_sequence;
         let mut protected_sequences = protected
             .iter()
@@ -776,71 +894,41 @@ impl Database {
             .filter(|sequence| *sequence <= durable)
             .collect::<BTreeSet<_>>();
         protected_sequences.insert(durable);
-
-        let mut merged = BTreeMap::<Vec<u8>, BTreeMap<u64, Option<Vec<u8>>>>::new();
-        for segment in &self.segments {
-            for (key, versions) in segment.all_versions()? {
-                let target = merged.entry(key).or_default();
-                for version in versions {
-                    match target.get(&version.sequence) {
-                        Some(existing) if existing != &version.value => {
-                            return Err(Error::InvalidSegment(format!(
-                                "segments disagree for sequence {}",
-                                version.sequence
-                            )));
-                        }
-                        Some(_) => {}
-                        None => {
-                            target.insert(version.sequence, version.value);
-                        }
-                    }
-                }
-            }
-        }
-        let input_versions = merged.values().map(BTreeMap::len).sum::<usize>() as u64;
-        let mut retained = BTreeMap::<Vec<u8>, Vec<VersionedValue>>::new();
-        for (key, versions) in merged {
-            let selected = protected_sequences
-                .iter()
-                .filter_map(|sequence| {
-                    versions
-                        .range(..=*sequence)
-                        .next_back()
-                        .map(|(sequence, value)| (*sequence, value.clone()))
-                })
-                .collect::<BTreeMap<_, _>>();
-            if selected.values().all(Option::is_none) {
-                continue;
-            }
-            retained.insert(
-                key,
-                selected
-                    .into_iter()
-                    .map(|(sequence, value)| VersionedValue { sequence, value })
-                    .collect(),
-            );
-        }
-        let output_versions = retained.values().map(Vec::len).sum::<usize>() as u64;
         let previous_manifest = self.manifest.digest.clone();
-        let input_segments = self.segments.len();
-        let mut compacted_segments = Vec::new();
-        if !retained.is_empty() {
-            let table = Memtable::from_versions(retained, durable)?;
-            let (mut segment, _) = Segment::write_from_memtable_with_cache(
-                &self.root.join(SEGMENT_DIRECTORY),
-                &table,
-                Arc::clone(&self.block_cache),
-            )?;
-            segment.descriptor.level = self
-                .segments
-                .iter()
-                .map(|segment| segment.descriptor.level)
-                .max()
-                .unwrap_or_default()
-                .saturating_add(1);
-            compacted_segments.push(segment);
-        }
+        let input_segments = candidate.indices.len();
+        let input_bytes = candidate.indices.iter().try_fold(0u64, |total, index| {
+            total
+                .checked_add(self.segments[*index].descriptor.bytes)
+                .ok_or_else(|| Error::InvalidSegment("compaction input bytes overflow".into()))
+        })?;
+        let merge = self.merge_compaction_candidate(
+            &candidate,
+            durable,
+            &protected_sequences,
+            retain_all_versions,
+        )?;
+        let CompactionMerge {
+            segments: compacted_segments,
+            output_segments,
+            input_versions,
+            output_versions,
+            output_bytes,
+            peak_buffer_bytes,
+        } = merge;
         inject_compaction_failure(failure, CompactionBoundary::SegmentSynced)?;
+        let selected = candidate.indices.iter().copied().collect::<BTreeSet<_>>();
+        let mut descriptors = self
+            .segments
+            .iter()
+            .enumerate()
+            .filter(|(index, _)| !selected.contains(index))
+            .map(|(_, segment)| segment.descriptor.clone())
+            .collect::<Vec<_>>();
+        descriptors.extend(
+            compacted_segments
+                .iter()
+                .map(|segment| segment.descriptor.clone()),
+        );
         let next = Manifest::new(
             self.manifest
                 .generation
@@ -850,25 +938,302 @@ impl Database {
             at,
             durable,
             self.manifest.wal_start_sequence,
-            compacted_segments
-                .iter()
-                .map(|segment| segment.descriptor.clone())
-                .collect(),
+            descriptors,
         )?;
         self.manifests
             .publish(&next, Some(previous_manifest.as_str()))?;
-        self.segments = compacted_segments;
+        let mut retained_segments = std::mem::take(&mut self.segments)
+            .into_iter()
+            .enumerate()
+            .filter_map(|(index, segment)| (!selected.contains(&index)).then_some(segment))
+            .collect::<Vec<_>>();
+        retained_segments.extend(compacted_segments);
+        self.segments = retained_segments;
         self.manifest = next.clone();
         inject_compaction_failure(failure, CompactionBoundary::ManifestPublished)?;
         Ok(Some(CompactionOutcome {
             previous_manifest,
             manifest: next.digest,
             input_segments,
-            output_segments: self.segments.len(),
+            output_segments,
             input_versions,
             output_versions,
             protected_sequences: protected_sequences.into_iter().collect(),
+            source_level: candidate.source_level,
+            target_level: candidate.target_level,
+            input_bytes,
+            output_bytes,
+            peak_buffer_bytes,
+            history_pruned: !retain_all_versions,
         }))
+    }
+
+    fn select_compaction_candidate(&self, force: bool) -> Option<CompactionCandidate> {
+        let mut l0 = self
+            .segments
+            .iter()
+            .enumerate()
+            .filter(|(_, segment)| segment.descriptor.level == 0)
+            .map(|(index, segment)| (index, &segment.descriptor))
+            .collect::<Vec<_>>();
+        l0.sort_by(|left, right| {
+            left.1
+                .maximum_sequence
+                .cmp(&right.1.maximum_sequence)
+                .then_with(|| left.1.first_key.cmp(&right.1.first_key))
+                .then_with(|| left.1.id.cmp(&right.1.id))
+        });
+        if !l0.is_empty() && (force || l0.len() >= self.compaction.l0_compaction_trigger) {
+            let target_level = 1.min(self.compaction.max_level);
+            let mut selected_l0 = vec![l0[0].0];
+            let mut first_key = l0[0].1.first_key.clone();
+            let mut last_key = l0[0].1.last_key.clone();
+            for (index, descriptor) in l0.into_iter().skip(1) {
+                let candidate_first = first_key.as_slice().min(descriptor.first_key.as_slice());
+                let candidate_last = last_key.as_slice().max(descriptor.last_key.as_slice());
+                let overlap_count = self
+                    .segments
+                    .iter()
+                    .enumerate()
+                    .filter(|(other, segment)| {
+                        !selected_l0.contains(other)
+                            && *other != index
+                            && segment.descriptor.level == target_level
+                            && ranges_overlap(
+                                candidate_first,
+                                candidate_last,
+                                &segment.descriptor.first_key,
+                                &segment.descriptor.last_key,
+                            )
+                    })
+                    .count();
+                if selected_l0.len() + 1 + overlap_count > self.compaction.max_input_segments {
+                    break;
+                }
+                selected_l0.push(index);
+                first_key = candidate_first.to_vec();
+                last_key = candidate_last.to_vec();
+            }
+            let mut indices = selected_l0;
+            let overlaps = self
+                .segments
+                .iter()
+                .enumerate()
+                .filter(|(index, segment)| {
+                    !indices.contains(index)
+                        && segment.descriptor.level == target_level
+                        && ranges_overlap(
+                            &first_key,
+                            &last_key,
+                            &segment.descriptor.first_key,
+                            &segment.descriptor.last_key,
+                        )
+                })
+                .map(|(index, _)| index)
+                .collect::<Vec<_>>();
+            indices.extend(overlaps);
+            if (force || indices.len() >= 2) && indices.len() <= self.compaction.max_input_segments
+            {
+                indices.sort_unstable();
+                return Some(CompactionCandidate {
+                    indices,
+                    source_level: 0,
+                    target_level,
+                });
+            }
+            return None;
+        }
+
+        for source_level in 1..self.compaction.max_level {
+            let mut at_level = self
+                .segments
+                .iter()
+                .enumerate()
+                .filter(|(_, segment)| segment.descriptor.level == source_level)
+                .map(|(index, segment)| (index, &segment.descriptor))
+                .collect::<Vec<_>>();
+            if at_level.is_empty() || (!force && at_level.len() < 2) {
+                continue;
+            }
+            at_level.sort_by(|left, right| {
+                left.1
+                    .first_key
+                    .cmp(&right.1.first_key)
+                    .then_with(|| left.1.id.cmp(&right.1.id))
+            });
+            let target_level = source_level.saturating_add(1);
+            for take in (1..=at_level.len().min(self.compaction.max_input_segments)).rev() {
+                let first_key = &at_level[0].1.first_key;
+                let last_key = &at_level[take - 1].1.last_key;
+                let mut indices = at_level
+                    .iter()
+                    .take(take)
+                    .map(|(index, _)| *index)
+                    .collect::<Vec<_>>();
+                for (index, segment) in self.segments.iter().enumerate() {
+                    if segment.descriptor.level == target_level
+                        && ranges_overlap(
+                            first_key,
+                            last_key,
+                            &segment.descriptor.first_key,
+                            &segment.descriptor.last_key,
+                        )
+                    {
+                        indices.push(index);
+                    }
+                }
+                indices.sort_unstable();
+                indices.dedup();
+                if indices.len() <= self.compaction.max_input_segments
+                    && (force || indices.len() >= 2)
+                {
+                    return Some(CompactionCandidate {
+                        indices,
+                        source_level,
+                        target_level,
+                    });
+                }
+            }
+        }
+        None
+    }
+
+    fn merge_compaction_candidate(
+        &self,
+        candidate: &CompactionCandidate,
+        durable: u64,
+        protected_sequences: &BTreeSet<u64>,
+        retain_all_versions: bool,
+    ) -> Result<CompactionMerge> {
+        let selected = candidate.indices.iter().copied().collect::<BTreeSet<_>>();
+        let mut cursors = candidate
+            .indices
+            .iter()
+            .map(|index| self.segments[*index].record_cursor())
+            .collect::<Vec<_>>();
+        let mut current = cursors
+            .iter_mut()
+            .map(|cursor| cursor.next_record())
+            .collect::<Result<Vec<_>>>()?;
+        let mut buffered = BTreeMap::<Vec<u8>, Vec<VersionedValue>>::new();
+        let mut buffered_bytes = 0usize;
+        let mut peak_buffer_bytes = 0usize;
+        let mut compacted_segments = Vec::new();
+        let mut input_versions = 0u64;
+        let mut output_versions = 0u64;
+        let mut output_bytes = 0u64;
+
+        while let Some(key) = current
+            .iter()
+            .filter_map(|record| record.as_ref().map(|record| record.key.as_slice()))
+            .min()
+            .map(<[u8]>::to_vec)
+        {
+            let mut versions = BTreeMap::<u64, Option<Vec<u8>>>::new();
+            for (cursor, record) in cursors.iter_mut().zip(current.iter_mut()) {
+                while record.as_ref().is_some_and(|record| record.key == key) {
+                    let observed = record.take().expect("record was checked");
+                    match versions.get(&observed.version.sequence) {
+                        Some(existing) if existing != &observed.version.value => {
+                            return Err(Error::InvalidSegment(format!(
+                                "segments disagree for sequence {}",
+                                observed.version.sequence
+                            )));
+                        }
+                        Some(_) => {}
+                        None => {
+                            input_versions = input_versions.saturating_add(1);
+                            versions.insert(observed.version.sequence, observed.version.value);
+                        }
+                    }
+                    *record = cursor.next_record()?;
+                }
+            }
+            let retained = if retain_all_versions {
+                versions
+                    .into_iter()
+                    .map(|(sequence, value)| VersionedValue { sequence, value })
+                    .collect::<Vec<_>>()
+            } else {
+                protected_sequences
+                    .iter()
+                    .filter_map(|sequence| {
+                        versions
+                            .range(..=*sequence)
+                            .next_back()
+                            .map(|(sequence, value)| {
+                                (
+                                    *sequence,
+                                    VersionedValue {
+                                        sequence: *sequence,
+                                        value: value.clone(),
+                                    },
+                                )
+                            })
+                    })
+                    .collect::<BTreeMap<_, _>>()
+                    .into_values()
+                    .collect::<Vec<_>>()
+            };
+            let tombstone_only = retained.iter().all(|version| version.value.is_none());
+            let shadows_unselected = self.segments.iter().enumerate().any(|(index, segment)| {
+                !selected.contains(&index)
+                    && key >= segment.descriptor.first_key
+                    && key <= segment.descriptor.last_key
+            });
+            if retained.is_empty()
+                || (!retain_all_versions && tombstone_only && !shadows_unselected)
+            {
+                continue;
+            }
+            let group_bytes = version_group_bytes(&key, &retained);
+            if !buffered.is_empty()
+                && buffered_bytes.saturating_add(group_bytes) > self.compaction.target_segment_bytes
+            {
+                let segment = self.write_compaction_partition(
+                    std::mem::take(&mut buffered),
+                    durable,
+                    candidate.target_level,
+                )?;
+                output_bytes = output_bytes.saturating_add(segment.descriptor.bytes);
+                compacted_segments.push(segment);
+                buffered_bytes = 0;
+            }
+            output_versions = output_versions.saturating_add(retained.len() as u64);
+            buffered_bytes = buffered_bytes.saturating_add(group_bytes);
+            peak_buffer_bytes = peak_buffer_bytes.max(buffered_bytes);
+            buffered.insert(key, retained);
+        }
+        if !buffered.is_empty() {
+            let segment =
+                self.write_compaction_partition(buffered, durable, candidate.target_level)?;
+            output_bytes = output_bytes.saturating_add(segment.descriptor.bytes);
+            compacted_segments.push(segment);
+        }
+        Ok(CompactionMerge {
+            output_segments: compacted_segments.len(),
+            segments: compacted_segments,
+            input_versions,
+            output_versions,
+            output_bytes,
+            peak_buffer_bytes,
+        })
+    }
+
+    fn write_compaction_partition(
+        &self,
+        versions: BTreeMap<Vec<u8>, Vec<VersionedValue>>,
+        durable: u64,
+        target_level: u8,
+    ) -> Result<Segment> {
+        let table = Memtable::from_versions(versions, durable)?;
+        let (mut segment, _) = Segment::write_from_memtable_with_cache(
+            &self.root.join(SEGMENT_DIRECTORY),
+            &table,
+            Arc::clone(&self.block_cache),
+        )?;
+        segment.descriptor.level = target_level;
+        Ok(segment)
     }
 
     /// Removes physical objects unreachable from `CURRENT` or a named
@@ -1029,6 +1394,22 @@ impl Database {
         self.maintenance
     }
 
+    pub fn compaction_policy(&self) -> CompactionPolicy {
+        self.compaction
+    }
+
+    pub fn l0_segment_count(&self) -> usize {
+        self.segments
+            .iter()
+            .filter(|segment| segment.descriptor.level == 0)
+            .count()
+    }
+
+    pub fn compaction_debt_segments(&self) -> usize {
+        self.l0_segment_count()
+            .saturating_sub(self.compaction.l0_compaction_trigger.saturating_sub(1))
+    }
+
     pub fn maintenance_stats(&self) -> MaintenanceStats {
         self.maintenance_stats
     }
@@ -1046,6 +1427,24 @@ impl Database {
 fn wal_path(root: &Path, starting_sequence: u64) -> PathBuf {
     root.join(WAL_DIRECTORY)
         .join(format!("{starting_sequence:020}.wal"))
+}
+
+fn ranges_overlap(
+    left_first: &[u8],
+    left_last: &[u8],
+    right_first: &[u8],
+    right_last: &[u8],
+) -> bool {
+    left_first <= right_last && right_first <= left_last
+}
+
+fn version_group_bytes(key: &[u8], versions: &[VersionedValue]) -> usize {
+    versions.iter().fold(0usize, |bytes, version| {
+        bytes
+            .saturating_add(key.len())
+            .saturating_add(version.value.as_ref().map_or(0, Vec::len))
+            .saturating_add(std::mem::size_of::<VersionedValue>())
+    })
 }
 
 fn inject_failure(

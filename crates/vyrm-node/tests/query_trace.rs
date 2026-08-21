@@ -246,6 +246,18 @@ fn traced_query_is_observer_safe_causal_and_equal_across_all_engines() {
     assert!(native_traces[7]
         .attributes
         .contains_key("block_bytes_loaded_delta"));
+    assert!(native_traces[7]
+        .attributes
+        .contains_key("filter_checks_delta"));
+    assert!(native_traces[7]
+        .attributes
+        .contains_key("filter_negatives_delta"));
+    assert!(native_traces[7]
+        .attributes
+        .contains_key("compaction_debt_segments"));
+    assert!(native_traces[7]
+        .attributes
+        .contains_key("compaction_target_segment_bytes"));
 }
 
 #[test]

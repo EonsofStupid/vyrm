@@ -280,6 +280,7 @@ impl Engine for NativeEngine {
         let manifest = database.manifest();
         let cache = database.block_cache_stats();
         let maintenance = database.maintenance_policy();
+        let compaction = database.compaction_policy();
         let maintenance_stats = database.maintenance_stats();
         Ok(PhysicalStoreEvidence {
             backend: "vyrmkv_native".into(),
@@ -296,6 +297,17 @@ impl Engine for NativeEngine {
             maintenance_write_stalls: Some(maintenance_stats.write_stalls),
             failed_maintenance_flushes: Some(maintenance_stats.failed_flushes),
             oversized_batches: Some(maintenance_stats.oversized_batches),
+            automatic_compactions: Some(maintenance_stats.automatic_compactions),
+            failed_compactions: Some(maintenance_stats.failed_compactions),
+            compaction_input_bytes: Some(maintenance_stats.compaction_input_bytes),
+            compaction_output_bytes: Some(maintenance_stats.compaction_output_bytes),
+            peak_compaction_buffer_bytes: Some(
+                maintenance_stats.peak_compaction_buffer_bytes as u64,
+            ),
+            l0_segment_count: Some(database.l0_segment_count() as u64),
+            l0_compaction_trigger: Some(compaction.l0_compaction_trigger as u64),
+            compaction_debt_segments: Some(database.compaction_debt_segments() as u64),
+            compaction_target_segment_bytes: Some(compaction.target_segment_bytes as u64),
             segment_count: Some(manifest.segments.len() as u64),
             segment_bytes: Some(manifest.segments.iter().map(|segment| segment.bytes).sum()),
             cache_capacity_bytes: Some(cache.capacity_bytes as u64),
@@ -307,6 +319,8 @@ impl Engine for NativeEngine {
             block_loads: Some(cache.loads),
             block_bytes_loaded: Some(cache.bytes_loaded),
             block_bytes_decoded: Some(cache.bytes_decoded),
+            filter_checks: Some(cache.filter_checks),
+            filter_negatives: Some(cache.filter_negatives),
         })
     }
 

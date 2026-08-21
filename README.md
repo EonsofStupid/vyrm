@@ -39,7 +39,8 @@ Vyrm provides:
 - observer-safe query, storage-read, vector-plan/search, projection-publication,
   and embedding-inference/commit trace trees; native reads include bounded
   manifest/memtable/segment/cache/block deltas plus configured mutable-state
-  limits and automatic-flush/backpressure deltas, while raw queries,
+  limits, automatic-flush/backpressure deltas, block-filter effectiveness, and
+  leveled-compaction debt/byte-flow/buffer evidence, while raw queries,
   parameters, vectors, filters, and embedding source bytes remain outside
   persisted traces;
 - authoritative per-project vector artifact catalogs: exact, compact-dense, and
@@ -315,6 +316,15 @@ now part of the scheduled remote matrix. These are scoped append/replay M3
 results, not a general database-superiority claim. A separate 20,000-operation
 physical differential now proves put/overwrite/delete behavior across reopen
 and compaction against both Fjall and an independent ordered-map oracle.
+Native compaction is now a bounded leveled streaming step with deterministic
+candidate selection, key-partitioned output, protected-snapshot pruning, and
+non-overlapping levels above L0. Segment-v3 validation derives authenticated
+block-local negative filters that reject point misses before block I/O without
+introducing another persisted truth. The canonical fresh nine-trial standard
+promotion cell remains green after these changes; its
+[raw evidence](eval/results/2026-08-21-vyrmkv-m35-standard.json) is retained.
+Asynchronous immutable-memtable flush, family-aware maintenance, and the full
+AI workload matrix remain explicit gates rather than implied claims.
 The canonical `PersistentEngine` now creates native stores for missing paths and
 reopens them by their authenticated `CURRENT` marker. CLI, `vyrmd`, and
 Connectome use that selector. Existing non-native directories remain on the

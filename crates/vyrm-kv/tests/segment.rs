@@ -190,6 +190,19 @@ fn v3_rejects_authenticated_length_flags_and_block_corruption() {
         Segment::open(&corrupt_body_path),
         Err(Error::InvalidSegment(_))
     ));
+
+    let mut impossible_entries =
+        std::fs::read(segments.read_dir().unwrap().next().unwrap().unwrap().path()).unwrap();
+    let index_offset = u64::from_be_bytes(impossible_entries[48..56].try_into().unwrap()) as usize;
+    impossible_entries[index_offset + 40..index_offset + 48]
+        .copy_from_slice(&u64::MAX.to_be_bytes());
+    rewrite_checksum(&mut impossible_entries);
+    let impossible_entries_path = directory.path().join("impossible-entries.seg");
+    std::fs::write(&impossible_entries_path, impossible_entries).unwrap();
+    assert!(matches!(
+        Segment::open(&impossible_entries_path),
+        Err(Error::InvalidSegment(_))
+    ));
 }
 
 #[test]
@@ -245,6 +258,51 @@ fn versions_crossing_block_boundaries_keep_exact_mvcc_semantics() {
             Some(vec![(sequence - 1) as u8; 1024])
         );
     }
+}
+
+#[test]
+fn authenticated_block_filters_skip_negative_point_read_io() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut database = vyrm_kv::Database::create(directory.path()).unwrap();
+    let operations = (0..200)
+        .map(|index| Mutation::Put {
+            key: format!("key:{:04}", index * 2).into_bytes(),
+            value: vec![index as u8; 128],
+        })
+        .collect();
+    database
+        .write_owned(
+            WriteBatch::new(operations).unwrap(),
+            Durability::Authoritative,
+        )
+        .unwrap();
+    database.flush_memtable(1).unwrap();
+    let snapshot = database.snapshot();
+    let before = database.block_cache_stats();
+
+    let mut rejected = false;
+    for index in 0..200 {
+        let missing = format!("key:{:04}", index * 2 + 1);
+        assert_eq!(database.get(missing.as_bytes(), snapshot).unwrap(), None);
+        let after = database.block_cache_stats();
+        if after.filter_negatives > before.filter_negatives {
+            assert_eq!(after.loads, before.loads);
+            rejected = true;
+            break;
+        }
+    }
+    assert!(
+        rejected,
+        "expected at least one deterministic negative filter hit"
+    );
+
+    assert_eq!(
+        database.get(b"key:0000", snapshot).unwrap(),
+        Some(vec![0; 128])
+    );
+    let after_present = database.block_cache_stats();
+    assert!(after_present.filter_checks > before.filter_checks);
+    assert!(after_present.loads > before.loads);
 }
 
 #[test]
