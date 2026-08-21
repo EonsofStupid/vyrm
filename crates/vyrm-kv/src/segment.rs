@@ -1284,7 +1284,7 @@ fn decode_sha256_hex(encoded: &[u8]) -> Result<[u8; 32]> {
         return invalid("v3 block digest has the wrong length");
     }
     let mut digest = [0u8; 32];
-    for (index, pair) in encoded.chunks_exact(2).enumerate() {
+    for (index, pair) in encoded.as_chunks::<2>().0.iter().enumerate() {
         digest[index] = (decode_hex_nibble(pair[0])? << 4) | decode_hex_nibble(pair[1])?;
     }
     Ok(digest)

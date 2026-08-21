@@ -192,7 +192,9 @@ impl CompactDenseSegment {
             };
             let start = vector_offset + row * row_stride;
             for (chunk, value) in bytes[start..start + row_bytes]
-                .chunks_exact_mut(4)
+                .as_chunks_mut::<4>()
+                .0
+                .iter_mut()
                 .zip(values)
             {
                 chunk.copy_from_slice(&value.to_le_bytes());
@@ -640,8 +642,8 @@ fn score_scalar(query: &[f32], row: &[u8], metric: ScoreMetric) -> Result<f64> {
     let mut right_norm = 0.0;
     let mut squared_distance = 0.0;
     let mut manhattan = 0.0;
-    for (left, chunk) in query.iter().zip(row.chunks_exact(4)) {
-        let right = f32::from_le_bytes(chunk.try_into().expect("four-byte vector value"));
+    for (left, chunk) in query.iter().zip(row.as_chunks::<4>().0.iter()) {
+        let right = f32::from_le_bytes(*chunk);
         let left = f64::from(*left);
         let right = f64::from(right);
         dot += left * right;
@@ -691,8 +693,11 @@ unsafe fn score_avx2(query: &[f32], row: &[u8], metric: ScoreMetric) -> f64 {
     let mut right_norm = reduce(right_norm, &mut lanes);
     let mut distance = reduce(distance, &mut lanes);
     let mut manhattan = reduce(manhattan, &mut lanes);
-    for (left, chunk) in query[index..].iter().zip(row[index * 4..].chunks_exact(4)) {
-        let right = f32::from_le_bytes(chunk.try_into().expect("four-byte vector value"));
+    for (left, chunk) in query[index..]
+        .iter()
+        .zip(row[index * 4..].as_chunks::<4>().0.iter())
+    {
+        let right = f32::from_le_bytes(*chunk);
         let left = f64::from(*left);
         let right = f64::from(right);
         dot += left * right;
@@ -711,9 +716,11 @@ unsafe fn score_avx2(query: &[f32], row: &[u8], metric: ScoreMetric) -> f64 {
 }
 
 fn decode_row(row: &[u8]) -> Result<Vec<f32>> {
-    row.chunks_exact(4)
+    row.as_chunks::<4>()
+        .0
+        .iter()
         .map(|chunk| {
-            let value = f32::from_le_bytes(chunk.try_into().expect("four-byte vector value"));
+            let value = f32::from_le_bytes(*chunk);
             if !value.is_finite() {
                 return invalid("compact dense vector contains a non-finite value");
             }

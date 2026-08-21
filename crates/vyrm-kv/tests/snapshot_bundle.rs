@@ -124,7 +124,9 @@ fn physical_snapshot_bundle_round_trips_installs_atomically_and_continues_writes
         .collect::<String>();
     let legacy_bytes = legacy_hex
         .as_bytes()
-        .chunks_exact(2)
+        .as_chunks::<2>()
+        .0
+        .iter()
         .map(|pair| u8::from_str_radix(std::str::from_utf8(pair).unwrap(), 16).unwrap())
         .collect::<Vec<_>>();
     let legacy = SnapshotBundle::decode(&legacy_bytes).unwrap();
