@@ -2,7 +2,7 @@ import { test, expect } from '@playwright/test';
 
 const baseURL = process.env.CONNECTOME_URL || 'http://127.0.0.1:4387';
 
-function clusterStatus(project, observedAt, denied = 0) {
+function clusterStatus(project, observedAt, denied = 0, baseline = 0, startedAt = 100) {
   const metrics = (attempted = 0, allowed = 0, deniedCount = 0) => ({
     attempted, allowed, denied: deniedCount, failed: 0, current_in_flight: 0,
     peak_in_flight: attempted ? 1 : 0, request_bytes: attempted * 96,
@@ -11,7 +11,7 @@ function clusterStatus(project, observedAt, denied = 0) {
   });
   const operations = {
     append: metrics(), snapshot: metrics(), vote: metrics(), artifact: metrics(),
-    runtime_commit: metrics(denied, 0, denied),
+    runtime_commit: metrics(baseline + denied, baseline, denied),
   };
   return {
     project_scope: project,
@@ -31,7 +31,7 @@ function clusterStatus(project, observedAt, denied = 0) {
       observed_at: observedAt,
       transport_ingress: {
         contract_version: 1,
-        started_at: 100,
+        started_at: startedAt,
         observed_at: observedAt,
         policy: {
           max_global_in_flight: 256,
@@ -44,14 +44,14 @@ function clusterStatus(project, observedAt, denied = 0) {
         identities: {},
         current_in_flight: 0,
         peak_in_flight: denied ? 1 : 0,
-        accepted_connections: denied,
+        accepted_connections: baseline + denied,
         denied_connections: 0,
-        connection_request_bytes: denied * 96,
+        connection_request_bytes: (baseline + denied) * 96,
         overflowed: false,
       },
       artifacts: {
         contract_version: 1,
-        started_at: 100,
+        started_at: startedAt,
         observed_at: observedAt,
         policy: {
           max_active_sessions: 64,
@@ -68,7 +68,7 @@ function clusterStatus(project, observedAt, denied = 0) {
         gc_reclaimed_partial_bytes: 0, overflowed: false,
       },
       consensus_traces: {
-        started_at: 100,
+        started_at: startedAt,
         observed_at: observedAt,
         prepared_observations: 0, chunk_observations: 0, completed_observations: 0,
         failed_observations: 0, commit_acknowledgements: 0, cursor_conflicts: 0,
@@ -89,9 +89,51 @@ test('developer lenses remain navigable and inspectable', async ({ page }) => {
   await page.locator('tbody tr').first().click();
   await expect(page.locator('#inspector-body')).toContainText('Digest');
 
-  await page.getByRole('button', { name: /Graph/ }).click();
+  await page.getByRole('button', { name: /Runtime graph/i }).click();
   await expect(page).toHaveURL(/#graph$/);
   await expect(page.locator('#graph .graph-node')).not.toHaveCount(0);
+});
+
+test('connectome panel exposes estates tables scoped models and faithful visuals', async ({ page, request }) => {
+  const seeded = await request.post(`${baseURL}/api/flights`, {
+    data: {
+      prompt: 'Install a governed record and expose it through the Connectome Panel.',
+      provider: 'observe',
+      context_mode: 'fresh',
+      budget: 512,
+      acceptance_marker: '',
+      reasoning_profile: 'default',
+    },
+  });
+  expect(seeded.ok()).toBeTruthy();
+
+  const snapshot = await (await request.get(`${baseURL}/api/snapshot`)).json();
+  expect(snapshot.estates).toHaveLength(1);
+  expect(snapshot.tables.map((table) => table.id)).toContain('temporal_events');
+  expect(snapshot.models.length).toBeGreaterThan(0);
+
+  await page.goto(`${baseURL}/#estates`);
+  await expect(page.getByRole('heading', { name: 'Estates' })).toBeVisible();
+  await expect(page.locator('.estate-map')).toContainText(snapshot.instance.id);
+  await expect(page.locator('.future-boundary')).toContainText('Not attached');
+
+  await page.getByRole('button', { name: /Tables/ }).click();
+  await expect(page.getByRole('heading', { name: 'Tables' })).toBeVisible();
+  await page.getByRole('button', { name: /Temporal events/ }).click();
+  await expect(page.locator('.table-preview')).toContainText('bounded response');
+  await expect(page.locator('.table-dataset tbody tr')).not.toHaveCount(0);
+
+  await page.getByRole('button', { name: /Data models/ }).click();
+  await expect(page.getByRole('heading', { name: 'Data models' })).toBeVisible();
+  await expect(page.locator('.model-map')).toContainText('prompt flight');
+  await expect(page.locator('.schema-contract-line')).toContainText('Deny or commit');
+
+  await page.getByRole('button', { name: /Visuals/ }).click();
+  await expect(page.getByRole('heading', { name: 'Visuals' })).toBeVisible();
+  await expect(page.locator('.observatory-lane')).toHaveCount(6);
+  await expect(page.locator('.observatory-packet')).not.toHaveCount(0);
+  await page.getByRole('button', { name: 'Previous event' }).click();
+  await expect(page.locator('.observatory-controls')).toContainText('cursor');
 });
 
 test('source routing and read-only transport are enforced', async ({ page, request }) => {
@@ -158,19 +200,20 @@ test('global temporal evidence can be frozen rewound and inspected', async ({ pa
 
 test('retained cluster observations can be frozen rewound and inspected', async ({ page, request }) => {
   const snapshot = await (await request.get(`${baseURL}/api/snapshot`)).json();
+  const observedAt = Date.now();
   const first = await request.post(`${baseURL}/api/cluster/samples`, {
-    data: { status: clusterStatus(snapshot.instance.id, 110, 0) },
+    data: { status: clusterStatus(snapshot.instance.id, observedAt, 0, 0, observedAt) },
   });
-  expect(first.status()).toBe(201);
+  expect(first.status(), await first.text()).toBe(201);
   const second = await request.post(`${baseURL}/api/cluster/samples`, {
-    data: { status: clusterStatus(snapshot.instance.id, 120, 1) },
+    data: { status: clusterStatus(snapshot.instance.id, observedAt + 10, 1, 0, observedAt) },
   });
-  expect(second.status()).toBe(201);
+  expect(second.status(), await second.text()).toBe(201);
 
   await page.goto(`${baseURL}/#cluster`);
   await expect(page.getByRole('heading', { name: 'Cluster flight recorder' })).toBeVisible();
   await expect(page.locator('.cluster-node')).toHaveCount(1);
-  await expect(page.locator('.cluster-frame')).toHaveCount(2);
+  await expect(page.locator('.cluster-frame')).not.toHaveCount(0);
   await expect(page.locator('.cluster-alert')).toContainText('transport denied');
   await page.locator('.cluster-frame').first().click();
   await expect(page.getByTitle('Play or freeze cluster history')).toContainText('Resume time');

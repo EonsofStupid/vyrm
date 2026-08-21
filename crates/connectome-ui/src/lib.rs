@@ -39,6 +39,9 @@ const JS: &str = include_str!("../static/app.js");
 pub struct Snapshot {
     pub generated_at: u64,
     pub instance: InstanceView,
+    pub estates: Vec<EstateView>,
+    pub tables: Vec<TableView>,
+    pub models: Vec<DataModelView>,
     pub health: HealthView,
     pub claims: Vec<ClaimView>,
     pub runs: Vec<RunView>,
@@ -66,6 +69,45 @@ pub struct InstanceView {
     pub mode: &'static str,
     pub root: PathBuf,
     pub member: PathBuf,
+}
+
+/// One project-owned runtime boundary. Connectome deliberately models this as
+/// an estate even when it currently contains a single dedicated instance so a
+/// later cloud control plane can add deployments without changing the local
+/// inspection contract.
+#[derive(Debug, Serialize)]
+pub struct EstateView {
+    pub id: String,
+    pub scope: String,
+    pub mode: &'static str,
+    pub state: &'static str,
+    pub storage_backend: &'static str,
+    pub runtime_cursor: u64,
+    pub observed_nodes: usize,
+    pub root: PathBuf,
+    pub member: PathBuf,
+    pub control_plane: &'static str,
+}
+
+/// A logical, inspectable runtime surface. These are not presented as physical
+/// SQL tables: authority and boundedness stay explicit so projections cannot be
+/// mistaken for the underlying runtime log.
+#[derive(Debug, Serialize)]
+pub struct TableView {
+    pub id: &'static str,
+    pub label: &'static str,
+    pub category: &'static str,
+    pub authority: &'static str,
+    pub rows: usize,
+    pub known_at_cursor: u64,
+    pub bounded: bool,
+    pub description: &'static str,
+}
+
+#[derive(Debug, Serialize)]
+pub struct DataModelView {
+    pub scope: String,
+    pub registry: RuntimeSchemaRegistry,
 }
 
 #[derive(Debug, Serialize)]
@@ -332,7 +374,9 @@ pub fn snapshot(
         &invocations,
         &flights,
     );
-    let schema = store.runtime_schema(&ScopeId::new(vyrm_node::REASONING_SCOPE)?)?;
+    let reasoning_scope = ScopeId::new(vyrm_node::REASONING_SCOPE)?;
+    let schema = store.runtime_schema(&reasoning_scope)?;
+    let models = scoped_models(store, [&reasoning_scope, &instance_scope])?;
     let retention = runtime_retention(store, at)?;
     let health = HealthView {
         state: if quarantined {
@@ -364,17 +408,48 @@ pub fn snapshot(
             .map_or(0, |entry| entry.catalog_revision),
     };
 
+    let instance_mode = match binding.manifest.mode {
+        InstanceMode::Dedicated => "dedicated",
+        InstanceMode::Umbrella => "umbrella",
+    };
+    let instance_state = health.state;
+    let runtime_cursor = health.runtime_cursor;
+    let estates = vec![EstateView {
+        id: binding.manifest.id.clone(),
+        scope: binding.manifest.id.clone(),
+        mode: instance_mode,
+        state: instance_state,
+        storage_backend: health.storage_backend,
+        runtime_cursor,
+        observed_nodes: cluster.nodes.len(),
+        root: binding.instance_root.clone(),
+        member: binding.member.clone(),
+        control_plane: "local",
+    }];
+    let tables = table_catalog(
+        runtime_cursor,
+        &claims,
+        &runs,
+        &files,
+        &invocations,
+        &flights,
+        &temporal_events,
+        &traces,
+        &cluster,
+        &vector_artifacts,
+    );
+
     Ok(Snapshot {
         generated_at: at,
         instance: InstanceView {
             id: binding.manifest.id.clone(),
-            mode: match binding.manifest.mode {
-                InstanceMode::Dedicated => "dedicated",
-                InstanceMode::Umbrella => "umbrella",
-            },
+            mode: instance_mode,
             root: binding.instance_root.clone(),
             member: binding.member.clone(),
         },
+        estates,
+        tables,
+        models,
         health,
         claims,
         runs,
@@ -392,6 +467,138 @@ pub fn snapshot(
         },
         graph,
     })
+}
+
+fn scoped_models(
+    store: &PersistentEngine,
+    scopes: [&ScopeId; 2],
+) -> Result<Vec<DataModelView>, Box<dyn std::error::Error>> {
+    let mut seen = BTreeSet::new();
+    let mut models = Vec::new();
+    for scope in scopes {
+        if !seen.insert(scope.as_str().to_owned()) {
+            continue;
+        }
+        if let Some(registry) = store.runtime_schema(scope)? {
+            models.push(DataModelView {
+                scope: scope.as_str().to_owned(),
+                registry,
+            });
+        }
+    }
+    Ok(models)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn table_catalog(
+    known_at_cursor: u64,
+    claims: &[ClaimView],
+    runs: &[RunView],
+    files: &[FileView],
+    invocations: &[Invocation],
+    flights: &[Flight],
+    temporal_events: &[TemporalEventView],
+    traces: &TraceExportView,
+    cluster: &ClusterHistoryView,
+    vector_artifacts: &[VectorArtifactCatalogEntry],
+) -> Vec<TableView> {
+    [
+        (
+            "claims",
+            "Current claims",
+            "knowledge",
+            "authoritative",
+            claims.len(),
+            false,
+            "Bi-temporal assertions currently in force.",
+        ),
+        (
+            "reasoning_runs",
+            "Reasoning runs",
+            "reasoning",
+            "authoritative",
+            runs.len(),
+            false,
+            "Typed goal-to-outcome reasoning contracts.",
+        ),
+        (
+            "prompt_flights",
+            "Prompt flights",
+            "reasoning",
+            "authoritative",
+            flights.len(),
+            false,
+            "Persisted prompt experiments and provider envelopes.",
+        ),
+        (
+            "temporal_events",
+            "Temporal events",
+            "runtime",
+            "bounded log window",
+            temporal_events.len(),
+            true,
+            "Newest runtime mutations with commit and audit identity.",
+        ),
+        (
+            "causal_traces",
+            "Causal traces",
+            "runtime",
+            "authoritative",
+            traces.traces.len(),
+            true,
+            "Retention-filtered causal span trees and critical paths.",
+        ),
+        (
+            "source_files",
+            "Source files",
+            "source",
+            "projection",
+            files.len(),
+            false,
+            "Complete files in the current source-routing generation.",
+        ),
+        (
+            "invocations",
+            "Invocations",
+            "audit",
+            "authoritative",
+            invocations.len(),
+            false,
+            "Operator and lifecycle command activity.",
+        ),
+        (
+            "cluster_samples",
+            "Cluster samples",
+            "estate",
+            "authoritative",
+            cluster.samples.len(),
+            true,
+            "Retained and hash-linked node observations.",
+        ),
+        (
+            "vector_artifacts",
+            "Vector artifacts",
+            "search",
+            "catalog",
+            vector_artifacts.len(),
+            false,
+            "Durable vector index generations and provenance.",
+        ),
+    ]
+    .into_iter()
+    .map(
+        |(id, label, category, authority, rows, bounded, description)| TableView {
+            id,
+            label,
+            category,
+            authority,
+            rows,
+            known_at_cursor,
+            bounded,
+            description,
+        },
+    )
+    .collect()
 }
 
 /// Returns the newest persisted runtime mutations in global cursor order.

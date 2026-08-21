@@ -222,6 +222,25 @@ fn snapshot_exposes_runtime_objects_without_mutating_the_store() {
     let snapshot = connectome_ui::snapshot(&store, &binding, 10).unwrap();
 
     assert_eq!(snapshot.instance.mode, "dedicated");
+    assert_eq!(snapshot.estates.len(), 1);
+    assert_eq!(snapshot.estates[0].id, binding.manifest.id);
+    assert_eq!(snapshot.estates[0].control_plane, "local");
+    assert_eq!(snapshot.tables.len(), 9);
+    assert_eq!(
+        snapshot
+            .tables
+            .iter()
+            .find(|table| table.id == "claims")
+            .unwrap()
+            .rows,
+        2
+    );
+    assert!(!snapshot.models.is_empty());
+    assert!(snapshot.models.iter().any(|model| model
+        .registry
+        .records
+        .keys()
+        .any(|kind| kind.as_str() == "reasoning_run")));
     assert_eq!(snapshot.health.storage_backend, "vyrmkv_native");
     assert_eq!(snapshot.health.current_claims, 2);
     assert_eq!(snapshot.health.runtime_cursor, 18);

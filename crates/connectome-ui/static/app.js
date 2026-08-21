@@ -1,7 +1,8 @@
 (() => {
   'use strict';
 
-  const views = new Set(['overview', 'flight', 'stream', 'traces', 'cluster', 'graph', 'schema', 'query', 'runs', 'claims', 'routes', 'activity']);
+  const views = new Set(['overview', 'estates', 'tables', 'models', 'visuals', 'flight', 'stream', 'traces', 'cluster', 'graph', 'schema', 'query', 'runs', 'claims', 'routes', 'activity']);
+  const visualViews = new Set(['visuals', 'flight', 'stream', 'traces', 'cluster', 'graph']);
   const initialView = location.hash.slice(1);
   const promptPresets = {
     weak: 'Make this better.',
@@ -17,6 +18,9 @@
     data: null,
     view: views.has(initialView) ? initialView : 'overview',
     selected: null,
+    tableId: 'claims',
+    modelScope: null,
+    visualCursor: null,
     graphScope: 'local',
     graphKinds: new Set(['instance', 'subject', 'claim', 'run', 'event', 'evidence', 'file', 'invocation', 'flight', 'flight_event']),
     graphFocusKind: null,
@@ -133,17 +137,18 @@
     $('#cluster-count').textContent = data.cluster?.nodes?.length || 0;
     $('#claim-count').textContent = data.claims.length;
     $('#file-count').textContent = data.files.length;
-    $('#schema-count').textContent = data.schema
-      ? Object.keys(data.schema.records || {}).length + Object.keys(data.schema.relations || {}).length + Object.keys(data.schema.events || {}).length
-      : 0;
+    $('#estate-count').textContent = (data.estates || []).length;
+    $('#table-count').textContent = (data.tables || []).length;
+    $('#model-count').textContent = (data.models || []).reduce((count, model) => count + Object.keys(model.registry.records || {}).length + Object.keys(model.registry.relations || {}).length + Object.keys(model.registry.events || {}).length, 0);
+    $('#visual-count').textContent = 5;
     $('#snapshot-age').textContent = ago(data.generated_at);
-    $$('.nav-item').forEach((button) => button.classList.toggle('active', button.dataset.view === state.view));
+    $$('.nav-item').forEach((button) => button.classList.toggle('active', button.dataset.view === state.view || (button.dataset.view === 'visuals' && visualViews.has(state.view))));
   }
 
   function render() {
     if (!state.data) return;
     updateChrome();
-    const renderers = { overview: renderOverview, flight: renderFlight, stream: renderStream, traces: renderTraces, cluster: renderCluster, graph: renderGraph, schema: renderSchema, query: renderQuery, runs: renderRuns, claims: renderClaims, routes: renderRoutes, activity: renderActivity };
+    const renderers = { overview: renderOverview, estates: renderEstates, tables: renderTables, models: renderModels, visuals: renderVisuals, flight: renderFlight, stream: renderStream, traces: renderTraces, cluster: renderCluster, graph: renderGraph, schema: renderSchema, query: renderQuery, runs: renderRuns, claims: renderClaims, routes: renderRoutes, activity: renderActivity };
     (renderers[state.view] || renderOverview)();
     renderInspector();
   }
@@ -190,6 +195,162 @@
 
   function timeline(events) {
     return `<div class="timeline">${events.map((event) => `<button class="timeline-event lens-row object-link" data-object="event:${event.run_id}:${event.ordinal}"><div><div class="event-kind">${escapeHtml(event.payload.kind)}</div><div class="event-summary">${escapeHtml(eventSummary(event))}</div><div class="event-meta">#${event.ordinal} · ${escapeHtml(event.actor)}</div></div></button>`).join('')}</div>`;
+  }
+
+  function renderEstates() {
+    const estates = state.data.estates || [];
+    const estate = estates[0];
+    if (!estate) {
+      $('#main').innerHTML = pageHead('Estates', 'Project-owned runtime boundaries and the instances observed inside them.') + empty('No estate bound', 'Connectome is not attached to a Vyrm instance.');
+      return;
+    }
+    const nodes = state.data.cluster?.nodes || [];
+    const visibleNodes = nodes.length ? nodes : [{ canonical_node_id: estate.id, state: estate.state, shard: 0, raft_node_id: 0, applied_lag: 0, latest_cursor: estate.runtime_cursor, alerts: [] }];
+    $('#main').innerHTML = pageHead('Estates', 'The local project boundary, its storage ownership, and every observed runtime member. Cloud fleet control remains a later control plane.', `<span class="badge ${estate.state}">${escapeHtml(estate.control_plane)} control</span>`) + `
+      <section class="metrics estate-metrics">
+        ${metric('Bound estates', estates.length, 'one project boundary')}
+        ${metric('Observed nodes', visibleNodes.length, nodes.length ? 'retained telemetry' : 'local process')}
+        ${metric('Runtime head', estate.runtime_cursor, 'global commit cursor')}
+        ${metric('Data surfaces', state.data.tables?.length || 0, `${state.data.models?.length || 0} schema scope(s)`)}
+      </section>
+      <section class="estate-layout">
+        <article class="estate-map" aria-label="Estate topology">
+          <header><div><span class="eyebrow">LOCAL ESTATE</span><h2>${escapeHtml(estate.id)}</h2></div><code>${escapeHtml(estate.mode)}</code></header>
+          <div class="estate-core"><span class="estate-orbit"></span><strong>${escapeHtml(estate.id)}</strong><small>${escapeHtml(estate.storage_backend)} · cursor ${human(estate.runtime_cursor)}</small></div>
+          <div class="estate-node-grid">${visibleNodes.map((node) => `<button type="button" class="estate-node ${node.alerts?.length ? 'attention' : ''}" data-open-estate-node="${escapeHtml(node.latest_sample_digest || '')}"><span></span><strong>${escapeHtml(node.canonical_node_id)}</strong><code>shard ${human(node.shard)} · raft ${human(node.raft_node_id)}</code><small>${escapeHtml(node.state)} · lag ${human(node.applied_lag)}</small></button>`).join('')}</div>
+        </article>
+        <aside class="estate-contracts">
+          <article><span>STORAGE BOUNDARY</span><strong>${escapeHtml(estate.storage_backend)}</strong><code>${escapeHtml(estate.root)}</code><small>Member ${escapeHtml(estate.member)}</small></article>
+          <article><span>PROJECT SCOPE</span><strong>${escapeHtml(estate.scope)}</strong><code>cursor ${human(estate.runtime_cursor)}</code><small>All views remain bound to this manifest.</small></article>
+          <article class="future-boundary"><span>HOSTING CONTROL PLANE</span><strong>Not attached</strong><code>local-only</code><small>Reserved for the later cloud hosting tab; no remote action is implied.</small></article>
+          <button type="button" class="primary-button estate-action" data-go="cluster">Open retained cluster history</button>
+        </aside>
+      </section>`;
+    $$('[data-go]').forEach((button) => button.addEventListener('click', () => navigate(button.dataset.go)));
+    $$('[data-open-estate-node]').forEach((button) => button.addEventListener('click', () => {
+      if (button.dataset.openEstateNode) select(`cluster-sample:${button.dataset.openEstateNode}`);
+    }));
+  }
+
+  function rowsForTable(id) {
+    const data = state.data;
+    return ({
+      claims: data.claims,
+      reasoning_runs: data.runs,
+      prompt_flights: data.flights,
+      temporal_events: data.temporal_events,
+      causal_traces: data.traces?.traces || [],
+      source_files: data.files,
+      invocations: data.invocations,
+      cluster_samples: data.cluster?.samples || [],
+      vector_artifacts: data.vector_artifacts,
+    })[id] || [];
+  }
+
+  function cellValue(value) {
+    if (value == null) return '—';
+    if (Array.isArray(value)) return `${value.length} item${value.length === 1 ? '' : 's'}`;
+    if (typeof value === 'object') {
+      const identity = value.id || value.kind || value.state || value.actor || value.digest;
+      return identity ? String(identity) : JSON.stringify(value);
+    }
+    return String(value);
+  }
+
+  function tableObjectId(table, row) {
+    if (table === 'claims') return `claim:${row.id}`;
+    if (table === 'reasoning_runs') return `run:${row.id}`;
+    if (table === 'source_files') return `file:${row.path}`;
+    if (table === 'invocations') return `invocation:${row.ordinal}`;
+    if (table === 'prompt_flights') return `flight:${row.id}`;
+    if (table === 'temporal_events') return `runtime-change:${row.cursor}`;
+    if (table === 'cluster_samples') return `cluster-sample:${row.digest}`;
+    return '';
+  }
+
+  function renderTables() {
+    const tables = state.data.tables || [];
+    if (!tables.some((table) => table.id === state.tableId)) state.tableId = tables[0]?.id || null;
+    const selected = tables.find((table) => table.id === state.tableId);
+    const rows = selected ? rowsForTable(selected.id) : [];
+    const preferred = ['id', 'kind', 'subject', 'predicate', 'state', 'status', 'scope', 'actor', 'path', 'cursor', 'ordinal', 'created_at'];
+    const discovered = [...new Set(rows.slice(0, 20).flatMap((row) => Object.keys(row || {})))];
+    const columns = [...preferred.filter((key) => discovered.includes(key)), ...discovered.filter((key) => !preferred.includes(key))].slice(0, 6);
+    $('#main').innerHTML = pageHead('Tables', 'Logical runtime surfaces with their source of truth made explicit. Select one surface to inspect its current read-only rows.', selected ? `<span class="badge ready">known at cursor ${human(selected.known_at_cursor)}</span>` : '') + `
+      <section class="table-workspace">
+        <aside class="table-catalog" aria-label="Runtime tables">${tables.map((table) => `<button type="button" class="table-catalog-row ${table.id === state.tableId ? 'active' : ''}" data-table-id="${escapeHtml(table.id)}"><span class="table-glyph ${escapeHtml(table.category)}">${table.bounded ? '≈' : '▤'}</span><div><strong>${escapeHtml(table.label)}</strong><small>${escapeHtml(table.authority)} · ${table.bounded ? 'bounded response' : 'current view'}</small></div><b>${human(table.rows)}</b></button>`).join('')}</aside>
+        <article class="table-preview">
+          ${selected ? `<header><div><span class="eyebrow">${escapeHtml(selected.category)} / ${escapeHtml(selected.authority)}</span><h2>${escapeHtml(selected.label)}</h2><p>${escapeHtml(selected.description)}</p></div><strong>${human(rows.length)} rows loaded · ${selected.bounded ? 'bounded response' : 'current view'}</strong></header>
+          <div class="table-scroll"><table class="data-table table-dataset"><thead><tr>${columns.map((column) => `<th>${escapeHtml(column.replaceAll('_', ' '))}</th>`).join('')}</tr></thead><tbody>${rows.slice(0, 100).map((row) => { const object = tableObjectId(selected.id, row); return `<tr ${object ? `data-object="${escapeHtml(object)}"` : ''}>${columns.map((column) => `<td><span class="table-cell-value">${escapeHtml(cellValue(row[column]))}</span></td>`).join('')}</tr>`; }).join('')}</tbody></table>${rows.length ? '' : empty('No rows in this surface', 'The table contract exists but has no current data.')}</div>
+          <footer><span>${selected.bounded ? 'Response is retention- or limit-bounded; row count is not a lifetime total.' : 'Snapshot-consistent current rows.'}</span><button type="button" data-go="query">Open Query Lab</button></footer>` : empty('No table catalog', 'The runtime did not expose any logical data surfaces.')}
+        </article>
+      </section>`;
+    $$('[data-table-id]').forEach((button) => button.addEventListener('click', () => { state.tableId = button.dataset.tableId; renderTables(); }));
+    $$('[data-object]', $('#main')).forEach((row) => row.addEventListener('click', () => select(row.dataset.object)));
+    $$('[data-go]').forEach((button) => button.addEventListener('click', () => navigate(button.dataset.go)));
+  }
+
+  function renderModels() {
+    const models = state.data.models?.length ? state.data.models : (state.data.schema ? [{ scope: 'reasoning', registry: state.data.schema }] : []);
+    if (!state.modelScope || !models.some((model) => model.scope === state.modelScope)) state.modelScope = models[0]?.scope || null;
+    const model = models.find((candidate) => candidate.scope === state.modelScope);
+    if (!model) {
+      $('#main').innerHTML = pageHead(state.view === 'schema' ? 'Runtime schema' : 'Data models', 'Typed records, events, relations, and their enforcement rules.') + empty('No model installed', 'The first governed runtime write installs a scoped schema.');
+      return;
+    }
+    const schema = model.registry;
+    const records = Object.entries(schema.records || {});
+    const relations = Object.entries(schema.relations || {});
+    const events = Object.entries(schema.events || {});
+    $('#main').innerHTML = pageHead(state.view === 'schema' ? 'Runtime schema' : 'Data models', 'Every persisted model by runtime scope, including legal relationships, required properties, and deny-by-default boundaries.', `<span class="badge ready">revision ${human(schema.revision)}</span>`) + `
+      <div class="model-scope-tabs" aria-label="Data model scopes">${models.map((candidate) => `<button type="button" class="${candidate.scope === state.modelScope ? 'active' : ''}" data-model-scope="${escapeHtml(candidate.scope)}"><span>${escapeHtml(candidate.scope)}</span><b>r${human(candidate.registry.revision)}</b></button>`).join('')}</div>
+      <section class="model-map" aria-label="Data model relationship map">
+        <header><span>RECORD TYPES</span><span>RELATION PATHS</span><span>EVENT TYPES</span></header>
+        <div class="model-column">${records.map(([kind]) => `<div class="model-node record"><i></i><strong>${escapeHtml(kind.replaceAll('_', ' '))}</strong></div>`).join('') || '<div class="model-empty">No records</div>'}</div>
+        <div class="model-column relations">${relations.map(([kind, definition]) => `<div class="model-relation"><small>${escapeHtml((definition.from || []).join(' | '))}</small><strong>— ${escapeHtml(kind)} →</strong><small>${escapeHtml((definition.to || []).join(' | '))}</small></div>`).join('') || '<div class="model-empty">No relations</div>'}</div>
+        <div class="model-column">${events.map(([kind, definition]) => `<div class="model-node event"><i></i><strong>${escapeHtml(kind.replaceAll('_', ' '))}</strong><small>${definition.subject_required ? 'subject required' : 'subject optional'}</small></div>`).join('') || '<div class="model-empty">No events</div>'}</div>
+      </section>
+      <section class="schema-contract-line" aria-label="Schema enforcement sequence">
+        <div><span>01</span><strong>Registry</strong><small>revision ${human(schema.revision)}</small></div><i>→</i>
+        <div><span>02</span><strong>Bind</strong><small>legal types + fields</small></div><i>→</i>
+        <div><span>03</span><strong>Validate</strong><small>cardinality + identity</small></div><i>→</i>
+        <div><span>04</span><strong>Deny or commit</strong><small>one ACID boundary</small></div>
+      </section>
+      <section class="schema-revision"><span class="eyebrow">CURRENT MIGRATION</span><strong>${escapeHtml(schema.migration)}</strong><small>Scope ${escapeHtml(model.scope)} · every later registry advances exactly one revision.</small></section>
+      <section class="schema-groups">
+        ${schemaGroup('Record types', 'Persistent graph objects with required, optional, and unique properties.', records, 'record')}
+        ${schemaGroup('Event types', 'Immutable lifecycle facts with governed subject types and payloads.', events, 'event')}
+        ${schemaGroup('Relation types', 'Directed edges with legal endpoints and temporal cardinality.', relations, 'relation')}
+      </section>`;
+    $$('[data-model-scope]').forEach((button) => button.addEventListener('click', () => { state.modelScope = button.dataset.modelScope; renderModels(); }));
+  }
+
+  function renderVisuals() {
+    const events = state.data.temporal_events || [];
+    if (state.visualCursor == null || !events.some((event) => event.cursor === state.visualCursor)) state.visualCursor = events.at(-1)?.cursor || null;
+    const activeIndex = Math.max(0, events.findIndex((event) => event.cursor === state.visualCursor));
+    const active = events[activeIndex];
+    const windowed = events.slice(Math.max(0, events.length - 48));
+    const lanes = [['reasoning', 'REASONING'], ['workflow', 'LIFECYCLE'], ['routing', 'ROUTING'], ['search', 'SEARCH'], ['storage', 'STORAGE'], ['data', 'DATA']];
+    const modes = [
+      ['flight', 'Prompt flight', 'Provider events, reasoning effort, tokens, and acceptance'],
+      ['stream', 'Temporal flow', 'Every committed mutation with replay and audit evidence'],
+      ['traces', 'Causal traces', 'Parent/child spans, critical path, and integrity diagnostics'],
+      ['graph', 'Runtime graph', 'Claims, reasoning, source, and provenance neighborhoods'],
+      ['cluster', 'Estate topology', 'Node history, replication lag, transport, and alerts'],
+    ];
+    $('#main').innerHTML = pageHead('Visuals', 'Choose one faithful runtime lens, then freeze, rewind, inspect, or open it at full depth. Every mark below comes from the current snapshot.', `<span class="badge ready">${human(events.length)} events loaded</span>`) + `
+      <nav class="visual-deck" aria-label="Available runtime visualizations">${modes.map(([view, title, detail]) => `<button type="button" data-open-visual="${view}"><span>${escapeHtml(title)}</span><small>${escapeHtml(detail)}</small><b>Open →</b></button>`).join('')}</nav>
+      <section class="observatory">
+        <header><div><span class="eyebrow">LIVE BASELINE / GLOBAL LOG</span><h2>Runtime signal observatory</h2></div><div class="observatory-controls"><button type="button" id="visual-prev" aria-label="Previous event">◀</button><strong>${active ? `cursor ${human(active.cursor)}` : 'waiting'}</strong><button type="button" id="visual-next" aria-label="Next event">▶</button></div></header>
+        ${active ? `<div class="signal-observatory">${lanes.map(([family, label]) => `<div class="observatory-lane"><label>${label}</label><div>${windowed.map((event) => event.family === family ? `<button type="button" class="observatory-packet ${event.cursor === active.cursor ? 'active' : ''}" data-visual-cursor="${event.cursor}" aria-label="cursor ${event.cursor}: ${escapeHtml(event.label)}"><i></i></button>` : '<span></span>').join('')}</div></div>`).join('')}</div>
+        <article class="observatory-readout"><span class="event-kind">${escapeHtml(active.family)} / ${escapeHtml(active.action)}</span><h3>${escapeHtml(active.label)}</h3><p>${escapeHtml(active.detail)}</p><footer><code>${escapeHtml(active.scope)} · ${escapeHtml(active.commit_id.slice(0, 14))}…</code><button type="button" id="visual-inspect">Inspect mutation + audit</button></footer></article>` : empty('No runtime events', 'Committed mutations will form the first visual baseline.')}
+      </section>`;
+    $$('[data-open-visual]').forEach((button) => button.addEventListener('click', () => navigate(button.dataset.openVisual)));
+    $$('[data-visual-cursor]').forEach((button) => button.addEventListener('click', () => { state.visualCursor = Number(button.dataset.visualCursor); renderVisuals(); }));
+    $('#visual-prev')?.addEventListener('click', () => { if (events.length) { state.visualCursor = events[Math.max(0, activeIndex - 1)].cursor; renderVisuals(); } });
+    $('#visual-next')?.addEventListener('click', () => { if (events.length) { state.visualCursor = events[Math.min(events.length - 1, activeIndex + 1)].cursor; renderVisuals(); } });
+    $('#visual-inspect')?.addEventListener('click', () => select(`runtime-change:${active.cursor}`));
   }
 
   function currentFlight() {

@@ -147,13 +147,25 @@ The workbench has no authentication. Keep remote binding on a trusted network
 or tunnel the loopback address over SSH. Frontier runners remain disabled
 unless `--enable-runners` is also explicit.
 
-Connectome provides twelve lenses:
+Connectome Panel starts with four operator workspaces. The snapshot API makes
+their scope explicit: an estate is a project-owned runtime boundary, a table is
+a logical surface with named authority and boundedness, and each data model is
+paired with the runtime scope that owns its schema revision.
+
+| Workspace | Purpose |
+|---|---|
+| Estates | Inspect the local project boundary, instance/store ownership, observed nodes, and retained cluster state; cloud fleet control is intentionally not attached |
+| Tables | Browse claims, reasoning runs, prompt flights, temporal changes, traces, source, invocations, cluster samples, and vector artifacts without presenting projections as physical SQL tables |
+| Data models | Switch between scoped schema registries and inspect record, event, relation, property, uniqueness, endpoint, and cardinality rules |
+| Visuals | Choose one evidence-backed runtime visual, freeze its current event, and open the full prompt, temporal, trace, graph, or cluster lab |
+
+The deeper labs remain available from the same panel:
 
 | Lens | Purpose |
 |---|---|
 | Prompt flights | Launch, replay, freeze, inspect, and compare prompt experiments |
 | Temporal stream | Freeze and scrub persisted mutations across instance scopes with their change and audit evidence |
-| Schema | Inspect the persisted type, property, endpoint, uniqueness, and cardinality contract |
+| Schema | Compatibility route for the reasoning schema; Data models is the multi-scope view |
 | Query lab | Parse, bind, explain, and execute exact bitemporal `vyrmQL` reads |
 | Cluster | Freeze, rewind, and inspect validated project-node observations, topology, restart boundaries, deltas, alerts, and raw audit evidence |
 | Overview | Runtime health, freshness, grounding, and active work |
