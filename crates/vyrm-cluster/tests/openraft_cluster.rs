@@ -27,6 +27,10 @@ use vyrm_store::{Engine, NativeEngine};
 
 type VyrmRaft = Raft<VyrmRaftTypeConfig>;
 
+// OpenRaft's wait helpers poll asynchronously. Give CI enough scheduling headroom
+// while keeping the deadline tied to the election envelope exercised by this test.
+const CONSENSUS_WAIT_ELECTION_WINDOWS: u32 = 50;
+
 #[derive(Clone, Default)]
 struct NetworkHub {
     nodes: Arc<RwLock<BTreeMap<u64, VyrmRaft>>>,
@@ -196,7 +200,7 @@ fn real_consensus_elects_fails_over_installs_snapshot_and_changes_membership() {
         cluster.node(1).trigger().elect().await.unwrap();
         cluster
             .node(1)
-            .wait(Some(Duration::from_secs(5)))
+            .wait(Some(consensus_wait()))
             .current_leader(1, "node 1 election")
             .await
             .unwrap();
@@ -210,7 +214,7 @@ fn real_consensus_elects_fails_over_installs_snapshot_and_changes_membership() {
             .unwrap();
         cluster
             .node(1)
-            .wait(Some(Duration::from_secs(5)))
+            .wait(Some(consensus_wait()))
             .voter_ids([1, 2, 3], "three-voter membership")
             .await
             .unwrap();
@@ -251,7 +255,7 @@ fn real_consensus_elects_fails_over_installs_snapshot_and_changes_membership() {
         cluster.node(1).trigger().snapshot().await.unwrap();
         cluster
             .node(1)
-            .wait(Some(Duration::from_secs(5)))
+            .wait(Some(consensus_wait()))
             .ge(Metric::Snapshot(Some(before_snapshot)), "leader snapshot")
             .await
             .unwrap();
@@ -261,7 +265,7 @@ fn real_consensus_elects_fails_over_installs_snapshot_and_changes_membership() {
         for id in [2, 3] {
             cluster
                 .node(id)
-                .wait(Some(Duration::from_secs(5)))
+                .wait(Some(consensus_wait()))
                 .ge(
                     Metric::AppliedIndex(Some(before_failover.index)),
                     "voter caught up before failover",
@@ -271,7 +275,7 @@ fn real_consensus_elects_fails_over_installs_snapshot_and_changes_membership() {
         }
         cluster
             .node(4)
-            .wait(Some(Duration::from_secs(5)))
+            .wait(Some(consensus_wait()))
             .ge(
                 Metric::AppliedIndex(Some(before_snapshot.index)),
                 "snapshot learner catch-up",
@@ -285,7 +289,7 @@ fn real_consensus_elects_fails_over_installs_snapshot_and_changes_membership() {
         cluster.node(2).trigger().elect().await.unwrap();
         let new_metrics = cluster
             .node(2)
-            .wait(Some(Duration::from_secs(5)))
+            .wait(Some(consensus_wait()))
             .current_leader(2, "majority-side failover")
             .await
             .unwrap();
@@ -316,7 +320,7 @@ fn real_consensus_elects_fails_over_installs_snapshot_and_changes_membership() {
         for id in [2, 3, 4] {
             cluster
                 .node(id)
-                .wait(Some(Duration::from_secs(5)))
+                .wait(Some(consensus_wait()))
                 .voter_ids([2, 3, 4], "joint-to-uniform membership")
                 .await
                 .unwrap();
@@ -365,7 +369,7 @@ fn real_consensus_replicates_canonical_runtime_truth_to_every_voter() {
         cluster.node(1).trigger().elect().await.unwrap();
         cluster
             .node(1)
-            .wait(Some(Duration::from_secs(5)))
+            .wait(Some(consensus_wait()))
             .current_leader(1, "runtime leader election")
             .await
             .unwrap();
@@ -414,7 +418,7 @@ fn real_consensus_replicates_canonical_runtime_truth_to_every_voter() {
         for id in [1, 2, 3] {
             cluster
                 .node(id)
-                .wait(Some(Duration::from_secs(5)))
+                .wait(Some(consensus_wait()))
                 .ge(
                     Metric::AppliedIndex(Some(response.log_id.index)),
                     "canonical runtime apply on every voter",
@@ -426,7 +430,7 @@ fn real_consensus_replicates_canonical_runtime_truth_to_every_voter() {
         cluster.node(1).trigger().snapshot().await.unwrap();
         let snapshot_metrics = cluster
             .node(1)
-            .wait(Some(Duration::from_secs(5)))
+            .wait(Some(consensus_wait()))
             .ge(
                 Metric::Snapshot(Some(response.log_id)),
                 "runtime-bearing snapshot publication",
@@ -442,14 +446,14 @@ fn real_consensus_replicates_canonical_runtime_truth_to_every_voter() {
             .unwrap();
         cluster
             .node(1)
-            .wait(Some(Duration::from_secs(5)))
+            .wait(Some(consensus_wait()))
             .purged(Some(snapshot_log), "runtime-bearing log purge")
             .await
             .unwrap();
         cluster.node(1).add_learner(4, node(4), true).await.unwrap();
         cluster
             .node(4)
-            .wait(Some(Duration::from_secs(5)))
+            .wait(Some(consensus_wait()))
             .ge(
                 Metric::AppliedIndex(Some(response.log_id.index)),
                 "new learner receives runtime truth from snapshot after purge",
@@ -489,6 +493,14 @@ fn test_config() -> Arc<Config> {
         ..Config::default()
     };
     Arc::new(config.validate().unwrap())
+}
+
+fn consensus_wait() -> Duration {
+    Duration::from_millis(
+        test_config()
+            .election_timeout_max
+            .saturating_mul(u64::from(CONSENSUS_WAIT_ELECTION_WINDOWS)),
+    )
 }
 
 fn unreachable<E>(message: String) -> RPCError<u64, VyrmRaftNode, E>
