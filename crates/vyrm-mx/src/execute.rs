@@ -65,6 +65,7 @@ pub struct QueryExecution {
     pub scanned_changes: usize,
     pub stamp_validation: String,
     pub stamp_validation_max_changes: usize,
+    pub stamp_validation_proof_nodes: u16,
     pub returned_rows: usize,
     pub output_bytes: usize,
     pub truncated: bool,
@@ -87,17 +88,20 @@ pub fn execute<E: Engine>(
     let shape = PlanShape::read(plan)?;
     let access = ReadPath::from_plan(plan, &shape)?;
     let requested = access.scanned_positions()?;
-    let stamp_validation_max_changes = usize::try_from(contract.stamp_validation_max_changes)
-        .map_err(|_| {
-            Error::Budget("stamp-validation bound exceeds this platform's address space".into())
-        })?;
     if requested > budget.max_scanned_changes {
         return Err(Error::Budget(format!(
             "query requires scanning {requested} changes, budget allows {}",
             budget.max_scanned_changes
         )));
     }
-    let changes = access.load(engine, &plan.logical.read)?;
+    let page = access.load(engine, &plan.logical.read)?;
+    let stamp_validation_max_changes =
+        usize::try_from(page.validation.change_reads).map_err(|_| {
+            Error::Budget("stamp-validation evidence exceeds this platform's address space".into())
+        })?;
+    let stamp_validation = page.validation.method.clone();
+    let stamp_validation_proof_nodes = page.validation.proof_nodes;
+    let changes = page.changes;
     let mut rows = rows_for_source(
         &changes,
         &plan.logical.read.scope,
@@ -149,8 +153,9 @@ pub fn execute<E: Engine>(
         valid_at: contract.valid_at,
         known_at_cursor: contract.known_at_cursor,
         scanned_changes: requested,
-        stamp_validation: contract.stamp_validation.clone(),
+        stamp_validation,
         stamp_validation_max_changes,
+        stamp_validation_proof_nodes,
         returned_rows,
         output_bytes,
         truncated,
@@ -172,7 +177,12 @@ impl ReadPath {
             || contract.known_at_cursor != shape.known_at_cursor
             || contract.schema_revision != plan.logical.schema_revision
             || contract.authorization_boundary != format!("scope:{}", plan.logical.read.scope)
-            || contract.stamp_validation != "full_hash_chain_replay"
+            || contract.stamp_validation
+                != if plan.logical.read.accumulator_root.is_some() {
+                    "rfc9162_inclusion_or_hash_chain_fallback"
+                } else {
+                    "full_hash_chain_replay"
+                }
             || contract.stamp_validation_max_changes != plan.logical.read.commit_cursor
         {
             return Err(Error::Integrity(
@@ -252,7 +262,7 @@ impl ReadPath {
         &self,
         engine: &E,
         stamp: &vyrm_core::ReadStamp,
-    ) -> Result<Vec<RuntimeChange>> {
+    ) -> Result<vyrm_core::RuntimeChangePage> {
         let (after, limit, expected_through) = match self {
             Self::LogScan { through_cursor } if *through_cursor == 0 => {
                 (stamp.commit_cursor, 1, stamp.commit_cursor)
@@ -282,7 +292,7 @@ impl ReadPath {
                 "stamped access returned a change outside its cursor interval".into(),
             ));
         }
-        Ok(page.changes)
+        Ok(page)
     }
 }
 

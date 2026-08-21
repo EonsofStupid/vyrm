@@ -18,8 +18,9 @@ use std::sync::{Mutex, MutexGuard};
 use vyrm_core::{
     key, projection_family, AuditEnvelope, Claim, ClaimSource, Millis, ObjectReference, Predicate,
     ProjectionWork, ReadStamp, Reader, RetentionPin, RuntimeChange, RuntimeChangePage,
-    RuntimeCommit, RuntimeCommitOutcome, RuntimeMutation, RuntimeRecord, RuntimeRef,
-    RuntimeRelation, RuntimeSchemaRegistry, ScopeId, SnapshotHandle, SnapshotId, Subject,
+    RuntimeCommit, RuntimeCommitOutcome, RuntimeLogAccumulator, RuntimeMerkleNode, RuntimeMutation,
+    RuntimeRecord, RuntimeRef, RuntimeRelation, RuntimeSchemaRegistry, ScopeId, SnapshotHandle,
+    SnapshotId, Subject,
 };
 use vyrm_kv::{
     CompactionOutcome, Database, DatabaseOptions, GarbageCollectionReport, Manifest, Mutation,
@@ -638,15 +639,28 @@ impl Engine for NativeEngine {
     ) -> Result<RuntimeChangePage> {
         let database = self.lock()?;
         let snapshot = database.snapshot();
-        validate_native_read_stamp(&database, snapshot, read)?;
-        native_change_page(
+        let validation = validate_native_read_stamp(&database, snapshot, read)?;
+        if limit == 1 && after < read.commit_cursor && read.accumulator_root.is_some() {
+            let mut page = native_authenticated_point_page(&database, snapshot, read, after + 1)?;
+            if validation.method == "full_hash_chain_replay" {
+                page.validation.method = "full_hash_chain_replay_then_rfc9162_inclusion".into();
+                page.validation.change_reads = page
+                    .validation
+                    .change_reads
+                    .saturating_add(validation.change_reads);
+            }
+            return Ok(page);
+        }
+        let mut page = native_change_page(
             &database,
             snapshot,
             read.commit_cursor,
             after,
             limit,
             Some(&read.scope),
-        )
+        )?;
+        page.validation = validation;
+        Ok(page)
     }
 
     fn commit_runtime(&self, commit: &RuntimeCommit) -> Result<RuntimeCommitOutcome> {
@@ -803,6 +817,8 @@ pub fn prepare_native_runtime_commit(
             actual: start,
         });
     }
+    let (mut accumulator, bootstrap_nodes) =
+        native_runtime_accumulator_with(database, snapshot, start)?;
 
     let previous_schema: Option<RuntimeSchemaRegistry> = get_json(
         database,
@@ -933,6 +949,14 @@ pub fn prepare_native_runtime_commit(
     .map_err(|error| Error::CorruptWatermark(error.to_string()))?
     .filter(|digest| !digest.is_empty());
     let mut operations = Vec::new();
+    for node in bootstrap_nodes {
+        put(
+            &mut operations,
+            keyspaces::META,
+            &keyspaces::runtime_accumulator_node_key(node.level, node.index),
+            node.digest.into_bytes(),
+        );
+    }
     let mut outbox_count = 0;
 
     for (ordinal, mutation) in commit.mutations.iter().cloned().enumerate() {
@@ -976,6 +1000,14 @@ pub fn prepare_native_runtime_commit(
             &cursor.to_be_bytes(),
             serde_json::to_vec(&change)?,
         );
+        for node in accumulator.append_change(&change)? {
+            put(
+                &mut operations,
+                keyspaces::META,
+                &keyspaces::runtime_accumulator_node_key(node.level, node.index),
+                node.digest.into_bytes(),
+            );
+        }
         if let Some(family) = projection_family(&mutation) {
             let work = ProjectionWork::for_change(
                 commit.scope.clone(),
@@ -1052,6 +1084,12 @@ pub fn prepare_native_runtime_commit(
         keyspaces::META,
         keyspaces::RUNTIME_LAST_DIGEST,
         previous_digest.as_deref().unwrap_or("").as_bytes().to_vec(),
+    );
+    put(
+        &mut operations,
+        keyspaces::META,
+        keyspaces::RUNTIME_ACCUMULATOR_STATE,
+        serde_json::to_vec(&accumulator)?,
     );
     let audit = AuditEnvelope::accepted_commit(commit, &commit_id, cursor, previous_audit_digest)?;
     put(
@@ -1208,13 +1246,23 @@ fn native_read_stamp(
     .transpose()
     .map_err(|error| Error::CorruptWatermark(error.to_string()))?
     .filter(|digest| !digest.is_empty());
-    ReadStamp::new(
-        scope.clone(),
-        schema_revision,
-        0,
-        commit_cursor,
-        head_digest,
-    )
+    match load_native_runtime_accumulator(database, snapshot, commit_cursor)? {
+        Some(accumulator) => ReadStamp::authenticated(
+            scope.clone(),
+            schema_revision,
+            0,
+            commit_cursor,
+            head_digest,
+            accumulator.root,
+        ),
+        None => ReadStamp::new(
+            scope.clone(),
+            schema_revision,
+            0,
+            commit_cursor,
+            head_digest,
+        ),
+    }
     .map_err(Error::from)
 }
 
@@ -1222,11 +1270,44 @@ fn validate_native_read_stamp(
     database: &Database,
     snapshot: Snapshot,
     read: &ReadStamp,
-) -> Result<()> {
+) -> Result<vyrm_core::RuntimeReadValidation> {
     read.validate()?;
     let current = read_sequence(database, snapshot, keyspaces::RUNTIME_CURSOR)?;
     if read.commit_cursor > current {
         return Err(Error::ReadStampUnavailable(read.manifest_id.clone()));
+    }
+    if read.commit_cursor == current && read.accumulator_root.is_some() {
+        let accumulator = load_native_runtime_accumulator(database, snapshot, current)?
+            .ok_or_else(|| Error::ReadStampMismatch(read.manifest_id.clone()))?;
+        let head_digest = get(
+            database,
+            snapshot,
+            keyspaces::META,
+            keyspaces::RUNTIME_LAST_DIGEST,
+        )?
+        .map(String::from_utf8)
+        .transpose()
+        .map_err(|error| Error::CorruptWatermark(error.to_string()))?
+        .filter(|digest| !digest.is_empty());
+        let schema_revision = get_json::<RuntimeSchemaRegistry>(
+            database,
+            snapshot,
+            keyspaces::RUNTIME_SCHEMAS,
+            read.scope.as_str().as_bytes(),
+        )?
+        .map(|schema| schema.revision);
+        if read.catalog_revision != 0
+            || read.head_digest != head_digest
+            || read.schema_revision != schema_revision
+            || read.accumulator_root.as_deref() != Some(accumulator.root.as_str())
+        {
+            return Err(Error::ReadStampMismatch(read.manifest_id.clone()));
+        }
+        return Ok(vyrm_core::RuntimeReadValidation::new(
+            "authenticated_current_head",
+            0,
+            0,
+        ));
     }
     let retained_head = if read.commit_cursor == 0 {
         None
@@ -1262,13 +1343,138 @@ fn validate_native_read_stamp(
             _ => None,
         })
         .next_back();
+    if let Some(root) = read.accumulator_root.as_deref() {
+        RuntimeLogAccumulator::from_nodes(read.commit_cursor, root, |level, index| {
+            read_native_accumulator_node(database, snapshot, level, index)
+        })?;
+    }
     if read.catalog_revision != 0
         || read.head_digest != retained_head
         || read.schema_revision != schema_revision
     {
         return Err(Error::ReadStampMismatch(read.manifest_id.clone()));
     }
-    Ok(())
+    Ok(vyrm_core::RuntimeReadValidation::new(
+        "full_hash_chain_replay",
+        read.commit_cursor,
+        0,
+    ))
+}
+
+fn load_native_runtime_accumulator(
+    database: &Database,
+    snapshot: Snapshot,
+    expected_size: u64,
+) -> Result<Option<RuntimeLogAccumulator>> {
+    let stored: Option<RuntimeLogAccumulator> = get_json(
+        database,
+        snapshot,
+        keyspaces::META,
+        keyspaces::RUNTIME_ACCUMULATOR_STATE,
+    )?;
+    match stored {
+        Some(accumulator) => {
+            accumulator.validate()?;
+            if accumulator.tree_size != expected_size {
+                return Err(Error::Substrate(format!(
+                    "runtime accumulator size {} differs from cursor {expected_size}",
+                    accumulator.tree_size
+                )));
+            }
+            Ok(Some(accumulator))
+        }
+        None if expected_size == 0 => Ok(Some(RuntimeLogAccumulator::new())),
+        None => Ok(None),
+    }
+}
+
+fn native_runtime_accumulator_with(
+    database: &Database,
+    snapshot: Snapshot,
+    expected_size: u64,
+) -> Result<(RuntimeLogAccumulator, Vec<RuntimeMerkleNode>)> {
+    if let Some(accumulator) = load_native_runtime_accumulator(database, snapshot, expected_size)? {
+        return Ok((accumulator, Vec::new()));
+    }
+    let page = native_change_page(database, snapshot, expected_size, 0, usize::MAX, None)?;
+    let mut accumulator = RuntimeLogAccumulator::new();
+    let mut nodes = Vec::new();
+    for change in &page.changes {
+        nodes.extend(accumulator.append_change(change)?);
+    }
+    if accumulator.tree_size != expected_size {
+        return Err(Error::Substrate(
+            "runtime accumulator bootstrap did not cover the full log".into(),
+        ));
+    }
+    Ok((accumulator, nodes))
+}
+
+fn native_authenticated_point_page(
+    database: &Database,
+    snapshot: Snapshot,
+    read: &ReadStamp,
+    cursor: u64,
+) -> Result<RuntimeChangePage> {
+    let root = read
+        .accumulator_root
+        .as_deref()
+        .ok_or_else(|| Error::ReadStampMismatch(read.manifest_id.clone()))?;
+    let accumulator = match load_native_runtime_accumulator(database, snapshot, read.commit_cursor)
+    {
+        Ok(Some(accumulator)) if accumulator.root == root => accumulator,
+        Ok(_) | Err(_) => {
+            RuntimeLogAccumulator::from_nodes(read.commit_cursor, root, |level, index| {
+                read_native_accumulator_node(database, snapshot, level, index)
+            })?
+        }
+    };
+    let change: RuntimeChange = get_json(
+        database,
+        snapshot,
+        keyspaces::RUNTIME_CHANGES,
+        &cursor.to_be_bytes(),
+    )?
+    .ok_or_else(|| Error::ReadStampUnavailable(read.manifest_id.clone()))?;
+    let proof = accumulator.inclusion_proof(cursor - 1, |level, index| {
+        read_native_accumulator_node(database, snapshot, level, index)
+    })?;
+    let proof_nodes = proof.path.len();
+    proof.verify_change(&change, root)?;
+    let selected = (change.scope == read.scope).then_some(change);
+    Ok(RuntimeChangePage {
+        requested_after: cursor - 1,
+        through_cursor: cursor,
+        head_cursor: read.commit_cursor,
+        validation: vyrm_core::RuntimeReadValidation::new(
+            "rfc9162_inclusion_proof",
+            1,
+            proof_nodes,
+        ),
+        changes: selected.into_iter().collect(),
+    })
+}
+
+fn read_native_accumulator_node(
+    database: &Database,
+    snapshot: Snapshot,
+    level: u8,
+    index: u64,
+) -> vyrm_core::Result<Option<String>> {
+    get(
+        database,
+        snapshot,
+        keyspaces::META,
+        &keyspaces::runtime_accumulator_node_key(level, index),
+    )
+    .map_err(|error| vyrm_core::Error::InvalidRuntime {
+        reason: format!("cannot read runtime accumulator node: {error}"),
+    })?
+    .map(String::from_utf8)
+    .transpose()
+    .map_err(|error| vyrm_core::Error::InvalidRuntime {
+        reason: format!("runtime accumulator node is not UTF-8: {error}"),
+    })
 }
 
 fn native_change_page(
@@ -1289,6 +1495,7 @@ fn native_change_page(
             requested_after: after,
             through_cursor: after,
             head_cursor: head,
+            validation: vyrm_core::RuntimeReadValidation::new("bounded_hash_chain_page", 0, 0),
             changes: Vec::new(),
         });
     }
@@ -1340,6 +1547,11 @@ fn native_change_page(
         requested_after: after,
         through_cursor: through,
         head_cursor: head,
+        validation: vyrm_core::RuntimeReadValidation::new(
+            "bounded_hash_chain_page",
+            through.saturating_sub(after),
+            0,
+        ),
         changes: selected,
     })
 }
@@ -1375,9 +1587,10 @@ pub fn native_snapshot_artifact_view(
 ) -> Result<(ReadStamp, Vec<ObjectReference>)> {
     let cursor_key = storage_key(keyspaces::META, keyspaces::RUNTIME_CURSOR);
     let digest_key = storage_key(keyspaces::META, keyspaces::RUNTIME_LAST_DIGEST);
+    let accumulator_key = storage_key(keyspaces::META, keyspaces::RUNTIME_ACCUMULATOR_STATE);
     let schema_key = storage_key(keyspaces::RUNTIME_SCHEMAS, scope.as_str().as_bytes());
     let values = bundle
-        .get_many(&[&cursor_key, &digest_key, &schema_key])
+        .get_many(&[&cursor_key, &digest_key, &accumulator_key, &schema_key])
         .map_err(Error::from)?;
     let commit_cursor = values[0]
         .as_deref()
@@ -1390,18 +1603,49 @@ pub fn native_snapshot_artifact_view(
         .transpose()
         .map_err(|error| Error::CorruptWatermark(error.to_string()))?
         .filter(|digest| !digest.is_empty());
-    let schema_revision = values[2]
+    let accumulator = values[2]
+        .as_deref()
+        .map(serde_json::from_slice::<RuntimeLogAccumulator>)
+        .transpose()?;
+    if let Some(accumulator) = &accumulator {
+        accumulator.validate()?;
+        if accumulator.tree_size != commit_cursor {
+            return Err(Error::Substrate(format!(
+                "snapshot runtime accumulator size {} differs from cursor {commit_cursor}",
+                accumulator.tree_size
+            )));
+        }
+    }
+    let schema_revision = values[3]
         .as_deref()
         .map(serde_json::from_slice::<RuntimeSchemaRegistry>)
         .transpose()?
         .map(|schema| schema.revision);
-    let read = ReadStamp::new(
-        scope.clone(),
-        schema_revision,
-        0,
-        commit_cursor,
-        head_digest,
-    )?;
+    let read = match accumulator {
+        Some(accumulator) => ReadStamp::authenticated(
+            scope.clone(),
+            schema_revision,
+            0,
+            commit_cursor,
+            head_digest,
+            accumulator.root,
+        )?,
+        None if commit_cursor == 0 => ReadStamp::authenticated(
+            scope.clone(),
+            schema_revision,
+            0,
+            commit_cursor,
+            head_digest,
+            RuntimeLogAccumulator::new().root,
+        )?,
+        None => ReadStamp::new(
+            scope.clone(),
+            schema_revision,
+            0,
+            commit_cursor,
+            head_digest,
+        )?,
+    };
     let objects = native_snapshot_objects(bundle, Some(scope))?;
     Ok((read, objects))
 }

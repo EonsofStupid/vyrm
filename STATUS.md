@@ -221,11 +221,16 @@ not roadmap language.
   the physical/logical match, requests at most one result cursor position, and
   keeps the full exact scan as fallback. A 4,096-event test proves the result
   path fits a one-change operator budget while the unbound query is denied by
-  that same budget. The contract does not mislabel this as end-to-end O(1): it
-  exposes `full_hash_chain_replay` and a validation upper bound equal to the
-  stamped head because current backends replay the chain before serving the
-  page. Authenticated random-access stamp proof, catalog schema-history binding,
-  and non-cursor source paths remain the next optimization boundaries.
+  that same budget. New stamps bind an RFC 9162-style accumulator root; Memory,
+  Fjall, and native commit the compact frontier and complete-subtree nodes with
+  the log mutation, validate current heads without replay, and authenticate a
+  cursor result with one change read plus a logarithmic inclusion path. The
+  4,096-event case uses at most 13 proof nodes. Historical prefixes reconstruct
+  their frontier from retained nodes but transparently report replay-plus-proof
+  because scoped schema history is not yet authenticated; legacy stores
+  bootstrap atomically on the next commit and retain linear fallback
+  beforehand. Catalog schema-history binding and non-cursor source paths remain
+  the next optimization boundaries.
   Connectome's Query Lab exposes this evidence and result
   together without mutating on GET. The explicit CLI `query` command and MCP
   `vyrm_query` tool capture the immutable read stamp before tracing, then emit
@@ -381,9 +386,10 @@ artifact even on failure.
   locally passing promotion baseline; broader promotion and removal of the
   Fjall oracle remain open. `vyrmQL` and the exact reference slice of `vyrmMX`
   are implemented; its first narrower result path is the exact stamped event
-  cursor lookup. The plan explicitly exposes the still-linear hash-chain stamp
-  validation bound, while other sources and schema history deliberately retain
-  the authoritative replay fallback. M5 now adds a
+  cursor lookup. New stamps bind an authenticated accumulator and cursor
+  execution reports its actual inclusion-proof/change-read evidence, while
+  other sources and schema history deliberately retain the authoritative replay
+  fallback. M5 now adds a
   separate `vyrm-vector` exact dense/sparse/multivector oracle, deterministic
   filter-aware HNSW, exact reranking, immutable authenticated artifacts,
   freshness/cost planning, CAS generation retirement/quarantine, a portable
@@ -466,8 +472,10 @@ artifact even on failure.
 
 ## Product and instance boundary
 
-The product chain is **Automaton → LFG → Connectome**. Vyrm is Connectome's
-evolving persistence/runtime substrate, not another peer in that chain. A major
+The product umbrella is **RRFlow**. RRO owns orchestration around Automaton and
+LFG; RRD owns the composed data/runtime contract; Connectome Panel is the
+operator UI; and Vyrm is RRD's native LSM persistence engine. A columnar path is
+a future evidence-gated engine capability, not a current claim. A major
 platform receives one isolated Connectome/Vyrm instance molded to that platform.
 A set of related small projects may share an umbrella instance only through
 explicit membership. The default remains the existing per-checkout

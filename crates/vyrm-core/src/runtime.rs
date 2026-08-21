@@ -334,6 +334,12 @@ impl RuntimeChange {
         digest::sha256_hex(&self.canonical_bytes()) == self.digest
     }
 
+    /// Canonical leaf input for the authenticated runtime log. The Merkle
+    /// layer applies its own RFC 9162 domain separator to these bytes.
+    pub fn authenticated_log_bytes(&self) -> Vec<u8> {
+        self.canonical_bytes()
+    }
+
     fn canonical_bytes(&self) -> Vec<u8> {
         let mut out = b"vyrm-runtime-change-v1\0".to_vec();
         out.extend_from_slice(&self.cursor.to_be_bytes());
@@ -375,6 +381,10 @@ pub struct ReadStamp {
     pub commit_cursor: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub head_digest: Option<String>,
+    /// RFC 9162 Merkle root for the exact global log prefix. `None` denotes a
+    /// legacy stamp whose validation must replay the hash chain.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub accumulator_root: Option<String>,
     pub manifest_id: String,
 }
 
@@ -393,6 +403,30 @@ impl ReadStamp {
             catalog_revision,
             commit_cursor,
             head_digest,
+            accumulator_root: None,
+            manifest_id: String::new(),
+        };
+        stamp.validate_components()?;
+        stamp.manifest_id = digest::sha256_hex(&stamp.manifest_bytes());
+        Ok(stamp)
+    }
+
+    pub fn authenticated(
+        scope: ScopeId,
+        schema_revision: Option<u64>,
+        catalog_revision: u64,
+        commit_cursor: u64,
+        head_digest: Option<String>,
+        accumulator_root: String,
+    ) -> Result<Self> {
+        let mut stamp = Self {
+            contract_version: DATA_RUNTIME_CONTRACT_VERSION,
+            scope,
+            schema_revision,
+            catalog_revision,
+            commit_cursor,
+            head_digest,
+            accumulator_root: Some(accumulator_root),
             manifest_id: String::new(),
         };
         stamp.validate_components()?;
@@ -446,6 +480,9 @@ impl ReadStamp {
                 });
             }
         }
+        if let Some(root) = &self.accumulator_root {
+            validate_digest("read stamp accumulator root", root)?;
+        }
         Ok(())
     }
 
@@ -457,6 +494,10 @@ impl ReadStamp {
         out.extend_from_slice(&self.catalog_revision.to_be_bytes());
         out.extend_from_slice(&self.commit_cursor.to_be_bytes());
         optional_text(&mut out, self.head_digest.as_deref());
+        if let Some(root) = &self.accumulator_root {
+            out.extend_from_slice(b"vyrm-read-stamp-accumulator-v1\0");
+            text(&mut out, root);
+        }
         out
     }
 }
@@ -1178,11 +1219,29 @@ impl AuditEnvelope {
 
 /// One bounded replay page. Consumers advance to `through_cursor`, even if a
 /// scope filter produced no matching changes, so sparse feeds cannot stall.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RuntimeReadValidation {
+    pub method: String,
+    pub change_reads: u64,
+    pub proof_nodes: u16,
+}
+
+impl RuntimeReadValidation {
+    pub fn new(method: impl Into<String>, change_reads: u64, proof_nodes: usize) -> Self {
+        Self {
+            method: method.into(),
+            change_reads,
+            proof_nodes: u16::try_from(proof_nodes).unwrap_or(u16::MAX),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RuntimeChangePage {
     pub requested_after: u64,
     pub through_cursor: u64,
     pub head_cursor: u64,
+    pub validation: RuntimeReadValidation,
     pub changes: Vec<RuntimeChange>,
 }
 
@@ -1898,6 +1957,18 @@ mod tests {
         let mut changed_read = read;
         changed_read.commit_cursor = 3;
         assert!(changed_read.validate().is_err());
+
+        let mut authenticated = ReadStamp::authenticated(
+            ScopeId::new("instance:test").unwrap(),
+            Some(1),
+            0,
+            2,
+            Some("11".repeat(32)),
+            "22".repeat(32),
+        )
+        .unwrap();
+        authenticated.accumulator_root = Some("33".repeat(32));
+        assert!(authenticated.validate().is_err());
 
         let mut future_snapshot = snapshot.clone();
         future_snapshot.contract_version = DATA_RUNTIME_CONTRACT_VERSION + 1;

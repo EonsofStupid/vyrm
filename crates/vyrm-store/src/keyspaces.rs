@@ -92,6 +92,19 @@ pub const INVOCATION_WATERMARK: &[u8] = b"watermark/invocations/ordinal";
 pub const RUNTIME_CURSOR: &[u8] = b"watermark/runtime/cursor";
 pub const RUNTIME_LAST_DIGEST: &[u8] = b"watermark/runtime/last-digest";
 pub const RUNTIME_LAST_AUDIT_DIGEST: &[u8] = b"watermark/runtime/last-audit-digest";
+/// Versioned RFC 9162 compact frontier for the global runtime log. Complete
+/// subtree nodes share this META keyspace so migrations and snapshots cannot
+/// accidentally omit proof state.
+pub const RUNTIME_ACCUMULATOR_STATE: &[u8] = b"runtime/merkle/v1/state";
+const RUNTIME_ACCUMULATOR_NODE_PREFIX: &[u8] = b"runtime/merkle/v1/node/";
+
+pub fn runtime_accumulator_node_key(level: u8, index: u64) -> Vec<u8> {
+    let mut key = Vec::with_capacity(RUNTIME_ACCUMULATOR_NODE_PREFIX.len() + 9);
+    key.extend_from_slice(RUNTIME_ACCUMULATOR_NODE_PREFIX);
+    key.push(level);
+    key.extend_from_slice(&index.to_be_bytes());
+    key
+}
 
 /// Persistence policy for a write transaction.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -11,8 +11,9 @@ use std::path::{Path, PathBuf};
 use vyrm_core::{
     key, projection_family, AuditEnvelope, Claim, ClaimSource, Millis, Predicate, ProjectionWork,
     ReadStamp, Reader, RetentionPin, RuntimeChange, RuntimeChangePage, RuntimeCommit,
-    RuntimeCommitOutcome, RuntimeMutation, RuntimeRecord, RuntimeRef, RuntimeRelation,
-    RuntimeSchemaRegistry, ScopeId, SnapshotHandle, SnapshotId, Subject,
+    RuntimeCommitOutcome, RuntimeLogAccumulator, RuntimeMerkleNode, RuntimeMutation, RuntimeRecord,
+    RuntimeRef, RuntimeRelation, RuntimeSchemaRegistry, ScopeId, SnapshotHandle, SnapshotId,
+    Subject,
 };
 
 /// Sequences assigned by an append.
@@ -123,7 +124,10 @@ impl Store {
     /// Fjall-to-vyrmKV migration path. Kept crate-private so ordinary runtime
     /// code cannot accidentally treat the compatibility adapter as an export
     /// API.
-    pub(crate) fn export_migration_archive(&self, path: &Path) -> Result<crate::MigrationInventory> {
+    pub(crate) fn export_migration_archive(
+        &self,
+        path: &Path,
+    ) -> Result<crate::MigrationInventory> {
         self.db.persist(fjall::PersistMode::SyncAll)?;
 
         let known: BTreeSet<&str> = keyspaces::ALL.into_iter().collect();
@@ -356,15 +360,40 @@ impl Store {
         limit: usize,
     ) -> Result<RuntimeChangePage> {
         let snapshot = self.db.read_tx();
-        validate_read_stamp_with(&snapshot, &self.meta, &self.runtime_changes, read)?;
-        runtime_change_page(
+        let validation = validate_read_stamp_with(
+            &snapshot,
+            &self.meta,
+            &self.runtime_changes,
+            &self.runtime_schemas,
+            read,
+        )?;
+        if limit == 1 && after < read.commit_cursor && read.accumulator_root.is_some() {
+            let mut page = authenticated_point_page(
+                &snapshot,
+                &self.meta,
+                &self.runtime_changes,
+                read,
+                after + 1,
+            )?;
+            if validation.method == "full_hash_chain_replay" {
+                page.validation.method = "full_hash_chain_replay_then_rfc9162_inclusion".into();
+                page.validation.change_reads = page
+                    .validation
+                    .change_reads
+                    .saturating_add(validation.change_reads);
+            }
+            return Ok(page);
+        }
+        let mut page = runtime_change_page(
             &snapshot,
             &self.runtime_changes,
             read.commit_cursor,
             after,
             limit,
             Some(&read.scope),
-        )
+        )?;
+        page.validation = validation;
+        Ok(page)
     }
 
     /// Atomically appends a complete causal runtime transaction.
@@ -389,6 +418,15 @@ impl Store {
                 expected: commit.expected_cursor,
                 actual: start,
             });
+        }
+        let (mut accumulator, bootstrap_nodes) =
+            runtime_accumulator_with(&tx, &self.meta, &self.runtime_changes, start)?;
+        for node in bootstrap_nodes {
+            tx.insert(
+                &self.meta,
+                keyspaces::runtime_accumulator_node_key(node.level, node.index),
+                node.digest.as_bytes(),
+            );
         }
 
         let previous_schema = tx
@@ -544,6 +582,13 @@ impl Store {
                 runtime_cursor_key(cursor),
                 serde_json::to_vec(&change)?,
             );
+            for node in accumulator.append_change(&change)? {
+                tx.insert(
+                    &self.meta,
+                    keyspaces::runtime_accumulator_node_key(node.level, node.index),
+                    node.digest.as_bytes(),
+                );
+            }
             if let Some(family) = projection_family(&mutation) {
                 let work = ProjectionWork::for_change(
                     commit.scope.clone(),
@@ -616,6 +661,11 @@ impl Store {
             &self.meta,
             keyspaces::RUNTIME_LAST_DIGEST,
             previous_digest.as_deref().unwrap_or("").as_bytes(),
+        );
+        tx.insert(
+            &self.meta,
+            keyspaces::RUNTIME_ACCUMULATOR_STATE,
+            serde_json::to_vec(&accumulator)?,
         );
         let audit =
             AuditEnvelope::accepted_commit(commit, &commit_id, cursor, previous_audit_digest)?;
@@ -694,10 +744,7 @@ impl Store {
         Ok(audit)
     }
 
-    pub fn runtime_commit_outcome(
-        &self,
-        commit_id: &str,
-    ) -> Result<Option<RuntimeCommitOutcome>> {
+    pub fn runtime_commit_outcome(&self, commit_id: &str) -> Result<Option<RuntimeCommitOutcome>> {
         let snapshot = self.db.read_tx();
         snapshot
             .get(&self.runtime_commits, commit_id.as_bytes())?
@@ -1121,13 +1168,23 @@ fn runtime_read_stamp_with<R: Readable>(
         .map_err(|error| Error::CorruptWatermark(error.to_string()))?
         .filter(|digest| !digest.is_empty());
 
-    ReadStamp::new(
-        scope.clone(),
-        schema_revision,
-        0,
-        commit_cursor,
-        head_digest,
-    )
+    match load_runtime_accumulator(reader, meta, commit_cursor)? {
+        Some(accumulator) => ReadStamp::authenticated(
+            scope.clone(),
+            schema_revision,
+            0,
+            commit_cursor,
+            head_digest,
+            accumulator.root,
+        ),
+        None => ReadStamp::new(
+            scope.clone(),
+            schema_revision,
+            0,
+            commit_cursor,
+            head_digest,
+        ),
+    }
     .map_err(Error::from)
 }
 
@@ -1135,12 +1192,42 @@ fn validate_read_stamp_with<R: Readable>(
     reader: &R,
     meta: &SingleWriterTxKeyspace,
     changes_keyspace: &SingleWriterTxKeyspace,
+    schemas: &SingleWriterTxKeyspace,
     read: &ReadStamp,
-) -> Result<()> {
+) -> Result<vyrm_core::RuntimeReadValidation> {
     read.validate()?;
     let current = decode_optional_sequence(reader.get(meta, keyspaces::RUNTIME_CURSOR)?)?;
     if read.commit_cursor > current {
         return Err(Error::ReadStampUnavailable(read.manifest_id.clone()));
+    }
+    if read.commit_cursor == current && read.accumulator_root.is_some() {
+        let accumulator = load_runtime_accumulator(reader, meta, current)?
+            .ok_or_else(|| Error::ReadStampMismatch(read.manifest_id.clone()))?;
+        let head_digest = reader
+            .get(meta, keyspaces::RUNTIME_LAST_DIGEST)?
+            .map(|bytes| String::from_utf8(bytes.to_vec()))
+            .transpose()
+            .map_err(|error| Error::CorruptWatermark(error.to_string()))?
+            .filter(|digest| !digest.is_empty());
+        let schema_revision = reader
+            .get(schemas, read.scope.as_str().as_bytes())?
+            .map(|bytes| {
+                serde_json::from_slice::<RuntimeSchemaRegistry>(&bytes)
+                    .map(|schema| schema.revision)
+            })
+            .transpose()?;
+        if read.catalog_revision != 0
+            || read.head_digest != head_digest
+            || read.schema_revision != schema_revision
+            || read.accumulator_root.as_deref() != Some(accumulator.root.as_str())
+        {
+            return Err(Error::ReadStampMismatch(read.manifest_id.clone()));
+        }
+        return Ok(vyrm_core::RuntimeReadValidation::new(
+            "authenticated_current_head",
+            0,
+            0,
+        ));
     }
     let retained_head = if read.commit_cursor == 0 {
         None
@@ -1173,13 +1260,131 @@ fn validate_read_stamp_with<R: Readable>(
             _ => None,
         })
         .next_back();
+    if let Some(root) = read.accumulator_root.as_deref() {
+        RuntimeLogAccumulator::from_nodes(read.commit_cursor, root, |level, index| {
+            read_fjall_accumulator_node(reader, meta, level, index)
+        })?;
+    }
     if read.catalog_revision != 0
         || read.head_digest != retained_head
         || read.schema_revision != schema_revision
     {
         return Err(Error::ReadStampMismatch(read.manifest_id.clone()));
     }
-    Ok(())
+    Ok(vyrm_core::RuntimeReadValidation::new(
+        "full_hash_chain_replay",
+        read.commit_cursor,
+        0,
+    ))
+}
+
+fn load_runtime_accumulator<R: Readable>(
+    reader: &R,
+    meta: &SingleWriterTxKeyspace,
+    expected_size: u64,
+) -> Result<Option<RuntimeLogAccumulator>> {
+    let stored = reader
+        .get(meta, keyspaces::RUNTIME_ACCUMULATOR_STATE)?
+        .map(|bytes| serde_json::from_slice::<RuntimeLogAccumulator>(&bytes))
+        .transpose()?;
+    match stored {
+        Some(accumulator) => {
+            accumulator.validate()?;
+            if accumulator.tree_size != expected_size {
+                return Err(Error::Substrate(format!(
+                    "runtime accumulator size {} differs from cursor {expected_size}",
+                    accumulator.tree_size
+                )));
+            }
+            Ok(Some(accumulator))
+        }
+        None if expected_size == 0 => Ok(Some(RuntimeLogAccumulator::new())),
+        None => Ok(None),
+    }
+}
+
+fn runtime_accumulator_with<R: Readable>(
+    reader: &R,
+    meta: &SingleWriterTxKeyspace,
+    changes: &SingleWriterTxKeyspace,
+    expected_size: u64,
+) -> Result<(RuntimeLogAccumulator, Vec<RuntimeMerkleNode>)> {
+    if let Some(accumulator) = load_runtime_accumulator(reader, meta, expected_size)? {
+        return Ok((accumulator, Vec::new()));
+    }
+    let page = runtime_change_page(reader, changes, expected_size, 0, usize::MAX, None)?;
+    let mut accumulator = RuntimeLogAccumulator::new();
+    let mut nodes = Vec::new();
+    for change in &page.changes {
+        nodes.extend(accumulator.append_change(change)?);
+    }
+    if accumulator.tree_size != expected_size {
+        return Err(Error::Substrate(
+            "runtime accumulator bootstrap did not cover the full log".into(),
+        ));
+    }
+    Ok((accumulator, nodes))
+}
+
+fn authenticated_point_page<R: Readable>(
+    reader: &R,
+    meta: &SingleWriterTxKeyspace,
+    changes: &SingleWriterTxKeyspace,
+    read: &ReadStamp,
+    cursor: u64,
+) -> Result<RuntimeChangePage> {
+    let root = read
+        .accumulator_root
+        .as_deref()
+        .ok_or_else(|| Error::ReadStampMismatch(read.manifest_id.clone()))?;
+    let accumulator = match load_runtime_accumulator(reader, meta, read.commit_cursor) {
+        Ok(Some(accumulator)) if accumulator.root == root => accumulator,
+        Ok(_) | Err(_) => {
+            RuntimeLogAccumulator::from_nodes(read.commit_cursor, root, |level, index| {
+                read_fjall_accumulator_node(reader, meta, level, index)
+            })?
+        }
+    };
+    let bytes = reader
+        .get(changes, runtime_cursor_key(cursor))?
+        .ok_or_else(|| Error::ReadStampUnavailable(read.manifest_id.clone()))?;
+    let change: RuntimeChange = serde_json::from_slice(&bytes)?;
+    let proof = accumulator.inclusion_proof(cursor - 1, |level, index| {
+        read_fjall_accumulator_node(reader, meta, level, index)
+    })?;
+    let proof_nodes = proof.path.len();
+    proof.verify_change(&change, root)?;
+    let selected = (change.scope == read.scope).then_some(change);
+    Ok(RuntimeChangePage {
+        requested_after: cursor - 1,
+        through_cursor: cursor,
+        head_cursor: read.commit_cursor,
+        validation: vyrm_core::RuntimeReadValidation::new(
+            "rfc9162_inclusion_proof",
+            1,
+            proof_nodes,
+        ),
+        changes: selected.into_iter().collect(),
+    })
+}
+
+fn read_fjall_accumulator_node<R: Readable>(
+    reader: &R,
+    meta: &SingleWriterTxKeyspace,
+    level: u8,
+    index: u64,
+) -> vyrm_core::Result<Option<String>> {
+    let value = reader
+        .get(meta, keyspaces::runtime_accumulator_node_key(level, index))
+        .map_err(|error| vyrm_core::Error::InvalidRuntime {
+            reason: format!("cannot read runtime accumulator node: {error}"),
+        })?;
+    value
+        .map(|bytes| String::from_utf8(bytes.to_vec()))
+        .transpose()
+        .map_err(|error| vyrm_core::Error::InvalidRuntime {
+            reason: format!("runtime accumulator node is not UTF-8: {error}"),
+        })
 }
 
 fn runtime_change_page<R: Readable>(
@@ -1200,6 +1405,7 @@ fn runtime_change_page<R: Readable>(
             requested_after: after,
             through_cursor: after,
             head_cursor: head,
+            validation: vyrm_core::RuntimeReadValidation::new("bounded_hash_chain_page", 0, 0),
             changes: Vec::new(),
         });
     }
@@ -1250,6 +1456,11 @@ fn runtime_change_page<R: Readable>(
         requested_after: after,
         through_cursor: through,
         head_cursor: head,
+        validation: vyrm_core::RuntimeReadValidation::new(
+            "bounded_hash_chain_page",
+            through.saturating_sub(after),
+            0,
+        ),
         changes: selected,
     })
 }

@@ -269,6 +269,9 @@ fn bound_event_cursor_uses_one_exact_authoritative_position_on_every_engine() {
     assert_eq!(expected, exercise(&fjall));
     assert_eq!(expected, exercise(&native));
     assert_eq!(expected.scanned_changes, 1);
+    assert_eq!(expected.stamp_validation, "rfc9162_inclusion_proof");
+    assert_eq!(expected.stamp_validation_max_changes, 1);
+    assert!(expected.stamp_validation_proof_nodes > 0);
     assert_eq!(expected.returned_rows, 1);
     assert_eq!(expected.batches[0].rows[0].identity, "event:tool_result:5");
 }
@@ -296,7 +299,7 @@ fn event_cursor_outside_the_stamp_is_an_exact_empty_path() {
 }
 
 #[test]
-fn cursor_lookup_bounds_result_access_and_exposes_linear_stamp_validation() {
+fn cursor_lookup_uses_authenticated_logarithmic_validation() {
     const EVENTS: u64 = 4_096;
     let engine = MemoryEngine::new();
     engine.commit_runtime(&fixture_commit()).unwrap();
@@ -336,8 +339,10 @@ fn cursor_lookup_bounds_result_access_and_exposes_linear_stamp_validation() {
     )
     .unwrap();
     assert_eq!(point_result.scanned_changes, 1);
-    assert_eq!(point_result.stamp_validation, "full_hash_chain_replay");
-    assert_eq!(point_result.stamp_validation_max_changes, head as usize);
+    assert_eq!(point_result.stamp_validation, "rfc9162_inclusion_proof");
+    assert_eq!(point_result.stamp_validation_max_changes, 1);
+    assert!(point_result.stamp_validation_proof_nodes > 0);
+    assert!(point_result.stamp_validation_proof_nodes <= 13);
     assert_eq!(point_result.returned_rows, 1);
 
     let unbound =

@@ -249,7 +249,11 @@ pub fn plan(bound: &BoundQuery) -> Result<PhysicalPlan> {
             schema_revision: bound.schema_revision,
             exact: true,
             deterministic_order: "identity_ascending".into(),
-            stamp_validation: "full_hash_chain_replay".into(),
+            stamp_validation: if bound.read.accumulator_root.is_some() {
+                "rfc9162_inclusion_or_hash_chain_fallback".into()
+            } else {
+                "full_hash_chain_replay".into()
+            },
             stamp_validation_max_changes: bound.read.commit_cursor,
             network_required: false,
             gpu_required: false,

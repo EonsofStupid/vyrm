@@ -284,14 +284,18 @@ built-in global `cursor`. `authoritative_event_cursor_lookup` reads at most one
 result cursor position through the exact captured `ReadStamp`; the executor
 rejects a plan whose source/filter/known-cursor contract does not match that
 operator. Out-of-range lookups still validate the stamped backend state before
-returning empty. The plan and result explicitly report
-`full_hash_chain_replay` and a validation upper bound equal to the stamped head:
-the current linear hash chain does not provide a logarithmic membership proof,
-so this is not an end-to-end O(1) claim. All other query shapes retain
-`authoritative_log_scan`. This closes the point-result semantic proof, not the
-broader indexing problem: an authenticated cursor accumulator, catalog schema
-history, and record/relation/claim access paths require additional canonical
-state or grounded projection stamps.
+returning empty. New read stamps bind an RFC 9162-style Merkle root. The compact
+frontier and complete-subtree nodes live in the existing META keyspace and join
+the same atomic commit as the runtime change. A current-head cursor lookup reads
+one change and verifies a logarithmic inclusion path. A retained prefix
+reconstructs the same proof from retained nodes, but reports replay-plus-proof
+because scoped schema history still requires linear validation. Results expose
+the actual method, change-read count, and proof-node count. Legacy logs use the
+linear fallback until their next authoritative commit atomically rebuilds the
+accumulator. All other query shapes retain
+`authoritative_log_scan`. Catalog schema history and record/relation/claim
+access paths still require additional canonical state or grounded projection
+stamps.
 
 ## Vector, embedding, GPU, and edge profile
 

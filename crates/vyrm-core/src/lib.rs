@@ -30,6 +30,7 @@
 //! instant takes it as a parameter, so that results are reproducible and tests
 //! are deterministic.
 
+pub mod authenticated_log;
 pub mod claim;
 pub mod data;
 pub mod digest;
@@ -44,6 +45,10 @@ pub mod schema;
 pub mod temporal;
 pub mod trace;
 
+pub use authenticated_log::{
+    RuntimeInclusionProof, RuntimeLogAccumulator, RuntimeMerkleNode,
+    RUNTIME_LOG_ACCUMULATOR_VERSION,
+};
 pub use claim::{supersede, Claim, Millis, Producer, PromotionState, Tier};
 pub use data::{
     EmbeddingProvenance, GeoPoint, GeoValue, ObjectReceipt, ObjectReference, RuntimeGeo,
@@ -61,9 +66,9 @@ pub use runtime::{
     OutboxId, ProjectionFamily, ProjectionId, ProjectionStamp, ProjectionState, ProjectionWork,
     ReadStamp, RetentionPin, RetentionPinId, RuntimeChange, RuntimeChangePage, RuntimeCommit,
     RuntimeCommitOutcome, RuntimeEvent, RuntimeGraphDiff, RuntimeGraphSnapshot, RuntimeId,
-    RuntimeMutation, RuntimeProperties, RuntimeRecord, RuntimeRecordChange, RuntimeRef,
-    RuntimeRelation, RuntimeRelationChange, RuntimeType, RuntimeValue, ScopeId, SnapshotHandle,
-    SnapshotId, DATA_RUNTIME_CONTRACT_VERSION,
+    RuntimeMutation, RuntimeProperties, RuntimeReadValidation, RuntimeRecord, RuntimeRecordChange,
+    RuntimeRef, RuntimeRelation, RuntimeRelationChange, RuntimeType, RuntimeValue, ScopeId,
+    SnapshotHandle, SnapshotId, DATA_RUNTIME_CONTRACT_VERSION,
 };
 pub use schema::{
     RuntimeEventSchema, RuntimePropertySchema, RuntimeRecordSchema, RuntimeRelationSchema,
@@ -71,6 +76,6 @@ pub use schema::{
 };
 pub use temporal::{changed_since, resolve_as_of, ClaimReader, ClaimSource};
 pub use trace::{
-    RuntimeTraceEvent, TraceDataClass, TraceDomain, TraceId, TraceLink, TraceOutcome, TracePhase,
-    SpanId, RUNTIME_TRACE_CONTRACT_VERSION, RUNTIME_TRACE_EVENT_TYPE,
+    RuntimeTraceEvent, SpanId, TraceDataClass, TraceDomain, TraceId, TraceLink, TraceOutcome,
+    TracePhase, RUNTIME_TRACE_CONTRACT_VERSION, RUNTIME_TRACE_EVENT_TYPE,
 };

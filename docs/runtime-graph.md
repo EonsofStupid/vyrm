@@ -5,8 +5,11 @@
 The product architecture is:
 
 ```text
-Automaton → LFG → Connectome
-                      └─ Vyrm persistence/runtime substrate
+RRFlow
+├─ RRO orchestration: Automaton → LFG
+├─ RRD data runtime
+│  └─ Vyrm native LSM persistence engine
+└─ Connectome Panel: operator client and visualizer
 ```
 
 This graph records operational causality. It does not perform BM25, embedding,

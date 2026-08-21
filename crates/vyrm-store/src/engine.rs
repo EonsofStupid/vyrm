@@ -34,9 +34,9 @@ use vyrm_core::{
     projection_family, resolve_as_of, AuditEnvelope, Claim, ClaimSource, DataTransaction,
     DataTransactionView, Millis, ObjectReference, Predicate, ProjectionWork, ReadStamp, Reader,
     RetentionPin, RuntimeChange, RuntimeChangePage, RuntimeCommit, RuntimeCommitOutcome,
-    RuntimeGeo, RuntimeGraphSnapshot, RuntimeMutation, RuntimeRecord, RuntimeRef, RuntimeRelation,
-    RuntimeSchemaRegistry, RuntimeSeriesSample, RuntimeVector, ScopeId, SnapshotHandle, SnapshotId,
-    Subject,
+    RuntimeGeo, RuntimeGraphSnapshot, RuntimeLogAccumulator, RuntimeMutation, RuntimeRecord,
+    RuntimeRef, RuntimeRelation, RuntimeSchemaRegistry, RuntimeSeriesSample, RuntimeVector,
+    ScopeId, SnapshotHandle, SnapshotId, Subject,
 };
 
 /// A read-only physical counter snapshot used to attribute bounded storage
@@ -516,6 +516,8 @@ struct MemoryEngineInner {
     projections: BTreeMap<String, Vec<u8>>,
     observes: u64,
     runtime_changes: Vec<RuntimeChange>,
+    runtime_accumulator: RuntimeLogAccumulator,
+    runtime_merkle_nodes: BTreeMap<(u8, u64), String>,
     runtime_records: BTreeMap<(ScopeId, RuntimeRef), RuntimeRecord>,
     runtime_relations: BTreeMap<(ScopeId, RuntimeRef), RuntimeRelation>,
     runtime_vectors: BTreeMap<(ScopeId, RuntimeRef), RuntimeVector>,
@@ -764,14 +766,27 @@ impl Engine for MemoryEngine {
             ));
         }
         let inner = self.inner.lock().expect("engine mutex");
-        memory_validate_read_stamp(&inner, read)?;
-        Ok(memory_change_page(
+        let validation = memory_validate_read_stamp(&inner, read)?;
+        if limit == 1 && after < read.commit_cursor {
+            let mut page = memory_authenticated_point_page(&inner, read, after + 1)?;
+            if validation.method == "full_hash_chain_replay" {
+                page.validation.method = "full_hash_chain_replay_then_rfc9162_inclusion".into();
+                page.validation.change_reads = page
+                    .validation
+                    .change_reads
+                    .saturating_add(validation.change_reads);
+            }
+            return Ok(page);
+        }
+        let mut page = memory_change_page(
             &inner.runtime_changes,
             read.commit_cursor,
             after,
             limit,
             Some(&read.scope),
-        ))
+        );
+        page.validation = validation;
+        Ok(page)
     }
 
     fn commit_runtime(&self, commit: &RuntimeCommit) -> Result<RuntimeCommitOutcome> {
@@ -887,6 +902,8 @@ impl Engine for MemoryEngine {
             .last()
             .map(|change| change.digest.clone());
         let mut committed = Vec::with_capacity(commit.mutations.len());
+        let mut accumulator = inner.runtime_accumulator.clone();
+        let mut merkle_nodes = Vec::new();
         let mut pending_work = Vec::new();
         for (ordinal, mutation) in commit.mutations.iter().cloned().enumerate() {
             let cursor = start + ordinal as u64 + 1;
@@ -908,6 +925,7 @@ impl Engine for MemoryEngine {
                 previous_digest.clone(),
             );
             previous_digest = Some(change.digest.clone());
+            merkle_nodes.extend(accumulator.append_change(&change)?);
             committed.push(change);
         }
         let last_cursor = start + commit.mutations.len() as u64;
@@ -963,6 +981,12 @@ impl Engine for MemoryEngine {
             }
         }
         inner.runtime_changes.extend(committed);
+        inner.runtime_accumulator = accumulator;
+        for node in merkle_nodes {
+            inner
+                .runtime_merkle_nodes
+                .insert((node.level, node.index), node.digest);
+        }
         let outbox_count = pending_work.len();
         for work in pending_work {
             inner.runtime_outbox.insert(work.source_cursor, work);
@@ -1043,7 +1067,7 @@ impl Engine for MemoryEngine {
 }
 
 fn memory_read_stamp(inner: &MemoryEngineInner, scope: &ScopeId) -> Result<ReadStamp> {
-    ReadStamp::new(
+    ReadStamp::authenticated(
         scope.clone(),
         inner
             .runtime_schemas
@@ -1055,14 +1079,40 @@ fn memory_read_stamp(inner: &MemoryEngineInner, scope: &ScopeId) -> Result<ReadS
             .runtime_changes
             .last()
             .map(|change| change.digest.clone()),
+        inner.runtime_accumulator.root.clone(),
     )
     .map_err(Error::from)
 }
 
-fn memory_validate_read_stamp(inner: &MemoryEngineInner, read: &ReadStamp) -> Result<()> {
+fn memory_validate_read_stamp(
+    inner: &MemoryEngineInner,
+    read: &ReadStamp,
+) -> Result<vyrm_core::RuntimeReadValidation> {
     read.validate()?;
     if read.commit_cursor > inner.runtime_changes.len() as u64 {
         return Err(Error::ReadStampUnavailable(read.manifest_id.clone()));
+    }
+    if read.commit_cursor == inner.runtime_changes.len() as u64 && read.accumulator_root.is_some() {
+        let head_digest = inner
+            .runtime_changes
+            .last()
+            .map(|change| change.digest.clone());
+        let schema_revision = inner
+            .runtime_schemas
+            .get(&read.scope)
+            .map(|schema| schema.revision);
+        if read.catalog_revision != 0
+            || read.head_digest != head_digest
+            || read.schema_revision != schema_revision
+            || read.accumulator_root.as_deref() != Some(inner.runtime_accumulator.root.as_str())
+        {
+            return Err(Error::ReadStampMismatch(read.manifest_id.clone()));
+        }
+        return Ok(vyrm_core::RuntimeReadValidation::new(
+            "authenticated_current_head",
+            0,
+            0,
+        ));
     }
     let head_digest = if read.commit_cursor == 0 {
         None
@@ -1083,13 +1133,64 @@ fn memory_validate_read_stamp(inner: &MemoryEngineInner, read: &ReadStamp) -> Re
             _ => None,
         })
         .next_back();
+    if let Some(root) = read.accumulator_root.as_deref() {
+        RuntimeLogAccumulator::from_nodes(read.commit_cursor, root, |level, index| {
+            Ok(inner.runtime_merkle_nodes.get(&(level, index)).cloned())
+        })?;
+    }
     if read.catalog_revision != 0
         || read.head_digest != head_digest
         || read.schema_revision != schema_revision
     {
         return Err(Error::ReadStampMismatch(read.manifest_id.clone()));
     }
-    Ok(())
+    Ok(vyrm_core::RuntimeReadValidation::new(
+        "full_hash_chain_replay",
+        read.commit_cursor,
+        0,
+    ))
+}
+
+fn memory_authenticated_point_page(
+    inner: &MemoryEngineInner,
+    read: &ReadStamp,
+    cursor: u64,
+) -> Result<RuntimeChangePage> {
+    let root = read
+        .accumulator_root
+        .as_deref()
+        .ok_or_else(|| Error::ReadStampMismatch(read.manifest_id.clone()))?;
+    let accumulator = if inner.runtime_accumulator.tree_size == read.commit_cursor
+        && inner.runtime_accumulator.root == root
+    {
+        inner.runtime_accumulator.clone()
+    } else {
+        RuntimeLogAccumulator::from_nodes(read.commit_cursor, root, |level, index| {
+            Ok(inner.runtime_merkle_nodes.get(&(level, index)).cloned())
+        })?
+    };
+    let change = inner
+        .runtime_changes
+        .get(cursor as usize - 1)
+        .cloned()
+        .ok_or_else(|| Error::ReadStampUnavailable(read.manifest_id.clone()))?;
+    let proof = accumulator.inclusion_proof(cursor - 1, |level, index| {
+        Ok(inner.runtime_merkle_nodes.get(&(level, index)).cloned())
+    })?;
+    let proof_nodes = proof.path.len();
+    proof.verify_change(&change, root)?;
+    let selected = (change.scope == read.scope).then_some(change);
+    Ok(RuntimeChangePage {
+        requested_after: cursor - 1,
+        through_cursor: cursor,
+        head_cursor: read.commit_cursor,
+        validation: vyrm_core::RuntimeReadValidation::new(
+            "rfc9162_inclusion_proof",
+            1,
+            proof_nodes,
+        ),
+        changes: selected.into_iter().collect(),
+    })
 }
 
 fn memory_change_page(
@@ -1104,6 +1205,7 @@ fn memory_change_page(
             requested_after: after,
             through_cursor: after,
             head_cursor: head,
+            validation: vyrm_core::RuntimeReadValidation::new("bounded_hash_chain_page", 0, 0),
             changes: Vec::new(),
         };
     }
@@ -1120,6 +1222,11 @@ fn memory_change_page(
         requested_after: after,
         through_cursor: end as u64,
         head_cursor: head,
+        validation: vyrm_core::RuntimeReadValidation::new(
+            "bounded_hash_chain_page",
+            end.saturating_sub(after as usize) as u64,
+            0,
+        ),
         changes: selected,
     }
 }

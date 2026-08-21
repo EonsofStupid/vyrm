@@ -1,11 +1,11 @@
-# vyrm — Connectome runtime substrate
+# vyrm — native storage engine for RRD
 
-The product architecture is **Automaton → LFG → Connectome**. Automaton owns
-conversation/provider orchestration; LFG owns context encoding, just-in-time
-compilation, and routing; Connectome owns persistent runtime intelligence and
-its developer workbench. This repository is **Vyrm**, the persistence and
-lifecycle substrate being evolved inside Connectome; it is not a fourth peer
-product.
+The umbrella is **RRFlow**: RRO orchestrates Automaton and LFG, RRD composes the
+durable data/runtime contract, and Connectome Panel is the operator client and
+visualizer. This repository is **Vyrm**, RRD's native persistence engine. Vyrm
+owns the LSM authority and evidence needed by those layers; it does not own
+workflow orchestration or UI semantics. A columnar analytical path remains a
+measured future addition, not a property of the current row/key-value engine.
 
 The system makes operational reasoning observable and enforceable without
 claiming access to a model's hidden chain-of-thought. It records goals, plans,
@@ -30,7 +30,8 @@ Vyrm provides:
 - atomic typed runtime commits spanning claims, graph records, relations,
   lifecycle events, vectors, series samples, geospatial values, and verified
   object references;
-- one hash-chained global runtime cursor with resumable, scope-filtered replay;
+- one hash-chained global runtime cursor with resumable, scope-filtered replay,
+  plus an RFC 9162-style authenticated accumulator for logarithmic point proofs;
 - bounded persisted runtime traces with W3C-width identities and typed links to
   reasoning runs, cursors, read stamps, snapshots, plans, projections,
   workflows, providers, and external operator-knowledge revisions; project
@@ -311,9 +312,14 @@ to one stamped authoritative cursor result lookup; unbound records, relations,
 events, and claims retain the exact log-replay fallback. The planner publishes
 both the selected path and rejection reason, and execution revalidates the path
 against the logical filter and `ReadStamp` before storage access. Its contract
-also reports `full_hash_chain_replay` and the stamped head as the current
-validation bound: result access is one position, but end-to-end stamp proof is
-still linear until Vyrm has an authenticated random-access accumulator. Fjall remains live
+advertises authenticated-proof support with a legacy replay fallback, while
+execution reports the path actually observed. Current stamped cursor lookup
+reads one authoritative change and verifies an RFC 9162 inclusion path; a
+4,096-event test bounds that path to 13 proof nodes. Historical prefixes can
+reconstruct their compact frontier from retained complete-subtree nodes, but
+still report replay-plus-proof while schema history lacks an authenticated
+absence/index proof. Legacy databases retain full replay until the first atomic
+accumulator bootstrap. Fjall remains live
 until broader benchmark regression runs
 reproduce the native engine's first strict local equal-or-better pass. That
 checked-in five-trial workload has native ahead in write/read throughput,

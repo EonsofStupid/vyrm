@@ -818,7 +818,8 @@
           <section class="query-contract-grid">
             <article><span>READ MANIFEST</span><strong>${escapeHtml(contract.read_manifest.slice(0, 14))}…</strong><small>cursor ${human(contract.known_at_cursor)} · schema r${human(contract.schema_revision)}</small></article>
             <article><span>SEMANTICS</span><strong>${contract.exact ? 'Exact' : 'Approximate'}</strong><small>valid ${human(contract.valid_at)} · ${escapeHtml(contract.deterministic_order)}</small></article>
-            <article><span>EXECUTION</span><strong>${human(value.execution.returned_rows)} rows</strong><small>${human(value.execution.scanned_changes)} changes · ${human(value.execution.output_bytes)} bytes</small></article>
+            <article><span>EXECUTION</span><strong>${human(value.execution.returned_rows)} rows</strong><small>${human(value.execution.scanned_changes)} result positions · ${human(value.execution.output_bytes)} bytes</small></article>
+            <article><span>READ PROOF</span><strong>${escapeHtml(value.execution.stamp_validation.replaceAll('_', ' '))}</strong><small>${human(value.execution.stamp_validation_max_changes)} change reads · ${human(value.execution.stamp_validation_proof_nodes)} proof nodes</small></article>
             <article><span>BOUNDARY</span><strong>${escapeHtml(contract.scope)}</strong><small>network ${contract.network_required ? 'yes' : 'no'} · GPU ${contract.gpu_required ? 'yes' : 'no'}</small></article>
           </section>
           <section class="query-paths">${value.plan.explanation.candidates.map((candidate) => `<article class="${candidate.selected ? 'selected' : 'rejected'}"><span>${candidate.selected ? 'SELECTED' : 'REJECTED'}</span><strong>${escapeHtml(candidate.name.replaceAll('_', ' '))}</strong><p>${escapeHtml(candidate.reason)}</p></article>`).join('')}</section>

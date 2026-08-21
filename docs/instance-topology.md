@@ -2,7 +2,11 @@
 
 | Layer | Meaning |
 |---|---|
-| Product | vyrm/connectome: the reusable runtime pattern and shared kernel |
+| Suite | RRFlow: umbrella brand and deployable system |
+| Orchestration | RRO: Automaton/LFG execution, policy, and lifecycle composition |
+| Data runtime | RRD: unified durable contracts over storage capabilities |
+| Storage engine | Vyrm: native LSM authority; columnar path only after measured implementation |
+| Operator client | Connectome Panel: visualization, replay, comparison, and control |
 | Instance | One deployed, isolated runtime molded to a platform or an explicit umbrella |
 | Member | A project admitted to an umbrella instance |
 | Upstream | A capability source such as SurrealDB or Qdrant; never an automatic merge target |

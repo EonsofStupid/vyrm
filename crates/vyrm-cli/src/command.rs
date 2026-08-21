@@ -642,11 +642,14 @@ pub fn execute(store: &PersistentEngine, command: &Command, reader: &Reader, now
                 serde_json::to_string_pretty(&result)?
             } else {
                 let mut lines = vec![format!(
-                    "plan {} read={} rows={} scanned={} bytes={} truncated={}",
+                    "plan {} read={} rows={} scanned={} validation={} validation_reads={} proof_nodes={} bytes={} truncated={}",
                     result.plan.digest,
                     result.execution.known_at_cursor,
                     result.execution.returned_rows,
                     result.execution.scanned_changes,
+                    result.execution.stamp_validation,
+                    result.execution.stamp_validation_max_changes,
+                    result.execution.stamp_validation_proof_nodes,
                     result.execution.output_bytes,
                     result.execution.truncated,
                 )];
