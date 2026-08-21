@@ -751,6 +751,14 @@ fn physical_storage_attributes(
             RuntimeValue::Unsigned(execution.scanned_changes as u64),
         );
         attributes.insert(
+            "stamp_validation".into(),
+            RuntimeValue::String(execution.stamp_validation.clone()),
+        );
+        attributes.insert(
+            "stamp_validation_max_changes".into(),
+            RuntimeValue::Unsigned(execution.stamp_validation_max_changes as u64),
+        );
+        attributes.insert(
             "logical_output_bytes".into(),
             RuntimeValue::Unsigned(execution.output_bytes as u64),
         );
@@ -787,6 +795,14 @@ fn execution_attributes(execution: &QueryExecution) -> RuntimeProperties {
         (
             "returned_rows".into(),
             RuntimeValue::Unsigned(execution.returned_rows as u64),
+        ),
+        (
+            "stamp_validation".into(),
+            RuntimeValue::String(execution.stamp_validation.clone()),
+        ),
+        (
+            "stamp_validation_max_changes".into(),
+            RuntimeValue::Unsigned(execution.stamp_validation_max_changes as u64),
         ),
         (
             "output_bytes".into(),

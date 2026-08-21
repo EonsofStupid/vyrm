@@ -296,7 +296,7 @@ fn event_cursor_outside_the_stamp_is_an_exact_empty_path() {
 }
 
 #[test]
-fn cursor_lookup_budget_is_constant_while_unbound_replay_tracks_the_head() {
+fn cursor_lookup_bounds_result_access_and_exposes_linear_stamp_validation() {
     const EVENTS: u64 = 4_096;
     let engine = MemoryEngine::new();
     engine.commit_runtime(&fixture_commit()).unwrap();
@@ -336,6 +336,8 @@ fn cursor_lookup_budget_is_constant_while_unbound_replay_tracks_the_head() {
     )
     .unwrap();
     assert_eq!(point_result.scanned_changes, 1);
+    assert_eq!(point_result.stamp_validation, "full_hash_chain_replay");
+    assert_eq!(point_result.stamp_validation_max_changes, head as usize);
     assert_eq!(point_result.returned_rows, 1);
 
     let unbound =

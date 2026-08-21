@@ -60,7 +60,11 @@ pub struct QueryExecution {
     pub read_manifest: String,
     pub valid_at: u64,
     pub known_at_cursor: u64,
+    /// Cursor positions requested by the selected result access path. This
+    /// excludes the hash-chain replay currently used to validate `ReadStamp`.
     pub scanned_changes: usize,
+    pub stamp_validation: String,
+    pub stamp_validation_max_changes: usize,
     pub returned_rows: usize,
     pub output_bytes: usize,
     pub truncated: bool,
@@ -83,6 +87,10 @@ pub fn execute<E: Engine>(
     let shape = PlanShape::read(plan)?;
     let access = ReadPath::from_plan(plan, &shape)?;
     let requested = access.scanned_positions()?;
+    let stamp_validation_max_changes = usize::try_from(contract.stamp_validation_max_changes)
+        .map_err(|_| {
+            Error::Budget("stamp-validation bound exceeds this platform's address space".into())
+        })?;
     if requested > budget.max_scanned_changes {
         return Err(Error::Budget(format!(
             "query requires scanning {requested} changes, budget allows {}",
@@ -141,6 +149,8 @@ pub fn execute<E: Engine>(
         valid_at: contract.valid_at,
         known_at_cursor: contract.known_at_cursor,
         scanned_changes: requested,
+        stamp_validation: contract.stamp_validation.clone(),
+        stamp_validation_max_changes,
         returned_rows,
         output_bytes,
         truncated,
@@ -162,6 +172,8 @@ impl ReadPath {
             || contract.known_at_cursor != shape.known_at_cursor
             || contract.schema_revision != plan.logical.schema_revision
             || contract.authorization_boundary != format!("scope:{}", plan.logical.read.scope)
+            || contract.stamp_validation != "full_hash_chain_replay"
+            || contract.stamp_validation_max_changes != plan.logical.read.commit_cursor
         {
             return Err(Error::Integrity(
                 "logical plan, read stamp, and execution contract disagree".into(),

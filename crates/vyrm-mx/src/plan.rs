@@ -81,6 +81,8 @@ pub struct ExecutionContract {
     pub schema_revision: u64,
     pub exact: bool,
     pub deterministic_order: String,
+    pub stamp_validation: String,
+    pub stamp_validation_max_changes: u64,
     pub network_required: bool,
     pub gpu_required: bool,
     pub authorization_boundary: String,
@@ -206,14 +208,14 @@ pub fn plan(bound: &BoundQuery) -> Result<PhysicalPlan> {
                 selected: true,
                 exact: true,
                 reason: format!(
-                    "uses the bound global cursor {cursor} inside the captured read stamp"
+                    "uses bound global cursor {cursor} after the captured stamp is validated"
                 ),
             },
             CandidatePath {
                 name: "authoritative_log_scan".into(),
                 selected: false,
                 exact: true,
-                reason: "rejected: exact cursor lookup scans fewer authoritative positions".into(),
+                reason: "rejected: exact cursor lookup requests fewer result positions after shared stamp validation".into(),
             },
             CandidatePath {
                 name: "derived_projection".into(),
@@ -247,6 +249,8 @@ pub fn plan(bound: &BoundQuery) -> Result<PhysicalPlan> {
             schema_revision: bound.schema_revision,
             exact: true,
             deterministic_order: "identity_ascending".into(),
+            stamp_validation: "full_hash_chain_replay".into(),
+            stamp_validation_max_changes: bound.read.commit_cursor,
             network_required: false,
             gpu_required: false,
             authorization_boundary: format!("scope:{}", bound.read.scope),

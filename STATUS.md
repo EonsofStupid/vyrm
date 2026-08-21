@@ -218,11 +218,14 @@ not roadmap language.
   relations, events, and claims with Memory/Fjall/native/direct-graph
   differentials. Event queries that bind the built-in global `cursor` now use a
   content-addressed `authoritative_event_cursor_lookup`: the executor validates
-  the physical/logical match and stamped head, reads at most one global cursor
-  position, and keeps the full exact scan as fallback. A 4,096-event test proves
-  the point path fits a one-change budget while the unbound query is denied by
-  that same budget. Catalog schema-history binding and non-cursor source paths
-  still replay the authoritative log and remain the next optimization boundary.
+  the physical/logical match, requests at most one result cursor position, and
+  keeps the full exact scan as fallback. A 4,096-event test proves the result
+  path fits a one-change operator budget while the unbound query is denied by
+  that same budget. The contract does not mislabel this as end-to-end O(1): it
+  exposes `full_hash_chain_replay` and a validation upper bound equal to the
+  stamped head because current backends replay the chain before serving the
+  page. Authenticated random-access stamp proof, catalog schema-history binding,
+  and non-cursor source paths remain the next optimization boundaries.
   Connectome's Query Lab exposes this evidence and result
   together without mutating on GET. The explicit CLI `query` command and MCP
   `vyrm_query` tool capture the immutable read stamp before tracing, then emit
@@ -377,9 +380,10 @@ artifact even on failure.
   executable WAL/MVCC/segment/manifest/checkpoint/compaction/GC engine and a
   locally passing promotion baseline; broader promotion and removal of the
   Fjall oracle remain open. `vyrmQL` and the exact reference slice of `vyrmMX`
-  are implemented; its first narrower physical path is the exact stamped event
-  cursor lookup, while other sources and schema history deliberately retain the
-  authoritative replay fallback. M5 now adds a
+  are implemented; its first narrower result path is the exact stamped event
+  cursor lookup. The plan explicitly exposes the still-linear hash-chain stamp
+  validation bound, while other sources and schema history deliberately retain
+  the authoritative replay fallback. M5 now adds a
   separate `vyrm-vector` exact dense/sparse/multivector oracle, deterministic
   filter-aware HNSW, exact reranking, immutable authenticated artifacts,
   freshness/cost planning, CAS generation retirement/quarantine, a portable

@@ -62,6 +62,8 @@
           "schema_revision": 1,
           "exact": true,
           "deterministic_order": "identity_ascending",
+          "stamp_validation": "full_hash_chain_replay",
+          "stamp_validation_max_changes": 4,
           "network_required": false,
           "gpu_required": false,
           "authorization_boundary": "scope:instance:golden"
@@ -81,7 +83,7 @@
           }
         ]
       },
-      "digest": "bcd75afccd54e6435027bcc1b44a623d2992ac02e2267a789dcf29ad63e59b00"
+      "digest": "b3cc32f61dee1dcae935b61fed74c71bc869dd7b63e91b014f073d464d41611a"
     }
   },
   {
@@ -156,6 +158,8 @@
           "schema_revision": 1,
           "exact": true,
           "deterministic_order": "identity_ascending",
+          "stamp_validation": "full_hash_chain_replay",
+          "stamp_validation_max_changes": 4,
           "network_required": false,
           "gpu_required": false,
           "authorization_boundary": "scope:instance:golden"
@@ -165,13 +169,13 @@
             "name": "authoritative_event_cursor_lookup",
             "selected": true,
             "exact": true,
-            "reason": "uses the bound global cursor 4 inside the captured read stamp"
+            "reason": "uses bound global cursor 4 after the captured stamp is validated"
           },
           {
             "name": "authoritative_log_scan",
             "selected": false,
             "exact": true,
-            "reason": "rejected: exact cursor lookup scans fewer authoritative positions"
+            "reason": "rejected: exact cursor lookup requests fewer result positions after shared stamp validation"
           },
           {
             "name": "derived_projection",
@@ -181,7 +185,7 @@
           }
         ]
       },
-      "digest": "0363705af637a2e6cb003ea20b084f28e9a62c26a2fdd64f356062e60bd0d98e"
+      "digest": "67be0109f4e5bdf713bd3e5e2be468b01d565824e8bdff11cde6c51a7facac26"
     }
   }
 ]

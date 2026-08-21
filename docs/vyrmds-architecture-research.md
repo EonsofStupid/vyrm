@@ -281,13 +281,17 @@ will actually provide.
 
 The first optimized physical path is now implemented for event equality on the
 built-in global `cursor`. `authoritative_event_cursor_lookup` reads at most one
-cursor position through the exact captured `ReadStamp`; the executor rejects a
-plan whose source/filter/known-cursor contract does not match that operator.
-Out-of-range lookups still validate the stamped backend state before returning
-empty. All other query shapes retain `authoritative_log_scan`. This closes the
-point-access semantic proof, not the broader indexing problem: catalog schema
-history still replays from cursor zero, and record/relation/claim access paths
-require cursor-versioned authoritative indexes or grounded projection stamps.
+result cursor position through the exact captured `ReadStamp`; the executor
+rejects a plan whose source/filter/known-cursor contract does not match that
+operator. Out-of-range lookups still validate the stamped backend state before
+returning empty. The plan and result explicitly report
+`full_hash_chain_replay` and a validation upper bound equal to the stamped head:
+the current linear hash chain does not provide a logarithmic membership proof,
+so this is not an end-to-end O(1) claim. All other query shapes retain
+`authoritative_log_scan`. This closes the point-result semantic proof, not the
+broader indexing problem: an authenticated cursor accumulator, catalog schema
+history, and record/relation/claim access paths require additional canonical
+state or grounded projection stamps.
 
 ## Vector, embedding, GPU, and edge profile
 

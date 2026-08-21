@@ -77,12 +77,15 @@ disagree, `SPEC.md` is authoritative and this document is wrong.
 > `docs/vyrmds-architecture-research.md`.
 > **VyrmMX M2.1 access-path overlay (2026-08-21).** Equality on the built-in
 > event `cursor` now lowers to `authoritative_event_cursor_lookup` instead of a
-> replay from zero. The operator is still canonical Vyrm truth: it uses the
+> result replay from zero. The operator is still canonical Vyrm truth: it uses the
 > existing global-cursor key, validates the full `ReadStamp` even for an empty
 > result, verifies its physical/logical correspondence before I/O, and falls
 > back to the exact log scan for every unsupported shape. Memory, Fjall, and
-> native return identical rows; a 4,096-event cardinality test proves one
-> cursor position versus a budget-denied unbound replay. Schema-history binding,
+> native return identical rows; a 4,096-event cardinality test proves one result
+> cursor position versus a budget-denied unbound replay. This is not yet an
+> end-to-end constant-time claim: plans and executions expose
+> `full_hash_chain_replay` with the stamped head as the validation bound.
+> Authenticated random-access stamp proof, schema-history binding,
 > record/relation/claim indexes, and grounded derived projections remain open.
 > M3 is now active in a standalone `vyrm-kv` crate. Its v1 WAL, atomic mutation
 > batch, and immutable-manifest formats are frozen by checked-in vectors.

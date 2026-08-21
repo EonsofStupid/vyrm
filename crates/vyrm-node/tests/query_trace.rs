@@ -232,6 +232,14 @@ fn traced_query_is_observer_safe_causal_and_equal_across_all_engines() {
         RuntimeValue::Unsigned(1)
     );
     assert_eq!(
+        memory_traces[8].attributes["stamp_validation"],
+        RuntimeValue::String("full_hash_chain_replay".into())
+    );
+    assert_eq!(
+        memory_traces[8].attributes["stamp_validation_max_changes"],
+        RuntimeValue::Unsigned(3)
+    );
+    assert_eq!(
         memory_traces[7].attributes["backend"],
         RuntimeValue::String("memory".into())
     );
@@ -258,6 +266,10 @@ fn traced_query_is_observer_safe_causal_and_equal_across_all_engines() {
     assert!(native_traces[7]
         .attributes
         .contains_key("compaction_target_segment_bytes"));
+    assert_eq!(
+        native_traces[7].attributes["stamp_validation"],
+        RuntimeValue::String("full_hash_chain_replay".into())
+    );
 }
 
 #[test]
