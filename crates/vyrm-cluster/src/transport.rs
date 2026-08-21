@@ -69,6 +69,8 @@ type VoteResult = std::result::Result<VoteResponse<u64>, RaftError<u64>>;
 type ConsensusRaftError = RaftError<u64, ClientWriteError<u64, VyrmRaftNode>>;
 type ConsensusCommitResult =
     std::result::Result<ClientWriteResponse<VyrmRaftTypeConfig>, ConsensusCommitWireError>;
+type BoxedRpcError<E> = Box<RPCError<u64, VyrmRaftNode, E>>;
+type WireRpcResult<E> = std::result::Result<WireResponse, BoxedRpcError<E>>;
 
 #[derive(Debug, Serialize, Deserialize)]
 enum ConsensusCommitWireError {
@@ -498,7 +500,8 @@ impl RaftNetwork<VyrmRaftTypeConfig> for VyrmRaftNetworkClient {
                 &option,
                 RPCTypes::AppendEntries,
             )
-            .await?
+            .await
+            .map_err(|error| *error)?
         {
             WireResponse::Append(result) => {
                 remote_result(self.target_id, self.target.clone(), result)
@@ -541,7 +544,8 @@ impl RaftNetwork<VyrmRaftTypeConfig> for VyrmRaftNetworkClient {
                 &option,
                 RPCTypes::InstallSnapshot,
             )
-            .await?
+            .await
+            .map_err(|error| *error)?
         {
             WireResponse::Snapshot(result) => {
                 remote_result(self.target_id, self.target.clone(), result)
@@ -559,7 +563,8 @@ impl RaftNetwork<VyrmRaftTypeConfig> for VyrmRaftNetworkClient {
     ) -> std::result::Result<VoteResponse<u64>, RPCError<u64, VyrmRaftNode, RaftError<u64>>> {
         match self
             .call_with_timeout(WireRequest::Vote(request), &option, RPCTypes::Vote)
-            .await?
+            .await
+            .map_err(|error| *error)?
         {
             WireResponse::Vote(result) => {
                 remote_result(self.target_id, self.target.clone(), result)
@@ -888,65 +893,62 @@ impl VyrmRaftNetworkClient {
         request: WireRequest,
         option: &RPCOption,
         action: RPCTypes,
-    ) -> std::result::Result<WireResponse, RPCError<u64, VyrmRaftNode, E>>
+    ) -> WireRpcResult<E>
     where
         E: std::error::Error,
     {
         match tokio::time::timeout(option.hard_ttl(), self.call(request)).await {
             Ok(result) => result,
-            Err(_) => Err(RPCError::Timeout(Timeout {
+            Err(_) => Err(Box::new(RPCError::Timeout(Timeout {
                 action,
                 id: self.source.raft_node_id,
                 target: self.target_id,
                 timeout: option.hard_ttl(),
-            })),
+            }))),
         }
     }
 
-    async fn call<E>(
-        &self,
-        request: WireRequest,
-    ) -> std::result::Result<WireResponse, RPCError<u64, VyrmRaftNode, E>>
+    async fn call<E>(&self, request: WireRequest) -> WireRpcResult<E>
     where
         E: std::error::Error,
     {
         if !self.gate.is_enabled() {
-            return Err(unreachable("local Raft transport is disabled"));
+            return Err(Box::new(unreachable("local Raft transport is disabled")));
         }
         self.target
             .validate()
-            .map_err(|error| unreachable(error.to_string()))?;
+            .map_err(|error| Box::new(unreachable(error.to_string())))?;
         let endpoint = VyrmTlsEndpoint::parse(&self.target.endpoint)
-            .map_err(|error| unreachable(error.to_string()))?;
+            .map_err(|error| Box::new(unreachable(error.to_string())))?;
         let stream = TcpStream::connect(&endpoint.address)
             .await
-            .map_err(|error| RPCError::Unreachable(Unreachable::new(&error)))?;
+            .map_err(|error| Box::new(RPCError::Unreachable(Unreachable::new(&error))))?;
         let server_name = ServerName::try_from(endpoint.server_name.clone())
-            .map_err(|error| unreachable(format!("invalid TLS server name: {error}")))?;
+            .map_err(|error| Box::new(unreachable(format!("invalid TLS server name: {error}"))))?;
         let connector = self
             .reloader
             .as_ref()
             .map(VyrmTlsReloader::client_config)
             .transpose()
-            .map_err(|error| unreachable(error.to_string()))?
+            .map_err(|error| Box::new(unreachable(error.to_string())))?
             .map(TlsConnector::from)
             .unwrap_or_else(|| self.connector.clone());
         let mut stream = connector
             .connect(server_name, stream)
             .await
-            .map_err(|error| RPCError::Unreachable(Unreachable::new(&error)))?;
+            .map_err(|error| Box::new(RPCError::Unreachable(Unreachable::new(&error))))?;
         let expected_peer = peer_binding_for_node(&self.source, self.target_id, &self.target)
-            .map_err(|error| unreachable(error.to_string()))?;
+            .map_err(|error| Box::new(unreachable(error.to_string())))?;
         verify_peer_identity(stream.get_ref().1.peer_certificates(), &expected_peer)
-            .map_err(|error| unreachable(error.to_string()))?;
+            .map_err(|error| Box::new(unreachable(error.to_string())))?;
         let envelope = WireEnvelope::new(&self.source, self.target_id, &self.target, request)
-            .map_err(|error| unreachable(error.to_string()))?;
+            .map_err(|error| Box::new(unreachable(error.to_string())))?;
         write_frame(&mut stream, &envelope)
             .await
-            .map_err(|error| RPCError::Unreachable(Unreachable::new(&error)))?;
+            .map_err(|error| Box::new(RPCError::Unreachable(Unreachable::new(&error))))?;
         read_frame(&mut stream)
             .await
-            .map_err(|error| RPCError::Unreachable(Unreachable::new(&error)))
+            .map_err(|error| Box::new(RPCError::Unreachable(Unreachable::new(&error))))
     }
 }
 

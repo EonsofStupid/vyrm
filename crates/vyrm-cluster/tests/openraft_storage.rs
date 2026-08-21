@@ -28,6 +28,9 @@ struct VyrmStoreBuilder;
 
 static TEST_SNAPSHOT_ORDINAL: AtomicU64 = AtomicU64::new(1);
 
+// OpenRaft fixes the conformance helper error type; keeping it unboxed lets
+// `?` compose directly with the suite's storage operations.
+#[allow(clippy::result_large_err)]
 async fn snapshot_bytes(mut snapshot: Box<VyrmSnapshotData>) -> Result<Vec<u8>, StorageError<u64>> {
     snapshot
         .seek(std::io::SeekFrom::Start(0))
@@ -41,6 +44,7 @@ async fn snapshot_bytes(mut snapshot: Box<VyrmSnapshotData>) -> Result<Vec<u8>, 
     Ok(bytes)
 }
 
+#[allow(clippy::result_large_err)]
 async fn snapshot_handle(
     root: &std::path::Path,
     bytes: &[u8],
