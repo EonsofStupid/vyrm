@@ -1,4 +1,4 @@
-use crate::{BoundFilter, Error, LogicalOperator, PhysicalPlan, Result};
+use crate::{BoundFilter, Error, LogicalOperator, PhysicalOperator, PhysicalPlan, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use vyrm_core::{
@@ -80,27 +80,16 @@ pub fn execute<E: Engine>(
             "plan explanation names a different read stamp".into(),
         ));
     }
-    let requested = usize::try_from(contract.known_at_cursor)
-        .map_err(|_| Error::Budget("known cursor exceeds this platform's address space".into()))?;
+    let shape = PlanShape::read(plan)?;
+    let access = ReadPath::from_plan(plan, &shape)?;
+    let requested = access.scanned_positions()?;
     if requested > budget.max_scanned_changes {
         return Err(Error::Budget(format!(
             "query requires scanning {requested} changes, budget allows {}",
             budget.max_scanned_changes
         )));
     }
-    let changes = if requested == 0 {
-        Vec::new()
-    } else {
-        let page = engine.runtime_read_changes(&plan.logical.read, 0, requested)?;
-        if page.through_cursor != contract.known_at_cursor {
-            return Err(Error::Integrity(format!(
-                "stamped replay ended at {}, expected {}",
-                page.through_cursor, contract.known_at_cursor
-            )));
-        }
-        page.changes
-    };
-    let shape = PlanShape::read(plan)?;
+    let changes = access.load(engine, &plan.logical.read)?;
     let mut rows = rows_for_source(
         &changes,
         &plan.logical.read.scope,
@@ -159,8 +148,136 @@ pub fn execute<E: Engine>(
     })
 }
 
+enum ReadPath {
+    LogScan { through_cursor: u64 },
+    EventCursorLookup { cursor: u64, through_cursor: u64 },
+}
+
+impl ReadPath {
+    fn from_plan(plan: &PhysicalPlan, shape: &PlanShape) -> Result<Self> {
+        let contract = &plan.explanation.contract;
+        if contract.read_manifest != plan.logical.read.manifest_id
+            || contract.scope != plan.logical.read.scope.as_str()
+            || contract.valid_at != shape.valid_at
+            || contract.known_at_cursor != shape.known_at_cursor
+            || contract.schema_revision != plan.logical.schema_revision
+            || contract.authorization_boundary != format!("scope:{}", plan.logical.read.scope)
+        {
+            return Err(Error::Integrity(
+                "logical plan, read stamp, and execution contract disagree".into(),
+            ));
+        }
+        let selected = plan
+            .explanation
+            .candidates
+            .iter()
+            .filter(|candidate| candidate.selected)
+            .collect::<Vec<_>>();
+        if selected.len() != 1 || !selected[0].exact {
+            return Err(Error::Integrity(
+                "physical plan must report exactly one exact selected path".into(),
+            ));
+        }
+        let [access, PhysicalOperator::ReferenceEvaluate] = plan.operators.as_slice() else {
+            return Err(Error::Integrity(
+                "physical plan must contain one authoritative access path followed by reference evaluation"
+                    .into(),
+            ));
+        };
+        let known_at_cursor = plan.explanation.contract.known_at_cursor;
+        match access {
+            PhysicalOperator::AuthoritativeLogScan {
+                through_cursor,
+                exact,
+                stable_order,
+            } if *through_cursor == known_at_cursor
+                && *exact
+                && stable_order == "global_cursor"
+                && selected[0].name == "authoritative_log_scan" =>
+            {
+                Ok(Self::LogScan {
+                    through_cursor: *through_cursor,
+                })
+            }
+            PhysicalOperator::AuthoritativeEventCursorLookup {
+                cursor,
+                through_cursor,
+                exact,
+                stable_order,
+            } if *through_cursor == known_at_cursor
+                && *exact
+                && stable_order == "global_cursor"
+                && selected[0].name == "authoritative_event_cursor_lookup"
+                && matches!(&shape.source, Source::Event { .. })
+                && shape.filters.iter().any(|filter| {
+                    filter.field == "cursor" && filter.value == RuntimeValue::Unsigned(*cursor)
+                }) =>
+            {
+                Ok(Self::EventCursorLookup {
+                    cursor: *cursor,
+                    through_cursor: *through_cursor,
+                })
+            }
+            _ => Err(Error::Integrity(
+                "physical access path does not match the stamped logical query".into(),
+            )),
+        }
+    }
+
+    fn scanned_positions(&self) -> Result<usize> {
+        match self {
+            Self::LogScan { through_cursor } => usize::try_from(*through_cursor).map_err(|_| {
+                Error::Budget("known cursor exceeds this platform's address space".into())
+            }),
+            Self::EventCursorLookup {
+                cursor,
+                through_cursor,
+            } => Ok(usize::from(*cursor > 0 && *cursor <= *through_cursor)),
+        }
+    }
+
+    fn load<E: Engine>(
+        &self,
+        engine: &E,
+        stamp: &vyrm_core::ReadStamp,
+    ) -> Result<Vec<RuntimeChange>> {
+        let (after, limit, expected_through) = match self {
+            Self::LogScan { through_cursor } if *through_cursor == 0 => {
+                (stamp.commit_cursor, 1, stamp.commit_cursor)
+            }
+            Self::LogScan { through_cursor } => (0, self.scanned_positions()?, *through_cursor),
+            Self::EventCursorLookup {
+                cursor,
+                through_cursor,
+            } if *cursor == 0 || *cursor > *through_cursor => {
+                (stamp.commit_cursor, 1, stamp.commit_cursor)
+            }
+            Self::EventCursorLookup { cursor, .. } => (cursor - 1, 1, *cursor),
+        };
+        let page = engine.runtime_read_changes(stamp, after, limit)?;
+        if page.through_cursor != expected_through || page.head_cursor != stamp.commit_cursor {
+            return Err(Error::Integrity(format!(
+                "stamped access ended at {}/{}, expected {}/{}",
+                page.through_cursor, page.head_cursor, expected_through, stamp.commit_cursor
+            )));
+        }
+        if page
+            .changes
+            .iter()
+            .any(|change| change.cursor <= after || change.cursor > expected_through)
+        {
+            return Err(Error::Integrity(
+                "stamped access returned a change outside its cursor interval".into(),
+            ));
+        }
+        Ok(page.changes)
+    }
+}
+
 struct PlanShape {
     source: Source,
+    valid_at: u64,
+    known_at_cursor: u64,
     filters: Vec<BoundFilter>,
     projection: Projection,
     limit: Option<usize>,
@@ -169,20 +286,52 @@ struct PlanShape {
 impl PlanShape {
     fn read(plan: &PhysicalPlan) -> Result<Self> {
         let mut source = None;
+        let mut temporal = None;
         let mut filters = Vec::new();
         let mut projection = None;
         let mut limit = None;
         for operator in &plan.logical.operators {
             match operator {
-                LogicalOperator::Scan { source: value } => source = Some(value.clone()),
+                LogicalOperator::Scan { source: value } => {
+                    if source.replace(value.clone()).is_some() {
+                        return Err(Error::Integrity(
+                            "logical plan contains more than one scan".into(),
+                        ));
+                    }
+                }
                 LogicalOperator::Filter { predicates } => filters.extend(predicates.clone()),
-                LogicalOperator::Project { projection: value } => projection = Some(value.clone()),
-                LogicalOperator::Limit { rows } => limit = Some(*rows),
-                LogicalOperator::Temporal { .. } => {}
+                LogicalOperator::Project { projection: value } => {
+                    if projection.replace(value.clone()).is_some() {
+                        return Err(Error::Integrity(
+                            "logical plan contains more than one projection".into(),
+                        ));
+                    }
+                }
+                LogicalOperator::Limit { rows } => {
+                    if limit.replace(*rows).is_some() {
+                        return Err(Error::Integrity(
+                            "logical plan contains more than one limit".into(),
+                        ));
+                    }
+                }
+                LogicalOperator::Temporal {
+                    valid_at,
+                    known_at_cursor,
+                } => {
+                    if temporal.replace((*valid_at, *known_at_cursor)).is_some() {
+                        return Err(Error::Integrity(
+                            "logical plan contains more than one temporal selector".into(),
+                        ));
+                    }
+                }
             }
         }
+        let (valid_at, known_at_cursor) = temporal
+            .ok_or_else(|| Error::Integrity("logical plan has no temporal selector".into()))?;
         Ok(Self {
             source: source.ok_or_else(|| Error::Integrity("logical plan has no scan".into()))?,
+            valid_at,
+            known_at_cursor,
             filters,
             projection: projection
                 .ok_or_else(|| Error::Integrity("logical plan has no projection".into()))?,

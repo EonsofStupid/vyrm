@@ -1,8 +1,9 @@
 //! `vyrmMX`: deterministic binding, planning, and reference execution.
 //!
-//! The implementation deliberately begins with one exact physical path: a
-//! stamped authoritative-log scan. Faster projections may compete later, but
-//! must publish freshness evidence and pass differential verification first.
+//! The implementation begins from an exact stamped authoritative-log scan and
+//! admits narrower authoritative paths only when the bound query proves them
+//! equivalent. Faster projections may compete later, but must publish
+//! freshness evidence and pass differential verification first.
 
 mod catalog;
 mod error;

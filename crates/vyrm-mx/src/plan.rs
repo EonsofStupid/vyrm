@@ -55,6 +55,12 @@ pub enum PhysicalOperator {
         exact: bool,
         stable_order: String,
     },
+    AuthoritativeEventCursorLookup {
+        cursor: u64,
+        through_cursor: u64,
+        exact: bool,
+        stable_order: String,
+    },
     ReferenceEvaluate,
 }
 
@@ -192,6 +198,46 @@ pub fn plan(bound: &BoundQuery) -> Result<PhysicalPlan> {
         schema_revision: bound.schema_revision,
         operators,
     };
+    let event_cursor = event_cursor_filter(bound);
+    let candidates = if let Some(cursor) = event_cursor {
+        vec![
+            CandidatePath {
+                name: "authoritative_event_cursor_lookup".into(),
+                selected: true,
+                exact: true,
+                reason: format!(
+                    "uses the bound global cursor {cursor} inside the captured read stamp"
+                ),
+            },
+            CandidatePath {
+                name: "authoritative_log_scan".into(),
+                selected: false,
+                exact: true,
+                reason: "rejected: exact cursor lookup scans fewer authoritative positions".into(),
+            },
+            CandidatePath {
+                name: "derived_projection".into(),
+                selected: false,
+                exact: false,
+                reason: "rejected: no projection generation and grounding proof supplied".into(),
+            },
+        ]
+    } else {
+        vec![
+            CandidatePath {
+                name: "authoritative_log_scan".into(),
+                selected: true,
+                exact: true,
+                reason: "replays the immutable log at the captured read stamp".into(),
+            },
+            CandidatePath {
+                name: "derived_projection".into(),
+                selected: false,
+                exact: false,
+                reason: "rejected: no projection generation and grounding proof supplied".into(),
+            },
+        ]
+    };
     let explanation = PlanExplanation {
         contract: ExecutionContract {
             read_manifest: bound.read.manifest_id.clone(),
@@ -205,35 +251,42 @@ pub fn plan(bound: &BoundQuery) -> Result<PhysicalPlan> {
             gpu_required: false,
             authorization_boundary: format!("scope:{}", bound.read.scope),
         },
-        candidates: vec![
-            CandidatePath {
-                name: "authoritative_log_scan".into(),
-                selected: true,
-                exact: true,
-                reason: "replays the immutable log at the captured read stamp".into(),
-            },
-            CandidatePath {
-                name: "derived_projection".into(),
-                selected: false,
-                exact: false,
-                reason: "rejected: no projection generation and grounding proof supplied".into(),
-            },
-        ],
+        candidates,
     };
-    let physical_operators = vec![
-        PhysicalOperator::AuthoritativeLogScan {
+    let access = event_cursor.map_or_else(
+        || PhysicalOperator::AuthoritativeLogScan {
             through_cursor: bound.known_at_cursor,
             exact: true,
             stable_order: "global_cursor".into(),
         },
-        PhysicalOperator::ReferenceEvaluate,
-    ];
+        |cursor| PhysicalOperator::AuthoritativeEventCursorLookup {
+            cursor,
+            through_cursor: bound.known_at_cursor,
+            exact: true,
+            stable_order: "global_cursor".into(),
+        },
+    );
+    let physical_operators = vec![access, PhysicalOperator::ReferenceEvaluate];
     let digest = plan_digest(&logical, &physical_operators, &explanation)?;
     Ok(PhysicalPlan {
         logical,
         operators: physical_operators,
         explanation,
         digest,
+    })
+}
+
+fn event_cursor_filter(bound: &BoundQuery) -> Option<u64> {
+    if !matches!(&bound.source, Source::Event { .. }) {
+        return None;
+    }
+    bound.filters.iter().find_map(|filter| {
+        (filter.field == "cursor")
+            .then_some(&filter.value)
+            .and_then(|value| match value {
+                RuntimeValue::Unsigned(cursor) => Some(*cursor),
+                _ => None,
+            })
     })
 }
 

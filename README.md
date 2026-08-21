@@ -306,7 +306,12 @@ Vyrm owns the storage contract. `vyrm_store::NativeEngine` now implements the
 same `Engine` port as the in-memory reference and transitional Fjall adapter;
 claim recall, projections, schema enforcement, hash-chained commits, snapshots,
 concurrent CAS, restart, and exact `vyrmQL` results run through a three-backend
-differential. Fjall remains live until broader benchmark regression runs
+differential. `vyrmMX` now lowers an event query with a bound built-in `cursor`
+to one stamped authoritative cursor lookup; unbound records, relations, events,
+and claims retain the exact log-replay fallback. The planner publishes both the
+selected path and rejection reason, and execution revalidates the path against
+the logical filter and `ReadStamp` before storage access. Fjall remains live
+until broader benchmark regression runs
 reproduce the native engine's first strict local equal-or-better pass. That
 checked-in five-trial workload has native ahead in write/read throughput,
 write/read p95, maintained recovery, steady RSS, and disk while preserving
