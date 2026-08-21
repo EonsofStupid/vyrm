@@ -1,7 +1,7 @@
 use crate::{Error, Result, WriteBatch};
 use serde::{Deserialize, Serialize};
 use std::fs::{File, OpenOptions};
-use std::io::{Read, Seek, SeekFrom, Write};
+use std::io::{IoSlice, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 
 pub const WAL_FORMAT_VERSION: u16 = 1;
@@ -79,6 +79,7 @@ pub struct Recovery {
 pub struct WalWriter {
     path: PathBuf,
     file: File,
+    offset: u64,
     next_sequence: u64,
     poisoned: bool,
 }
@@ -104,6 +105,7 @@ impl WalWriter {
         Ok(Self {
             path: path.to_owned(),
             file,
+            offset: FILE_HEADER_BYTES as u64,
             next_sequence,
             poisoned: false,
         })
@@ -118,10 +120,12 @@ impl WalWriter {
         if let Some(offset) = recovery.torn_tail {
             return Err(Error::TornTail { offset });
         }
-        let file = OpenOptions::new().read(true).write(true).open(path)?;
+        let mut file = OpenOptions::new().read(true).write(true).open(path)?;
+        file.seek(SeekFrom::Start(recovery.valid_bytes))?;
         Ok(Self {
             path: path.to_owned(),
             file,
+            offset: recovery.valid_bytes,
             next_sequence: recovery
                 .recovered_through
                 .checked_add(1)
@@ -154,10 +158,28 @@ impl WalWriter {
             )));
         }
         let header = record_header(batch)?;
-        let offset = self.file.seek(SeekFrom::End(0))?;
+        let offset = self.offset;
+        let end_offset = offset
+            .checked_add(RECORD_HEADER_BYTES as u64)
+            .and_then(|value| value.checked_add(batch.payload.len() as u64))
+            .ok_or_else(|| Error::InvalidBatch("WAL offset overflow".into()))?;
         let write = (|| -> std::io::Result<()> {
-            self.file.write_all(&header)?;
-            self.file.write_all(batch.payload)?;
+            let written = loop {
+                match self
+                    .file
+                    .write_vectored(&[IoSlice::new(&header), IoSlice::new(batch.payload)])
+                {
+                    Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
+                    result => break result?,
+                }
+            };
+            if written < header.len() {
+                self.file.write_all(&header[written..])?;
+                self.file.write_all(batch.payload)?;
+            } else {
+                self.file
+                    .write_all(&batch.payload[written - header.len()..])?;
+            }
             if durability == Durability::Authoritative {
                 self.file.sync_data()?;
             }
@@ -167,13 +189,14 @@ impl WalWriter {
             self.poisoned = true;
             return Err(Error::Io(error));
         }
+        self.offset = end_offset;
         self.next_sequence = batch
             .last_sequence
             .checked_add(1)
             .ok_or_else(|| Error::InvalidBatch("sequence overflow".into()))?;
         Ok(AppendReceipt {
             offset,
-            end_offset: offset + RECORD_HEADER_BYTES as u64 + batch.payload.len() as u64,
+            end_offset,
             first_sequence: batch.first_sequence,
             last_sequence: batch.last_sequence,
             checksum: u32::from_be_bytes(header[28..32].try_into().expect("fixed checksum field")),

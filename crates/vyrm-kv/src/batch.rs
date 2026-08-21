@@ -61,10 +61,10 @@ impl WriteBatch {
     }
 
     pub fn encode(&self) -> Result<Vec<u8>> {
-        self.validate()?;
+        let encoded_len = self.encoded_len()?;
         let count = u32::try_from(self.operations.len())
             .map_err(|_| Error::InvalidBatch("operation count exceeds u32".into()))?;
-        let mut output = Vec::with_capacity(BATCH_HEADER_BYTES);
+        let mut output = Vec::with_capacity(encoded_len);
         output.extend_from_slice(BATCH_MAGIC);
         output.extend_from_slice(&BATCH_FORMAT_VERSION.to_be_bytes());
         output.extend_from_slice(&0u16.to_be_bytes());
@@ -88,12 +88,8 @@ impl WriteBatch {
             );
             output.extend_from_slice(key);
             output.extend_from_slice(value);
-            if output.len() > WAL_MAX_PAYLOAD_BYTES {
-                return Err(Error::InvalidBatch(format!(
-                    "encoded batch exceeds {WAL_MAX_PAYLOAD_BYTES} bytes"
-                )));
-            }
         }
+        debug_assert_eq!(output.len(), encoded_len);
         Ok(output)
     }
 
@@ -168,15 +164,34 @@ impl WriteBatch {
     }
 
     fn validate(&self) -> Result<()> {
+        self.encoded_len().map(|_| ())
+    }
+
+    fn encoded_len(&self) -> Result<usize> {
         if self.operations.is_empty() || self.operations.len() > MAX_OPERATIONS {
             return Err(Error::InvalidBatch(format!(
                 "operation count must be in 1..={MAX_OPERATIONS}"
             )));
         }
+        let mut encoded_len = BATCH_HEADER_BYTES;
         for operation in &self.operations {
             operation.validate()?;
+            let value_len = match operation {
+                Mutation::Put { value, .. } => value.len(),
+                Mutation::Delete { .. } => 0,
+            };
+            encoded_len = encoded_len
+                .checked_add(OP_HEADER_BYTES)
+                .and_then(|length| length.checked_add(operation.key().len()))
+                .and_then(|length| length.checked_add(value_len))
+                .ok_or_else(|| Error::InvalidBatch("encoded batch length overflow".into()))?;
+            if encoded_len > WAL_MAX_PAYLOAD_BYTES {
+                return Err(Error::InvalidBatch(format!(
+                    "encoded batch exceeds {WAL_MAX_PAYLOAD_BYTES} bytes"
+                )));
+            }
         }
-        Ok(())
+        Ok(encoded_len)
     }
 }
 
