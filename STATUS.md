@@ -209,6 +209,14 @@ not roadmap language.
   scrub, rewind, resume, fast-forward up to 8×, jump to boundaries, inspect the
   entire retained envelope, and compare identical-prompt effort runs using
   provider-reported token, cache, tool, latency, and acceptance evidence.
+- Connectome now publishes `vyrm-diagnostics` v1 at
+  `GET /api/runtime/capabilities`. The handshake advertises persisted,
+  restart-recoverable, seekable, reversible playback and the exact available
+  speeds/lenses. Its engine catalog separates alpha, partial, experimental,
+  and planned work and carries executable evidence plus the current limitation
+  for every item. A reopen test proves prompt-flight packets survive both the
+  store and recorder process boundary; enabling frontier runners changes the
+  runner envelope without changing replay durability.
 - `vyrmQL` and `vyrmMX` now form a separate read-only query layer above the
   frozen engine port. The language requires explicit valid and known time;
   catalog binding rejects unknown types/fields and missing parameters; the

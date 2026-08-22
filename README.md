@@ -180,6 +180,7 @@ The local API also exposes the authoritative persistence layer:
 
 | Endpoint | Purpose |
 |---|---|
+| `GET /api/runtime/capabilities` | Negotiate the versioned developer-diagnostics contract, replay controls, enabled runners, and evidence-backed engine maturity without presenting roadmap items as shipped |
 | `GET /api/changes?after=N&limit=N&scope=...` | Resume the verified global runtime changefeed, optionally restricted to one scope |
 | `GET /api/runtime/events?limit=N` | Read the newest bounded, audit-attached temporal event projection |
 | `GET /api/runtime/traces?limit=N&classes=control` | Export bounded per-project causal traces; operator/content classes require explicit inclusion |

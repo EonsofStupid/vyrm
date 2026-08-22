@@ -104,6 +104,30 @@ kbd { background: var(--panel-3); border: 1px solid #373d37; border-radius: 4px;
 .metric-card .label { color: var(--muted); font-size: 11px; }
 .metric-card .value { margin-top: 13px; font-size: 26px; letter-spacing: -.04em; }
 .metric-card .meta { margin-top: 8px; color: var(--faint); font: 10px var(--mono); }
+.capability-replay { margin-bottom: 12px; }
+.capability-replay-body { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.capability-replay-body > div { min-width: 0; padding: 14px 15px; border-right: 1px solid var(--line-soft); }
+.capability-replay-body > div:last-child { border-right: 0; }
+.capability-replay-body span, .capability-replay-body small { display: block; color: var(--faint); font: 8px/1.5 var(--mono); text-transform: uppercase; letter-spacing: .07em; }
+.capability-replay-body strong { display: block; margin: 7px 0 4px; color: var(--text); font: 12px/1.4 var(--mono); }
+.capability-replay-body small { text-transform: none; letter-spacing: 0; }
+.capability-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; }
+.capability-card { --maturity: var(--faint); overflow: hidden; border: 1px solid var(--line-soft); border-radius: 10px; background: var(--panel); box-shadow: inset 3px 0 var(--maturity); }
+.capability-card.maturity-alpha { --maturity: var(--mint); }
+.capability-card.maturity-partial { --maturity: var(--amber); }
+.capability-card.maturity-experimental { --maturity: var(--violet); }
+.capability-card.maturity-planned { --maturity: #586058; }
+.capability-card header { display: flex; justify-content: space-between; gap: 14px; padding: 14px 15px 11px; border-bottom: 1px solid var(--line-soft); }
+.capability-card header span { color: var(--faint); font: 8px var(--mono); text-transform: uppercase; letter-spacing: .08em; }
+.capability-card h2 { margin: 5px 0 0; font-size: 13px; }
+.capability-card header b { align-self: start; padding: 4px 7px; border: 1px solid var(--maturity); border-radius: 999px; color: var(--maturity); font: 8px var(--mono); text-transform: uppercase; }
+.capability-card > p { margin: 0; padding: 12px 15px; color: var(--muted); font-size: 11px; line-height: 1.55; }
+.capability-card dl { display: grid; gap: 9px; margin: 0; padding: 0 15px 13px; }
+.capability-card dl div { display: grid; grid-template-columns: 74px 1fr; gap: 9px; }
+.capability-card dt { color: var(--faint); font: 8px var(--mono); text-transform: uppercase; }
+.capability-card dd { margin: 0; color: #aab1a7; font-size: 9px; line-height: 1.5; }
+.capability-card footer { padding: 8px 15px; border-top: 1px solid var(--line-soft); background: rgba(0,0,0,.08); }
+.capability-card code { color: var(--faint); font: 8px var(--mono); }
 .overview-grid { display: grid; grid-template-columns: minmax(320px, 1.35fr) minmax(280px, .85fr); gap: 12px; }
 .panel { background: var(--panel); border: 1px solid var(--line-soft); border-radius: var(--radius); overflow: hidden; }
 .panel-head { display: flex; justify-content: space-between; align-items: center; min-height: 48px; padding: 0 15px; border-bottom: 1px solid var(--line-soft); }
@@ -785,6 +809,9 @@ kbd { background: var(--panel-3); border: 1px solid #373d37; border-radius: 4px;
   .main { padding: 20px 14px 40px; }
   .page-head { align-items: flex-start; flex-direction: column; }
   .metrics { grid-template-columns: 1fr 1fr; }
+  .capability-replay-body, .capability-grid { grid-template-columns: 1fr; }
+  .capability-replay-body > div { border-right: 0; border-bottom: 1px solid var(--line-soft); }
+  .capability-replay-body > div:last-child { border-bottom: 0; }
   .run-card { grid-template-columns: 1fr; }
   .run-summary { border-right: 0; border-bottom: 1px solid var(--line-soft); }
   .flight-metrics { grid-template-columns: repeat(2, 1fr); }

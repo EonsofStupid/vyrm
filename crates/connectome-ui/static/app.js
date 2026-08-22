@@ -1,7 +1,7 @@
 (() => {
   'use strict';
 
-  const views = new Set(['overview', 'estates', 'tables', 'models', 'visuals', 'flight', 'stream', 'traces', 'cluster', 'graph', 'schema', 'query', 'runs', 'claims', 'routes', 'activity']);
+  const views = new Set(['overview', 'estates', 'tables', 'models', 'visuals', 'flight', 'stream', 'traces', 'cluster', 'graph', 'schema', 'capabilities', 'query', 'runs', 'claims', 'routes', 'activity']);
   const visualViews = new Set(['visuals', 'flight', 'stream', 'traces', 'cluster', 'graph']);
   const initialView = location.hash.slice(1);
   const promptPresets = {
@@ -148,7 +148,7 @@
   function render() {
     if (!state.data) return;
     updateChrome();
-    const renderers = { overview: renderOverview, estates: renderEstates, tables: renderTables, models: renderModels, visuals: renderVisuals, flight: renderFlight, stream: renderStream, traces: renderTraces, cluster: renderCluster, graph: renderGraph, schema: renderSchema, query: renderQuery, runs: renderRuns, claims: renderClaims, routes: renderRoutes, activity: renderActivity };
+    const renderers = { overview: renderOverview, estates: renderEstates, tables: renderTables, models: renderModels, visuals: renderVisuals, flight: renderFlight, stream: renderStream, traces: renderTraces, cluster: renderCluster, graph: renderGraph, schema: renderSchema, capabilities: renderCapabilities, query: renderQuery, runs: renderRuns, claims: renderClaims, routes: renderRoutes, activity: renderActivity };
     (renderers[state.view] || renderOverview)();
     renderInspector();
   }
@@ -183,6 +183,32 @@
         <article class="panel"><div class="panel-head"><h2>Recent activity</h2><span>${invocations.length} RECORDED</span></div><div class="panel-body signal-list">${invocations.slice(-6).reverse().map((item) => `<button class="signal-row lens-row object-link" data-object="invocation:${item.ordinal}"><span class="dot ${item.outcome === 'ok' ? 'mint' : 'red'}"></span><div><div class="name">${escapeHtml(item.command)}</div><div class="detail">${escapeHtml(item.detail || item.trigger)}</div></div><div class="value">${item.duration_ms} ms</div></button>`).join('') || empty('No activity', 'Every operator and lifecycle call will appear here.')}</div></article>
       </section>`;
     bindObjectLinks();
+  }
+
+  function renderCapabilities() {
+    const capabilities = state.data.capabilities;
+    const engine = capabilities.engine || [];
+    const count = (maturity) => engine.filter((item) => item.maturity === maturity).length;
+    const replay = capabilities.replay || {};
+    $('#main').innerHTML = pageHead('Runtime capabilities', 'The executable diagnostics handshake. Alpha and partial features expose evidence and limits; planned features are never presented as shipped.', `<span class="badge ready">${escapeHtml(capabilities.protocol)} v${human(capabilities.version)}</span>`) + `
+      <section class="metrics">
+        ${metric('Alpha', count('alpha'), 'executable local gate')}
+        ${metric('Partial', count('partial'), 'truth exists; surface incomplete')}
+        ${metric('Experimental', count('experimental'), 'not production certified')}
+        ${metric('Planned', count('planned'), 'no shipped claim')}
+      </section>
+      <section class="capability-replay panel">
+        <div class="panel-head"><h2>Developer replay contract</h2><span>${replay.persisted ? 'PERSISTED' : 'EPHEMERAL'}</span></div>
+        <div class="capability-replay-body">
+          <div><span>Protocol</span><strong>${escapeHtml(capabilities.protocol)} v${human(capabilities.version)}</strong><small>diagnostics enabled · ${capabilities.runners_enabled ? 'frontier runners enabled' : 'observe-only runners'}</small></div>
+          <div><span>Transport</span><strong>${replay.reversible && replay.seekable ? 'rewind · seek · replay' : 'forward only'}</strong><small>${(replay.speeds || []).map((speed) => `${speed}×`).join(' · ')}</small></div>
+          <div><span>Recovery</span><strong>${replay.restart_recoverable ? 'restart recoverable' : 'process local'}</strong><small>${replay.persisted ? 'authoritative events survive restart' : 'not retained'}</small></div>
+          <div><span>Lenses</span><strong>${human((replay.lenses || []).length)}</strong><small>${(replay.lenses || []).map((lens) => lens.replaceAll('_', ' ')).join(' · ')}</small></div>
+        </div>
+      </section>
+      <section class="capability-grid">
+        ${engine.map((item) => `<article class="capability-card maturity-${escapeHtml(item.maturity)}"><header><div><span>${escapeHtml(item.category)}</span><h2>${escapeHtml(item.label)}</h2></div><b>${escapeHtml(item.maturity)}</b></header><p>${escapeHtml(item.summary)}</p><dl><div><dt>Evidence</dt><dd>${escapeHtml(item.evidence)}</dd></div><div><dt>Current limit</dt><dd>${escapeHtml(item.limitation)}</dd></div></dl><footer><code>${escapeHtml(item.id)}</code></footer></article>`).join('')}
+      </section>`;
   }
 
   function metric(label, value, meta) {
@@ -1380,6 +1406,7 @@
     if (key === 'g') navigate('graph');
     if (key === 's') navigate('schema');
     if (key === 'q') navigate('query');
+    if (key === 'p') navigate('capabilities');
     if (key === 'f') navigate('flight');
     if (key === 't') navigate('stream');
     if (key === 'k') navigate('cluster');

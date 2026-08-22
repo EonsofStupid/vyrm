@@ -1717,4 +1717,40 @@ mod tests {
         assert_eq!(store.runtime_cursor().unwrap(), cursor);
         assert_eq!(recorder.flights().unwrap().len(), 2);
     }
+
+    #[test]
+    fn prompt_flights_survive_store_and_recorder_restart() {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::write(root.path().join("lib.rs"), "pub fn runtime() {}\n").unwrap();
+        vyrm_node::InstanceManifest::ensure_dedicated(root.path()).unwrap();
+        let db = root.path().join(vyrm_node::STORE_DIR);
+        let binding = InstanceBinding::discover(root.path()).unwrap();
+        let store = Arc::new(PersistentEngine::open(&db).unwrap());
+        let recorder = FlightRecorder::new(Arc::clone(&store), binding.clone(), false);
+
+        let mut original = recorder.seed_prompt_demos(1_000).unwrap();
+        let cursor = store.runtime_cursor().unwrap();
+        drop(recorder);
+        drop(store);
+
+        let reopened = Arc::new(PersistentEngine::open(&db).unwrap());
+        let restarted = FlightRecorder::new(Arc::clone(&reopened), binding, false);
+        let mut recovered = restarted.flights().unwrap();
+
+        original.sort_by(|left, right| left.id.cmp(&right.id));
+        recovered.sort_by(|left, right| left.id.cmp(&right.id));
+
+        assert_eq!(reopened.runtime_cursor().unwrap(), cursor);
+        assert_eq!(recovered.len(), original.len());
+        assert_eq!(recovered[0].id, original[0].id);
+        assert_eq!(
+            serde_json::to_value(&recovered[0].events).unwrap(),
+            serde_json::to_value(&original[0].events).unwrap()
+        );
+        assert_eq!(recovered[1].id, original[1].id);
+        assert_eq!(
+            serde_json::to_value(&recovered[1].events).unwrap(),
+            serde_json::to_value(&original[1].events).unwrap()
+        );
+    }
 }

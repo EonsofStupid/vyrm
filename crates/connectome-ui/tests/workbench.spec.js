@@ -94,6 +94,29 @@ test('developer lenses remain navigable and inspectable', async ({ page }) => {
   await expect(page.locator('#graph .graph-node')).not.toHaveCount(0);
 });
 
+test('capability handshake separates executable evidence from roadmap claims', async ({ page, request }) => {
+  const response = await request.get(`${baseURL}/api/runtime/capabilities`);
+  expect(response.ok()).toBeTruthy();
+  const capabilities = await response.json();
+  expect(capabilities.protocol).toBe('vyrm-diagnostics');
+  expect(capabilities.version).toBe(1);
+  expect(capabilities.replay).toMatchObject({
+    persisted: true,
+    restart_recoverable: true,
+    seekable: true,
+    reversible: true,
+  });
+  expect(capabilities.engine.find((item) => item.id === 'filtered_hnsw').maturity).toBe('alpha');
+  expect(capabilities.engine.find((item) => item.id === 'turboquant').maturity).toBe('planned');
+  expect(capabilities.engine.find((item) => item.id === 'kubernetes_hybrid_cloud').maturity).toBe('planned');
+
+  await page.goto(`${baseURL}/#capabilities`);
+  await expect(page.getByRole('heading', { name: 'Runtime capabilities' })).toBeVisible();
+  await expect(page.locator('.capability-card')).toHaveCount(capabilities.engine.length);
+  await expect(page.locator('.capability-replay')).toContainText('rewind · seek · replay');
+  await expect(page.locator('.capability-card.maturity-planned').filter({ hasText: 'TurboQuant compression' })).toHaveCount(1);
+});
+
 test('connectome panel exposes estates tables scoped models and faithful visuals', async ({ page, request }) => {
   const seeded = await request.post(`${baseURL}/api/flights`, {
     data: {

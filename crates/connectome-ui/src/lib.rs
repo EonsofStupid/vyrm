@@ -57,10 +57,225 @@ pub struct Snapshot {
     pub graph: GraphView,
 }
 
-#[derive(Debug, Default, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct CapabilitiesView {
+    pub protocol: &'static str,
+    pub version: u16,
+    pub developer_diagnostics: bool,
     pub runners_enabled: bool,
     pub providers: Vec<&'static str>,
+    pub replay: ReplayCapabilitiesView,
+    pub engine: Vec<EngineCapabilityView>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ReplayCapabilitiesView {
+    pub persisted: bool,
+    pub restart_recoverable: bool,
+    pub seekable: bool,
+    pub reversible: bool,
+    pub speeds: Vec<f32>,
+    pub lenses: Vec<&'static str>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CapabilityMaturity {
+    Alpha,
+    Partial,
+    Experimental,
+    Planned,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct EngineCapabilityView {
+    pub id: &'static str,
+    pub label: &'static str,
+    pub category: &'static str,
+    pub maturity: CapabilityMaturity,
+    pub summary: &'static str,
+    pub evidence: &'static str,
+    pub limitation: &'static str,
+}
+
+/// The diagnostics handshake consumed by Connectome. This catalog is
+/// deliberately conservative: a roadmap item remains `planned` until an
+/// executable, persisted path and its verification evidence exist.
+pub fn capabilities(runners_enabled: bool) -> CapabilitiesView {
+    CapabilitiesView {
+        protocol: "vyrm-diagnostics",
+        version: 1,
+        developer_diagnostics: true,
+        runners_enabled,
+        providers: if runners_enabled {
+            vec!["observe", "codex", "claude"]
+        } else {
+            vec!["observe"]
+        },
+        replay: ReplayCapabilitiesView {
+            persisted: true,
+            restart_recoverable: true,
+            seekable: true,
+            reversible: true,
+            speeds: vec![0.5, 1.0, 2.0, 4.0, 8.0],
+            lenses: vec!["prompt_flights", "temporal_stream", "causal_traces", "cluster_history"],
+        },
+        engine: vec![
+            EngineCapabilityView {
+                id: "multi_model_engine",
+                label: "Multi-model engine",
+                category: "data",
+                maturity: CapabilityMaturity::Alpha,
+                summary: "One atomic runtime commit spans records, relations, events, claims, vectors, series, geo values, and object references.",
+                evidence: "Memory, Fjall compatibility, and native VyrmKV share mixed-family rollback and reopen differentials.",
+                limitation: "Index and VyrmQL coverage is not yet equally mature for every canonical value family.",
+            },
+            EngineCapabilityView {
+                id: "frontier_reasoning_runtime",
+                label: "Frontier reasoning runtime",
+                category: "ai_runtime",
+                maturity: CapabilityMaturity::Alpha,
+                summary: "Observe, Codex, and Claude flight envelopes share one persisted reasoning-run contract.",
+                evidence: "Prompt-flight provider envelopes and same-prompt effort cohorts are persisted and replayable.",
+                limitation: "Frontier runners are explicit opt-in adapters, not an in-database model scheduler.",
+            },
+            EngineCapabilityView {
+                id: "real_time_live_queries",
+                label: "Real-time live queries",
+                category: "query",
+                maturity: CapabilityMaturity::Planned,
+                summary: "Push-based query subscriptions over committed runtime changes.",
+                evidence: "A resumable cursor changefeed exists and is currently polled by diagnostics clients.",
+                limitation: "No native subscription protocol or backpressure contract is shipped yet.",
+            },
+            EngineCapabilityView {
+                id: "vyrmql_security",
+                label: "VyrmQL granular security",
+                category: "query",
+                maturity: CapabilityMaturity::Partial,
+                summary: "Strict parse, bind, resource budget, scope, and read-stamp enforcement.",
+                evidence: "Query plans publish authorization/resource contracts and deny stale or over-budget reads.",
+                limitation: "Fine-grained persisted RBAC/ABAC policy administration is not complete.",
+            },
+            EngineCapabilityView {
+                id: "audit_logging",
+                label: "Structured audit logging",
+                category: "security",
+                maturity: CapabilityMaturity::Partial,
+                summary: "Accepted runtime operations carry JSON-serializable hash-chained audit envelopes.",
+                evidence: "Runtime commits bind actor, scope, cursor, mutation digest, and prior audit digest atomically.",
+                limitation: "Queries, deletes, schema administration, and every HTTP action do not yet share one comprehensive audit stream.",
+            },
+            EngineCapabilityView {
+                id: "embedded_distributed",
+                label: "Embedded or distributed runtime",
+                category: "deployment",
+                maturity: CapabilityMaturity::Experimental,
+                summary: "One logical runtime contract spans embedded engines and a typed Raft adapter slice.",
+                evidence: "Memory, Fjall compatibility, native VyrmKV, and the M7 consensus simulation share differentials.",
+                limitation: "Production Multi-AZ operation and remote lifecycle automation are not certified.",
+            },
+            EngineCapabilityView {
+                id: "turboquant",
+                label: "TurboQuant compression",
+                category: "vector",
+                maturity: CapabilityMaturity::Planned,
+                summary: "Quantized vector artifacts behind the exact-search oracle.",
+                evidence: "The artifact catalog and exact differential boundary required for experiments exist.",
+                limitation: "No TurboQuant codec, recall matrix, or promoted storage format is shipped.",
+            },
+            EngineCapabilityView {
+                id: "native_embedding_generation",
+                label: "Native embedding generation",
+                category: "vector",
+                maturity: CapabilityMaturity::Alpha,
+                summary: "Local embedding jobs bind source, model bytes, network policy, read stamp, inference, and commit in one governed path.",
+                evidence: "Deterministic FeatureHash and caller-supplied local FastEmbed adapters pass provenance, freshness, and atomic-commit tests.",
+                limitation: "This is not a distributed in-cluster inference scheduler and physical model quality remains provider-dependent.",
+            },
+            EngineCapabilityView {
+                id: "gpu_indexing",
+                label: "GPU-accelerated indexing",
+                category: "vector",
+                maturity: CapabilityMaturity::Experimental,
+                summary: "A verified accelerator boundary can admit deterministic dense artifacts with explicit fallback policy.",
+                evidence: "Accelerated builders must produce CPU-identical authenticated bytes before catalog publication.",
+                limitation: "No physical GPU backend or GPU performance/recall evidence is promoted.",
+            },
+            EngineCapabilityView {
+                id: "filtered_hnsw",
+                label: "Filtered HNSW traversal",
+                category: "vector",
+                maturity: CapabilityMaturity::Alpha,
+                summary: "Dense HNSW performs filter-aware candidate admission followed by exact reranking.",
+                evidence: "Deterministic recall, backend differential, and update/delete/reopen soak gates pass locally.",
+                limitation: "Sparse and multivector ANN plus compact graph storage remain open.",
+            },
+            EngineCapabilityView {
+                id: "multivector_late_interaction",
+                label: "Multivector and late interaction",
+                category: "vector",
+                maturity: CapabilityMaturity::Partial,
+                summary: "Objects can carry exact dense, sparse, and multivector values under typed validation.",
+                evidence: "The exact oracle and hand-calculated metric tests cover all three vector forms.",
+                limitation: "Native ColBERT late-interaction scoring and multivector ANN are not implemented.",
+            },
+            EngineCapabilityView {
+                id: "memory_tiers",
+                label: "Fine-grained memory tiers",
+                category: "storage",
+                maturity: CapabilityMaturity::Planned,
+                summary: "Policy-driven hot, warm, cold, and object-backed placement.",
+                evidence: "Snapshot pins, content-addressed objects, and physical artifact generations provide prerequisites.",
+                limitation: "No automatic tiering controller or promotion/demotion policy is shipped.",
+            },
+            EngineCapabilityView {
+                id: "object_storage",
+                label: "Local and S3 object storage",
+                category: "storage",
+                maturity: CapabilityMaturity::Alpha,
+                summary: "Content-addressed object bytes become visible only with a verified atomic runtime reference.",
+                evidence: "Local and capability-explicit S3-compatible adapters pass the same publication and failure differential.",
+                limitation: "Automatic placement across hot, warm, cold, and object tiers remains open.",
+            },
+            EngineCapabilityView {
+                id: "offline_edge",
+                label: "Offline edge vector runtime",
+                category: "deployment",
+                maturity: CapabilityMaturity::Alpha,
+                summary: "A no-network executable performs local embedding and mmap exact vector search with a minimal dependency surface.",
+                evidence: "The retained 10k×128 profile is bounded for binary size, artifact size, RSS, and latency.",
+                limitation: "The deterministic baseline does not establish state-of-the-art semantic quality or ANN-scale throughput.",
+            },
+            EngineCapabilityView {
+                id: "hardware_io",
+                label: "Hardware-level I/O optimization",
+                category: "storage",
+                maturity: CapabilityMaturity::Partial,
+                summary: "Native reads expose memtable, cache, block-load, byte, and manifest work counters.",
+                evidence: "Storage spans and benchmark artifacts measure the physical read path.",
+                limitation: "Direct I/O, io_uring, GPU indexing, and architecture-specific kernels are not promoted.",
+            },
+            EngineCapabilityView {
+                id: "discovery_recommendation",
+                label: "Discovery and recommendation queries",
+                category: "query",
+                maturity: CapabilityMaturity::Planned,
+                summary: "Composable recommendation, discovery, and hybrid retrieval operators.",
+                evidence: "Exact vector search, filters, graph traversal, and deterministic planning exist independently.",
+                limitation: "A unified recommendation query algebra and evaluation corpus are not shipped.",
+            },
+            EngineCapabilityView {
+                id: "kubernetes_hybrid_cloud",
+                label: "Kubernetes-native hybrid cloud",
+                category: "deployment",
+                maturity: CapabilityMaturity::Planned,
+                summary: "Per-project runtime deployment with an optional enterprise control plane.",
+                evidence: "Project manifests, node control contracts, artifact transfer, and Connectome boundaries exist.",
+                limitation: "Operators, CRDs, upgrade orchestration, Multi-AZ certification, and cloud transport remain open.",
+            },
+        ],
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -461,10 +676,7 @@ pub fn snapshot(
         cluster,
         vector_artifacts,
         schema,
-        capabilities: CapabilitiesView {
-            runners_enabled: false,
-            providers: vec!["observe"],
-        },
+        capabilities: capabilities(false),
         graph,
     })
 }
@@ -1540,14 +1752,7 @@ fn respond(
             Ok(mut value) => match recorder.flights() {
                 Ok(flights) => {
                     value.flights = flights;
-                    value.capabilities = CapabilitiesView {
-                        runners_enabled: recorder.runners_enabled(),
-                        providers: if recorder.runners_enabled() {
-                            vec!["observe", "codex", "claude"]
-                        } else {
-                            vec!["observe"]
-                        },
-                    };
+                    value.capabilities = capabilities(recorder.runners_enabled());
                     json_response(StatusCode(200), &value)
                 }
                 Err(error) => json_response(
@@ -1567,6 +1772,9 @@ fn respond(
                 &serde_json::json!({"error":error.to_string()}),
             ),
         },
+        "/api/runtime/capabilities" => {
+            json_response(StatusCode(200), &capabilities(recorder.runners_enabled()))
+        }
         "/api/cluster/history" => {
             let params = query_params(query);
             let limit = params
