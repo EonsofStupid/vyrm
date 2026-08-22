@@ -25,6 +25,7 @@
 mod ds;
 mod engine;
 mod error;
+mod footprint;
 mod gc;
 mod invocation;
 mod keyspaces;
@@ -40,6 +41,7 @@ mod writer;
 pub use ds::{DataRuntime, DataRuntimeStep};
 pub use engine::{Engine, MemoryEngine, PhysicalStoreEvidence};
 pub use error::{Error, Result};
+pub use footprint::{measure_storage_footprint, FootprintBytes, StorageFootprint};
 pub use gc::{PairStatus, RemovalReport, Verdict};
 pub use invocation::{Effectiveness, Invocation, InvocationInput, Outcome, RecallOutcome, Trigger};
 pub use keyspaces::Durability;

@@ -1,7 +1,8 @@
 # Fjall → vyrmKV AI-runtime audit
 
-Status: bounded leveled-maintenance, negative-filter, and five-profile AI-read
-matrix pass, 2026-08-22.
+Status: sparse-aware footprint correction and eight-profile AI-read matrix
+pass, 2026-08-22. The general append/replay promotion is revoked pending write,
+steady-RSS, and clean-reopen WAL-footprint gaps.
 
 ## Decision
 
@@ -78,23 +79,42 @@ second and its latency is for the complete 32-key request.
 
 | Profile | Fjall items/s | Native items/s | Native/Fjall throughput | Fjall p95 | Native p95 | Native/Fjall p95 |
 |---|---:|---:|---:|---:|---:|---:|
-| Current hot hit | 1,344,294 | 3,011,405 | 2.240× | 755 ns | 279 ns | 0.370× |
-| Cold immutable hit | 455,398 | 753,217 | 1.654× | 2,200 ns | 1,291 ns | 0.587× |
-| Point miss | 2,116,674 | 3,214,490 | 1.519× | 415 ns | 266 ns | 0.641× |
-| Historical hot-key version | 489,604 | 1,055,474 | 2.156× | 2,154 ns | 973 ns | 0.452× |
-| 32-key metadata fan-out | 720,851 | 1,325,589 | 1.839× | 44,217 ns | 22,553 ns | 0.510× |
+| Current hot hit, repeated | 1,321,784 | 2,936,465 | 2.222× | 770 ns | 294 ns | 0.382× |
+| Cold immutable hit, repeated | 457,661 | 746,409 | 1.631× | 2,203 ns | 1,309 ns | 0.594× |
+| Point miss, repeated | 2,063,394 | 3,137,016 | 1.520× | 433 ns | 282 ns | 0.651× |
+| Historical hot-key version, repeated | 491,285 | 1,050,642 | 2.139× | 2,130 ns | 978 ns | 0.459× |
+| Metadata fan-out, repeated | 723,698 | 1,321,738 | 1.826× | 44,343 ns | 22,885 ns | 0.516× |
+| Metadata fan-out, structured JSON | 569,268 | 913,358 | 1.604× | 44,270 ns | 22,518 ns | 0.509× |
+| Metadata fan-out, deterministic entropy | 628,669 | 1,033,822 | 1.644× | 43,899 ns | 22,345 ns | 0.509× |
+| Metadata fan-out, embedding f32 | 689,971 | 1,232,528 | 1.786× | 44,355 ns | 22,368 ns | 0.504× |
 
-All raw trials passed exact-value correctness and the strict native-throughput
-and p95 gate. The same fixture occupied 1,588,171 native bytes versus
-68,300,360 Fjall bytes. That disk result is specific to this small physical
-fixture and must not be extrapolated to arbitrary data.
+All raw trials passed exact-value correctness and the strict native-throughput,
+p95, and symmetric clean-reopen allocated-footprint gate. The former 1,588,171
+versus 68,300,360-byte statement was invalid: it summed apparent file lengths
+while Fjall held a sparse 64 MiB journal. The corrected clean-reopen result is:
+
+| Payload | Fjall allocated | Native allocated | Native/Fjall |
+|---|---:|---:|---:|
+| Repeated byte | 2,686,976 | 1,609,728 | 0.599× |
+| Structured JSON | 2,686,976 | 2,310,144 | 0.860× |
+| Deterministic entropy | 2,686,976 | 2,625,536 | 0.977× |
+| Embedding f32 | 2,686,976 | 2,625,536 | 0.977× |
+
+The real local advantage therefore ranges from 2.3% for high-entropy/vector
+bytes to 40.1% for deliberately compressible control values. Apparent bytes,
+allocated bytes (`st_blocks * 512` on Unix), logical live/written payload,
+file-class attribution, and active/reopened/maintained states are all retained.
+Only clean reopen without explicit maintenance is cross-backend promotion
+evidence. Backend-native maintained states remain diagnostic because their
+actions differ.
 
 Run it with:
 
 ```console
 cargo run --release --locked -p vyrm-store --example ai_hotset_benchmark -- \
   --workload metadata-fanout --trials 5 --cold-keys 8192 --hot-keys 128 \
-  --reads 8192 --batch-size 128 --value-bytes 128 --fanout-width 32 \
+  --payload-profile embedding-f32 --reads 8192 --batch-size 128 \
+  --value-bytes 128 --fanout-width 32 \
   --output target/vyrmkv-ai-metadata-fanout.json --require-promotion
 ```
 
@@ -113,9 +133,21 @@ Raw evidence:
 - [`point miss`](../eval/results/2026-08-22-vyrmkv-ai-point-miss.json)
 - [`historical hot-key version`](../eval/results/2026-08-22-vyrmkv-ai-historical-hot-hit.json)
 - [`metadata fan-out`](../eval/results/2026-08-22-vyrmkv-ai-metadata-fanout.json)
+- [`metadata fan-out, structured JSON`](../eval/results/2026-08-22-vyrmkv-ai-metadata-fanout-structured-json.json)
+- [`metadata fan-out, deterministic entropy`](../eval/results/2026-08-22-vyrmkv-ai-metadata-fanout-deterministic-entropy.json)
+- [`metadata fan-out, embedding f32`](../eval/results/2026-08-22-vyrmkv-ai-metadata-fanout-embedding-f32.json)
 
-The scheduled/manual workflow now reruns all five modes with a deny-by-default
-promotion gate and retains every raw trial as an artifact.
+The scheduled/manual workflow now reruns four single-key read modes plus four
+fan-out payload profiles with a deny-by-default promotion gate and retains
+every raw trial as an artifact.
+
+The corrected general harness initially exposed a full recovered-memtable clone
+on every bounded range. Replacing it with an ordered range walk preserved MVCC
+tombstones and moved clean-reopen read throughput from 0.115× to 1.553× Fjall
+and p95 from 7.987× to 0.675×. The general gate remains red because write
+throughput is 0.881×, write p95 is 1.181×, steady RSS is 1.186×, and allocated
+WAL footprint is 1.213× Fjall. The corrected evidence is
+[`2026-08-22-vyrmkv-corrected-standard.json`](../eval/results/2026-08-22-vyrmkv-corrected-standard.json).
 
 ## Ordered implementation gates
 

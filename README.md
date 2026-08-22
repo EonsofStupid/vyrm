@@ -332,26 +332,30 @@ reads one authoritative change and verifies an RFC 9162 inclusion path; a
 reconstruct their compact frontier from retained complete-subtree nodes, but
 still report replay-plus-proof while schema history lacks an authenticated
 absence/index proof. Legacy databases retain full replay until the first atomic
-accumulator bootstrap. Fjall remains live
-until broader benchmark regression runs
-reproduce the native engine's first strict local equal-or-better pass. That
-checked-in five-trial workload has native ahead in write/read throughput,
-write/read p95, maintained recovery, steady RSS, and disk while preserving
-correctness. A nine-trial small-batch/standard/read-heavy/sustained matrix also
-passes every cell. A three-trial 70,000-operation extension also passes and is
-now part of the scheduled remote matrix. These are scoped append/replay M3
-results, not a general database-superiority claim. A separate 20,000-operation
+accumulator bootstrap. Fjall remains live as a compatibility and performance
+oracle. The former M3 performance pass used asymmetric maintenance and treated
+Fjall's sparse 64 MiB journal as physically consumed space, so it is retained
+only as legacy diagnostic evidence. The corrected lifecycle harness measures
+both engines while active, after clean reopen, and after explicit maintenance,
+with apparent and allocated-byte accounting. Exact semantics pass, but the
+general append/replay promotion is currently red. A corrected ordered range
+walk makes native win both clean-reopen and maintained reads; write throughput/
+p95, steady RSS, and clean-reopen allocated footprint remain behind Fjall.
+The dedicated eight-profile AI-read matrix passes its bounded correctness,
+throughput, p95, and clean-reopen allocation gates. See the
+[benchmark audit](docs/vyrmkv-benchmark.md) and
+[corrected raw evidence](eval/results/2026-08-22-vyrmkv-corrected-standard.json).
+A separate 20,000-operation
 physical differential now proves put/overwrite/delete behavior across reopen
 and compaction against both Fjall and an independent ordered-map oracle.
 Native compaction is now a bounded leveled streaming step with deterministic
 candidate selection, key-partitioned output, protected-snapshot pruning, and
 non-overlapping levels above L0. Segment-v3 validation derives authenticated
 block-local negative filters that reject point misses before block I/O without
-introducing another persisted truth. The canonical fresh nine-trial standard
-promotion cell remains green after these changes; its
-[raw evidence](eval/results/2026-08-21-vyrmkv-m35-standard.json) is retained.
-Asynchronous immutable-memtable flush, family-aware maintenance, and the full
-AI workload matrix remain explicit gates rather than implied claims.
+introducing another persisted truth. The next storage-performance targets are
+write latency, recovered-memtable residency, and WAL footprint. Asynchronous
+immutable-memtable flush and family-aware maintenance remain explicit gates
+rather than implied capabilities.
 The canonical `PersistentEngine` now creates native stores for missing paths and
 reopens them by their authenticated `CURRENT` marker. CLI, `vyrmd`, and
 Connectome use that selector. Existing non-native directories remain on the

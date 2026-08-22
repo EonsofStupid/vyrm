@@ -6,16 +6,20 @@
 //! explicit point or metadata-fan-out workload. These are physical profiles,
 //! not a general database benchmark.
 
-use fjall::{KeyspaceCreateOptions, PersistMode, Readable, SingleWriterTxDatabase};
+use fjall::{
+    KeyspaceCreateOptions, PersistMode, Readable, SingleWriterTxDatabase, SingleWriterTxKeyspace,
+};
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeSet;
 use std::fs;
 use std::hint::black_box;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use vyrm_kv::{Database, Durability, Mutation, WriteBatch};
+use vyrm_store::{measure_storage_footprint, FootprintBytes, StorageFootprint};
 
-const FORMAT_VERSION: u16 = 2;
+const FORMAT_VERSION: u16 = 3;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -66,9 +70,42 @@ impl Workload {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum PayloadProfile {
+    RepeatedByte,
+    StructuredJson,
+    DeterministicEntropy,
+    EmbeddingF32,
+}
+
+impl PayloadProfile {
+    fn parse(value: &str) -> Result<Self, String> {
+        match value {
+            "repeated-byte" => Ok(Self::RepeatedByte),
+            "structured-json" => Ok(Self::StructuredJson),
+            "deterministic-entropy" => Ok(Self::DeterministicEntropy),
+            "embedding-f32" => Ok(Self::EmbeddingF32),
+            _ => Err(format!(
+                "unknown payload profile {value:?}; expected repeated-byte, structured-json, deterministic-entropy, or embedding-f32"
+            )),
+        }
+    }
+
+    const fn cli_str(self) -> &'static str {
+        match self {
+            Self::RepeatedByte => "repeated-byte",
+            Self::StructuredJson => "structured-json",
+            Self::DeterministicEntropy => "deterministic-entropy",
+            Self::EmbeddingF32 => "embedding-f32",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct Config {
     workload: Workload,
+    payload_profile: PayloadProfile,
     trials: usize,
     cold_keys: usize,
     hot_keys: usize,
@@ -82,6 +119,7 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             workload: Workload::CurrentHotHit,
+            payload_profile: PayloadProfile::RepeatedByte,
             trials: 5,
             cold_keys: 8_192,
             hot_keys: 128,
@@ -109,7 +147,24 @@ struct Trial {
     reads_per_second: f64,
     items_per_sample: usize,
     latency: Latency,
-    disk_bytes: u64,
+    footprint: LifecycleFootprint,
+}
+
+struct ReadMeasurement {
+    correctness_verified: bool,
+    reads_per_second: f64,
+    items_per_sample: usize,
+    latency: Latency,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct LifecycleFootprint {
+    logical_live_payload_bytes: u64,
+    logical_written_payload_bytes: u64,
+    active: StorageFootprint,
+    reopened: StorageFootprint,
+    maintained: StorageFootprint,
+    maintained_actions: Vec<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -122,6 +177,7 @@ struct Evidence {
     aggregation: &'static str,
     throughput_unit: &'static str,
     latency_unit: &'static str,
+    footprint_contract: &'static str,
     config: Config,
     fjall_version: &'static str,
     fjall_trials: Vec<Trial>,
@@ -130,7 +186,18 @@ struct Evidence {
     native: Trial,
     native_to_fjall_read_throughput: f64,
     native_to_fjall_p95_latency: f64,
+    footprint_comparison: FootprintComparison,
     promotion: PromotionVerdict,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct FootprintComparison {
+    promotion_state: &'static str,
+    native_to_fjall_reopened_apparent: f64,
+    native_to_fjall_reopened_allocated: Option<f64>,
+    fjall_reopened_allocated_to_live_payload: Option<f64>,
+    native_reopened_allocated_to_live_payload: Option<f64>,
+    maintained_cross_backend_comparable: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -182,7 +249,14 @@ fn run() -> Result<(), String> {
     }
     let throughput_ratio = native.reads_per_second / fjall.reads_per_second;
     let p95_ratio = native.latency.p95_ns as f64 / fjall.latency.p95_ns.max(1) as f64;
-    let promotion = promotion(&fjall, &native, throughput_ratio, p95_ratio);
+    let footprint_comparison = footprint_comparison(&fjall, &native);
+    let promotion = promotion(
+        &fjall,
+        &native,
+        throughput_ratio,
+        p95_ratio,
+        &footprint_comparison,
+    );
     let evidence = Evidence {
         format_version: FORMAT_VERSION,
         measured_at_unix_ms: SystemTime::now()
@@ -196,10 +270,12 @@ fn run() -> Result<(), String> {
             "median of per-trial metrics; latency percentiles are medians of each isolated trial's percentile",
         throughput_unit: "resolved key items per second",
         latency_unit: "nanoseconds per point request or complete fan-out request",
+        footprint_contract: "active is measured while the read snapshot is open; reopened follows a clean close/open with no explicit maintenance; maintained follows backend-native flush, major compaction, unreachable-file collection where available, and a second clean reopen; promotion does not compare backend-native maintained states",
         config,
         fjall_version: "3.1.8",
         native_to_fjall_read_throughput: throughput_ratio,
         native_to_fjall_p95_latency: p95_ratio,
+        footprint_comparison,
         promotion,
         fjall_trials,
         native_trials,
@@ -247,6 +323,7 @@ fn parse(arguments: &[String]) -> Result<(Config, Option<PathBuf>, bool), String
         };
         match arguments[index].as_str() {
             "--workload" => config.workload = Workload::parse(value)?,
+            "--payload-profile" => config.payload_profile = PayloadProfile::parse(value)?,
             "--trials" => config.trials = parsed()?,
             "--cold-keys" => config.cold_keys = parsed()?,
             "--hot-keys" => config.hot_keys = parsed()?,
@@ -281,6 +358,12 @@ fn parse(arguments: &[String]) -> Result<(Config, Option<PathBuf>, bool), String
     if config.workload == Workload::MetadataFanout && config.hot_keys == config.cold_keys {
         return Err("metadata-fanout requires immutable keys outside the hot set".into());
     }
+    if config.payload_profile == PayloadProfile::StructuredJson && config.value_bytes < 64 {
+        return Err("structured-json requires at least 64 value bytes".into());
+    }
+    if config.payload_profile == PayloadProfile::EmbeddingF32 && config.value_bytes % 4 != 0 {
+        return Err("embedding-f32 value bytes must be divisible by four".into());
+    }
     Ok((config, output, require_promotion))
 }
 
@@ -290,6 +373,7 @@ fn launch_child(backend: &str, path: &Path, config: &Config) -> Result<Trial, St
         .arg(path)
         .args(["--trials", "1"])
         .args(["--workload", config.workload.cli_str()])
+        .args(["--payload-profile", config.payload_profile.cli_str()])
         .args(["--cold-keys", &config.cold_keys.to_string()])
         .args(["--hot-keys", &config.hot_keys.to_string()])
         .args(["--reads", &config.reads.to_string()])
@@ -349,7 +433,7 @@ fn run_fjall(path: &Path, config: &Config) -> Result<Trial, String> {
     for start in (0..config.cold_keys).step_by(config.batch_size) {
         let mut transaction = database.write_tx().durability(Some(PersistMode::SyncAll));
         for index in start..(start + config.batch_size).min(config.cold_keys) {
-            transaction.insert(&keyspace, key(index), cold_value(index, config.value_bytes));
+            transaction.insert(&keyspace, key(index), value(config, index, false));
         }
         transaction.commit().map_err(|error| error.to_string())?;
     }
@@ -360,7 +444,7 @@ fn run_fjall(path: &Path, config: &Config) -> Result<Trial, String> {
     let historical = database.read_tx();
     let mut transaction = database.write_tx().durability(Some(PersistMode::SyncAll));
     for index in 0..config.hot_keys {
-        transaction.insert(&keyspace, key(index), hot_value(index, config.value_bytes));
+        transaction.insert(&keyspace, key(index), value(config, index, true));
     }
     transaction.commit().map_err(|error| error.to_string())?;
     let current = database.read_tx();
@@ -369,8 +453,8 @@ fn run_fjall(path: &Path, config: &Config) -> Result<Trial, String> {
     } else {
         &current
     };
-    if config.workload == Workload::MetadataFanout {
-        measure_fanout("fjall", path, config, |keys| {
+    let measured = if config.workload == Workload::MetadataFanout {
+        measure_fanout(config, |keys| {
             keys.iter()
                 .map(|key| {
                     snapshot
@@ -381,13 +465,67 @@ fn run_fjall(path: &Path, config: &Config) -> Result<Trial, String> {
                 .collect()
         })
     } else {
-        measure("fjall", path, config, |index| {
+        measure(config, |index| {
             Ok(snapshot
                 .get(&keyspace, key(index))
                 .map_err(|error| error.to_string())?
                 .map(|value| value.to_vec()))
         })
-    }
+    }?;
+    let active = storage_footprint(path)?;
+    drop(current);
+    drop(historical);
+    drop(keyspace);
+    drop(database);
+
+    let reopened_database = SingleWriterTxDatabase::builder(path)
+        .manual_journal_persist(true)
+        .open()
+        .map_err(|error| error.to_string())?;
+    let reopened_keyspace = reopened_database
+        .keyspace("runtime", KeyspaceCreateOptions::default)
+        .map_err(|error| error.to_string())?;
+    verify_fjall_current(&reopened_database, &reopened_keyspace, config)?;
+    let reopened = storage_footprint(path)?;
+    reopened_keyspace
+        .as_ref()
+        .rotate_memtable_and_wait()
+        .map_err(|error| error.to_string())?;
+    reopened_keyspace
+        .as_ref()
+        .major_compact()
+        .map_err(|error| error.to_string())?;
+    reopened_database
+        .persist(PersistMode::SyncAll)
+        .map_err(|error| error.to_string())?;
+    drop(reopened_keyspace);
+    drop(reopened_database);
+
+    let maintained_database = SingleWriterTxDatabase::builder(path)
+        .manual_journal_persist(true)
+        .open()
+        .map_err(|error| error.to_string())?;
+    let maintained_keyspace = maintained_database
+        .keyspace("runtime", KeyspaceCreateOptions::default)
+        .map_err(|error| error.to_string())?;
+    verify_fjall_current(&maintained_database, &maintained_keyspace, config)?;
+    let maintained = storage_footprint(path)?;
+
+    Ok(finish_trial(
+        "fjall",
+        measured,
+        lifecycle_footprint(
+            config,
+            active,
+            reopened,
+            maintained,
+            vec![
+                "flush_active_memtable".into(),
+                "major_compact".into(),
+                "persist_and_clean_reopen".into(),
+            ],
+        )?,
+    ))
 }
 
 fn run_native(path: &Path, config: &Config) -> Result<Trial, String> {
@@ -396,7 +534,7 @@ fn run_native(path: &Path, config: &Config) -> Result<Trial, String> {
         let operations = (start..(start + config.batch_size).min(config.cold_keys))
             .map(|index| Mutation::Put {
                 key: key(index),
-                value: cold_value(index, config.value_bytes),
+                value: value(config, index, false),
             })
             .collect();
         database
@@ -413,7 +551,7 @@ fn run_native(path: &Path, config: &Config) -> Result<Trial, String> {
     let operations = (0..config.hot_keys)
         .map(|index| Mutation::Put {
             key: key(index),
-            value: hot_value(index, config.value_bytes),
+            value: value(config, index, true),
         })
         .collect();
     database
@@ -428,27 +566,62 @@ fn run_native(path: &Path, config: &Config) -> Result<Trial, String> {
     } else {
         current
     };
-    if config.workload == Workload::MetadataFanout {
-        measure_fanout("native", path, config, |keys| {
+    let measured = if config.workload == Workload::MetadataFanout {
+        measure_fanout(config, |keys| {
             database
                 .get_many(keys, snapshot)
                 .map_err(|error| error.to_string())
         })
     } else {
-        measure("native", path, config, |index| {
+        measure(config, |index| {
             database
                 .get(&key(index), snapshot)
                 .map_err(|error| error.to_string())
         })
-    }
+    }?;
+    let active = storage_footprint(path)?;
+    drop(database);
+
+    let mut reopened_database = Database::open(path).map_err(|error| error.to_string())?;
+    verify_native_current(&reopened_database, config)?;
+    let reopened = storage_footprint(path)?;
+    reopened_database
+        .flush_memtable(2)
+        .map_err(|error| error.to_string())?;
+    reopened_database
+        .compact(&[], 3)
+        .map_err(|error| error.to_string())?;
+    reopened_database
+        .garbage_collect()
+        .map_err(|error| error.to_string())?;
+    drop(reopened_database);
+
+    let maintained_database = Database::open(path).map_err(|error| error.to_string())?;
+    verify_native_current(&maintained_database, config)?;
+    let maintained = storage_footprint(path)?;
+
+    Ok(finish_trial(
+        "native",
+        measured,
+        lifecycle_footprint(
+            config,
+            active,
+            reopened,
+            maintained,
+            vec![
+                "flush_active_memtable".into(),
+                "compact_unpinned_history".into(),
+                "collect_unreachable_files".into(),
+                "clean_reopen".into(),
+            ],
+        )?,
+    ))
 }
 
 fn measure(
-    backend: &str,
-    path: &Path,
     config: &Config,
     mut get: impl FnMut(usize) -> Result<Option<Vec<u8>>, String>,
-) -> Result<Trial, String> {
+) -> Result<ReadMeasurement, String> {
     for iteration in 0..config.hot_keys * 4 {
         black_box(get(workload_index(config, iteration))?);
     }
@@ -464,22 +637,18 @@ fn measure(
         black_box(value);
     }
     let elapsed = started.elapsed();
-    Ok(Trial {
-        backend: backend.into(),
+    Ok(ReadMeasurement {
         correctness_verified,
         reads_per_second: config.reads as f64 / elapsed.as_secs_f64(),
         items_per_sample: 1,
         latency: summarize(samples),
-        disk_bytes: directory_bytes(path)?,
     })
 }
 
 fn measure_fanout(
-    backend: &str,
-    path: &Path,
     config: &Config,
     mut get_many: impl FnMut(&[Vec<u8>]) -> Result<Vec<Option<Vec<u8>>>, String>,
-) -> Result<Trial, String> {
+) -> Result<ReadMeasurement, String> {
     for iteration in 0..config.hot_keys * 4 {
         let keys = fanout_keys(config, iteration);
         black_box(get_many(&keys)?);
@@ -500,13 +669,11 @@ fn measure_fanout(
         black_box(values);
     }
     let elapsed = started.elapsed();
-    Ok(Trial {
-        backend: backend.into(),
+    Ok(ReadMeasurement {
         correctness_verified,
         reads_per_second: (config.reads * config.fanout_width) as f64 / elapsed.as_secs_f64(),
         items_per_sample: config.fanout_width,
         latency: summarize(samples),
-        disk_bytes: directory_bytes(path)?,
     })
 }
 
@@ -521,10 +688,8 @@ fn workload_index(config: &Config, iteration: usize) -> usize {
 
 fn expected_value(config: &Config, index: usize) -> Option<Vec<u8>> {
     match config.workload {
-        Workload::CurrentHotHit => Some(hot_value(index, config.value_bytes)),
-        Workload::ColdHit | Workload::HistoricalHotHit => {
-            Some(cold_value(index, config.value_bytes))
-        }
+        Workload::CurrentHotHit => Some(value(config, index, true)),
+        Workload::ColdHit | Workload::HistoricalHotHit => Some(value(config, index, false)),
         Workload::PointMiss => None,
         Workload::MetadataFanout => unreachable!("metadata fan-out validates each batched key"),
     }
@@ -554,9 +719,9 @@ fn expected_fanout_value(config: &Config, key_bytes: &[u8]) -> Option<Vec<u8>> {
         .parse::<usize>()
         .expect("benchmark generated key suffix is numeric");
     if index < config.hot_keys {
-        Some(hot_value(index, config.value_bytes))
+        Some(value(config, index, true))
     } else if index < config.cold_keys {
-        Some(cold_value(index, config.value_bytes))
+        Some(value(config, index, false))
     } else {
         None
     }
@@ -566,12 +731,154 @@ fn key(index: usize) -> Vec<u8> {
     format!("runtime:control:{index:012}").into_bytes()
 }
 
-fn cold_value(index: usize, bytes: usize) -> Vec<u8> {
-    vec![(index % 251) as u8; bytes]
+fn value(config: &Config, index: usize, hot: bool) -> Vec<u8> {
+    match config.payload_profile {
+        PayloadProfile::RepeatedByte => {
+            vec![((index + if hot { 97 } else { 0 }) % 251) as u8; config.value_bytes]
+        }
+        PayloadProfile::StructuredJson => structured_json_value(config, index, hot),
+        PayloadProfile::DeterministicEntropy => deterministic_bytes(config, index, hot),
+        PayloadProfile::EmbeddingF32 => embedding_value(config, index, hot),
+    }
 }
 
-fn hot_value(index: usize, bytes: usize) -> Vec<u8> {
-    vec![((index + 97) % 251) as u8; bytes]
+fn structured_json_value(config: &Config, index: usize, hot: bool) -> Vec<u8> {
+    let prefix = format!(
+        "{{\"id\":{index:012},\"generation\":{},\"payload\":\"",
+        u8::from(hot)
+    );
+    let suffix = b"\"}";
+    let mut output = prefix.into_bytes();
+    assert!(output.len() + suffix.len() <= config.value_bytes);
+    let mut state = value_seed(index, hot);
+    const ALPHABET: &[u8] = b"abcdefghijklmnopqrstuvwxyz0123456789";
+    while output.len() + suffix.len() < config.value_bytes {
+        state = next_state(state);
+        output.push(ALPHABET[(state as usize) % ALPHABET.len()]);
+    }
+    output.extend_from_slice(suffix);
+    output
+}
+
+fn deterministic_bytes(config: &Config, index: usize, hot: bool) -> Vec<u8> {
+    let mut state = value_seed(index, hot);
+    (0..config.value_bytes)
+        .map(|_| {
+            state = next_state(state);
+            (state >> 56) as u8
+        })
+        .collect()
+}
+
+fn embedding_value(config: &Config, index: usize, hot: bool) -> Vec<u8> {
+    let mut state = value_seed(index, hot);
+    let mut output = Vec::with_capacity(config.value_bytes);
+    for _ in 0..config.value_bytes / 4 {
+        state = next_state(state);
+        let unit = ((state >> 40) as u32) as f32 / ((1u32 << 24) - 1) as f32;
+        output.extend_from_slice(&(unit * 2.0 - 1.0).to_le_bytes());
+    }
+    output
+}
+
+fn value_seed(index: usize, hot: bool) -> u64 {
+    (index as u64)
+        .wrapping_add(1)
+        .wrapping_mul(0x9E37_79B9_7F4A_7C15)
+        ^ if hot {
+            0xD1B5_4A32_D192_ED03
+        } else {
+            0x94D0_49BB_1331_11EB
+        }
+}
+
+fn next_state(mut state: u64) -> u64 {
+    state ^= state << 13;
+    state ^= state >> 7;
+    state ^= state << 17;
+    state
+}
+
+fn finish_trial(backend: &str, measured: ReadMeasurement, footprint: LifecycleFootprint) -> Trial {
+    Trial {
+        backend: backend.into(),
+        correctness_verified: measured.correctness_verified,
+        reads_per_second: measured.reads_per_second,
+        items_per_sample: measured.items_per_sample,
+        latency: measured.latency,
+        footprint,
+    }
+}
+
+fn lifecycle_footprint(
+    config: &Config,
+    active: StorageFootprint,
+    reopened: StorageFootprint,
+    maintained: StorageFootprint,
+    maintained_actions: Vec<String>,
+) -> Result<LifecycleFootprint, String> {
+    let logical_live_payload_bytes = logical_payload_bytes(config, config.cold_keys)?;
+    let hot_written = logical_payload_bytes(config, config.hot_keys)?;
+    let logical_written_payload_bytes = logical_live_payload_bytes
+        .checked_add(hot_written)
+        .ok_or_else(|| "logical written payload bytes overflowed".to_owned())?;
+    Ok(LifecycleFootprint {
+        logical_live_payload_bytes,
+        logical_written_payload_bytes,
+        active,
+        reopened,
+        maintained,
+        maintained_actions,
+    })
+}
+
+fn logical_payload_bytes(config: &Config, keys: usize) -> Result<u64, String> {
+    (0..keys).try_fold(0u64, |total, index| {
+        let item = key(index)
+            .len()
+            .checked_add(config.value_bytes)
+            .ok_or_else(|| "logical payload item bytes overflowed".to_owned())?;
+        total
+            .checked_add(item as u64)
+            .ok_or_else(|| "logical payload bytes overflowed".to_owned())
+    })
+}
+
+fn storage_footprint(path: &Path) -> Result<StorageFootprint, String> {
+    measure_storage_footprint(path).map_err(|error| error.to_string())
+}
+
+fn verify_fjall_current(
+    database: &SingleWriterTxDatabase,
+    keyspace: &SingleWriterTxKeyspace,
+    config: &Config,
+) -> Result<(), String> {
+    let snapshot = database.read_tx();
+    for index in 0..config.cold_keys {
+        let actual = snapshot
+            .get(keyspace, key(index))
+            .map_err(|error| error.to_string())?
+            .map(|bytes| bytes.to_vec());
+        let expected = Some(value(config, index, index < config.hot_keys));
+        if actual != expected {
+            return Err(format!("fjall current value differs at key {index}"));
+        }
+    }
+    Ok(())
+}
+
+fn verify_native_current(database: &Database, config: &Config) -> Result<(), String> {
+    let snapshot = database.snapshot();
+    for index in 0..config.cold_keys {
+        let actual = database
+            .get(&key(index), snapshot)
+            .map_err(|error| error.to_string())?;
+        let expected = Some(value(config, index, index < config.hot_keys));
+        if actual != expected {
+            return Err(format!("native current value differs at key {index}"));
+        }
+    }
+    Ok(())
 }
 
 fn summarize(mut samples: Vec<Duration>) -> Latency {
@@ -608,7 +915,80 @@ fn aggregate(backend: &str, trials: &[Trial]) -> Trial {
                     .collect(),
             ),
         },
-        disk_bytes: median_u64(trials.iter().map(|trial| trial.disk_bytes).collect()),
+        footprint: aggregate_lifecycle_footprint(trials),
+    }
+}
+
+fn aggregate_lifecycle_footprint(trials: &[Trial]) -> LifecycleFootprint {
+    LifecycleFootprint {
+        logical_live_payload_bytes: median_u64(
+            trials
+                .iter()
+                .map(|trial| trial.footprint.logical_live_payload_bytes)
+                .collect(),
+        ),
+        logical_written_payload_bytes: median_u64(
+            trials
+                .iter()
+                .map(|trial| trial.footprint.logical_written_payload_bytes)
+                .collect(),
+        ),
+        active: aggregate_storage_footprint(
+            trials.iter().map(|trial| &trial.footprint.active).collect(),
+        ),
+        reopened: aggregate_storage_footprint(
+            trials
+                .iter()
+                .map(|trial| &trial.footprint.reopened)
+                .collect(),
+        ),
+        maintained: aggregate_storage_footprint(
+            trials
+                .iter()
+                .map(|trial| &trial.footprint.maintained)
+                .collect(),
+        ),
+        maintained_actions: trials[0].footprint.maintained_actions.clone(),
+    }
+}
+
+fn aggregate_storage_footprint(values: Vec<&StorageFootprint>) -> StorageFootprint {
+    let classes = values
+        .iter()
+        .flat_map(|value| value.by_class.keys().cloned())
+        .collect::<BTreeSet<_>>();
+    let by_class = classes
+        .into_iter()
+        .map(|class| {
+            let measurements = values
+                .iter()
+                .map(|value| value.by_class.get(&class).cloned().unwrap_or_default())
+                .collect::<Vec<_>>();
+            (class, aggregate_footprint_bytes(&measurements))
+        })
+        .collect();
+    let allocated = values
+        .iter()
+        .filter_map(|value| value.allocated_bytes)
+        .collect::<Vec<_>>();
+    StorageFootprint {
+        apparent_bytes: median_u64(values.iter().map(|value| value.apparent_bytes).collect()),
+        allocated_bytes: (allocated.len() == values.len()).then(|| median_u64(allocated)),
+        allocated_bytes_source: values[0].allocated_bytes_source.clone(),
+        files: median_u64(values.iter().map(|value| value.files).collect()),
+        by_class,
+    }
+}
+
+fn aggregate_footprint_bytes(values: &[FootprintBytes]) -> FootprintBytes {
+    let allocated = values
+        .iter()
+        .filter_map(|value| value.allocated_bytes)
+        .collect::<Vec<_>>();
+    FootprintBytes {
+        apparent_bytes: median_u64(values.iter().map(|value| value.apparent_bytes).collect()),
+        allocated_bytes: (allocated.len() == values.len()).then(|| median_u64(allocated)),
+        files: median_u64(values.iter().map(|value| value.files).collect()),
     }
 }
 
@@ -617,6 +997,7 @@ fn promotion(
     native: &Trial,
     throughput_ratio: f64,
     p95_ratio: f64,
+    footprint: &FootprintComparison,
 ) -> PromotionVerdict {
     let mut failures = Vec::new();
     if !fjall.correctness_verified || !native.correctness_verified {
@@ -632,9 +1013,41 @@ fn promotion(
             "native p95 request-latency ratio {p95_ratio:.3} exceeds 1.000"
         ));
     }
+    if footprint
+        .native_to_fjall_reopened_allocated
+        .is_some_and(|ratio| ratio > 1.0)
+    {
+        failures.push(format!(
+            "native clean-reopen allocated-footprint ratio {:.3} exceeds 1.000",
+            footprint
+                .native_to_fjall_reopened_allocated
+                .expect("ratio was checked above")
+        ));
+    }
     PromotionVerdict {
         passes: failures.is_empty(),
         failures,
+    }
+}
+
+fn footprint_comparison(fjall: &Trial, native: &Trial) -> FootprintComparison {
+    let fjall_reopened = &fjall.footprint.reopened;
+    let native_reopened = &native.footprint.reopened;
+    FootprintComparison {
+        promotion_state: "clean_reopen_without_explicit_maintenance",
+        native_to_fjall_reopened_apparent: native_reopened.apparent_bytes as f64
+            / fjall_reopened.apparent_bytes.max(1) as f64,
+        native_to_fjall_reopened_allocated: native_reopened
+            .allocated_bytes
+            .zip(fjall_reopened.allocated_bytes)
+            .map(|(native, fjall)| native as f64 / fjall.max(1) as f64),
+        fjall_reopened_allocated_to_live_payload: fjall_reopened
+            .allocated_bytes
+            .map(|bytes| bytes as f64 / fjall.footprint.logical_live_payload_bytes.max(1) as f64),
+        native_reopened_allocated_to_live_payload: native_reopened
+            .allocated_bytes
+            .map(|bytes| bytes as f64 / native.footprint.logical_live_payload_bytes.max(1) as f64),
+        maintained_cross_backend_comparable: false,
     }
 }
 
@@ -646,21 +1059,4 @@ fn median_u64(mut values: Vec<u64>) -> u64 {
 fn median_f64(mut values: Vec<f64>) -> f64 {
     values.sort_by(f64::total_cmp);
     values[values.len() / 2]
-}
-
-fn directory_bytes(path: &Path) -> Result<u64, String> {
-    let mut total = 0u64;
-    for entry in fs::read_dir(path).map_err(|error| error.to_string())? {
-        let entry = entry.map_err(|error| error.to_string())?;
-        let metadata = entry.metadata().map_err(|error| error.to_string())?;
-        let bytes = if metadata.is_dir() {
-            directory_bytes(&entry.path())?
-        } else {
-            metadata.len()
-        };
-        total = total
-            .checked_add(bytes)
-            .ok_or_else(|| "directory byte count overflowed".to_owned())?;
-    }
-    Ok(total)
 }

@@ -1369,10 +1369,7 @@ impl Database {
                 }
             }
         }
-        for (key, version) in self.memtable.visible_versions(snapshot.sequence) {
-            if key.as_slice() < start || end.is_some_and(|end| key.as_slice() >= end) {
-                continue;
-            }
+        for (key, version) in self.memtable.visible_from(start, end, snapshot.sequence) {
             if visible
                 .get(&key)
                 .is_none_or(|current| version.sequence > current.sequence)

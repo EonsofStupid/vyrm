@@ -1,6 +1,7 @@
 use crate::{Error, Mutation, RecoveredBatch, Result, WriteBatch};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
+use std::ops::Bound::{Excluded, Included, Unbounded};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct VersionedValue {
@@ -192,18 +193,31 @@ impl Memtable {
         end: Option<&[u8]>,
         read_sequence: u64,
     ) -> Vec<(Vec<u8>, Vec<u8>)> {
+        self.visible_from(start, end, read_sequence)
+            .into_iter()
+            .filter_map(|(key, version)| version.value.map(|value| (key, value)))
+            .collect()
+    }
+
+    /// Returns only visible versions inside the requested ordered interval.
+    /// Tombstones are retained so callers merging immutable and mutable layers
+    /// cannot resurrect an older value.
+    pub(crate) fn visible_from(
+        &self,
+        start: &[u8],
+        end: Option<&[u8]>,
+        read_sequence: u64,
+    ) -> Vec<(Vec<u8>, VersionedValue)> {
+        let bounds = (Included(start), end.map_or(Unbounded, Excluded));
         self.versions
-            .iter()
-            .filter(|(key, _)| {
-                key.as_slice() >= start && end.is_none_or(|end| key.as_slice() < end)
-            })
+            .range::<[u8], _>(bounds)
             .filter_map(|(key, versions)| {
                 versions
                     .iter()
                     .rev()
                     .find(|version| version.sequence <= read_sequence)
-                    .and_then(|version| version.value.as_ref())
-                    .map(|value| (key.clone(), value.clone()))
+                    .cloned()
+                    .map(|version| (key.clone(), version))
             })
             .collect()
     }
@@ -231,16 +245,6 @@ impl Memtable {
     }
 
     pub fn visible_versions(&self, read_sequence: u64) -> Vec<(Vec<u8>, VersionedValue)> {
-        self.versions
-            .iter()
-            .filter_map(|(key, versions)| {
-                versions
-                    .iter()
-                    .rev()
-                    .find(|version| version.sequence <= read_sequence)
-                    .cloned()
-                    .map(|version| (key.clone(), version))
-            })
-            .collect()
+        self.visible_from(&[], None, read_sequence)
     }
 }

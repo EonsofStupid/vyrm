@@ -584,15 +584,15 @@ checkpoints, manifest CAS, segment flush, WAL rotation, and reopen at the
 manifest replay boundary are covered. The native `Engine` adapter and
 Memory/Fjall/native semantic/query differential are green. Snapshot-aware
 compaction/GC, physical lease pins, and crash/storage-full recovery matrices are
-also green. The isolated five-trial comparative baseline and strict
-equal-or-better policy are frozen in `docs/vyrmkv-benchmark.md`. Disk-resident
-segment-v3 blocks, optimized SHA-256, streaming immutable reads, self-serving
-native sequence values, and fresh steady-state probes moved every measured cell
-green while preserving correctness. The local M3 gap is closed; a nine-trial
-small-batch/standard/read-heavy/sustained matrix also passes. A three-trial
-70,000-operation extension now also passes locally with bounded mutable-state
-admission enabled; the scheduled workflow retains it as a fifth profile. Next
-reproduce the complete matrix under remote CI. The local mixed update/delete gate now passes 20,000 operations
+also green. The corrected comparative harness and deny-by-default policy are
+frozen in `docs/vyrmkv-benchmark.md`. It records active, clean-reopen, and
+maintained states for both engines plus physical allocated bytes. The former
+green M3 result used asymmetric maintenance and sparse apparent length; it is
+legacy evidence. Corrected semantics pass. An ordered bounded memtable walk
+makes native win clean-reopen and maintained reads, while write throughput/p95,
+steady RSS, and WAL footprint remain red. The separate
+eight-profile AI-read matrix passes its bounded gates. The local mixed
+update/delete gate passes 20,000 operations
 with 10 reopens and 8 compactions against Fjall and an independent model. The
 existing-store rehearsal copies all 18 canonical keyspaces through an
 authenticated streaming archive, verifies invisible native staging, resumes at

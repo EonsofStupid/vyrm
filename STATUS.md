@@ -299,8 +299,9 @@ not roadmap language.
   endpoint handshake, typed payload-expression filters, server process restart,
   concurrent serialization recovery, and performance evidence remain open. No
   live pgvector superiority claim is made.
-- M3 native storage has passed its first strict local promotion baseline in the
-  standalone `vyrm-kv` crate. WAL v1
+- M3 native storage persistence and semantic gates pass in the standalone
+  `vyrm-kv` crate. The corrected general performance gate is red on write
+  latency, steady RSS, and clean-reopen WAL footprint. WAL v1
   now has frozen CRC32C file/frame formats, atomic batch sequence ranges,
   explicit buffered/authoritative acknowledgments, idempotent recovery, and an
   explicit torn-tail-only repair path; complete corruption fails closed.
@@ -339,17 +340,17 @@ not roadmap language.
   L0, and exposes input/output bytes, debt, failures, and peak merge-buffer
   evidence. Automatic maintenance retains all MVCC history; explicit compaction
   alone prunes against its protected snapshots, retaining tombstones that still
-  shadow unselected lower levels. The five-trial
-  isolated Fjall/native baseline verifies
-  correctness and now passes every equal-or-better cell: native is 9.1% ahead
-  on write throughput and 67.3% ahead on bounded replay throughput, has lower
-  write/read p95 and maintained recovery, uses 15.9% less steady RSS, and 69.0%
-  less disk for this workload. A follow-on nine-trial matrix also passes all
-  cells for small-batch, standard, read-heavy, and sustained profiles after
-  native sequence values became self-serving and one-segment scans became
-  streaming. This is still scoped append/replay evidence
-  awaiting remote reproduction, mixed update/delete soak, and migration
-  rehearsal—not a universal database claim.
+  shadow unselected lower levels. The former Fjall/native promotion applied
+  native-only maintenance and counted sparse apparent length as disk usage; it
+  is now legacy diagnostic evidence. The corrected lifecycle harness measures
+  active, clean-reopen, and maintained states for both engines and records
+  physical allocation. Exact semantics pass. Replacing a full recovered-
+  memtable clone with an ordered bounded walk makes native win clean-reopen and
+  maintained read throughput/p95; write throughput/p95, steady RSS, and
+  clean-reopen allocated footprint remain red. The separate eight-profile
+  AI-read matrix passes its bounded correctness, throughput, p95, and
+  clean-reopen allocation gates.
+  These remain workload-scoped results—not a universal database claim.
   Native now also persists access/removal evidence and the invocation/
   effectiveness ledger with Fjall-equality and reopen tests, closing the
   operator-data gap that previously prevented runtime entry points from using
@@ -362,7 +363,8 @@ validation, and the `vyrm-core` serde-only dependency boundary. Compiled-binary
 tests cover operator commands, hooks, explicit recovery, and both MCP eras. A
 separate scheduled/manual workflow executes four isolated nine-trial
 native/Fjall profiles with `--require-promotion` and retains each raw JSON
-artifact even on failure.
+artifact even on failure. It intentionally remains red until the corrected
+same-lifecycle general gate passes.
 
 ## Deliberate limits
 

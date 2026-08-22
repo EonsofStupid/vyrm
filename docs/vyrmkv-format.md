@@ -1,6 +1,8 @@
 # vyrmKV native format contract
 
-Status: M3 local promotion baseline passes. WAL, atomic-batch, manifest,
+Status: M3 persistence and semantic gates pass; corrected general performance
+promotion is blocked on write latency, steady RSS, and clean-reopen WAL
+footprint. WAL, atomic-batch, manifest,
 checkpoint, and physical snapshot-bundle formats are version 1; new immutable
 segments are version 3 and the reader retains explicit version-1/version-2
 compatibility.
@@ -228,11 +230,15 @@ checkpoint.
 Deterministic crash and storage-full injection covers the WAL-sync,
 segment-sync, successor-WAL-sync, and manifest-publication flush boundaries,
 plus compaction segment and manifest publication. Every cell reopens, verifies
-the accepted data, continues writing, and reopens again. The comparative
-benchmark is recorded in `vyrmkv-benchmark.md`. The current five-trial isolated
-local baseline passes its strict equal-or-better gate in every measured cell.
-Fjall remains live as a compatibility oracle until the result is reproduced in
-CI and across broader workloads; no general native performance claim is made.
+the accepted data, continues writing, and reopens again. Comparative evidence
+is recorded in `vyrmkv-benchmark.md`. The corrected lifecycle harness measures
+both engines while active, after clean reopen, and after explicit maintenance,
+and reports physical allocation rather than sparse apparent length. Semantics
+and the bounded AI-read matrix pass; an ordered bounded memtable walk also wins
+the clean-reopen read gate. General promotion remains blocked on write
+throughput/p95, steady RSS, and WAL footprint. Fjall remains live as a
+compatibility and performance oracle; no general native performance claim is
+made.
 
 Manifest publication now holds an OS-level exclusive lock for the publication
 session. It validates expected `CURRENT`, generation, and parent; syncs immutable

@@ -120,6 +120,39 @@ impl Store {
         &self.path
     }
 
+    /// Flushes and major-compacts every compatibility keyspace, blocking until
+    /// each requested operation completes. This is an explicit operator
+    /// maintenance boundary; ordinary writes continue to use Fjall's native
+    /// background policy.
+    pub fn compact_physical(&self) -> Result<()> {
+        let keyspaces = [
+            &self.claims,
+            &self.sequence_index,
+            &self.access,
+            &self.meta,
+            &self.invocations,
+            &self.projections,
+            &self.runtime_changes,
+            &self.runtime_records,
+            &self.runtime_relations,
+            &self.runtime_vectors,
+            &self.runtime_series,
+            &self.runtime_geo,
+            &self.runtime_objects,
+            &self.runtime_outbox,
+            &self.runtime_audit,
+            &self.runtime_commits,
+            &self.runtime_schemas,
+            &self.runtime_snapshots,
+        ];
+        for keyspace in keyspaces {
+            keyspace.as_ref().rotate_memtable_and_wait()?;
+            keyspace.as_ref().major_compact()?;
+        }
+        self.db.persist(fjall::PersistMode::SyncAll)?;
+        Ok(())
+    }
+
     /// Writes one durable, cross-keyspace snapshot for the explicit
     /// Fjall-to-vyrmKV migration path. Kept crate-private so ordinary runtime
     /// code cannot accidentally treat the compatibility adapter as an export

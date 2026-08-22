@@ -32,6 +32,27 @@ fn corpus() -> Vec<Claim> {
 }
 
 #[test]
+fn compatibility_physical_maintenance_preserves_exact_semantics_across_reopen() {
+    let parent = tempfile::tempdir().unwrap();
+    let root = parent.path().join("fjall");
+    let store = Store::open(&root).unwrap();
+    Engine::append_batch(&store, &corpus()).unwrap();
+    let before = Engine::claims_in_range(&store, 0, corpus().len() as u64).unwrap();
+    store.compact_physical().unwrap();
+    assert_eq!(
+        Engine::claims_in_range(&store, 0, corpus().len() as u64).unwrap(),
+        before
+    );
+    drop(store);
+
+    let reopened = Store::open(&root).unwrap();
+    assert_eq!(
+        Engine::claims_in_range(&reopened, 0, corpus().len() as u64).unwrap(),
+        before
+    );
+}
+
+#[test]
 fn all_engines_are_indistinguishable_through_the_port() {
     let dir = tempfile::tempdir().unwrap();
     let fjall = Store::open(dir.path()).unwrap();

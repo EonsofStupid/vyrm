@@ -110,14 +110,15 @@ disagree, `SPEC.md` is authoritative and this document is wrong.
 > physical snapshots; runtime leases create/reconcile manifest checkpoints; GC
 > derives reachability from `CURRENT` plus those pins. Crash and storage-full
 > injection now cover every flush and compaction durability boundary. Native
-> performance proof has a five-trial isolated-process baseline. After segment-v2
-> compression, sparse immutable reads, hardware CRC32C, and fresh steady-state
-> probe processes, native passes correctness and every strict equal-or-better
-> cell: write/read throughput, write/read p95, maintained recovery, steady RSS,
-> and disk. This closes the local M3 gap; Fjall remains live as an oracle until
-> CI and broader workload matrices reproduce the result. A second nine-trial
-> small-batch/standard/read-heavy/sustained matrix now passes every strict cell;
-> the sparse index holds byte ranges into canonical segment storage rather than
+> performance harness now records active, clean-reopen, and maintained states
+> for both engines plus sparse-aware allocated bytes. The former green result
+> used native-only maintenance and apparent file length, so it is retained only
+> as legacy diagnostic evidence. Corrected semantics pass. An ordered bounded
+> memtable walk makes native win clean-reopen and maintained reads; write
+> throughput/p95, steady RSS, and WAL footprint remain red. Fjall remains live
+> as an oracle while those gaps are fixed. The
+> dedicated eight-profile AI-read matrix passes its bounded gates.
+> The sparse index holds byte ranges into canonical segment storage rather than
 > duplicate heap keys. The deterministic physical mutation gate now adds
 > 20,000 puts/overwrites/deletes across 10 reopens and 8 compactions, with
 > byte-identical Fjall/native/independent-model state. The offline migration

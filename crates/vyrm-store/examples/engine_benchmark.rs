@@ -5,15 +5,18 @@
 //! single machine run into a universal performance claim.
 
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeSet;
 use std::fs;
 use std::hint::black_box;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use vyrm_core::{Claim, Predicate, Producer, Subject};
-use vyrm_store::{Engine, NativeEngine, Store};
+use vyrm_store::{
+    measure_storage_footprint, Engine, FootprintBytes, NativeEngine, StorageFootprint, Store,
+};
 
-const FORMAT_VERSION: u16 = 1;
+const FORMAT_VERSION: u16 = 2;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct Config {
@@ -54,15 +57,26 @@ struct BackendResult {
     write_batch_latency: Latency,
     read_operations_per_second: f64,
     read_latency: Latency,
+    maintained_read_operations_per_second: f64,
+    maintained_read_latency: Latency,
     recovery_ns: u64,
+    maintained_recovery_ns: u64,
     uncompacted_recovery_ns: Option<u64>,
     maintenance_ns: Option<u64>,
     write_peak_rss_kib: Option<u64>,
     peak_rss_kib: Option<u64>,
     maintenance_peak_rss_kib: Option<u64>,
-    disk_bytes: u64,
+    footprint: LifecycleFootprint,
     semantic_sequence: u64,
     native_maintenance: Option<MaintenanceEvidence>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct LifecycleFootprint {
+    active: StorageFootprint,
+    reopened: StorageFootprint,
+    maintained: StorageFootprint,
+    maintained_actions: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -94,9 +108,13 @@ struct Ratios {
     native_to_fjall_read_throughput: f64,
     native_to_fjall_write_p95: f64,
     native_to_fjall_read_p95: f64,
+    native_to_fjall_maintained_read_throughput: f64,
+    native_to_fjall_maintained_read_p95: f64,
     native_to_fjall_recovery: f64,
+    native_to_fjall_maintained_recovery: f64,
     native_to_fjall_peak_rss: Option<f64>,
-    native_to_fjall_disk: f64,
+    native_to_fjall_reopened_apparent: f64,
+    native_to_fjall_reopened_allocated: Option<f64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -114,6 +132,7 @@ struct Evidence {
     operating_system: String,
     logical_cpus: usize,
     aggregation: String,
+    footprint_contract: String,
     config: Config,
     fjall_trials: Vec<BackendResult>,
     native_trials: Vec<BackendResult>,
@@ -184,6 +203,8 @@ fn run() -> Result<(), String> {
             .map(usize::from)
             .unwrap_or(1),
         aggregation: "median of per-trial metrics; latency percentiles are medians of each isolated trial's percentile"
+            .into(),
+        footprint_contract: "active follows identical logical writes while the engine is open; reopened follows a clean close/open and verification without explicit maintenance and is the only cross-backend footprint promotion state; maintained follows each backend's declared native maintenance actions and is diagnostic-only"
             .into(),
         config,
         fjall_trials,
@@ -392,22 +413,58 @@ fn run_fjall(path: &Path, config: &Config) -> Result<BackendResult, String> {
     let store = Store::open(path).map_err(|error| error.to_string())?;
     let (write_samples, write_elapsed) = write_workload(&store, config)?;
     let write_peak_rss_kib = peak_rss_kib();
+    let active = storage_footprint(path)?;
     drop(store);
     let probe = launch_probe("fjall", path, config)?;
+    let reopened = storage_footprint(path)?;
+    let maintained_store = Store::open(path).map_err(|error| error.to_string())?;
+    let maintained_sequence = maintained_store
+        .sequence()
+        .map_err(|error| error.to_string())?;
+    let before_maintenance_verified = verify(&maintained_store, config, maintained_sequence)?;
+    let maintenance_started = Instant::now();
+    maintained_store
+        .compact_physical()
+        .map_err(|error| error.to_string())?;
+    let maintenance_ns = nanos(maintenance_started.elapsed());
+    let maintenance_peak_rss_kib = peak_rss_kib();
+    drop(maintained_store);
+    let maintained_store = Store::open(path).map_err(|error| error.to_string())?;
+    let maintained_sequence = maintained_store
+        .sequence()
+        .map_err(|error| error.to_string())?;
+    let maintained_verified = verify(&maintained_store, config, maintained_sequence)?;
+    drop(maintained_store);
+    let maintained_probe = launch_probe("fjall", path, config)?;
+    let maintained = storage_footprint(path)?;
     Ok(BackendResult {
         backend: "fjall".into(),
-        correctness_verified: probe.correctness_verified,
+        correctness_verified: probe.correctness_verified
+            && before_maintenance_verified
+            && maintained_verified,
         write_operations_per_second: rate(config.operations, write_elapsed),
         write_batch_latency: summarize(write_samples),
         read_operations_per_second: probe.read_operations_per_second,
         read_latency: probe.read_latency,
+        maintained_read_operations_per_second: maintained_probe.read_operations_per_second,
+        maintained_read_latency: maintained_probe.read_latency,
         recovery_ns: probe.recovery_ns,
+        maintained_recovery_ns: maintained_probe.recovery_ns,
         uncompacted_recovery_ns: None,
-        maintenance_ns: None,
+        maintenance_ns: Some(maintenance_ns),
         write_peak_rss_kib,
         peak_rss_kib: probe.peak_rss_kib,
-        maintenance_peak_rss_kib: None,
-        disk_bytes: directory_bytes(path)?,
+        maintenance_peak_rss_kib,
+        footprint: LifecycleFootprint {
+            active,
+            reopened,
+            maintained,
+            maintained_actions: vec![
+                "flush_all_keyspaces".into(),
+                "major_compact_all_keyspaces".into(),
+                "persist_and_clean_reopen".into(),
+            ],
+        },
         semantic_sequence: probe.semantic_sequence,
         native_maintenance: None,
     })
@@ -437,11 +494,12 @@ fn run_native(path: &Path, config: &Config) -> Result<BackendResult, String> {
         oversized_batches: required(physical.oversized_batches, "oversized batches")?,
     });
     let write_peak_rss_kib = peak_rss_kib();
+    let active = storage_footprint(path)?;
     drop(store);
-    let recovery_started = Instant::now();
+    let probe = launch_probe("native", path, config)?;
+    let reopened_footprint = storage_footprint(path)?;
     let reopened = NativeEngine::open(path).map_err(|error| error.to_string())?;
     let sequence = reopened.sequence().map_err(|error| error.to_string())?;
-    let recovery = recovery_started.elapsed();
     let verified = verify(&reopened, config, sequence)?;
     let maintenance_started = Instant::now();
     reopened.compact(1, 1).map_err(|error| error.to_string())?;
@@ -451,21 +509,41 @@ fn run_native(path: &Path, config: &Config) -> Result<BackendResult, String> {
     let maintenance = maintenance_started.elapsed();
     let maintenance_peak_rss_kib = peak_rss_kib();
     drop(reopened);
-    let probe = launch_probe("native", path, config)?;
+    let maintained_store = NativeEngine::open(path).map_err(|error| error.to_string())?;
+    let maintained_sequence = maintained_store
+        .sequence()
+        .map_err(|error| error.to_string())?;
+    let maintained_verified = verify(&maintained_store, config, maintained_sequence)?;
+    drop(maintained_store);
+    let maintained_probe = launch_probe("native", path, config)?;
+    let maintained = storage_footprint(path)?;
     Ok(BackendResult {
         backend: "native".into(),
-        correctness_verified: verified && probe.correctness_verified,
+        correctness_verified: verified && probe.correctness_verified && maintained_verified,
         write_operations_per_second: rate(config.operations, write_elapsed),
         write_batch_latency: summarize(write_samples),
         read_operations_per_second: probe.read_operations_per_second,
         read_latency: probe.read_latency,
+        maintained_read_operations_per_second: maintained_probe.read_operations_per_second,
+        maintained_read_latency: maintained_probe.read_latency,
         recovery_ns: probe.recovery_ns,
-        uncompacted_recovery_ns: Some(nanos(recovery)),
+        maintained_recovery_ns: maintained_probe.recovery_ns,
+        uncompacted_recovery_ns: Some(probe.recovery_ns),
         maintenance_ns: Some(nanos(maintenance)),
         write_peak_rss_kib,
         peak_rss_kib: probe.peak_rss_kib,
         maintenance_peak_rss_kib,
-        disk_bytes: directory_bytes(path)?,
+        footprint: LifecycleFootprint {
+            active,
+            reopened: reopened_footprint,
+            maintained,
+            maintained_actions: vec![
+                "flush_active_memtable".into(),
+                "compact_unpinned_history".into(),
+                "collect_unreachable_files".into(),
+                "clean_reopen".into(),
+            ],
+        },
         semantic_sequence: probe.semantic_sequence,
         native_maintenance,
     })
@@ -586,7 +664,25 @@ fn aggregate(backend: &str, trials: &[BackendResult]) -> BackendResult {
                 .collect(),
         ),
         read_latency: aggregate_latency(trials.iter().map(|trial| &trial.read_latency).collect()),
+        maintained_read_operations_per_second: median_f64(
+            trials
+                .iter()
+                .map(|trial| trial.maintained_read_operations_per_second)
+                .collect(),
+        ),
+        maintained_read_latency: aggregate_latency(
+            trials
+                .iter()
+                .map(|trial| &trial.maintained_read_latency)
+                .collect(),
+        ),
         recovery_ns: median_u64(trials.iter().map(|trial| trial.recovery_ns).collect()),
+        maintained_recovery_ns: median_u64(
+            trials
+                .iter()
+                .map(|trial| trial.maintained_recovery_ns)
+                .collect(),
+        ),
         uncompacted_recovery_ns: median_option(
             trials
                 .iter()
@@ -617,7 +713,7 @@ fn aggregate(backend: &str, trials: &[BackendResult]) -> BackendResult {
                 .filter_map(|trial| trial.maintenance_peak_rss_kib)
                 .collect(),
         ),
-        disk_bytes: median_u64(trials.iter().map(|trial| trial.disk_bytes).collect()),
+        footprint: aggregate_lifecycle_footprint(trials),
         semantic_sequence: median_u64(trials.iter().map(|trial| trial.semantic_sequence).collect()),
         native_maintenance: aggregate_maintenance(
             trials
@@ -625,6 +721,67 @@ fn aggregate(backend: &str, trials: &[BackendResult]) -> BackendResult {
                 .filter_map(|trial| trial.native_maintenance.as_ref())
                 .collect(),
         ),
+    }
+}
+
+fn aggregate_lifecycle_footprint(trials: &[BackendResult]) -> LifecycleFootprint {
+    LifecycleFootprint {
+        active: aggregate_storage_footprint(
+            trials.iter().map(|trial| &trial.footprint.active).collect(),
+        ),
+        reopened: aggregate_storage_footprint(
+            trials
+                .iter()
+                .map(|trial| &trial.footprint.reopened)
+                .collect(),
+        ),
+        maintained: aggregate_storage_footprint(
+            trials
+                .iter()
+                .map(|trial| &trial.footprint.maintained)
+                .collect(),
+        ),
+        maintained_actions: trials[0].footprint.maintained_actions.clone(),
+    }
+}
+
+fn aggregate_storage_footprint(values: Vec<&StorageFootprint>) -> StorageFootprint {
+    let classes = values
+        .iter()
+        .flat_map(|value| value.by_class.keys().cloned())
+        .collect::<BTreeSet<_>>();
+    let by_class = classes
+        .into_iter()
+        .map(|class| {
+            let measurements = values
+                .iter()
+                .map(|value| value.by_class.get(&class).cloned().unwrap_or_default())
+                .collect::<Vec<_>>();
+            (class, aggregate_footprint_bytes(&measurements))
+        })
+        .collect();
+    let allocated = values
+        .iter()
+        .filter_map(|value| value.allocated_bytes)
+        .collect::<Vec<_>>();
+    StorageFootprint {
+        apparent_bytes: median_u64(values.iter().map(|value| value.apparent_bytes).collect()),
+        allocated_bytes: (allocated.len() == values.len()).then(|| median_u64(allocated)),
+        allocated_bytes_source: values[0].allocated_bytes_source.clone(),
+        files: median_u64(values.iter().map(|value| value.files).collect()),
+        by_class,
+    }
+}
+
+fn aggregate_footprint_bytes(values: &[FootprintBytes]) -> FootprintBytes {
+    let allocated = values
+        .iter()
+        .filter_map(|value| value.allocated_bytes)
+        .collect::<Vec<_>>();
+    FootprintBytes {
+        apparent_bytes: median_u64(values.iter().map(|value| value.apparent_bytes).collect()),
+        allocated_bytes: (allocated.len() == values.len()).then(|| median_u64(allocated)),
+        files: median_u64(values.iter().map(|value| value.files).collect()),
     }
 }
 
@@ -700,12 +857,25 @@ fn ratios(fjall: &BackendResult, native: &BackendResult) -> Ratios {
             / fjall.write_batch_latency.p95_ns.max(1) as f64,
         native_to_fjall_read_p95: native.read_latency.p95_ns as f64
             / fjall.read_latency.p95_ns.max(1) as f64,
+        native_to_fjall_maintained_read_throughput: native.maintained_read_operations_per_second
+            / fjall.maintained_read_operations_per_second,
+        native_to_fjall_maintained_read_p95: native.maintained_read_latency.p95_ns as f64
+            / fjall.maintained_read_latency.p95_ns.max(1) as f64,
         native_to_fjall_recovery: native.recovery_ns as f64 / fjall.recovery_ns.max(1) as f64,
+        native_to_fjall_maintained_recovery: native.maintained_recovery_ns as f64
+            / fjall.maintained_recovery_ns.max(1) as f64,
         native_to_fjall_peak_rss: native
             .peak_rss_kib
             .zip(fjall.peak_rss_kib)
             .map(|(native, fjall)| native as f64 / fjall.max(1) as f64),
-        native_to_fjall_disk: native.disk_bytes as f64 / fjall.disk_bytes.max(1) as f64,
+        native_to_fjall_reopened_apparent: native.footprint.reopened.apparent_bytes as f64
+            / fjall.footprint.reopened.apparent_bytes.max(1) as f64,
+        native_to_fjall_reopened_allocated: native
+            .footprint
+            .reopened
+            .allocated_bytes
+            .zip(fjall.footprint.reopened.allocated_bytes)
+            .map(|(native, fjall)| native as f64 / fjall.max(1) as f64),
     }
 }
 
@@ -724,10 +894,19 @@ fn promotion(fjall: &BackendResult, native: &BackendResult, ratios: &Ratios) -> 
         failures.push("native write p95 exceeds Fjall".into());
     }
     if ratios.native_to_fjall_read_p95 > 1.0 {
-        failures.push("native read p95 exceeds Fjall".into());
+        failures.push("native clean-reopen read p95 exceeds Fjall".into());
+    }
+    if ratios.native_to_fjall_maintained_read_throughput < 1.0 {
+        failures.push("native maintained read throughput is below Fjall".into());
+    }
+    if ratios.native_to_fjall_maintained_read_p95 > 1.0 {
+        failures.push("native maintained read p95 exceeds Fjall".into());
     }
     if ratios.native_to_fjall_recovery > 1.0 {
-        failures.push("native cold recovery exceeds Fjall".into());
+        failures.push("native clean-reopen recovery exceeds Fjall".into());
+    }
+    if ratios.native_to_fjall_maintained_recovery > 1.0 {
+        failures.push("native maintained recovery exceeds Fjall".into());
     }
     if ratios
         .native_to_fjall_peak_rss
@@ -735,11 +914,14 @@ fn promotion(fjall: &BackendResult, native: &BackendResult, ratios: &Ratios) -> 
     {
         failures.push("native peak RSS exceeds Fjall".into());
     }
-    if ratios.native_to_fjall_disk > 1.0 {
-        failures.push("native disk footprint exceeds Fjall".into());
+    if ratios
+        .native_to_fjall_reopened_allocated
+        .is_some_and(|ratio| ratio > 1.0)
+    {
+        failures.push("native clean-reopen allocated footprint exceeds Fjall".into());
     }
     PromotionVerdict {
-        policy: "correctness required; native must be equal-or-better in every measured dimension"
+        policy: "correctness required; native must be equal-or-better for throughput, p95, symmetric clean-reopen recovery/RSS, and allocated footprint when the platform exposes it; backend-native maintained footprints are diagnostic-only"
             .into(),
         passes: failures.is_empty(),
         failures,
@@ -757,20 +939,6 @@ fn peak_rss_kib() -> Option<u64> {
     })
 }
 
-fn directory_bytes(path: &Path) -> Result<u64, String> {
-    let mut bytes = 0u64;
-    for entry in fs::read_dir(path).map_err(|error| error.to_string())? {
-        let entry = entry.map_err(|error| error.to_string())?;
-        let metadata = entry.metadata().map_err(|error| error.to_string())?;
-        if metadata.is_dir() {
-            bytes = bytes
-                .checked_add(directory_bytes(&entry.path())?)
-                .ok_or_else(|| "directory byte count overflowed".to_owned())?;
-        } else if metadata.is_file() {
-            bytes = bytes
-                .checked_add(metadata.len())
-                .ok_or_else(|| "directory byte count overflowed".to_owned())?;
-        }
-    }
-    Ok(bytes)
+fn storage_footprint(path: &Path) -> Result<StorageFootprint, String> {
+    measure_storage_footprint(path).map_err(|error| error.to_string())
 }
