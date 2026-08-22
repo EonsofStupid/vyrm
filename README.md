@@ -338,9 +338,13 @@ Fjall's sparse 64 MiB journal as physically consumed space, so it is retained
 only as legacy diagnostic evidence. The corrected lifecycle harness measures
 both engines while active, after clean reopen, and after explicit maintenance,
 with apparent and allocated-byte accounting. Exact semantics pass, but the
-general append/replay promotion is currently red. A corrected ordered range
-walk makes native win both clean-reopen and maintained reads; write throughput/
-p95, steady RSS, and clean-reopen allocated footprint remain behind Fjall.
+canonical local append/replay promotion is now green in a nine-trial bounded
+fixture. Compact sequence references, cached batch validation, inline
+single-version memtable chains, streaming one-pass WAL recovery, keyspace-local
+mutation ordering, and a bounded first-WAL extent reservation moved every
+strict cell ahead of Fjall: 1.333× write throughput, 0.769× write p95, 1.393×
+clean-reopen read throughput, 0.710× read p95, 0.160× recovery time, 0.936×
+peak RSS, and 0.915× allocated footprint.
 The dedicated eight-profile AI-read matrix passes its bounded correctness,
 throughput, p95, and clean-reopen allocation gates. See the
 [benchmark audit](docs/vyrmkv-benchmark.md) and
@@ -352,10 +356,10 @@ Native compaction is now a bounded leveled streaming step with deterministic
 candidate selection, key-partitioned output, protected-snapshot pruning, and
 non-overlapping levels above L0. Segment-v3 validation derives authenticated
 block-local negative filters that reject point misses before block I/O without
-introducing another persisted truth. The next storage-performance targets are
-write latency, recovered-memtable residency, and WAL footprint. Asynchronous
-immutable-memtable flush and family-aware maintenance remain explicit gates
-rather than implied capabilities.
+introducing another persisted truth. These are local fixture claims, not
+general database superiority: sustained/remote repetition, asynchronous
+immutable-memtable flush, and family-aware maintenance remain explicit gates
+before Fjall compatibility retirement.
 The canonical `PersistentEngine` now creates native stores for missing paths and
 reopens them by their authenticated `CURRENT` marker. CLI, `vyrmd`, and
 Connectome use that selector. Existing non-native directories remain on the
@@ -397,6 +401,9 @@ statistically significant model-performance claim.
 - [`docs/runtime-tracing-operator-knowledge.md`](docs/runtime-tracing-operator-knowledge.md)
   — persisted trace contract, HelixDB comparison, per-project operator surface,
   and the non-authoritative pgvector knowledge-adapter boundary
+- [`docs/context-path-profiler.md`](docs/context-path-profiler.md) — boundary and
+  delivery gates for the future public prompt-to-context path visualizer,
+  SSOT diagnostics, replay, and evidence-gated pruning workflow
 - [`docs/vyrmds-architecture-research.md`](docs/vyrmds-architecture-research.md)
   — pinned upstream research, target data-runtime boundaries, and gated build
   sequence for `vyrmQL`/`vyrmMX`/`vyrmDS`/native `vyrmKV`

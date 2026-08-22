@@ -1,5 +1,5 @@
 use crate::{Error, Result, WAL_MAX_PAYLOAD_BYTES};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 
 pub const BATCH_FORMAT_VERSION: u16 = 1;
 const BATCH_MAGIC: &[u8; 8] = b"VYRBAT01";
@@ -40,16 +40,20 @@ impl Mutation {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct WriteBatch {
-    pub operations: Vec<Mutation>,
+    pub(crate) operations: Vec<Mutation>,
+    #[serde(skip)]
+    encoded_len: usize,
 }
 
 impl WriteBatch {
     pub fn new(operations: Vec<Mutation>) -> Result<Self> {
-        let batch = Self { operations };
-        batch.validate()?;
-        Ok(batch)
+        let encoded_len = validate_operations(&operations)?;
+        Ok(Self {
+            operations,
+            encoded_len,
+        })
     }
 
     pub fn len(&self) -> usize {
@@ -60,11 +64,14 @@ impl WriteBatch {
         self.operations.is_empty()
     }
 
+    pub fn operations(&self) -> &[Mutation] {
+        &self.operations
+    }
+
     pub fn encode(&self) -> Result<Vec<u8>> {
-        let encoded_len = self.encoded_len()?;
         let count = u32::try_from(self.operations.len())
             .map_err(|_| Error::InvalidBatch("operation count exceeds u32".into()))?;
-        let mut output = Vec::with_capacity(encoded_len);
+        let mut output = Vec::with_capacity(self.encoded_len);
         output.extend_from_slice(BATCH_MAGIC);
         output.extend_from_slice(&BATCH_FORMAT_VERSION.to_be_bytes());
         output.extend_from_slice(&0u16.to_be_bytes());
@@ -89,13 +96,18 @@ impl WriteBatch {
             output.extend_from_slice(key);
             output.extend_from_slice(value);
         }
-        debug_assert_eq!(output.len(), encoded_len);
+        debug_assert_eq!(output.len(), self.encoded_len);
         Ok(output)
     }
 
     pub fn decode(bytes: &[u8]) -> Result<Self> {
         if bytes.len() < BATCH_HEADER_BYTES {
             return invalid("incomplete batch header");
+        }
+        if bytes.len() > WAL_MAX_PAYLOAD_BYTES {
+            return invalid(format!(
+                "encoded batch exceeds {WAL_MAX_PAYLOAD_BYTES} bytes"
+            ));
         }
         if &bytes[0..8] != BATCH_MAGIC {
             return invalid("batch magic does not match");
@@ -160,39 +172,53 @@ impl WriteBatch {
                 bytes.len() - cursor
             ));
         }
-        Self::new(operations)
+        Ok(Self {
+            operations,
+            encoded_len: bytes.len(),
+        })
     }
+}
 
-    fn validate(&self) -> Result<()> {
-        self.encoded_len().map(|_| ())
+impl<'de> Deserialize<'de> for WriteBatch {
+    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        struct SerializedWriteBatch {
+            operations: Vec<Mutation>,
+        }
+
+        let serialized = SerializedWriteBatch::deserialize(deserializer)?;
+        Self::new(serialized.operations).map_err(serde::de::Error::custom)
     }
+}
 
-    fn encoded_len(&self) -> Result<usize> {
-        if self.operations.is_empty() || self.operations.len() > MAX_OPERATIONS {
+fn validate_operations(operations: &[Mutation]) -> Result<usize> {
+    if operations.is_empty() || operations.len() > MAX_OPERATIONS {
+        return Err(Error::InvalidBatch(format!(
+            "operation count must be in 1..={MAX_OPERATIONS}"
+        )));
+    }
+    let mut encoded_len = BATCH_HEADER_BYTES;
+    for operation in operations {
+        operation.validate()?;
+        let value_len = match operation {
+            Mutation::Put { value, .. } => value.len(),
+            Mutation::Delete { .. } => 0,
+        };
+        encoded_len = encoded_len
+            .checked_add(OP_HEADER_BYTES)
+            .and_then(|length| length.checked_add(operation.key().len()))
+            .and_then(|length| length.checked_add(value_len))
+            .ok_or_else(|| Error::InvalidBatch("encoded batch length overflow".into()))?;
+        if encoded_len > WAL_MAX_PAYLOAD_BYTES {
             return Err(Error::InvalidBatch(format!(
-                "operation count must be in 1..={MAX_OPERATIONS}"
+                "encoded batch exceeds {WAL_MAX_PAYLOAD_BYTES} bytes"
             )));
         }
-        let mut encoded_len = BATCH_HEADER_BYTES;
-        for operation in &self.operations {
-            operation.validate()?;
-            let value_len = match operation {
-                Mutation::Put { value, .. } => value.len(),
-                Mutation::Delete { .. } => 0,
-            };
-            encoded_len = encoded_len
-                .checked_add(OP_HEADER_BYTES)
-                .and_then(|length| length.checked_add(operation.key().len()))
-                .and_then(|length| length.checked_add(value_len))
-                .ok_or_else(|| Error::InvalidBatch("encoded batch length overflow".into()))?;
-            if encoded_len > WAL_MAX_PAYLOAD_BYTES {
-                return Err(Error::InvalidBatch(format!(
-                    "encoded batch exceeds {WAL_MAX_PAYLOAD_BYTES} bytes"
-                )));
-            }
-        }
-        Ok(encoded_len)
     }
+    Ok(encoded_len)
 }
 
 fn invalid<T>(reason: impl Into<String>) -> Result<T> {

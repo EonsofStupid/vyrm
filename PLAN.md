@@ -114,9 +114,11 @@ disagree, `SPEC.md` is authoritative and this document is wrong.
 > for both engines plus sparse-aware allocated bytes. The former green result
 > used native-only maintenance and apparent file length, so it is retained only
 > as legacy diagnostic evidence. Corrected semantics pass. An ordered bounded
-> memtable walk makes native win clean-reopen and maintained reads; write
-> throughput/p95, steady RSS, and WAL footprint remain red. Fjall remains live
-> as an oracle while those gaps are fixed. The
+> memtable walk first closed the read regression. Compact sequence references,
+> prepared batches, inline single-version chains, streaming one-pass recovery,
+> keyspace-local writes, and bounded first-WAL reservation now make the
+> corrected nine-trial local fixture pass every strict performance cell. Fjall
+> remains live as an oracle pending remote/sustained reproduction. The
 > dedicated eight-profile AI-read matrix passes its bounded gates.
 > The sparse index holds byte ranges into canonical segment storage rather than
 > duplicate heap keys. The deterministic physical mutation gate now adds

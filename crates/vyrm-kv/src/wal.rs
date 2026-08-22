@@ -11,6 +11,8 @@ const RECORD_MAGIC: &[u8; 4] = b"VYR1";
 const FILE_HEADER_BYTES: usize = 16;
 const RECORD_HEADER_BYTES: usize = 32;
 const RECORD_KIND_BATCH: u8 = 1;
+const INITIAL_WAL_RESERVATION_BYTES: u64 = 1024 * 1024;
+const INITIAL_WAL_RESERVATION_MIN_BATCH_BYTES: usize = 16 * 1024;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -76,6 +78,14 @@ pub struct Recovery {
     pub torn_tail: Option<u64>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct RecoverySummary {
+    pub recovered_through: u64,
+    pub valid_bytes: u64,
+    pub torn_tail: Option<u64>,
+    pub payload_bytes: usize,
+}
+
 pub struct WalWriter {
     path: PathBuf,
     file: File,
@@ -116,7 +126,11 @@ impl WalWriter {
     }
 
     pub fn open_at(path: &Path, starting_sequence: u64) -> Result<Self> {
-        let recovery = recover_from(path, starting_sequence)?;
+        let recovery = replay_from(path, starting_sequence, |_| Ok(()))?;
+        Self::open_after_recovery(path, recovery)
+    }
+
+    pub(crate) fn open_after_recovery(path: &Path, recovery: RecoverySummary) -> Result<Self> {
         if let Some(offset) = recovery.torn_tail {
             return Err(Error::TornTail { offset });
         }
@@ -163,6 +177,12 @@ impl WalWriter {
             .checked_add(RECORD_HEADER_BYTES as u64)
             .and_then(|value| value.checked_add(batch.payload.len() as u64))
             .ok_or_else(|| Error::InvalidBatch("WAL offset overflow".into()))?;
+        if offset == FILE_HEADER_BYTES as u64
+            && batch.first_sequence == 1
+            && batch.payload.len() >= INITIAL_WAL_RESERVATION_MIN_BATCH_BYTES
+        {
+            reserve_initial_wal_extent(&self.file);
+        }
         let write = (|| -> std::io::Result<()> {
             let written = loop {
                 match self
@@ -251,6 +271,27 @@ pub fn recover(path: &Path) -> Result<Recovery> {
 }
 
 pub fn recover_from(path: &Path, starting_sequence: u64) -> Result<Recovery> {
+    let mut batches = Vec::new();
+    let summary = replay_from(path, starting_sequence, |batch| {
+        batches.push(batch);
+        Ok(())
+    })?;
+    Ok(Recovery {
+        recovered_through: summary.recovered_through,
+        batches,
+        valid_bytes: summary.valid_bytes,
+        torn_tail: summary.torn_tail,
+    })
+}
+
+pub(crate) fn replay_from<F>(
+    path: &Path,
+    starting_sequence: u64,
+    mut replay: F,
+) -> Result<RecoverySummary>
+where
+    F: FnMut(RecoveredBatch) -> Result<()>,
+{
     if starting_sequence == 0 {
         return Err(Error::InvalidBatch(
             "WAL recovery sequence must be non-zero".into(),
@@ -268,10 +309,10 @@ pub fn recover_from(path: &Path, starting_sequence: u64) -> Result<Recovery> {
     file.read_exact(&mut file_header_bytes)?;
     validate_file_header(&file_header_bytes)?;
 
-    let mut batches = Vec::new();
     let mut offset = FILE_HEADER_BYTES as u64;
     let mut expected_sequence = starting_sequence;
     let mut torn_tail = None;
+    let mut payload_bytes = 0usize;
     while offset < length {
         let remaining = length - offset;
         if remaining < RECORD_HEADER_BYTES as u64 {
@@ -313,13 +354,20 @@ pub fn recover_from(path: &Path, starting_sequence: u64) -> Result<Recovery> {
                 ),
             });
         }
-        batches.push(RecoveredBatch {
+        payload_bytes =
+            payload_bytes
+                .checked_add(payload.len())
+                .ok_or_else(|| Error::Corruption {
+                    offset,
+                    reason: "recovered payload byte count overflow".into(),
+                })?;
+        replay(RecoveredBatch {
             offset,
             first_sequence: decoded.first_sequence,
             last_sequence: decoded.last_sequence,
             checksum: decoded.checksum,
             payload,
-        });
+        })?;
         expected_sequence =
             decoded
                 .last_sequence
@@ -330,11 +378,11 @@ pub fn recover_from(path: &Path, starting_sequence: u64) -> Result<Recovery> {
                 })?;
         offset = end;
     }
-    Ok(Recovery {
+    Ok(RecoverySummary {
         recovered_through: expected_sequence.saturating_sub(1),
-        batches,
         valid_bytes: offset,
         torn_tail,
+        payload_bytes,
     })
 }
 
@@ -471,6 +519,26 @@ fn crc32c(chunks: &[&[u8]]) -> u32 {
         .iter()
         .fold(0, |checksum, chunk| crc32c::crc32c_append(checksum, chunk))
 }
+
+#[cfg(target_os = "linux")]
+fn reserve_initial_wal_extent(file: &File) {
+    use std::os::fd::AsRawFd;
+
+    // Best effort only: reservation must never turn a write that fits into an
+    // artificial ENOSPC. KEEP_SIZE leaves the recovery-visible length at the
+    // last acknowledged byte, and this bounded first extent is never grown.
+    unsafe {
+        libc::fallocate(
+            file.as_raw_fd(),
+            libc::FALLOC_FL_KEEP_SIZE,
+            0,
+            INITIAL_WAL_RESERVATION_BYTES as libc::off_t,
+        );
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+fn reserve_initial_wal_extent(_file: &File) {}
 
 #[cfg(test)]
 mod tests {

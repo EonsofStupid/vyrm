@@ -589,9 +589,11 @@ frozen in `docs/vyrmkv-benchmark.md`. It records active, clean-reopen, and
 maintained states for both engines plus physical allocated bytes. The former
 green M3 result used asymmetric maintenance and sparse apparent length; it is
 legacy evidence. Corrected semantics pass. An ordered bounded memtable walk
-makes native win clean-reopen and maintained reads, while write throughput/p95,
-steady RSS, and WAL footprint remain red. The separate
-eight-profile AI-read matrix passes its bounded gates. The local mixed
+makes native win clean-reopen and maintained reads. Compact sequence
+references, prepared batches, inline single-version chains, streaming one-pass
+recovery, keyspace-local writes, and bounded initial-WAL reservation now make
+the corrected nine-trial local general fixture pass every strict cell. The
+separate eight-profile AI-read matrix also passes its bounded gates. The local mixed
 update/delete gate passes 20,000 operations
 with 10 reopens and 8 compactions against Fjall and an independent model. The
 existing-store rehearsal copies all 18 canonical keyspaces through an

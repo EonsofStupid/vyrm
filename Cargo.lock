@@ -3225,10 +3225,12 @@ name = "vyrm-kv"
 version = "0.1.0"
 dependencies = [
  "crc32c",
+ "libc",
  "lz4_flex 0.14.0",
  "ring",
  "serde",
  "serde_json",
+ "smallvec",
  "tempfile",
  "vyrm-core",
 ]

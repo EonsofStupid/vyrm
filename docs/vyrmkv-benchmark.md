@@ -1,8 +1,7 @@
 # vyrmKV promotion benchmark
 
-Status: the physical mixed-mutation soak and migration rehearsal pass. The
-general M3 performance promotion is revoked by corrected lifecycle evidence;
-the dedicated AI-read matrix still passes its bounded gates.
+Status: the physical mixed-mutation soak, migration rehearsal, corrected local
+general promotion, and dedicated AI-read matrix pass their bounded gates.
 
 The benchmark runs Fjall and native `vyrmKV` in separate fresh child processes.
 Both receive the same valid claim corpus, authoritative batch boundaries, and
@@ -18,7 +17,7 @@ Run the checked-in workload:
 
 ```console
 cargo run --release --locked -p vyrm-store --example engine_benchmark -- \
-  --trials 5 --operations 2048 --batch-size 64 \
+  --trials 9 --operations 2048 --batch-size 64 \
   --reads 1024 --read-width 32 \
   --output eval/results/2026-08-22-vyrmkv-corrected-standard.json
 ```
@@ -29,31 +28,52 @@ throughput; ratios below 1 favor native for latency, RSS, and footprint:
 
 | Metric | Native versus Fjall | Gate |
 |---|---:|---|
-| Authoritative write throughput | 0.881× | Fail |
-| Clean-reopen read throughput | 1.553× | Pass |
-| Authoritative write p95 | 1.181× | Fail |
-| Clean-reopen read p95 | 0.675× | Pass |
-| Maintained read throughput | 1.964× | Pass |
-| Maintained read p95 | 0.534× | Pass |
-| Clean-reopen recovery | 0.371× | Pass |
-| Maintained recovery | 0.274× | Pass |
-| Steady probe peak RSS | 1.186× | Fail |
-| Clean-reopen allocated footprint | 1.213× | Fail |
+| Authoritative write throughput | 1.333× | Pass |
+| Clean-reopen read throughput | 1.393× | Pass |
+| Authoritative write p95 | 0.769× | Pass |
+| Clean-reopen read p95 | 0.710× | Pass |
+| Maintained read throughput | 1.248× | Diagnostic |
+| Maintained read p95 | 0.808× | Diagnostic |
+| Clean-reopen recovery | 0.160× | Pass |
+| Maintained recovery | 0.230× | Diagnostic |
+| Steady probe peak RSS | 0.936× | Pass |
+| Clean-reopen allocated footprint | 0.915× | Pass |
 
-Correctness passed for every trial, but the general promotion gate fails. The
-corrected range walk removes the previous full-memtable clone: clean-reopen
-native read throughput is now 1.553× Fjall with 0.675× p95, while the maintained
-path remains stronger. Native write throughput/p95, steady RSS, and unmaintained
-WAL footprint remain red. Those gaps—not benchmark exceptions—are the next
-kernel targets.
+Correctness and every strict performance cell passed in all nine aggregated
+trials. The change set removes duplicated inline claims from current sequence
+index writes, caches validated batch length, keeps the common one-version chain
+inline, transfers decoded recovery ownership directly into the memtable, and
+streams each WAL frame exactly once into the database open path. Native writes
+are grouped by logical keyspace for ordered-tree locality. On Linux, only a
+substantial first batch in the initial WAL receives one best-effort 1 MiB
+`KEEP_SIZE` reservation; it never changes logical recovery length, grows, or
+applies to successor WALs. The high-entropy AI footprint gate verifies that
+this bounded reservation does not erase Vyrm's allocation result.
 
 Fjall remains a compatibility and performance oracle. The scheduled and
-manually dispatchable workflow runs with `--require-promotion`, so it stays red
-until the same-lifecycle general gate passes. The repository may claim only the
-bounded results recorded here; it may not infer general superiority over
+manually dispatchable workflow runs with `--require-promotion`; remote and
+sustained repetitions remain retirement gates. The repository may claim only
+the bounded results recorded here; it may not infer general superiority over
 Fjall, SurrealDB, Qdrant, or other databases.
 
 Evidence: [`2026-08-22-vyrmkv-corrected-standard.json`](../eval/results/2026-08-22-vyrmkv-corrected-standard.json).
+
+## Scale qualification remains open
+
+The scheduled five-profile matrix is intentionally stricter than the canonical
+fixture. On the same 2026-08-22 host, the final format-3 code passes the
+small-batch and standard profiles. Read-heavy misses only raw peak RSS at
+1.015× Fjall. Sustained misses raw peak RSS at 1.123×, despite winning write
+throughput/p95, clean-reopen read throughput/p95, recovery, and allocated
+footprint. The 70,000-operation extended profile records 1.181× RSS and 1.004×
+allocated footprint; its other promotion cells pass. Backend-native maintained
+reads are retained in every artifact but are diagnostic because the maintenance
+actions differ.
+
+Accordingly, the canonical and eight AI profiles are green, but the scheduled
+matrix remains red at scale. Fjall compatibility retirement still requires a
+more compact mutable byte representation plus repeated sustained/remote
+evidence; the repository does not average those failures away.
 
 ## Invalidated legacy M3/M3.5 evidence
 
@@ -96,8 +116,8 @@ maintenance and sparse-file accounting invalidate their performance verdicts.
 The sustained result is the combined effect of disk-resident blocks, compact
 `u32` record offsets, the
 strict generation-based LRU, streaming one-segment scans, and self-serving
-native sequence values; no benchmark threshold was relaxed in that legacy
-harness.
+native sequence values (the former inline format, no longer emitted); no
+benchmark threshold was relaxed in that legacy harness.
 
 Raw evidence:
 
@@ -116,8 +136,7 @@ It reported 1.214× write throughput, 1.289× read throughput, 0.853× write p95
 It preserves a larger-workload diagnostic, not valid promotion evidence.
 
 The scheduled/manual general workflow preserves one artifact per profile and
-uses `--require-promotion`; corrected same-lifecycle execution is expected to
-fail until the remaining write, RSS, and clean-reopen footprint gaps are fixed.
+uses `--require-promotion`; the corrected local canonical execution now passes.
 The legacy matrix spans corpus size, batch size, read count, and range width. It
 still uses an append
 then bounded-replay claim corpus; update/delete mixtures, long-duration soak,

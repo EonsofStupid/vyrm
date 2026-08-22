@@ -1,4 +1,5 @@
 use crate::segment::{block_cache_stats, new_block_cache, SharedBlockCache};
+use crate::wal::replay_from;
 use crate::{
     recover_from, AppendReceipt, Checkpoint, Durability, Error, Manifest, ManifestStore, Memtable,
     Result, Segment, SnapshotBundle, SnapshotBundleFile, SnapshotExportBoundary, SnapshotSegment,
@@ -346,20 +347,20 @@ impl Database {
             segments.push(segment);
         }
         let path = wal_path(root, manifest.wal_start_sequence);
-        let recovery = recover_from(&path, manifest.wal_start_sequence)?;
+        let mut memtable = Memtable::at_sequence(manifest.durable_sequence);
+        let recovery = replay_from(&path, manifest.wal_start_sequence, |batch| {
+            memtable.apply_owned_recovered(batch)
+        })?;
         if let Some(offset) = recovery.torn_tail {
             return Err(Error::TornTail { offset });
         }
-        let memtable = Memtable::recover_from(&recovery.batches, manifest.durable_sequence)?;
-        let wal_payload_bytes = recovery.batches.iter().fold(0usize, |bytes, batch| {
-            bytes.saturating_add(batch.payload.len())
-        });
+        let wal_payload_bytes = recovery.payload_bytes;
         let maintenance_stats = MaintenanceStats {
             peak_wal_payload_bytes: wal_payload_bytes,
             peak_memtable_versions: memtable.version_count(),
             ..MaintenanceStats::default()
         };
-        let wal = WalWriter::open_at(&path, manifest.wal_start_sequence)?;
+        let wal = WalWriter::open_after_recovery(&path, recovery)?;
         Ok(Self {
             root: root.to_owned(),
             manifests,

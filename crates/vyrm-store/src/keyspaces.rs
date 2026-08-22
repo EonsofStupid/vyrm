@@ -10,10 +10,9 @@ use fjall::PersistMode;
 
 /// Authoritative claims.
 pub const CLAIMS: &str = "claims";
-/// Sequence index: append sequence to claim key. Native Vyrm additionally
-/// carries canonical claim bytes in a versioned value envelope so replay needs
-/// one bounded range scan; the Fjall adapter and legacy native values retain
-/// the key-only representation.
+/// Sequence index: append sequence to canonical claim key. Current native and
+/// Fjall writes use the compact key reference; native still reads the legacy
+/// inline `VYRNSI01` claim envelope during format transition.
 ///
 /// Replaces the `events` keyspace carried over from the prior runtime, which was
 /// allocated for a term the specification never defined and which nothing wrote

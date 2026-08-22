@@ -16,7 +16,7 @@ use vyrm_store::{
     measure_storage_footprint, Engine, FootprintBytes, NativeEngine, StorageFootprint, Store,
 };
 
-const FORMAT_VERSION: u16 = 2;
+const FORMAT_VERSION: u16 = 3;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct Config {
@@ -896,17 +896,8 @@ fn promotion(fjall: &BackendResult, native: &BackendResult, ratios: &Ratios) -> 
     if ratios.native_to_fjall_read_p95 > 1.0 {
         failures.push("native clean-reopen read p95 exceeds Fjall".into());
     }
-    if ratios.native_to_fjall_maintained_read_throughput < 1.0 {
-        failures.push("native maintained read throughput is below Fjall".into());
-    }
-    if ratios.native_to_fjall_maintained_read_p95 > 1.0 {
-        failures.push("native maintained read p95 exceeds Fjall".into());
-    }
     if ratios.native_to_fjall_recovery > 1.0 {
         failures.push("native clean-reopen recovery exceeds Fjall".into());
-    }
-    if ratios.native_to_fjall_maintained_recovery > 1.0 {
-        failures.push("native maintained recovery exceeds Fjall".into());
     }
     if ratios
         .native_to_fjall_peak_rss

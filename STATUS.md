@@ -1,4 +1,4 @@
-# Runtime status — 2026-08-21
+# Runtime status — 2026-08-22
 
 vyrm now implements the complete runtime loop described by the current plan.
 It is pre-release software, but the listed behavior is executable and tested,
@@ -300,8 +300,8 @@ not roadmap language.
   concurrent serialization recovery, and performance evidence remain open. No
   live pgvector superiority claim is made.
 - M3 native storage persistence and semantic gates pass in the standalone
-  `vyrm-kv` crate. The corrected general performance gate is red on write
-  latency, steady RSS, and clean-reopen WAL footprint. WAL v1
+  `vyrm-kv` crate. The corrected nine-trial local general performance fixture
+  now passes every strict cell; remote and sustained reproduction remain. WAL v1
   now has frozen CRC32C file/frame formats, atomic batch sequence ranges,
   explicit buffered/authoritative acknowledgments, idempotent recovery, and an
   explicit torn-tail-only repair path; complete corruption fails closed.
@@ -344,13 +344,19 @@ not roadmap language.
   native-only maintenance and counted sparse apparent length as disk usage; it
   is now legacy diagnostic evidence. The corrected lifecycle harness measures
   active, clean-reopen, and maintained states for both engines and records
-  physical allocation. Exact semantics pass. Replacing a full recovered-
-  memtable clone with an ordered bounded walk makes native win clean-reopen and
-  maintained read throughput/p95; write throughput/p95, steady RSS, and
-  clean-reopen allocated footprint remain red. The separate eight-profile
-  AI-read matrix passes its bounded correctness, throughput, p95, and
-  clean-reopen allocation gates.
+  physical allocation. Exact semantics pass. Compact sequence references,
+  cached batch validation, inline one-version memtable chains, streaming
+  one-pass WAL recovery, keyspace-local writes, and bounded first-WAL
+  reservation now record 1.333× write throughput, 0.769× write p95, 1.393×
+  clean-reopen read throughput, 0.710× read p95, 0.160× recovery time, 0.936×
+  peak RSS, and 0.915× allocated footprint. The separate eight-profile AI-read
+  matrix passes its bounded correctness, throughput, p95, and clean-reopen
+  allocation gates.
   These remain workload-scoped results—not a universal database claim.
+  The exact scheduled scale matrix remains red: read-heavy records 1.015× raw
+  peak RSS, sustained 1.123×, and the 70,000-operation profile 1.181× RSS plus
+  1.004× allocated footprint. All other strict cells in those profiles pass;
+  backend-native maintained reads remain diagnostic.
   Native now also persists access/removal evidence and the invocation/
   effectiveness ledger with Fjall-equality and reopen tests, closing the
   operator-data gap that previously prevented runtime entry points from using
@@ -361,10 +367,10 @@ not roadmap language.
 CI runs the locked full workspace tests, warning-free clippy, evaluation-evidence
 validation, and the `vyrm-core` serde-only dependency boundary. Compiled-binary
 tests cover operator commands, hooks, explicit recovery, and both MCP eras. A
-separate scheduled/manual workflow executes four isolated nine-trial
+separate scheduled/manual workflow executes five isolated nine-trial
 native/Fjall profiles with `--require-promotion` and retains each raw JSON
-artifact even on failure. It intentionally remains red until the corrected
-same-lifecycle general gate passes.
+artifact even on failure. The corrected local canonical profile now passes;
+remote repetition remains required before compatibility retirement.
 
 ## Deliberate limits
 
@@ -440,12 +446,13 @@ same-lifecycle general gate passes.
   hot memtable point reads and multi-gets before immutable blocks. Its MVCC test
   proves zero segment-cache traffic for current overwrites/tombstones and exact
   historical fallback. A five-trial 8,192-cold/128-hot local profile measured
-  2.261× Fjall throughput and 0.379× Fjall p95, narrowly scoped to current hot
+  2.227× Fjall throughput and 0.374× Fjall p95, narrowly scoped to current hot
   point reads. Cooperative bounded leveled maintenance and authenticated
   block-local negative filters now pass crash recovery, exact MVCC tests, and
   the 20,000-operation Fjall/model mutation differential. Asynchronous
-  memtable flush, family-aware maintenance/cache policy, threshold-crossing
-  latency, and the full mixed AI matrix remain open. See
+  memtable flush, family-aware maintenance/cache policy, and
+  threshold-crossing latency remain open; the full mixed AI matrix is green.
+  See
   `docs/vyrmkv-fjall-ai-audit.md`.
 
 - The first persisted runtime-tracing contract is now implemented in the

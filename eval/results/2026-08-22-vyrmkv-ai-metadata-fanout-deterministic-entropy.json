@@ -1,6 +1,6 @@
 {
   "format_version": 3,
-  "measured_at_unix_ms": 1787415819572,
+  "measured_at_unix_ms": 1787428674322,
   "architecture": "x86_64",
   "operating_system": "linux",
   "workload": "metadata_fanout",
@@ -24,14 +24,14 @@
     {
       "backend": "fjall",
       "correctness_verified": true,
-      "reads_per_second": 629361.356149648,
+      "reads_per_second": 629963.2080810046,
       "items_per_sample": 32,
       "latency": {
         "samples": 8192,
-        "p50_ns": 35646,
-        "p95_ns": 44071,
-        "p99_ns": 48758,
-        "maximum_ns": 137775
+        "p50_ns": 35651,
+        "p95_ns": 43645,
+        "p99_ns": 49336,
+        "maximum_ns": 97783
       },
       "footprint": {
         "logical_live_payload_bytes": 1277952,
@@ -130,14 +130,14 @@
     {
       "backend": "fjall",
       "correctness_verified": true,
-      "reads_per_second": 627901.5918221776,
+      "reads_per_second": 635070.4532131944,
       "items_per_sample": 32,
       "latency": {
         "samples": 8192,
-        "p50_ns": 35771,
-        "p95_ns": 43899,
-        "p99_ns": 48592,
-        "maximum_ns": 100317
+        "p50_ns": 35404,
+        "p95_ns": 42631,
+        "p99_ns": 47567,
+        "maximum_ns": 132772
       },
       "footprint": {
         "logical_live_payload_bytes": 1277952,
@@ -236,14 +236,14 @@
     {
       "backend": "fjall",
       "correctness_verified": true,
-      "reads_per_second": 628669.4095778278,
+      "reads_per_second": 637201.3822824676,
       "items_per_sample": 32,
       "latency": {
         "samples": 8192,
-        "p50_ns": 35719,
-        "p95_ns": 43877,
-        "p99_ns": 51380,
-        "maximum_ns": 148377
+        "p50_ns": 35159,
+        "p95_ns": 43406,
+        "p99_ns": 48359,
+        "maximum_ns": 124888
       },
       "footprint": {
         "logical_live_payload_bytes": 1277952,
@@ -342,14 +342,14 @@
     {
       "backend": "fjall",
       "correctness_verified": true,
-      "reads_per_second": 630272.5737499263,
+      "reads_per_second": 635306.1669503875,
       "items_per_sample": 32,
       "latency": {
         "samples": 8192,
-        "p50_ns": 35667,
-        "p95_ns": 43454,
-        "p99_ns": 48199,
-        "maximum_ns": 84311
+        "p50_ns": 35314,
+        "p95_ns": 43413,
+        "p99_ns": 47482,
+        "maximum_ns": 98191
       },
       "footprint": {
         "logical_live_payload_bytes": 1277952,
@@ -448,14 +448,14 @@
     {
       "backend": "fjall",
       "correctness_verified": true,
-      "reads_per_second": 623019.3312956581,
+      "reads_per_second": 631160.9970394489,
       "items_per_sample": 32,
       "latency": {
         "samples": 8192,
-        "p50_ns": 35818,
-        "p95_ns": 45508,
-        "p99_ns": 54203,
-        "maximum_ns": 96281
+        "p50_ns": 35531,
+        "p95_ns": 44641,
+        "p99_ns": 48988,
+        "maximum_ns": 89656
       },
       "footprint": {
         "logical_live_payload_bytes": 1277952,
@@ -556,21 +556,21 @@
     {
       "backend": "native",
       "correctness_verified": true,
-      "reads_per_second": 1010241.7893624058,
+      "reads_per_second": 1004289.4657967632,
       "items_per_sample": 32,
       "latency": {
         "samples": 8192,
-        "p50_ns": 16959,
-        "p95_ns": 24710,
-        "p99_ns": 37476,
-        "maximum_ns": 258973
+        "p50_ns": 17492,
+        "p95_ns": 23771,
+        "p99_ns": 35200,
+        "maximum_ns": 145226
       },
       "footprint": {
         "logical_live_payload_bytes": 1277952,
         "logical_written_payload_bytes": 1297920,
         "active": {
           "apparent_bytes": 2604057,
-          "allocated_bytes": 2625536,
+          "allocated_bytes": 2621440,
           "allocated_bytes_source": "unix_st_blocks_times_512",
           "files": 7,
           "by_class": {
@@ -591,14 +591,14 @@
             },
             "wal": {
               "apparent_bytes": 1400912,
-              "allocated_bytes": 1409024,
+              "allocated_bytes": 1404928,
               "files": 2
             }
           }
         },
         "reopened": {
           "apparent_bytes": 2604057,
-          "allocated_bytes": 2625536,
+          "allocated_bytes": 2621440,
           "allocated_bytes_source": "unix_st_blocks_times_512",
           "files": 7,
           "by_class": {
@@ -619,7 +619,7 @@
             },
             "wal": {
               "apparent_bytes": 1400912,
-              "allocated_bytes": 1409024,
+              "allocated_bytes": 1404928,
               "files": 2
             }
           }
@@ -663,21 +663,21 @@
     {
       "backend": "native",
       "correctness_verified": true,
-      "reads_per_second": 1034433.1472560632,
+      "reads_per_second": 991602.1161405884,
       "items_per_sample": 32,
       "latency": {
         "samples": 8192,
-        "p50_ns": 16651,
-        "p95_ns": 22278,
-        "p99_ns": 33378,
-        "maximum_ns": 143644
+        "p50_ns": 17323,
+        "p95_ns": 26309,
+        "p99_ns": 43035,
+        "maximum_ns": 140126
       },
       "footprint": {
         "logical_live_payload_bytes": 1277952,
         "logical_written_payload_bytes": 1297920,
         "active": {
           "apparent_bytes": 2604057,
-          "allocated_bytes": 2625536,
+          "allocated_bytes": 2621440,
           "allocated_bytes_source": "unix_st_blocks_times_512",
           "files": 7,
           "by_class": {
@@ -698,14 +698,14 @@
             },
             "wal": {
               "apparent_bytes": 1400912,
-              "allocated_bytes": 1409024,
+              "allocated_bytes": 1404928,
               "files": 2
             }
           }
         },
         "reopened": {
           "apparent_bytes": 2604057,
-          "allocated_bytes": 2625536,
+          "allocated_bytes": 2621440,
           "allocated_bytes_source": "unix_st_blocks_times_512",
           "files": 7,
           "by_class": {
@@ -726,7 +726,7 @@
             },
             "wal": {
               "apparent_bytes": 1400912,
-              "allocated_bytes": 1409024,
+              "allocated_bytes": 1404928,
               "files": 2
             }
           }
@@ -770,21 +770,21 @@
     {
       "backend": "native",
       "correctness_verified": true,
-      "reads_per_second": 1029143.8943493718,
+      "reads_per_second": 1014837.4724880904,
       "items_per_sample": 32,
       "latency": {
         "samples": 8192,
-        "p50_ns": 16625,
-        "p95_ns": 22616,
-        "p99_ns": 35705,
-        "maximum_ns": 146318
+        "p50_ns": 17199,
+        "p95_ns": 23186,
+        "p99_ns": 33027,
+        "maximum_ns": 139266
       },
       "footprint": {
         "logical_live_payload_bytes": 1277952,
         "logical_written_payload_bytes": 1297920,
         "active": {
           "apparent_bytes": 2604057,
-          "allocated_bytes": 2625536,
+          "allocated_bytes": 2621440,
           "allocated_bytes_source": "unix_st_blocks_times_512",
           "files": 7,
           "by_class": {
@@ -805,14 +805,14 @@
             },
             "wal": {
               "apparent_bytes": 1400912,
-              "allocated_bytes": 1409024,
+              "allocated_bytes": 1404928,
               "files": 2
             }
           }
         },
         "reopened": {
           "apparent_bytes": 2604057,
-          "allocated_bytes": 2625536,
+          "allocated_bytes": 2621440,
           "allocated_bytes_source": "unix_st_blocks_times_512",
           "files": 7,
           "by_class": {
@@ -833,7 +833,7 @@
             },
             "wal": {
               "apparent_bytes": 1400912,
-              "allocated_bytes": 1409024,
+              "allocated_bytes": 1404928,
               "files": 2
             }
           }
@@ -877,21 +877,21 @@
     {
       "backend": "native",
       "correctness_verified": true,
-      "reads_per_second": 1036390.174079897,
+      "reads_per_second": 1004236.0038734708,
       "items_per_sample": 32,
       "latency": {
         "samples": 8192,
-        "p50_ns": 16629,
-        "p95_ns": 22345,
-        "p99_ns": 33993,
-        "maximum_ns": 153471
+        "p50_ns": 17413,
+        "p95_ns": 23702,
+        "p99_ns": 37178,
+        "maximum_ns": 142859
       },
       "footprint": {
         "logical_live_payload_bytes": 1277952,
         "logical_written_payload_bytes": 1297920,
         "active": {
           "apparent_bytes": 2604057,
-          "allocated_bytes": 2625536,
+          "allocated_bytes": 2621440,
           "allocated_bytes_source": "unix_st_blocks_times_512",
           "files": 7,
           "by_class": {
@@ -912,14 +912,14 @@
             },
             "wal": {
               "apparent_bytes": 1400912,
-              "allocated_bytes": 1409024,
+              "allocated_bytes": 1404928,
               "files": 2
             }
           }
         },
         "reopened": {
           "apparent_bytes": 2604057,
-          "allocated_bytes": 2625536,
+          "allocated_bytes": 2621440,
           "allocated_bytes_source": "unix_st_blocks_times_512",
           "files": 7,
           "by_class": {
@@ -940,7 +940,7 @@
             },
             "wal": {
               "apparent_bytes": 1400912,
-              "allocated_bytes": 1409024,
+              "allocated_bytes": 1404928,
               "files": 2
             }
           }
@@ -984,21 +984,21 @@
     {
       "backend": "native",
       "correctness_verified": true,
-      "reads_per_second": 1033822.4602693508,
+      "reads_per_second": 1008858.127186105,
       "items_per_sample": 32,
       "latency": {
         "samples": 8192,
-        "p50_ns": 16684,
-        "p95_ns": 22305,
-        "p99_ns": 32698,
-        "maximum_ns": 140032
+        "p50_ns": 17332,
+        "p95_ns": 23620,
+        "p99_ns": 35282,
+        "maximum_ns": 139718
       },
       "footprint": {
         "logical_live_payload_bytes": 1277952,
         "logical_written_payload_bytes": 1297920,
         "active": {
           "apparent_bytes": 2604057,
-          "allocated_bytes": 2625536,
+          "allocated_bytes": 2621440,
           "allocated_bytes_source": "unix_st_blocks_times_512",
           "files": 7,
           "by_class": {
@@ -1019,14 +1019,14 @@
             },
             "wal": {
               "apparent_bytes": 1400912,
-              "allocated_bytes": 1409024,
+              "allocated_bytes": 1404928,
               "files": 2
             }
           }
         },
         "reopened": {
           "apparent_bytes": 2604057,
-          "allocated_bytes": 2625536,
+          "allocated_bytes": 2621440,
           "allocated_bytes_source": "unix_st_blocks_times_512",
           "files": 7,
           "by_class": {
@@ -1047,7 +1047,7 @@
             },
             "wal": {
               "apparent_bytes": 1400912,
-              "allocated_bytes": 1409024,
+              "allocated_bytes": 1404928,
               "files": 2
             }
           }
@@ -1092,14 +1092,14 @@
   "fjall": {
     "backend": "fjall",
     "correctness_verified": true,
-    "reads_per_second": 628669.4095778278,
+    "reads_per_second": 635070.4532131944,
     "items_per_sample": 32,
     "latency": {
       "samples": 40960,
-      "p50_ns": 35719,
-      "p95_ns": 43899,
-      "p99_ns": 48758,
-      "maximum_ns": 100317
+      "p50_ns": 35404,
+      "p95_ns": 43413,
+      "p99_ns": 48359,
+      "maximum_ns": 98191
     },
     "footprint": {
       "logical_live_payload_bytes": 1277952,
@@ -1198,21 +1198,21 @@
   "native": {
     "backend": "native",
     "correctness_verified": true,
-    "reads_per_second": 1033822.4602693508,
+    "reads_per_second": 1004289.4657967632,
     "items_per_sample": 32,
     "latency": {
       "samples": 40960,
-      "p50_ns": 16651,
-      "p95_ns": 22345,
-      "p99_ns": 33993,
-      "maximum_ns": 146318
+      "p50_ns": 17332,
+      "p95_ns": 23702,
+      "p99_ns": 35282,
+      "maximum_ns": 140126
     },
     "footprint": {
       "logical_live_payload_bytes": 1277952,
       "logical_written_payload_bytes": 1297920,
       "active": {
         "apparent_bytes": 2604057,
-        "allocated_bytes": 2625536,
+        "allocated_bytes": 2621440,
         "allocated_bytes_source": "unix_st_blocks_times_512",
         "files": 7,
         "by_class": {
@@ -1233,14 +1233,14 @@
           },
           "wal": {
             "apparent_bytes": 1400912,
-            "allocated_bytes": 1409024,
+            "allocated_bytes": 1404928,
             "files": 2
           }
         }
       },
       "reopened": {
         "apparent_bytes": 2604057,
-        "allocated_bytes": 2625536,
+        "allocated_bytes": 2621440,
         "allocated_bytes_source": "unix_st_blocks_times_512",
         "files": 7,
         "by_class": {
@@ -1261,7 +1261,7 @@
           },
           "wal": {
             "apparent_bytes": 1400912,
-            "allocated_bytes": 1409024,
+            "allocated_bytes": 1404928,
             "files": 2
           }
         }
@@ -1302,14 +1302,14 @@
       ]
     }
   },
-  "native_to_fjall_read_throughput": 1.6444612136664907,
-  "native_to_fjall_p95_latency": 0.5090093168409303,
+  "native_to_fjall_read_throughput": 1.5813827595276602,
+  "native_to_fjall_p95_latency": 0.5459654942068044,
   "footprint_comparison": {
     "promotion_state": "clean_reopen_without_explicit_maintenance",
     "native_to_fjall_reopened_apparent": 0.9773066408859519,
-    "native_to_fjall_reopened_allocated": 0.9771341463414634,
+    "native_to_fjall_reopened_allocated": 0.975609756097561,
     "fjall_reopened_allocated_to_live_payload": 2.1025641025641026,
-    "native_reopened_allocated_to_live_payload": 2.0544871794871793,
+    "native_reopened_allocated_to_live_payload": 2.051282051282051,
     "maintained_cross_backend_comparable": false
   },
   "promotion": {

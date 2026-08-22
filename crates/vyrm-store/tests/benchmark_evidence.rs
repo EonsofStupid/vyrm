@@ -193,14 +193,14 @@ fn checked_in_ai_read_matrix_is_structurally_valid_and_green() {
 }
 
 #[test]
-fn corrected_standard_evidence_records_bounded_scan_win_and_remaining_write_memory_gap() {
+fn corrected_standard_evidence_records_a_bounded_strict_promotion() {
     let file = concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/../../eval/results/2026-08-22-vyrmkv-corrected-standard.json"
     );
     let evidence: serde_json::Value =
         serde_json::from_slice(&std::fs::read(file).unwrap()).unwrap();
-    assert_eq!(evidence["format_version"], 2);
+    assert_eq!(evidence["format_version"], 3);
     for backend in ["fjall", "native"] {
         assert_eq!(evidence[backend]["correctness_verified"], true);
         for state in ["active", "reopened", "maintained"] {
@@ -212,40 +212,24 @@ fn corrected_standard_evidence_records_bounded_scan_win_and_remaining_write_memo
             );
         }
     }
-    assert_eq!(evidence["promotion"]["passes"], false);
-    let failures = evidence["promotion"]["failures"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|failure| failure.as_str().unwrap())
-        .collect::<Vec<_>>()
-        .join("; ");
-    assert!(failures.contains("write throughput"));
-    assert!(failures.contains("write p95"));
-    assert!(failures.contains("peak RSS"));
-    assert!(failures.contains("clean-reopen allocated footprint"));
-    assert!(
-        evidence["ratios"]["native_to_fjall_read_throughput"]
-            .as_f64()
-            .unwrap()
-            > 1.0
+    assert_eq!(evidence["promotion"]["passes"], true);
+    assert_eq!(
+        evidence["promotion"]["failures"].as_array().unwrap().len(),
+        0
     );
-    assert!(
-        evidence["ratios"]["native_to_fjall_read_p95"]
-            .as_f64()
-            .unwrap()
-            < 1.0
-    );
-    assert!(
-        evidence["ratios"]["native_to_fjall_maintained_read_throughput"]
-            .as_f64()
-            .unwrap()
-            > 1.0
-    );
-    assert!(
-        evidence["ratios"]["native_to_fjall_maintained_read_p95"]
-            .as_f64()
-            .unwrap()
-            < 1.0
-    );
+    for ratio in [
+        "native_to_fjall_write_throughput",
+        "native_to_fjall_read_throughput",
+    ] {
+        assert!(evidence["ratios"][ratio].as_f64().unwrap() > 1.0);
+    }
+    for ratio in [
+        "native_to_fjall_write_p95",
+        "native_to_fjall_read_p95",
+        "native_to_fjall_recovery",
+        "native_to_fjall_peak_rss",
+        "native_to_fjall_reopened_allocated",
+    ] {
+        assert!(evidence["ratios"][ratio].as_f64().unwrap() < 1.0);
+    }
 }

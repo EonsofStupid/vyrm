@@ -79,14 +79,14 @@ second and its latency is for the complete 32-key request.
 
 | Profile | Fjall items/s | Native items/s | Native/Fjall throughput | Fjall p95 | Native p95 | Native/Fjall p95 |
 |---|---:|---:|---:|---:|---:|---:|
-| Current hot hit, repeated | 1,321,784 | 2,936,465 | 2.222× | 770 ns | 294 ns | 0.382× |
-| Cold immutable hit, repeated | 457,661 | 746,409 | 1.631× | 2,203 ns | 1,309 ns | 0.594× |
-| Point miss, repeated | 2,063,394 | 3,137,016 | 1.520× | 433 ns | 282 ns | 0.651× |
-| Historical hot-key version, repeated | 491,285 | 1,050,642 | 2.139× | 2,130 ns | 978 ns | 0.459× |
-| Metadata fan-out, repeated | 723,698 | 1,321,738 | 1.826× | 44,343 ns | 22,885 ns | 0.516× |
-| Metadata fan-out, structured JSON | 569,268 | 913,358 | 1.604× | 44,270 ns | 22,518 ns | 0.509× |
-| Metadata fan-out, deterministic entropy | 628,669 | 1,033,822 | 1.644× | 43,899 ns | 22,345 ns | 0.509× |
-| Metadata fan-out, embedding f32 | 689,971 | 1,232,528 | 1.786× | 44,355 ns | 22,368 ns | 0.504× |
+| Current hot hit, repeated | 1,331,222 | 2,965,162 | 2.227× | 765 ns | 286 ns | 0.374× |
+| Cold immutable hit, repeated | 461,347 | 739,225 | 1.602× | 2,171 ns | 1,316 ns | 0.606× |
+| Point miss, repeated | 2,091,713 | 3,134,216 | 1.498× | 424 ns | 277 ns | 0.653× |
+| Historical hot-key version, repeated | 495,986 | 1,049,125 | 2.115× | 2,127 ns | 981 ns | 0.461× |
+| Metadata fan-out, repeated | 729,382 | 1,311,367 | 1.798× | 43,734 ns | 22,931 ns | 0.524× |
+| Metadata fan-out, structured JSON | 569,702 | 926,449 | 1.626× | 44,337 ns | 22,121 ns | 0.499× |
+| Metadata fan-out, deterministic entropy | 635,070 | 1,004,289 | 1.581× | 43,413 ns | 23,702 ns | 0.546× |
+| Metadata fan-out, embedding f32 | 692,827 | 1,216,853 | 1.756× | 44,671 ns | 22,678 ns | 0.508× |
 
 All raw trials passed exact-value correctness and the strict native-throughput,
 p95, and symmetric clean-reopen allocated-footprint gate. The former 1,588,171
@@ -95,13 +95,13 @@ while Fjall held a sparse 64 MiB journal. The corrected clean-reopen result is:
 
 | Payload | Fjall allocated | Native allocated | Native/Fjall |
 |---|---:|---:|---:|
-| Repeated byte | 2,686,976 | 1,609,728 | 0.599× |
-| Structured JSON | 2,686,976 | 2,310,144 | 0.860× |
-| Deterministic entropy | 2,686,976 | 2,625,536 | 0.977× |
-| Embedding f32 | 2,686,976 | 2,625,536 | 0.977× |
+| Repeated byte | 2,686,976 | 1,605,632 | 0.598× |
+| Structured JSON | 2,686,976 | 2,306,048 | 0.858× |
+| Deterministic entropy | 2,686,976 | 2,621,440 | 0.976× |
+| Embedding f32 | 2,686,976 | 2,621,440 | 0.976× |
 
-The real local advantage therefore ranges from 2.3% for high-entropy/vector
-bytes to 40.1% for deliberately compressible control values. Apparent bytes,
+The real local advantage therefore ranges from 2.4% for high-entropy/vector
+bytes to 40.2% for deliberately compressible control values. Apparent bytes,
 allocated bytes (`st_blocks * 512` on Unix), logical live/written payload,
 file-class attribution, and active/reopened/maintained states are all retained.
 Only clean reopen without explicit maintenance is cross-backend promotion
@@ -142,11 +142,14 @@ fan-out payload profiles with a deny-by-default promotion gate and retains
 every raw trial as an artifact.
 
 The corrected general harness initially exposed a full recovered-memtable clone
-on every bounded range. Replacing it with an ordered range walk preserved MVCC
-tombstones and moved clean-reopen read throughput from 0.115× to 1.553× Fjall
-and p95 from 7.987× to 0.675×. The general gate remains red because write
-throughput is 0.881×, write p95 is 1.181×, steady RSS is 1.186×, and allocated
-WAL footprint is 1.213× Fjall. The corrected evidence is
+on every bounded range. The ordered range walk fixed reads; compact sequence
+references, prepared batches, inline single-version chains, streaming one-pass
+recovery, keyspace-local writes, and bounded initial-WAL reservation then closed
+the remaining local gaps. The canonical nine-trial fixture records 1.333× write
+throughput, 0.769× write p95, 1.393× read throughput, 0.710× read p95, 0.160×
+recovery time, 0.936× peak RSS, and 0.915× allocated footprint. The corrected
+general gate is green locally; sustained and remote reproduction remain. The
+evidence is
 [`2026-08-22-vyrmkv-corrected-standard.json`](../eval/results/2026-08-22-vyrmkv-corrected-standard.json).
 
 ## Ordered implementation gates

@@ -1,7 +1,10 @@
 use crate::{Error, Mutation, RecoveredBatch, Result, WriteBatch};
 use serde::{Deserialize, Serialize};
+use smallvec::SmallVec;
 use std::collections::BTreeMap;
 use std::ops::Bound::{Excluded, Included, Unbounded};
+
+type VersionChain = SmallVec<[VersionedValue; 1]>;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct VersionedValue {
@@ -13,7 +16,10 @@ pub struct VersionedValue {
 /// flush/compaction proves they are unreachable.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Memtable {
-    versions: BTreeMap<Vec<u8>, Vec<VersionedValue>>,
+    // AI storage workloads overwhelmingly create one live version per logical
+    // key. Keep that version inline in the tree node and spill only actual
+    // MVCC history, avoiding one heap allocation for every new key.
+    versions: BTreeMap<Box<[u8]>, VersionChain>,
     maximum_sequence: u64,
     version_count: usize,
     approximate_bytes: usize,
@@ -26,8 +32,13 @@ impl Memtable {
 
     pub fn recover_from(batches: &[RecoveredBatch], previous_sequence: u64) -> Result<Self> {
         let mut table = Self::at_sequence(previous_sequence);
-        for batch in batches {
-            table.apply(batch)?;
+        for recovered in batches {
+            let batch = WriteBatch::decode(&recovered.payload)?;
+            table.apply_owned_write_batch(
+                batch,
+                recovered.first_sequence,
+                recovered.last_sequence,
+            )?;
         }
         Ok(table)
     }
@@ -72,7 +83,10 @@ impl Memtable {
                 .ok_or_else(|| Error::InvalidSegment("compacted version count overflow".into()))?;
         }
         Ok(Self {
-            versions,
+            versions: versions
+                .into_iter()
+                .map(|(key, values)| (key.into_boxed_slice(), VersionChain::from_vec(values)))
+                .collect(),
             maximum_sequence,
             version_count,
             approximate_bytes,
@@ -82,6 +96,11 @@ impl Memtable {
     pub fn apply(&mut self, recovered: &RecoveredBatch) -> Result<()> {
         let batch = WriteBatch::decode(&recovered.payload)?;
         self.apply_write_batch(&batch, recovered.first_sequence, recovered.last_sequence)
+    }
+
+    pub(crate) fn apply_owned_recovered(&mut self, recovered: RecoveredBatch) -> Result<()> {
+        let batch = WriteBatch::decode(&recovered.payload)?;
+        self.apply_owned_write_batch(batch, recovered.first_sequence, recovered.last_sequence)
     }
 
     pub(crate) fn apply_write_batch(
@@ -122,7 +141,7 @@ impl Memtable {
                 .saturating_add(value.as_ref().map_or(0, Vec::len))
                 .saturating_add(std::mem::size_of::<VersionedValue>());
             self.versions
-                .entry(key)
+                .entry(key.into_boxed_slice())
                 .or_default()
                 .push(VersionedValue { sequence, value });
         }
@@ -166,7 +185,7 @@ impl Memtable {
                 .saturating_add(value.as_ref().map_or(0, Vec::len))
                 .saturating_add(std::mem::size_of::<VersionedValue>());
             self.versions
-                .entry(key)
+                .entry(key.into_boxed_slice())
                 .or_default()
                 .push(VersionedValue { sequence, value });
         }
@@ -217,7 +236,7 @@ impl Memtable {
                     .rev()
                     .find(|version| version.sequence <= read_sequence)
                     .cloned()
-                    .map(|version| (key.clone(), version))
+                    .map(|version| (key.to_vec(), version))
             })
             .collect()
     }
@@ -241,7 +260,7 @@ impl Memtable {
     pub fn all_versions(&self) -> impl Iterator<Item = (&[u8], &[VersionedValue])> {
         self.versions
             .iter()
-            .map(|(key, versions)| (key.as_slice(), versions.as_slice()))
+            .map(|(key, versions)| (key.as_ref(), versions.as_slice()))
     }
 
     pub fn visible_versions(&self, read_sequence: u64) -> Vec<(Vec<u8>, VersionedValue)> {

@@ -1,8 +1,8 @@
 # vyrmKV native format contract
 
-Status: M3 persistence and semantic gates pass; corrected general performance
-promotion is blocked on write latency, steady RSS, and clean-reopen WAL
-footprint. WAL, atomic-batch, manifest,
+Status: M3 persistence and semantic gates pass; the corrected nine-trial local
+general performance fixture now passes every strict cell. Remote and sustained
+reproduction remain promotion gates. WAL, atomic-batch, manifest,
 checkpoint, and physical snapshot-bundle formats are version 1; new immutable
 segments are version 3 and the reader retains explicit version-1/version-2
 compatibility.
@@ -234,11 +234,12 @@ the accepted data, continues writing, and reopens again. Comparative evidence
 is recorded in `vyrmkv-benchmark.md`. The corrected lifecycle harness measures
 both engines while active, after clean reopen, and after explicit maintenance,
 and reports physical allocation rather than sparse apparent length. Semantics
-and the bounded AI-read matrix pass; an ordered bounded memtable walk also wins
-the clean-reopen read gate. General promotion remains blocked on write
-throughput/p95, steady RSS, and WAL footprint. Fjall remains live as a
-compatibility and performance oracle; no general native performance claim is
-made.
+and the bounded AI-read matrix pass. The corrected nine-trial local general
+fixture now also passes write throughput/p95, clean-reopen reads/recovery/RSS,
+and allocated footprint after compact sequence references and streaming
+one-pass recovery. Fjall remains live as a compatibility and performance
+oracle pending sustained and remote reproduction; no general native database
+superiority claim is made.
 
 Manifest publication now holds an OS-level exclusive lock for the publication
 session. It validates expected `CURRENT`, generation, and parent; syncs immutable

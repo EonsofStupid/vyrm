@@ -473,11 +473,11 @@ fn canonical_runtime_commit_is_atomic_idempotent_durable_and_transferable() {
             let atomic_frame = wal.batches.iter().any(|batch| {
                 let decoded = WriteBatch::decode(&batch.payload).unwrap();
                 let has_raft_state = decoded
-                    .operations
+                    .operations()
                     .iter()
                     .any(|operation| operation.key() == b"vyrm/raft/v4/state/current");
                 let has_runtime_change = decoded
-                    .operations
+                    .operations()
                     .iter()
                     .any(|operation| operation.key().starts_with(b"runtime_changes\0"));
                 has_raft_state && has_runtime_change

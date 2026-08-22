@@ -60,6 +60,30 @@ fn atomic_frames_round_trip_and_continue_after_reopen() {
 }
 
 #[test]
+fn large_initial_batch_reservation_never_changes_logical_wal_bytes() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("active.wal");
+    let payload = vec![0x5a; 20 * 1024];
+    let mut writer = WalWriter::create(&path).unwrap();
+    let receipt = writer
+        .append(
+            &WalBatch {
+                first_sequence: 1,
+                last_sequence: 1,
+                payload: &payload,
+            },
+            Durability::Authoritative,
+        )
+        .unwrap();
+    drop(writer);
+
+    assert_eq!(std::fs::metadata(&path).unwrap().len(), receipt.end_offset);
+    let recovery = recover(&path).unwrap();
+    assert_eq!(recovery.valid_bytes, receipt.end_offset);
+    assert_eq!(recovery.batches[0].payload, payload);
+}
+
+#[test]
 fn rotated_wal_recovery_starts_at_the_manifest_sequence() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("rotated.wal");

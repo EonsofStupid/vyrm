@@ -342,6 +342,7 @@ impl Engine for NativeEngine {
         }
         let mut sequence = start;
         let mut operations = Vec::with_capacity(claims.len() * 2 + 1);
+        let mut sequence_operations = Vec::with_capacity(claims.len());
         for claim in claims {
             sequence = sequence.checked_add(1).ok_or(Error::SequenceOverflow)?;
             let claim_key = key::claim_key(
@@ -352,10 +353,10 @@ impl Engine for NativeEngine {
             );
             let encoded_claim = serde_json::to_vec(claim)?;
             put(
-                &mut operations,
+                &mut sequence_operations,
                 keyspaces::SEQUENCE_INDEX,
                 &key::sequence_key(sequence),
-                encode_native_sequence_value(&encoded_claim),
+                claim_key.clone(),
             );
             put(
                 &mut operations,
@@ -364,6 +365,10 @@ impl Engine for NativeEngine {
                 encoded_claim,
             );
         }
+        // Keep writes for each logical keyspace adjacent. The physical commit
+        // remains atomic, while the ordered memtable avoids bouncing between
+        // distant tree ranges for every claim in the batch.
+        operations.extend(sequence_operations);
         put_sequence(&mut operations, keyspaces::SEQUENCE_WATERMARK, sequence);
         write(&mut database, operations, Durability::Authoritative)?;
         tracing::debug!(first = start + 1, last = sequence, "append committed");
@@ -731,6 +736,7 @@ impl Engine for NativeEngine {
     }
 }
 
+#[cfg(test)]
 fn encode_native_sequence_value(encoded_claim: &[u8]) -> Vec<u8> {
     let mut value = Vec::with_capacity(NATIVE_SEQUENCE_VALUE_MAGIC.len() + encoded_claim.len());
     value.extend_from_slice(NATIVE_SEQUENCE_VALUE_MAGIC);
@@ -1884,7 +1890,7 @@ mod tests {
     }
 
     #[test]
-    fn native_sequence_envelope_is_strict_and_canonical() {
+    fn legacy_inline_sequence_envelope_remains_strict_and_readable() {
         let claim = claim();
         let claim_key = key::claim_key(
             &claim.subject,
@@ -1903,7 +1909,7 @@ mod tests {
     }
 
     #[test]
-    fn native_replay_reads_legacy_key_only_sequence_values() {
+    fn native_replay_reads_compact_key_reference_sequence_values() {
         let directory = tempfile::tempdir().unwrap();
         let root = directory.path().join("legacy-native");
         let claim = claim();

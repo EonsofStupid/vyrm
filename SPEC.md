@@ -255,15 +255,13 @@ NOT incur that cost.
 | `access` | Buffered, periodic flush | Telemetry. Loss on crash is acceptable. |
 | `meta` | `SyncAll` | Watermarks and idempotency keys. |
 
-The sequence index maps an append sequence to the claim key written at that
-sequence, and is what makes §8.2 and §8.4 answerable. Its entry MUST be written
-in the transaction that writes the claim, so that the index cannot diverge from
-the watermark under termination. Native Vyrm values additionally carry the
-canonical claim bytes in a versioned `VYRNSI01` envelope. The typed bytes
-deterministically define the claim key, so a bounded replay needs one contiguous
-range scan without storing that identity twice.
-Legacy native key-only values remain readable through an explicit compatibility
-branch; the Fjall adapter retains its key-only representation.
+The sequence index maps an append sequence to the canonical claim key written
+at that sequence, and is what makes §8.2 and §8.4 answerable. Its entry MUST be
+written in the transaction that writes the claim, so that the index cannot
+diverge from the watermark under termination. Current native and Fjall writes
+store the compact key reference. Native also reads the former inline
+`VYRNSI01` claim envelope so existing native stores remain replayable; new
+writes do not duplicate the claim body in the WAL and recovered memtable.
 
 Fjall persists writes across keyspaces in a single database-level journal, so
 writes requiring mutual atomicity retain it across durability classes.

@@ -51,6 +51,20 @@ fn batch_codec_is_canonical_strict_and_frozen() {
 }
 
 #[test]
+fn serialized_batches_preserve_validation_and_cached_encoding() {
+    let batch = fixture_batch();
+    let json = serde_json::to_vec(&batch).unwrap();
+    let decoded: WriteBatch = serde_json::from_slice(&json).unwrap();
+    assert_eq!(decoded, batch);
+    assert_eq!(decoded.encode().unwrap(), batch.encode().unwrap());
+
+    let invalid = serde_json::json!({
+        "operations": [{"operation": "put", "key": [], "value": [1]}]
+    });
+    assert!(serde_json::from_value::<WriteBatch>(invalid).is_err());
+}
+
+#[test]
 fn wal_allocates_one_sequence_per_operation_and_memtable_preserves_snapshots() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("active.wal");
