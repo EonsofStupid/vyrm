@@ -1,6 +1,7 @@
 # Fjall → vyrmKV AI-runtime audit
 
-Status: bounded leveled-maintenance and negative-filter pass, 2026-08-21.
+Status: bounded leveled-maintenance, negative-filter, and five-profile AI-read
+matrix pass, 2026-08-22.
 
 ## Decision
 
@@ -68,30 +69,53 @@ while an older snapshot loads and returns the correct immutable values. The
 20,000-operation Fjall/native/independent-model mutation soak, runtime hash-chain
 tests, and snapshot differential remain green.
 
-The new `ai_hotset_benchmark` runs both engines in alternating isolated
-processes. Setup publishes 8,192 cold keys into immutable storage, overwrites
-128 control-like keys in the active memtable, then measures 65,536 verified
-current point reads. Five local x86-64 Linux trials produced these medians:
+The `ai_hotset_benchmark` runs both engines in alternating isolated processes.
+Setup publishes 8,192 cold keys into immutable storage and overwrites 128
+control-like keys in the active memtable. Each mode performs 8,192 verified
+requests in each of five local x86-64 Linux trials. Fan-out requests resolve 32
+mixed hot, cold, and absent metadata keys; its throughput is resolved items per
+second and its latency is for the complete 32-key request.
 
-| Metric | Fjall 3.1.8 | Native VyrmKV | Ratio |
-|---|---:|---:|---:|
-| Hot current reads/s | 1,379,005 | 3,117,435 | 2.261× native/Fjall |
-| Hot current p95 | 746 ns | 283 ns | 0.379× native/Fjall |
+| Profile | Fjall items/s | Native items/s | Native/Fjall throughput | Fjall p95 | Native p95 | Native/Fjall p95 |
+|---|---:|---:|---:|---:|---:|---:|
+| Current hot hit | 1,344,294 | 3,011,405 | 2.240× | 755 ns | 279 ns | 0.370× |
+| Cold immutable hit | 455,398 | 753,217 | 1.654× | 2,200 ns | 1,291 ns | 0.587× |
+| Point miss | 2,116,674 | 3,214,490 | 1.519× | 415 ns | 266 ns | 0.641× |
+| Historical hot-key version | 489,604 | 1,055,474 | 2.156× | 2,154 ns | 973 ns | 0.452× |
+| 32-key metadata fan-out | 720,851 | 1,325,589 | 1.839× | 44,217 ns | 22,553 ns | 0.510× |
+
+All raw trials passed exact-value correctness and the strict native-throughput
+and p95 gate. The same fixture occupied 1,588,171 native bytes versus
+68,300,360 Fjall bytes. That disk result is specific to this small physical
+fixture and must not be extrapolated to arbitrary data.
 
 Run it with:
 
 ```console
 cargo run --release --locked -p vyrm-store --example ai_hotset_benchmark -- \
-  --trials 5 --cold-keys 8192 --hot-keys 128 --reads 65536 \
-  --batch-size 128 --value-bytes 128 --output target/vyrmkv-ai-hotset.json
+  --workload metadata-fanout --trials 5 --cold-keys 8192 --hot-keys 128 \
+  --reads 8192 --batch-size 128 --value-bytes 128 --fanout-width 32 \
+  --output target/vyrmkv-ai-metadata-fanout.json --require-promotion
 ```
 
-This result validates one hypothesis only. Setup time is excluded, both paths
-copy the returned value for equal validation, and correctness is checked on
-every read. It does not prove general superiority, negative-read performance,
-range performance, sustained maintenance, or multi-writer behavior. The
-versioned benchmark output retains every raw per-trial result so repeated runs
-can expose regressions across machines.
+Setup time is excluded, both paths copy returned values for equal validation,
+and correctness is checked on every item. These profiles establish their five
+bounded hypotheses; they do not prove general superiority, range performance,
+sustained maintenance, or multi-writer behavior. A proposed one-segment
+multi-get allocation shortcut was also measured in five before/after trials
+and rejected when it failed to improve the median. The kernel was restored to
+the measured baseline rather than retaining unearned complexity.
+
+Raw evidence:
+
+- [`current hot hit`](../eval/results/2026-08-22-vyrmkv-ai-current-hot-hit.json)
+- [`cold immutable hit`](../eval/results/2026-08-22-vyrmkv-ai-cold-hit.json)
+- [`point miss`](../eval/results/2026-08-22-vyrmkv-ai-point-miss.json)
+- [`historical hot-key version`](../eval/results/2026-08-22-vyrmkv-ai-historical-hot-hit.json)
+- [`metadata fan-out`](../eval/results/2026-08-22-vyrmkv-ai-metadata-fanout.json)
+
+The scheduled/manual workflow now reruns all five modes with a deny-by-default
+promotion gate and retains every raw trial as an artifact.
 
 ## Ordered implementation gates
 
@@ -125,10 +149,11 @@ can expose regressions across machines.
 5. Test family-aware blocks/cache admission and prefix/restart compression
    against the simpler single-space design. Reject it if mixed-family evidence
    does not improve.
-6. Run the complete AI matrix: hot hits, misses, historical reads, append/replay,
-   mixed atomic families, vector metadata fan-out, compaction interference,
-   restart, disk, RSS, and crash/storage-full boundaries.
+6. **Partial:** hot hits, cold hits, misses, historical reads, and vector
+   metadata fan-out now have correctness-checked isolated Fjall/native gates.
+   Append/replay and mixed atomic-family coverage already exist in the general
+   promotion and semantic suites. Compaction interference, long-duration
+   restart/RSS, and crash/storage-full performance cells remain.
 
 Fjall removal requires all semantic/migration differentials plus repeated
-remote AI-matrix evidence. A favorable append benchmark or this hot-set cell is
-not enough.
+remote AI-matrix evidence. Favorable local matrix cells are not enough.

@@ -1,0 +1,199 @@
+{
+  "format_version": 2,
+  "measured_at_unix_ms": 1787406524383,
+  "architecture": "x86_64",
+  "operating_system": "linux",
+  "workload": "point_miss",
+  "aggregation": "median of per-trial metrics; latency percentiles are medians of each isolated trial's percentile",
+  "throughput_unit": "resolved key items per second",
+  "latency_unit": "nanoseconds per point request or complete fan-out request",
+  "config": {
+    "workload": "point_miss",
+    "trials": 5,
+    "cold_keys": 8192,
+    "hot_keys": 128,
+    "reads": 8192,
+    "batch_size": 128,
+    "value_bytes": 128,
+    "fanout_width": 32
+  },
+  "fjall_version": "3.1.8",
+  "fjall_trials": [
+    {
+      "backend": "fjall",
+      "correctness_verified": true,
+      "reads_per_second": 2102971.139852972,
+      "items_per_sample": 1,
+      "latency": {
+        "samples": 8192,
+        "p50_ns": 397,
+        "p95_ns": 413,
+        "p99_ns": 428,
+        "maximum_ns": 13275
+      },
+      "disk_bytes": 68300360
+    },
+    {
+      "backend": "fjall",
+      "correctness_verified": true,
+      "reads_per_second": 2128468.3420213745,
+      "items_per_sample": 1,
+      "latency": {
+        "samples": 8192,
+        "p50_ns": 401,
+        "p95_ns": 417,
+        "p99_ns": 437,
+        "maximum_ns": 14326
+      },
+      "disk_bytes": 68300360
+    },
+    {
+      "backend": "fjall",
+      "correctness_verified": true,
+      "reads_per_second": 2131263.1220194967,
+      "items_per_sample": 1,
+      "latency": {
+        "samples": 8192,
+        "p50_ns": 398,
+        "p95_ns": 415,
+        "p99_ns": 437,
+        "maximum_ns": 20242
+      },
+      "disk_bytes": 68300360
+    },
+    {
+      "backend": "fjall",
+      "correctness_verified": true,
+      "reads_per_second": 2116673.8970855167,
+      "items_per_sample": 1,
+      "latency": {
+        "samples": 8192,
+        "p50_ns": 399,
+        "p95_ns": 415,
+        "p99_ns": 439,
+        "maximum_ns": 14220
+      },
+      "disk_bytes": 68300360
+    },
+    {
+      "backend": "fjall",
+      "correctness_verified": true,
+      "reads_per_second": 2052583.9330685253,
+      "items_per_sample": 1,
+      "latency": {
+        "samples": 8192,
+        "p50_ns": 401,
+        "p95_ns": 455,
+        "p99_ns": 685,
+        "maximum_ns": 16136
+      },
+      "disk_bytes": 68300360
+    }
+  ],
+  "native_trials": [
+    {
+      "backend": "native",
+      "correctness_verified": true,
+      "reads_per_second": 3169855.4179105344,
+      "items_per_sample": 1,
+      "latency": {
+        "samples": 8192,
+        "p50_ns": 257,
+        "p95_ns": 270,
+        "p99_ns": 278,
+        "maximum_ns": 24234
+      },
+      "disk_bytes": 1588171
+    },
+    {
+      "backend": "native",
+      "correctness_verified": true,
+      "reads_per_second": 3226880.1638650084,
+      "items_per_sample": 1,
+      "latency": {
+        "samples": 8192,
+        "p50_ns": 254,
+        "p95_ns": 266,
+        "p99_ns": 275,
+        "maximum_ns": 18623
+      },
+      "disk_bytes": 1588171
+    },
+    {
+      "backend": "native",
+      "correctness_verified": true,
+      "reads_per_second": 2945487.977684477,
+      "items_per_sample": 1,
+      "latency": {
+        "samples": 8192,
+        "p50_ns": 280,
+        "p95_ns": 292,
+        "p99_ns": 296,
+        "maximum_ns": 16439
+      },
+      "disk_bytes": 1588171
+    },
+    {
+      "backend": "native",
+      "correctness_verified": true,
+      "reads_per_second": 3234526.0384873855,
+      "items_per_sample": 1,
+      "latency": {
+        "samples": 8192,
+        "p50_ns": 254,
+        "p95_ns": 266,
+        "p99_ns": 274,
+        "maximum_ns": 19720
+      },
+      "disk_bytes": 1588171
+    },
+    {
+      "backend": "native",
+      "correctness_verified": true,
+      "reads_per_second": 3214490.3196440204,
+      "items_per_sample": 1,
+      "latency": {
+        "samples": 8192,
+        "p50_ns": 255,
+        "p95_ns": 266,
+        "p99_ns": 275,
+        "maximum_ns": 13664
+      },
+      "disk_bytes": 1588171
+    }
+  ],
+  "fjall": {
+    "backend": "fjall",
+    "correctness_verified": true,
+    "reads_per_second": 2116673.8970855167,
+    "items_per_sample": 1,
+    "latency": {
+      "samples": 40960,
+      "p50_ns": 399,
+      "p95_ns": 415,
+      "p99_ns": 437,
+      "maximum_ns": 14326
+    },
+    "disk_bytes": 68300360
+  },
+  "native": {
+    "backend": "native",
+    "correctness_verified": true,
+    "reads_per_second": 3214490.3196440204,
+    "items_per_sample": 1,
+    "latency": {
+      "samples": 40960,
+      "p50_ns": 255,
+      "p95_ns": 266,
+      "p99_ns": 275,
+      "maximum_ns": 18623
+    },
+    "disk_bytes": 1588171
+  },
+  "native_to_fjall_read_throughput": 1.5186516562943897,
+  "native_to_fjall_p95_latency": 0.6409638554216868,
+  "promotion": {
+    "passes": true,
+    "failures": []
+  }
+}

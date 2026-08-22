@@ -140,10 +140,12 @@ effects before it can be added safely.
 ## AI-runtime profiles
 
 The append/replay matrix is not representative of all frontier-runtime access.
-The first dedicated profile publishes a cold immutable corpus, overwrites a
-small control set in the active memtable, and measures verified current point
-reads in isolated Fjall/native processes. The design audit, local five-trial
-result, exact command, and remaining miss/history/compaction matrix are in
-[`vyrmkv-fjall-ai-audit.md`](vyrmkv-fjall-ai-audit.md). Its versioned JSON
-retains raw hot-set evidence separately from the scheduled general promotion
-artifact; the new profile does not broaden the existing promotion claim.
+The dedicated AI-read matrix publishes a cold immutable corpus, overwrites a
+small control set in the active memtable, and independently measures current
+hot hits, cold immutable hits, point misses, historical reads, and 32-key mixed
+metadata fan-out. All five local five-trial cells pass exact correctness,
+native-throughput, and native-p95 gates. The design audit, commands, bounded
+claims, and versioned raw results are in
+[`vyrmkv-fjall-ai-audit.md`](vyrmkv-fjall-ai-audit.md). The scheduled/manual
+workflow reruns each mode and retains its raw artifact separately from the
+general promotion matrix.

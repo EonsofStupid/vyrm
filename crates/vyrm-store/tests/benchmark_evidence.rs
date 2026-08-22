@@ -119,3 +119,67 @@ fn checked_in_native_promotion_matrix_is_structurally_valid_and_green() {
             < maintenance["memtable_max_versions"].as_u64().unwrap()
     );
 }
+
+#[test]
+fn checked_in_ai_read_matrix_is_structurally_valid_and_green() {
+    let root = concat!(env!("CARGO_MANIFEST_DIR"), "/../../eval/results/");
+    for (name, workload, items_per_sample) in [
+        (
+            "2026-08-22-vyrmkv-ai-current-hot-hit.json",
+            "current_hot_hit",
+            1,
+        ),
+        ("2026-08-22-vyrmkv-ai-cold-hit.json", "cold_hit", 1),
+        ("2026-08-22-vyrmkv-ai-point-miss.json", "point_miss", 1),
+        (
+            "2026-08-22-vyrmkv-ai-historical-hot-hit.json",
+            "historical_hot_hit",
+            1,
+        ),
+        (
+            "2026-08-22-vyrmkv-ai-metadata-fanout.json",
+            "metadata_fanout",
+            32,
+        ),
+    ] {
+        let file = format!("{root}{name}");
+        let evidence: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&file).unwrap()).unwrap();
+        assert_eq!(evidence["format_version"], 2, "{file}");
+        assert_eq!(evidence["workload"], workload, "{file}");
+        assert_eq!(evidence["config"]["trials"], 5, "{file}");
+        assert_eq!(evidence["config"]["cold_keys"], 8_192, "{file}");
+        assert_eq!(evidence["config"]["hot_keys"], 128, "{file}");
+        assert_eq!(evidence["config"]["reads"], 8_192, "{file}");
+        assert_eq!(evidence["config"]["fanout_width"], 32, "{file}");
+        for backend in ["fjall", "native"] {
+            assert_eq!(evidence[backend]["correctness_verified"], true, "{file}");
+            assert_eq!(
+                evidence[backend]["items_per_sample"], items_per_sample,
+                "{file}"
+            );
+        }
+        for trials in ["fjall_trials", "native_trials"] {
+            assert_eq!(evidence[trials].as_array().unwrap().len(), 5, "{file}");
+        }
+        assert_eq!(evidence["promotion"]["passes"], true, "{file}");
+        assert!(
+            evidence["promotion"]["failures"]
+                .as_array()
+                .unwrap()
+                .is_empty(),
+            "{file}"
+        );
+        assert!(
+            evidence["native_to_fjall_read_throughput"]
+                .as_f64()
+                .unwrap()
+                >= 1.0,
+            "{file}"
+        );
+        assert!(
+            evidence["native_to_fjall_p95_latency"].as_f64().unwrap() <= 1.0,
+            "{file}"
+        );
+    }
+}

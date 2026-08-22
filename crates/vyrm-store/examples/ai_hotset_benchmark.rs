@@ -1,10 +1,10 @@
-//! Isolated Fjall/vyrmKV point-read profile for an AI runtime's hot control set.
+//! Isolated Fjall/vyrmKV read profiles for an AI runtime's control and metadata sets.
 //!
 //! Setup is deliberately excluded from measurement: a cold immutable corpus is
 //! published first, then a small set of routing, lease, cursor, and outcome-like
-//! keys is overwritten in the active memtable. The measured phase repeatedly
-//! reads only that current hot set. This is one physical profile, not a general
-//! database benchmark.
+//! keys is overwritten in the active memtable. The measured phase selects one
+//! explicit point or metadata-fan-out workload. These are physical profiles,
+//! not a general database benchmark.
 
 use fjall::{KeyspaceCreateOptions, PersistMode, Readable, SingleWriterTxDatabase};
 use serde::{Deserialize, Serialize};
@@ -15,27 +15,80 @@ use std::process::Command;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use vyrm_kv::{Database, Durability, Mutation, WriteBatch};
 
-const FORMAT_VERSION: u16 = 1;
+const FORMAT_VERSION: u16 = 2;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum Workload {
+    CurrentHotHit,
+    ColdHit,
+    PointMiss,
+    HistoricalHotHit,
+    MetadataFanout,
+}
+
+impl Workload {
+    fn parse(value: &str) -> Result<Self, String> {
+        match value {
+            "current-hot-hit" => Ok(Self::CurrentHotHit),
+            "cold-hit" => Ok(Self::ColdHit),
+            "point-miss" => Ok(Self::PointMiss),
+            "historical-hot-hit" => Ok(Self::HistoricalHotHit),
+            "metadata-fanout" => Ok(Self::MetadataFanout),
+            _ => Err(format!(
+                "unknown workload {value:?}; expected current-hot-hit, cold-hit, point-miss, historical-hot-hit, or metadata-fanout"
+            )),
+        }
+    }
+
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::CurrentHotHit => "current_hot_hit",
+            Self::ColdHit => "cold_hit",
+            Self::PointMiss => "point_miss",
+            Self::HistoricalHotHit => "historical_hot_hit",
+            Self::MetadataFanout => "metadata_fanout",
+        }
+    }
+
+    const fn cli_str(self) -> &'static str {
+        match self {
+            Self::CurrentHotHit => "current-hot-hit",
+            Self::ColdHit => "cold-hit",
+            Self::PointMiss => "point-miss",
+            Self::HistoricalHotHit => "historical-hot-hit",
+            Self::MetadataFanout => "metadata-fanout",
+        }
+    }
+
+    const fn uses_historical_snapshot(self) -> bool {
+        matches!(self, Self::HistoricalHotHit)
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct Config {
+    workload: Workload,
     trials: usize,
     cold_keys: usize,
     hot_keys: usize,
     reads: usize,
     batch_size: usize,
     value_bytes: usize,
+    fanout_width: usize,
 }
 
 impl Default for Config {
     fn default() -> Self {
         Self {
+            workload: Workload::CurrentHotHit,
             trials: 5,
             cold_keys: 8_192,
             hot_keys: 128,
             reads: 65_536,
             batch_size: 128,
             value_bytes: 128,
+            fanout_width: 32,
         }
     }
 }
@@ -54,6 +107,7 @@ struct Trial {
     backend: String,
     correctness_verified: bool,
     reads_per_second: f64,
+    items_per_sample: usize,
     latency: Latency,
     disk_bytes: u64,
 }
@@ -64,7 +118,10 @@ struct Evidence {
     measured_at_unix_ms: u128,
     architecture: String,
     operating_system: String,
-    workload: &'static str,
+    workload: String,
+    aggregation: &'static str,
+    throughput_unit: &'static str,
+    latency_unit: &'static str,
     config: Config,
     fjall_version: &'static str,
     fjall_trials: Vec<Trial>,
@@ -73,6 +130,13 @@ struct Evidence {
     native: Trial,
     native_to_fjall_read_throughput: f64,
     native_to_fjall_p95_latency: f64,
+    promotion: PromotionVerdict,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct PromotionVerdict {
+    passes: bool,
+    failures: Vec<String>,
 }
 
 fn main() {
@@ -87,7 +151,7 @@ fn run() -> Result<(), String> {
     if arguments.first().is_some_and(|value| value == "--child") {
         return run_child(&arguments);
     }
-    let (config, output) = parse(&arguments)?;
+    let (config, output, require_promotion) = parse(&arguments)?;
     let root = tempfile::tempdir().map_err(|error| error.to_string())?;
     let mut fjall_trials = Vec::with_capacity(config.trials);
     let mut native_trials = Vec::with_capacity(config.trials);
@@ -116,6 +180,9 @@ fn run() -> Result<(), String> {
     if !fjall.correctness_verified || !native.correctness_verified {
         return Err("one or more isolated trials failed correctness".into());
     }
+    let throughput_ratio = native.reads_per_second / fjall.reads_per_second;
+    let p95_ratio = native.latency.p95_ns as f64 / fjall.latency.p95_ns.max(1) as f64;
+    let promotion = promotion(&fjall, &native, throughput_ratio, p95_ratio);
     let evidence = Evidence {
         format_version: FORMAT_VERSION,
         measured_at_unix_ms: SystemTime::now()
@@ -124,12 +191,16 @@ fn run() -> Result<(), String> {
             .as_millis(),
         architecture: std::env::consts::ARCH.into(),
         operating_system: std::env::consts::OS.into(),
-        workload: "current point reads over a hot memtable overlay above one immutable corpus",
+        workload: config.workload.as_str().into(),
+        aggregation:
+            "median of per-trial metrics; latency percentiles are medians of each isolated trial's percentile",
+        throughput_unit: "resolved key items per second",
+        latency_unit: "nanoseconds per point request or complete fan-out request",
         config,
         fjall_version: "3.1.8",
-        native_to_fjall_read_throughput: native.reads_per_second / fjall.reads_per_second,
-        native_to_fjall_p95_latency: native.latency.p95_ns as f64
-            / fjall.latency.p95_ns.max(1) as f64,
+        native_to_fjall_read_throughput: throughput_ratio,
+        native_to_fjall_p95_latency: p95_ratio,
+        promotion,
         fjall_trials,
         native_trials,
         fjall,
@@ -146,14 +217,26 @@ fn run() -> Result<(), String> {
         "{}",
         String::from_utf8(bytes).map_err(|error| error.to_string())?
     );
+    if require_promotion && !evidence.promotion.passes {
+        return Err(format!(
+            "strict AI-read promotion gate failed: {}",
+            evidence.promotion.failures.join("; ")
+        ));
+    }
     Ok(())
 }
 
-fn parse(arguments: &[String]) -> Result<(Config, Option<PathBuf>), String> {
+fn parse(arguments: &[String]) -> Result<(Config, Option<PathBuf>, bool), String> {
     let mut config = Config::default();
     let mut output = None;
+    let mut require_promotion = false;
     let mut index = 0;
     while index < arguments.len() {
+        if arguments[index] == "--require-promotion" {
+            require_promotion = true;
+            index += 1;
+            continue;
+        }
         let value = arguments
             .get(index + 1)
             .ok_or_else(|| format!("missing value after {}", arguments[index]))?;
@@ -163,12 +246,14 @@ fn parse(arguments: &[String]) -> Result<(Config, Option<PathBuf>), String> {
                 .map_err(|error| format!("invalid value for {}: {error}", arguments[index]))
         };
         match arguments[index].as_str() {
+            "--workload" => config.workload = Workload::parse(value)?,
             "--trials" => config.trials = parsed()?,
             "--cold-keys" => config.cold_keys = parsed()?,
             "--hot-keys" => config.hot_keys = parsed()?,
             "--reads" => config.reads = parsed()?,
             "--batch-size" => config.batch_size = parsed()?,
             "--value-bytes" => config.value_bytes = parsed()?,
+            "--fanout-width" => config.fanout_width = parsed()?,
             "--output" => output = Some(PathBuf::from(value)),
             unknown => return Err(format!("unknown argument {unknown}")),
         }
@@ -181,6 +266,7 @@ fn parse(arguments: &[String]) -> Result<(Config, Option<PathBuf>), String> {
         config.reads,
         config.batch_size,
         config.value_bytes,
+        config.fanout_width,
     ]
     .contains(&0)
     {
@@ -189,7 +275,13 @@ fn parse(arguments: &[String]) -> Result<(Config, Option<PathBuf>), String> {
     if config.hot_keys > config.cold_keys || config.batch_size > config.cold_keys {
         return Err("hot keys and batch size cannot exceed the cold corpus".into());
     }
-    Ok((config, output))
+    if config.workload == Workload::ColdHit && config.hot_keys == config.cold_keys {
+        return Err("cold-hit requires at least one immutable key outside the hot set".into());
+    }
+    if config.workload == Workload::MetadataFanout && config.hot_keys == config.cold_keys {
+        return Err("metadata-fanout requires immutable keys outside the hot set".into());
+    }
+    Ok((config, output, require_promotion))
 }
 
 fn launch_child(backend: &str, path: &Path, config: &Config) -> Result<Trial, String> {
@@ -197,11 +289,13 @@ fn launch_child(backend: &str, path: &Path, config: &Config) -> Result<Trial, St
         .args(["--child", backend, "--path"])
         .arg(path)
         .args(["--trials", "1"])
+        .args(["--workload", config.workload.cli_str()])
         .args(["--cold-keys", &config.cold_keys.to_string()])
         .args(["--hot-keys", &config.hot_keys.to_string()])
         .args(["--reads", &config.reads.to_string()])
         .args(["--batch-size", &config.batch_size.to_string()])
         .args(["--value-bytes", &config.value_bytes.to_string()])
+        .args(["--fanout-width", &config.fanout_width.to_string()])
         .output()
         .map_err(|error| error.to_string())?;
     if !output.status.success() {
@@ -225,9 +319,12 @@ fn run_child(arguments: &[String]) -> Result<(), String> {
             .get(3)
             .ok_or_else(|| "child path value is required".to_owned())?,
     );
-    let (config, output) = parse(&arguments[4..])?;
+    let (config, output, require_promotion) = parse(&arguments[4..])?;
     if output.is_some() {
         return Err("child output path is not supported".into());
+    }
+    if require_promotion {
+        return Err("child cannot require a promotion verdict".into());
     }
     let trial = match backend.as_str() {
         "fjall" => run_fjall(&path, &config)?,
@@ -260,19 +357,37 @@ fn run_fjall(path: &Path, config: &Config) -> Result<Trial, String> {
         .as_ref()
         .rotate_memtable_and_wait()
         .map_err(|error| error.to_string())?;
+    let historical = database.read_tx();
     let mut transaction = database.write_tx().durability(Some(PersistMode::SyncAll));
     for index in 0..config.hot_keys {
         transaction.insert(&keyspace, key(index), hot_value(index, config.value_bytes));
     }
     transaction.commit().map_err(|error| error.to_string())?;
-    let snapshot = database.read_tx();
-    measure("fjall", path, config, |index| {
-        snapshot
-            .get(&keyspace, key(index))
-            .map_err(|error| error.to_string())?
-            .map(|value| value.to_vec())
-            .ok_or_else(|| format!("fjall hot key {index} is absent"))
-    })
+    let current = database.read_tx();
+    let snapshot = if config.workload.uses_historical_snapshot() {
+        &historical
+    } else {
+        &current
+    };
+    if config.workload == Workload::MetadataFanout {
+        measure_fanout("fjall", path, config, |keys| {
+            keys.iter()
+                .map(|key| {
+                    snapshot
+                        .get(&keyspace, key)
+                        .map(|value| value.map(|value| value.to_vec()))
+                        .map_err(|error| error.to_string())
+                })
+                .collect()
+        })
+    } else {
+        measure("fjall", path, config, |index| {
+            Ok(snapshot
+                .get(&keyspace, key(index))
+                .map_err(|error| error.to_string())?
+                .map(|value| value.to_vec()))
+        })
+    }
 }
 
 fn run_native(path: &Path, config: &Config) -> Result<Trial, String> {
@@ -294,6 +409,7 @@ fn run_native(path: &Path, config: &Config) -> Result<Trial, String> {
     database
         .flush_memtable(1)
         .map_err(|error| error.to_string())?;
+    let historical = database.snapshot();
     let operations = (0..config.hot_keys)
         .map(|index| Mutation::Put {
             key: key(index),
@@ -306,33 +422,45 @@ fn run_native(path: &Path, config: &Config) -> Result<Trial, String> {
             Durability::Authoritative,
         )
         .map_err(|error| error.to_string())?;
-    let snapshot = database.snapshot();
-    measure("native", path, config, |index| {
-        database
-            .get(&key(index), snapshot)
-            .map_err(|error| error.to_string())?
-            .ok_or_else(|| format!("native hot key {index} is absent"))
-    })
+    let current = database.snapshot();
+    let snapshot = if config.workload.uses_historical_snapshot() {
+        historical
+    } else {
+        current
+    };
+    if config.workload == Workload::MetadataFanout {
+        measure_fanout("native", path, config, |keys| {
+            database
+                .get_many(keys, snapshot)
+                .map_err(|error| error.to_string())
+        })
+    } else {
+        measure("native", path, config, |index| {
+            database
+                .get(&key(index), snapshot)
+                .map_err(|error| error.to_string())
+        })
+    }
 }
 
 fn measure(
     backend: &str,
     path: &Path,
     config: &Config,
-    mut get: impl FnMut(usize) -> Result<Vec<u8>, String>,
+    mut get: impl FnMut(usize) -> Result<Option<Vec<u8>>, String>,
 ) -> Result<Trial, String> {
     for iteration in 0..config.hot_keys * 4 {
-        black_box(get(iteration % config.hot_keys)?);
+        black_box(get(workload_index(config, iteration))?);
     }
     let started = Instant::now();
     let mut samples = Vec::with_capacity(config.reads);
     let mut correctness_verified = true;
     for iteration in 0..config.reads {
-        let index = iteration.wrapping_mul(7_919) % config.hot_keys;
+        let index = workload_index(config, iteration.wrapping_mul(7_919));
         let read_started = Instant::now();
         let value = get(index)?;
         samples.push(read_started.elapsed());
-        correctness_verified &= value == hot_value(index, config.value_bytes);
+        correctness_verified &= value == expected_value(config, index);
         black_box(value);
     }
     let elapsed = started.elapsed();
@@ -340,9 +468,98 @@ fn measure(
         backend: backend.into(),
         correctness_verified,
         reads_per_second: config.reads as f64 / elapsed.as_secs_f64(),
+        items_per_sample: 1,
         latency: summarize(samples),
         disk_bytes: directory_bytes(path)?,
     })
+}
+
+fn measure_fanout(
+    backend: &str,
+    path: &Path,
+    config: &Config,
+    mut get_many: impl FnMut(&[Vec<u8>]) -> Result<Vec<Option<Vec<u8>>>, String>,
+) -> Result<Trial, String> {
+    for iteration in 0..config.hot_keys * 4 {
+        let keys = fanout_keys(config, iteration);
+        black_box(get_many(&keys)?);
+    }
+    let started = Instant::now();
+    let mut samples = Vec::with_capacity(config.reads);
+    let mut correctness_verified = true;
+    for iteration in 0..config.reads {
+        let keys = fanout_keys(config, iteration.wrapping_mul(7_919));
+        let expected = keys
+            .iter()
+            .map(|key| expected_fanout_value(config, key))
+            .collect::<Vec<_>>();
+        let read_started = Instant::now();
+        let values = get_many(&keys)?;
+        samples.push(read_started.elapsed());
+        correctness_verified &= values == expected;
+        black_box(values);
+    }
+    let elapsed = started.elapsed();
+    Ok(Trial {
+        backend: backend.into(),
+        correctness_verified,
+        reads_per_second: (config.reads * config.fanout_width) as f64 / elapsed.as_secs_f64(),
+        items_per_sample: config.fanout_width,
+        latency: summarize(samples),
+        disk_bytes: directory_bytes(path)?,
+    })
+}
+
+fn workload_index(config: &Config, iteration: usize) -> usize {
+    match config.workload {
+        Workload::CurrentHotHit | Workload::HistoricalHotHit => iteration % config.hot_keys,
+        Workload::ColdHit => config.hot_keys + iteration % (config.cold_keys - config.hot_keys),
+        Workload::PointMiss => config.cold_keys + 1 + iteration % config.cold_keys,
+        Workload::MetadataFanout => unreachable!("metadata fan-out uses batched keys"),
+    }
+}
+
+fn expected_value(config: &Config, index: usize) -> Option<Vec<u8>> {
+    match config.workload {
+        Workload::CurrentHotHit => Some(hot_value(index, config.value_bytes)),
+        Workload::ColdHit | Workload::HistoricalHotHit => {
+            Some(cold_value(index, config.value_bytes))
+        }
+        Workload::PointMiss => None,
+        Workload::MetadataFanout => unreachable!("metadata fan-out validates each batched key"),
+    }
+}
+
+fn fanout_keys(config: &Config, iteration: usize) -> Vec<Vec<u8>> {
+    let cold_span = config.cold_keys - config.hot_keys;
+    (0..config.fanout_width)
+        .map(|lane| {
+            let mixed = iteration.wrapping_add(lane.wrapping_mul(1_009));
+            let index = match lane % 4 {
+                0 => mixed % config.hot_keys,
+                1 | 2 => config.hot_keys + mixed % cold_span,
+                _ => config.cold_keys + 1 + mixed % config.cold_keys,
+            };
+            key(index)
+        })
+        .collect()
+}
+
+fn expected_fanout_value(config: &Config, key_bytes: &[u8]) -> Option<Vec<u8>> {
+    let suffix = key_bytes
+        .strip_prefix(b"runtime:control:")
+        .expect("benchmark generated key has its canonical prefix");
+    let index = std::str::from_utf8(suffix)
+        .expect("benchmark generated key suffix is UTF-8")
+        .parse::<usize>()
+        .expect("benchmark generated key suffix is numeric");
+    if index < config.hot_keys {
+        Some(hot_value(index, config.value_bytes))
+    } else if index < config.cold_keys {
+        Some(cold_value(index, config.value_bytes))
+    } else {
+        None
+    }
 }
 
 fn key(index: usize) -> Vec<u8> {
@@ -378,6 +595,7 @@ fn aggregate(backend: &str, trials: &[Trial]) -> Trial {
         backend: backend.into(),
         correctness_verified: trials.iter().all(|trial| trial.correctness_verified),
         reads_per_second: median_f64(trials.iter().map(|trial| trial.reads_per_second).collect()),
+        items_per_sample: trials[0].items_per_sample,
         latency: Latency {
             samples: trials.iter().map(|trial| trial.latency.samples).sum(),
             p50_ns: median_u64(trials.iter().map(|trial| trial.latency.p50_ns).collect()),
@@ -391,6 +609,32 @@ fn aggregate(backend: &str, trials: &[Trial]) -> Trial {
             ),
         },
         disk_bytes: median_u64(trials.iter().map(|trial| trial.disk_bytes).collect()),
+    }
+}
+
+fn promotion(
+    fjall: &Trial,
+    native: &Trial,
+    throughput_ratio: f64,
+    p95_ratio: f64,
+) -> PromotionVerdict {
+    let mut failures = Vec::new();
+    if !fjall.correctness_verified || !native.correctness_verified {
+        failures.push("one or more backends failed correctness".into());
+    }
+    if throughput_ratio < 1.0 {
+        failures.push(format!(
+            "native item throughput ratio {throughput_ratio:.3} is below 1.000"
+        ));
+    }
+    if p95_ratio > 1.0 {
+        failures.push(format!(
+            "native p95 request-latency ratio {p95_ratio:.3} exceeds 1.000"
+        ));
+    }
+    PromotionVerdict {
+        passes: failures.is_empty(),
+        failures,
     }
 }
 

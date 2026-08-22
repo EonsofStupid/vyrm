@@ -59,3 +59,34 @@ jobs:
           name: vyrmkv-${{ matrix.profile }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: target/vyrmkv-${{ matrix.profile }}.json
           if-no-files-found: error
+
+  ai-read-promotion:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        workload:
+          - current-hot-hit
+          - cold-hit
+          - point-miss
+          - historical-hot-hit
+          - metadata-fanout
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Run isolated AI-read profile
+        run: >-
+          cargo run --release --locked -p vyrm-store --example ai_hotset_benchmark --
+          --workload ${{ matrix.workload }} --trials 5 --cold-keys 8192
+          --hot-keys 128 --reads 8192 --batch-size 128 --value-bytes 128
+          --fanout-width 32 --output target/vyrmkv-ai-${{ matrix.workload }}.json
+          --require-promotion
+      - name: Retain raw AI-read evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: vyrmkv-ai-${{ matrix.workload }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: target/vyrmkv-ai-${{ matrix.workload }}.json
+          if-no-files-found: error
