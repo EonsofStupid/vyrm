@@ -6,9 +6,9 @@
 //! tests and replays remain deterministic.
 
 use crate::{
-    Error, Millis, ProjectionStamp, ReadStamp, Result, RuntimeEvent, RuntimeEventSchema,
-    RuntimeProperties, RuntimePropertySchema, RuntimeSchemaRegistry, RuntimeType, RuntimeValue,
-    RuntimeValueType, SnapshotId,
+    Error, Millis, ProjectionStamp, ReadStamp, Result, RuntimeCommit, RuntimeEvent,
+    RuntimeEventSchema, RuntimeMutation, RuntimeProperties, RuntimePropertySchema,
+    RuntimeSchemaRegistry, RuntimeType, RuntimeValue, RuntimeValueType, SnapshotId,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -466,6 +466,57 @@ impl RuntimeTraceEvent {
         registry.events.insert(kind, schema);
         Ok(true)
     }
+
+    /// Prepares the one canonical runtime commit used by both local engines
+    /// and consensus-backed trace writers. Schema installation/repair and the
+    /// event share the caller's exact read cursor CAS.
+    pub fn prepare_commit(
+        &self,
+        read: &ReadStamp,
+        current_schema: Option<&RuntimeSchemaRegistry>,
+        actor: &str,
+    ) -> Result<RuntimeCommit> {
+        self.validate()?;
+        read.validate()?;
+        if actor.trim().is_empty() {
+            return invalid("runtime trace actor must not be empty");
+        }
+        if current_schema.map(|schema| schema.revision) != read.schema_revision {
+            return invalid("runtime trace schema does not match its read stamp");
+        }
+
+        let mut mutations = Vec::new();
+        let mut registry = current_schema
+            .cloned()
+            .unwrap_or_else(|| RuntimeSchemaRegistry::empty(1, "install runtime trace contract"));
+        if Self::register_schema(&mut registry)? {
+            if let Some(current) = current_schema {
+                registry.revision =
+                    current
+                        .revision
+                        .checked_add(1)
+                        .ok_or_else(|| Error::InvalidRuntime {
+                            reason:
+                                "runtime schema revision overflow while installing trace contract"
+                                    .into(),
+                        })?;
+                registry.migration = "install canonical runtime trace contract".into();
+            }
+            mutations.push(RuntimeMutation::Schema { registry });
+        }
+        mutations.push(RuntimeMutation::Event {
+            event: self.clone().into_runtime_event()?,
+        });
+        let commit = RuntimeCommit {
+            scope: read.scope.clone(),
+            at: self.at,
+            actor: actor.to_owned(),
+            expected_cursor: read.commit_cursor,
+            mutations,
+        };
+        commit.validate()?;
+        Ok(commit)
+    }
 }
 
 fn validate_hex_identity(kind: &'static str, value: &str, width: usize) -> Result<()> {
@@ -582,10 +633,36 @@ fn link_value(link: &TraceLink) -> RuntimeValue {
         TraceLink::Read { stamp } => {
             value.insert("kind".into(), RuntimeValue::String("read".into()));
             value.insert(
+                "contract_version".into(),
+                RuntimeValue::Unsigned(u64::from(stamp.contract_version)),
+            );
+            value.insert(
                 "scope".into(),
                 RuntimeValue::String(stamp.scope.to_string()),
             );
+            if let Some(schema_revision) = stamp.schema_revision {
+                value.insert(
+                    "schema_revision".into(),
+                    RuntimeValue::Unsigned(schema_revision),
+                );
+            }
+            value.insert(
+                "catalog_revision".into(),
+                RuntimeValue::Unsigned(stamp.catalog_revision),
+            );
+            value.insert(
+                "commit_cursor".into(),
+                RuntimeValue::Unsigned(stamp.commit_cursor),
+            );
+            // Retain the original v1 alias for existing consumers while the
+            // exact field name makes the complete stamp reconstructable.
             value.insert("cursor".into(), RuntimeValue::Unsigned(stamp.commit_cursor));
+            if let Some(head_digest) = &stamp.head_digest {
+                value.insert(
+                    "head_digest".into(),
+                    RuntimeValue::Digest(head_digest.clone()),
+                );
+            }
             value.insert(
                 "manifest_id".into(),
                 RuntimeValue::Digest(stamp.manifest_id.clone()),
@@ -611,6 +688,10 @@ fn link_value(link: &TraceLink) -> RuntimeValue {
         }
         TraceLink::Projection { stamp } => {
             value.insert("kind".into(), RuntimeValue::String("projection".into()));
+            value.insert(
+                "contract_version".into(),
+                RuntimeValue::Unsigned(u64::from(stamp.contract_version)),
+            );
             value.insert("id".into(), RuntimeValue::String(stamp.id.to_string()));
             value.insert(
                 "generation".into(),
@@ -621,8 +702,16 @@ fn link_value(link: &TraceLink) -> RuntimeValue {
                 RuntimeValue::Unsigned(stamp.source_cursor),
             );
             value.insert(
+                "config_digest".into(),
+                RuntimeValue::Digest(stamp.config_digest.clone()),
+            );
+            value.insert(
                 "artifact_digest".into(),
                 RuntimeValue::Digest(stamp.artifact_digest.clone()),
+            );
+            value.insert(
+                "state".into(),
+                RuntimeValue::String(projection_state_name(stamp.state).into()),
             );
         }
         TraceLink::Workflow {
@@ -710,6 +799,15 @@ fn domain_name(value: TraceDomain) -> &'static str {
         TraceDomain::Tool => "tool",
         TraceDomain::Adapter => "adapter",
         TraceDomain::Cluster => "cluster",
+    }
+}
+
+fn projection_state_name(value: crate::ProjectionState) -> &'static str {
+    match value {
+        crate::ProjectionState::Building => "building",
+        crate::ProjectionState::Ready => "ready",
+        crate::ProjectionState::Quarantined => "quarantined",
+        crate::ProjectionState::Retiring => "retiring",
     }
 }
 
@@ -814,6 +912,63 @@ mod tests {
     }
 
     #[test]
+    fn trace_commit_preparation_atomically_installs_schema_and_binds_the_read() {
+        let scope = crate::ScopeId::new("instance:trace-commit").unwrap();
+        let read = ReadStamp::new(scope.clone(), None, 0, 0, None).unwrap();
+        let event = RuntimeTraceEvent::start(
+            trace_id(),
+            span_id(),
+            None,
+            TraceDomain::Cluster,
+            "cluster.artifact_transfer",
+            10,
+            TraceDataClass::Control,
+            Vec::new(),
+            RuntimeProperties::new(),
+        )
+        .unwrap();
+        let bootstrap = event
+            .prepare_commit(&read, None, "cluster:transport")
+            .unwrap();
+        assert_eq!(bootstrap.scope, scope);
+        assert_eq!(bootstrap.expected_cursor, 0);
+        assert!(matches!(
+            bootstrap.mutations[0],
+            RuntimeMutation::Schema { .. }
+        ));
+        assert!(matches!(
+            bootstrap.mutations[1],
+            RuntimeMutation::Event { .. }
+        ));
+
+        let RuntimeMutation::Schema { registry } = &bootstrap.mutations[0] else {
+            unreachable!()
+        };
+        let installed_read =
+            ReadStamp::new(scope, Some(1), 0, 2, Some(bootstrap.digest())).unwrap();
+        let event_only = event
+            .prepare_commit(&installed_read, Some(registry), "cluster:transport")
+            .unwrap();
+        assert_eq!(event_only.mutations.len(), 1);
+        assert!(matches!(
+            event_only.mutations[0],
+            RuntimeMutation::Event { .. }
+        ));
+
+        let stale = ReadStamp::new(
+            installed_read.scope.clone(),
+            Some(2),
+            0,
+            installed_read.commit_cursor,
+            installed_read.head_digest.clone(),
+        )
+        .unwrap();
+        assert!(event
+            .prepare_commit(&stale, Some(registry), "cluster:transport")
+            .is_err());
+    }
+
+    #[test]
     fn attributes_are_bounded_before_they_reach_the_runtime_log() {
         let event = RuntimeTraceEvent::annotation(
             trace_id(),
@@ -831,5 +986,86 @@ mod tests {
             )]),
         );
         assert!(event.is_err());
+    }
+
+    #[test]
+    fn persisted_read_and_projection_links_retain_complete_reconstructable_stamps() {
+        let read = ReadStamp::new(
+            crate::ScopeId::new("instance:trace").unwrap(),
+            Some(7),
+            11,
+            29,
+            Some("a".repeat(64)),
+        )
+        .unwrap();
+        let projection = ProjectionStamp {
+            contract_version: crate::DATA_RUNTIME_CONTRACT_VERSION,
+            id: crate::ProjectionId::new("vector:operator").unwrap(),
+            generation: 3,
+            source_cursor: 29,
+            config_digest: "b".repeat(64),
+            artifact_digest: "c".repeat(64),
+            state: crate::ProjectionState::Ready,
+        };
+        projection.validate().unwrap();
+        let runtime = RuntimeTraceEvent::annotation(
+            trace_id(),
+            span_id(),
+            None,
+            TraceDomain::Projection,
+            "projection.publish",
+            10,
+            TraceOutcome::Ok,
+            TraceDataClass::Control,
+            vec![
+                TraceLink::Read {
+                    stamp: read.clone(),
+                },
+                TraceLink::Projection {
+                    stamp: projection.clone(),
+                },
+            ],
+            RuntimeProperties::new(),
+        )
+        .unwrap()
+        .into_runtime_event()
+        .unwrap();
+        let RuntimeValue::List(links) = &runtime.properties["links"] else {
+            panic!("links must remain a typed list")
+        };
+        let RuntimeValue::Map(read_link) = &links[0] else {
+            panic!("read link must remain a typed map")
+        };
+        assert_eq!(
+            read_link["contract_version"],
+            RuntimeValue::Unsigned(u64::from(read.contract_version))
+        );
+        assert_eq!(
+            read_link["schema_revision"],
+            RuntimeValue::Unsigned(read.schema_revision.unwrap())
+        );
+        assert_eq!(
+            read_link["catalog_revision"],
+            RuntimeValue::Unsigned(read.catalog_revision)
+        );
+        assert_eq!(
+            read_link["commit_cursor"],
+            RuntimeValue::Unsigned(read.commit_cursor)
+        );
+        assert_eq!(
+            read_link["head_digest"],
+            RuntimeValue::Digest(read.head_digest.unwrap())
+        );
+        let RuntimeValue::Map(projection_link) = &links[1] else {
+            panic!("projection link must remain a typed map")
+        };
+        assert_eq!(
+            projection_link["config_digest"],
+            RuntimeValue::Digest(projection.config_digest)
+        );
+        assert_eq!(
+            projection_link["state"],
+            RuntimeValue::String("ready".into())
+        );
     }
 }

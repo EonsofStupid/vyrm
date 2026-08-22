@@ -135,6 +135,48 @@ fn all_engines_enforce_identical_snapshot_semantics() {
     assert_snapshot_contract(&memory);
 }
 
+fn assert_historical_authenticated_point_read(engine: &dyn Engine) {
+    let scope = ScopeId::new("instance:historical-proof").unwrap();
+    engine.commit_runtime(&bootstrap(&scope, 0)).unwrap();
+    engine.commit_runtime(&pulse(&scope, 1)).unwrap();
+    let retained = engine.runtime_read_stamp(&scope).unwrap();
+    assert!(retained.accumulator_root.is_some());
+    engine.commit_runtime(&item(&scope, 2, "later")).unwrap();
+
+    let point = engine.runtime_read_changes(&retained, 0, 1).unwrap();
+    assert_eq!(point.head_cursor, 2);
+    assert_eq!(point.through_cursor, 1);
+    assert_eq!(point.changes.len(), 1);
+    assert_eq!(
+        point.validation.method,
+        "full_hash_chain_replay_then_rfc9162_inclusion"
+    );
+    assert_eq!(point.validation.change_reads, 3);
+
+    let forged = ReadStamp::authenticated(
+        retained.scope.clone(),
+        retained.schema_revision,
+        retained.catalog_revision,
+        retained.commit_cursor,
+        retained.head_digest.clone(),
+        "66".repeat(32),
+    )
+    .unwrap();
+    assert!(engine.runtime_read_changes(&forged, 0, 1).is_err());
+}
+
+#[test]
+fn retained_prefix_proofs_survive_later_commits_on_all_engines() {
+    let dir = tempfile::tempdir().unwrap();
+    let fjall = Store::open(dir.path()).unwrap();
+    let native_dir = tempfile::tempdir().unwrap();
+    let native = NativeEngine::open(&native_dir.path().join("native")).unwrap();
+    let memory = MemoryEngine::new();
+    assert_historical_authenticated_point_read(&fjall);
+    assert_historical_authenticated_point_read(&native);
+    assert_historical_authenticated_point_read(&memory);
+}
+
 #[test]
 fn fjall_snapshot_catalog_survives_restart() {
     let dir = tempfile::tempdir().unwrap();
@@ -177,7 +219,10 @@ fn native_snapshot_catalog_survives_flush_and_restart() {
         handle
     };
     let reopened = NativeEngine::open(&path).unwrap();
-    assert_eq!(reopened.runtime_snapshots(20).unwrap(), vec![handle.clone()]);
+    assert_eq!(
+        reopened.runtime_snapshots(20).unwrap(),
+        vec![handle.clone()]
+    );
     let page = reopened
         .runtime_snapshot_changes(&handle, 0, 10, 20)
         .unwrap();

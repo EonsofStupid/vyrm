@@ -1,7 +1,8 @@
 (() => {
   'use strict';
 
-  const views = new Set(['overview', 'flight', 'stream', 'graph', 'schema', 'query', 'runs', 'claims', 'routes', 'activity']);
+  const views = new Set(['overview', 'estates', 'tables', 'models', 'visuals', 'flight', 'stream', 'traces', 'cluster', 'graph', 'schema', 'capabilities', 'query', 'runs', 'claims', 'routes', 'activity']);
+  const visualViews = new Set(['visuals', 'flight', 'stream', 'traces', 'cluster', 'graph']);
   const initialView = location.hash.slice(1);
   const promptPresets = {
     weak: 'Make this better.',
@@ -17,6 +18,9 @@
     data: null,
     view: views.has(initialView) ? initialView : 'overview',
     selected: null,
+    tableId: 'claims',
+    modelScope: null,
+    visualCursor: null,
     graphScope: 'local',
     graphKinds: new Set(['instance', 'subject', 'claim', 'run', 'event', 'evidence', 'file', 'invocation', 'flight', 'flight_event']),
     graphFocusKind: null,
@@ -32,6 +36,13 @@
     streamDirection: 1,
     streamSpeed: 1,
     streamTimer: null,
+    traceId: null,
+    traceSpanId: null,
+    clusterCursor: null,
+    clusterPlaying: false,
+    clusterSpeed: 1,
+    clusterDirection: 1,
+    clusterTimer: null,
     refreshTimer: null,
     promptDraft: promptPresets.strong,
     flightSettings: { context: 'pruned', provider: 'codex', budget: 1500, acceptance: '', reasoning: 'default' },
@@ -122,19 +133,22 @@
     $('#run-count').textContent = data.runs.length;
     $('#flight-count').textContent = data.flights.length;
     $('#stream-count').textContent = data.temporal_events.length;
+    $('#trace-count').textContent = data.traces?.traces?.length || 0;
+    $('#cluster-count').textContent = data.cluster?.nodes?.length || 0;
     $('#claim-count').textContent = data.claims.length;
     $('#file-count').textContent = data.files.length;
-    $('#schema-count').textContent = data.schema
-      ? Object.keys(data.schema.records || {}).length + Object.keys(data.schema.relations || {}).length + Object.keys(data.schema.events || {}).length
-      : 0;
+    $('#estate-count').textContent = (data.estates || []).length;
+    $('#table-count').textContent = (data.tables || []).length;
+    $('#model-count').textContent = (data.models || []).reduce((count, model) => count + Object.keys(model.registry.records || {}).length + Object.keys(model.registry.relations || {}).length + Object.keys(model.registry.events || {}).length, 0);
+    $('#visual-count').textContent = 5;
     $('#snapshot-age').textContent = ago(data.generated_at);
-    $$('.nav-item').forEach((button) => button.classList.toggle('active', button.dataset.view === state.view));
+    $$('.nav-item').forEach((button) => button.classList.toggle('active', button.dataset.view === state.view || (button.dataset.view === 'visuals' && visualViews.has(state.view))));
   }
 
   function render() {
     if (!state.data) return;
     updateChrome();
-    const renderers = { overview: renderOverview, flight: renderFlight, stream: renderStream, graph: renderGraph, schema: renderSchema, query: renderQuery, runs: renderRuns, claims: renderClaims, routes: renderRoutes, activity: renderActivity };
+    const renderers = { overview: renderOverview, estates: renderEstates, tables: renderTables, models: renderModels, visuals: renderVisuals, flight: renderFlight, stream: renderStream, traces: renderTraces, cluster: renderCluster, graph: renderGraph, schema: renderSchema, capabilities: renderCapabilities, query: renderQuery, runs: renderRuns, claims: renderClaims, routes: renderRoutes, activity: renderActivity };
     (renderers[state.view] || renderOverview)();
     renderInspector();
   }
@@ -153,13 +167,14 @@
       [active ? 'violet' : 'mint', 'Reasoning contract', active ? `${active.id} · ${active.state}` : 'no active run', `${runs.length} total run(s)`],
       [health.last_grounded_at ? 'mint' : 'amber', 'Last grounding', health.last_grounded_at ? ago(health.last_grounded_at) : 'not yet grounded', 'differential evidence'],
       [health.retention_pins ? 'violet' : 'mint', 'Snapshot retention', `${health.snapshot_leases} live lease(s)`, health.oldest_retained_cursor == null ? 'no pinned cursor' : `cursor ≥ ${health.oldest_retained_cursor}`],
+      [health.vector_artifacts ? 'violet' : 'amber', 'Vector artifact catalog', `${health.vector_artifacts} durable generation(s)`, `revision ${health.vector_catalog_revision}`],
     ];
     $('#main').innerHTML = pageHead('Runtime overview', 'A live, read-only view of the instance’s memory, reasoning contract, source projection, and operational evidence.', `<span class="badge ${health.state}"><span class="status-dot ${health.state === 'ready' ? '' : health.state}"></span>${health.state}</span>`) + `
       <section class="metrics">
         ${metric('Current claims', health.current_claims, `${health.subjects} subjects`)}
         ${metric('Claim sequence', health.claim_sequence, `projection at ${health.projection_watermark}`)}
         ${metric('Indexed source', health.indexed_files, `${health.indexed_symbols} symbols`)}
-        ${metric('Activity', invocations.length, `${runs.length} reasoning runs`)}
+        ${metric('Vector artifacts', health.vector_artifacts, `catalog revision ${health.vector_catalog_revision}`)}
       </section>
       <section class="overview-grid">
         <article class="panel"><div class="panel-head"><h2>Active reasoning run</h2><span>${active ? active.state : 'IDLE'}</span></div><div class="panel-body">${active ? timeline(active.events.slice(-7)) : empty('No active run', 'A goal begins the next externally auditable reasoning sequence.')}</div></article>
@@ -168,6 +183,32 @@
         <article class="panel"><div class="panel-head"><h2>Recent activity</h2><span>${invocations.length} RECORDED</span></div><div class="panel-body signal-list">${invocations.slice(-6).reverse().map((item) => `<button class="signal-row lens-row object-link" data-object="invocation:${item.ordinal}"><span class="dot ${item.outcome === 'ok' ? 'mint' : 'red'}"></span><div><div class="name">${escapeHtml(item.command)}</div><div class="detail">${escapeHtml(item.detail || item.trigger)}</div></div><div class="value">${item.duration_ms} ms</div></button>`).join('') || empty('No activity', 'Every operator and lifecycle call will appear here.')}</div></article>
       </section>`;
     bindObjectLinks();
+  }
+
+  function renderCapabilities() {
+    const capabilities = state.data.capabilities;
+    const engine = capabilities.engine || [];
+    const count = (maturity) => engine.filter((item) => item.maturity === maturity).length;
+    const replay = capabilities.replay || {};
+    $('#main').innerHTML = pageHead('Runtime capabilities', 'The executable diagnostics handshake. Alpha and partial features expose evidence and limits; planned features are never presented as shipped.', `<span class="badge ready">${escapeHtml(capabilities.protocol)} v${human(capabilities.version)}</span>`) + `
+      <section class="metrics">
+        ${metric('Alpha', count('alpha'), 'executable local gate')}
+        ${metric('Partial', count('partial'), 'truth exists; surface incomplete')}
+        ${metric('Experimental', count('experimental'), 'not production certified')}
+        ${metric('Planned', count('planned'), 'no shipped claim')}
+      </section>
+      <section class="capability-replay panel">
+        <div class="panel-head"><h2>Developer replay contract</h2><span>${replay.persisted ? 'PERSISTED' : 'EPHEMERAL'}</span></div>
+        <div class="capability-replay-body">
+          <div><span>Protocol</span><strong>${escapeHtml(capabilities.protocol)} v${human(capabilities.version)}</strong><small>diagnostics enabled · ${capabilities.runners_enabled ? 'frontier runners enabled' : 'observe-only runners'}</small></div>
+          <div><span>Transport</span><strong>${replay.reversible && replay.seekable ? 'rewind · seek · replay' : 'forward only'}</strong><small>${(replay.speeds || []).map((speed) => `${speed}×`).join(' · ')}</small></div>
+          <div><span>Recovery</span><strong>${replay.restart_recoverable ? 'restart recoverable' : 'process local'}</strong><small>${replay.persisted ? 'authoritative events survive restart' : 'not retained'}</small></div>
+          <div><span>Lenses</span><strong>${human((replay.lenses || []).length)}</strong><small>${(replay.lenses || []).map((lens) => lens.replaceAll('_', ' ')).join(' · ')}</small></div>
+        </div>
+      </section>
+      <section class="capability-grid">
+        ${engine.map((item) => `<article class="capability-card maturity-${escapeHtml(item.maturity)}"><header><div><span>${escapeHtml(item.category)}</span><h2>${escapeHtml(item.label)}</h2></div><b>${escapeHtml(item.maturity)}</b></header><p>${escapeHtml(item.summary)}</p><dl><div><dt>Evidence</dt><dd>${escapeHtml(item.evidence)}</dd></div><div><dt>Current limit</dt><dd>${escapeHtml(item.limitation)}</dd></div></dl><footer><code>${escapeHtml(item.id)}</code></footer></article>`).join('')}
+      </section>`;
   }
 
   function metric(label, value, meta) {
@@ -180,6 +221,162 @@
 
   function timeline(events) {
     return `<div class="timeline">${events.map((event) => `<button class="timeline-event lens-row object-link" data-object="event:${event.run_id}:${event.ordinal}"><div><div class="event-kind">${escapeHtml(event.payload.kind)}</div><div class="event-summary">${escapeHtml(eventSummary(event))}</div><div class="event-meta">#${event.ordinal} · ${escapeHtml(event.actor)}</div></div></button>`).join('')}</div>`;
+  }
+
+  function renderEstates() {
+    const estates = state.data.estates || [];
+    const estate = estates[0];
+    if (!estate) {
+      $('#main').innerHTML = pageHead('Estates', 'Project-owned runtime boundaries and the instances observed inside them.') + empty('No estate bound', 'Connectome is not attached to a Vyrm instance.');
+      return;
+    }
+    const nodes = state.data.cluster?.nodes || [];
+    const visibleNodes = nodes.length ? nodes : [{ canonical_node_id: estate.id, state: estate.state, shard: 0, raft_node_id: 0, applied_lag: 0, latest_cursor: estate.runtime_cursor, alerts: [] }];
+    $('#main').innerHTML = pageHead('Estates', 'The local project boundary, its storage ownership, and every observed runtime member. Cloud fleet control remains a later control plane.', `<span class="badge ${estate.state}">${escapeHtml(estate.control_plane)} control</span>`) + `
+      <section class="metrics estate-metrics">
+        ${metric('Bound estates', estates.length, 'one project boundary')}
+        ${metric('Observed nodes', visibleNodes.length, nodes.length ? 'retained telemetry' : 'local process')}
+        ${metric('Runtime head', estate.runtime_cursor, 'global commit cursor')}
+        ${metric('Data surfaces', state.data.tables?.length || 0, `${state.data.models?.length || 0} schema scope(s)`)}
+      </section>
+      <section class="estate-layout">
+        <article class="estate-map" aria-label="Estate topology">
+          <header><div><span class="eyebrow">LOCAL ESTATE</span><h2>${escapeHtml(estate.id)}</h2></div><code>${escapeHtml(estate.mode)}</code></header>
+          <div class="estate-core"><span class="estate-orbit"></span><strong>${escapeHtml(estate.id)}</strong><small>${escapeHtml(estate.storage_backend)} · cursor ${human(estate.runtime_cursor)}</small></div>
+          <div class="estate-node-grid">${visibleNodes.map((node) => `<button type="button" class="estate-node ${node.alerts?.length ? 'attention' : ''}" data-open-estate-node="${escapeHtml(node.latest_sample_digest || '')}"><span></span><strong>${escapeHtml(node.canonical_node_id)}</strong><code>shard ${human(node.shard)} · raft ${human(node.raft_node_id)}</code><small>${escapeHtml(node.state)} · lag ${human(node.applied_lag)}</small></button>`).join('')}</div>
+        </article>
+        <aside class="estate-contracts">
+          <article><span>STORAGE BOUNDARY</span><strong>${escapeHtml(estate.storage_backend)}</strong><code>${escapeHtml(estate.root)}</code><small>Member ${escapeHtml(estate.member)}</small></article>
+          <article><span>PROJECT SCOPE</span><strong>${escapeHtml(estate.scope)}</strong><code>cursor ${human(estate.runtime_cursor)}</code><small>All views remain bound to this manifest.</small></article>
+          <article class="future-boundary"><span>HOSTING CONTROL PLANE</span><strong>Not attached</strong><code>local-only</code><small>Reserved for the later cloud hosting tab; no remote action is implied.</small></article>
+          <button type="button" class="primary-button estate-action" data-go="cluster">Open retained cluster history</button>
+        </aside>
+      </section>`;
+    $$('[data-go]').forEach((button) => button.addEventListener('click', () => navigate(button.dataset.go)));
+    $$('[data-open-estate-node]').forEach((button) => button.addEventListener('click', () => {
+      if (button.dataset.openEstateNode) select(`cluster-sample:${button.dataset.openEstateNode}`);
+    }));
+  }
+
+  function rowsForTable(id) {
+    const data = state.data;
+    return ({
+      claims: data.claims,
+      reasoning_runs: data.runs,
+      prompt_flights: data.flights,
+      temporal_events: data.temporal_events,
+      causal_traces: data.traces?.traces || [],
+      source_files: data.files,
+      invocations: data.invocations,
+      cluster_samples: data.cluster?.samples || [],
+      vector_artifacts: data.vector_artifacts,
+    })[id] || [];
+  }
+
+  function cellValue(value) {
+    if (value == null) return '—';
+    if (Array.isArray(value)) return `${value.length} item${value.length === 1 ? '' : 's'}`;
+    if (typeof value === 'object') {
+      const identity = value.id || value.kind || value.state || value.actor || value.digest;
+      return identity ? String(identity) : JSON.stringify(value);
+    }
+    return String(value);
+  }
+
+  function tableObjectId(table, row) {
+    if (table === 'claims') return `claim:${row.id}`;
+    if (table === 'reasoning_runs') return `run:${row.id}`;
+    if (table === 'source_files') return `file:${row.path}`;
+    if (table === 'invocations') return `invocation:${row.ordinal}`;
+    if (table === 'prompt_flights') return `flight:${row.id}`;
+    if (table === 'temporal_events') return `runtime-change:${row.cursor}`;
+    if (table === 'cluster_samples') return `cluster-sample:${row.digest}`;
+    return '';
+  }
+
+  function renderTables() {
+    const tables = state.data.tables || [];
+    if (!tables.some((table) => table.id === state.tableId)) state.tableId = tables[0]?.id || null;
+    const selected = tables.find((table) => table.id === state.tableId);
+    const rows = selected ? rowsForTable(selected.id) : [];
+    const preferred = ['id', 'kind', 'subject', 'predicate', 'state', 'status', 'scope', 'actor', 'path', 'cursor', 'ordinal', 'created_at'];
+    const discovered = [...new Set(rows.slice(0, 20).flatMap((row) => Object.keys(row || {})))];
+    const columns = [...preferred.filter((key) => discovered.includes(key)), ...discovered.filter((key) => !preferred.includes(key))].slice(0, 6);
+    $('#main').innerHTML = pageHead('Tables', 'Logical runtime surfaces with their source of truth made explicit. Select one surface to inspect its current read-only rows.', selected ? `<span class="badge ready">known at cursor ${human(selected.known_at_cursor)}</span>` : '') + `
+      <section class="table-workspace">
+        <aside class="table-catalog" aria-label="Runtime tables">${tables.map((table) => `<button type="button" class="table-catalog-row ${table.id === state.tableId ? 'active' : ''}" data-table-id="${escapeHtml(table.id)}"><span class="table-glyph ${escapeHtml(table.category)}">${table.bounded ? '≈' : '▤'}</span><div><strong>${escapeHtml(table.label)}</strong><small>${escapeHtml(table.authority)} · ${table.bounded ? 'bounded response' : 'current view'}</small></div><b>${human(table.rows)}</b></button>`).join('')}</aside>
+        <article class="table-preview">
+          ${selected ? `<header><div><span class="eyebrow">${escapeHtml(selected.category)} / ${escapeHtml(selected.authority)}</span><h2>${escapeHtml(selected.label)}</h2><p>${escapeHtml(selected.description)}</p></div><strong>${human(rows.length)} rows loaded · ${selected.bounded ? 'bounded response' : 'current view'}</strong></header>
+          <div class="table-scroll"><table class="data-table table-dataset"><thead><tr>${columns.map((column) => `<th>${escapeHtml(column.replaceAll('_', ' '))}</th>`).join('')}</tr></thead><tbody>${rows.slice(0, 100).map((row) => { const object = tableObjectId(selected.id, row); return `<tr ${object ? `data-object="${escapeHtml(object)}"` : ''}>${columns.map((column) => `<td><span class="table-cell-value">${escapeHtml(cellValue(row[column]))}</span></td>`).join('')}</tr>`; }).join('')}</tbody></table>${rows.length ? '' : empty('No rows in this surface', 'The table contract exists but has no current data.')}</div>
+          <footer><span>${selected.bounded ? 'Response is retention- or limit-bounded; row count is not a lifetime total.' : 'Snapshot-consistent current rows.'}</span><button type="button" data-go="query">Open Query Lab</button></footer>` : empty('No table catalog', 'The runtime did not expose any logical data surfaces.')}
+        </article>
+      </section>`;
+    $$('[data-table-id]').forEach((button) => button.addEventListener('click', () => { state.tableId = button.dataset.tableId; renderTables(); }));
+    $$('[data-object]', $('#main')).forEach((row) => row.addEventListener('click', () => select(row.dataset.object)));
+    $$('[data-go]').forEach((button) => button.addEventListener('click', () => navigate(button.dataset.go)));
+  }
+
+  function renderModels() {
+    const models = state.data.models?.length ? state.data.models : (state.data.schema ? [{ scope: 'reasoning', registry: state.data.schema }] : []);
+    if (!state.modelScope || !models.some((model) => model.scope === state.modelScope)) state.modelScope = models[0]?.scope || null;
+    const model = models.find((candidate) => candidate.scope === state.modelScope);
+    if (!model) {
+      $('#main').innerHTML = pageHead(state.view === 'schema' ? 'Runtime schema' : 'Data models', 'Typed records, events, relations, and their enforcement rules.') + empty('No model installed', 'The first governed runtime write installs a scoped schema.');
+      return;
+    }
+    const schema = model.registry;
+    const records = Object.entries(schema.records || {});
+    const relations = Object.entries(schema.relations || {});
+    const events = Object.entries(schema.events || {});
+    $('#main').innerHTML = pageHead(state.view === 'schema' ? 'Runtime schema' : 'Data models', 'Every persisted model by runtime scope, including legal relationships, required properties, and deny-by-default boundaries.', `<span class="badge ready">revision ${human(schema.revision)}</span>`) + `
+      <div class="model-scope-tabs" aria-label="Data model scopes">${models.map((candidate) => `<button type="button" class="${candidate.scope === state.modelScope ? 'active' : ''}" data-model-scope="${escapeHtml(candidate.scope)}"><span>${escapeHtml(candidate.scope)}</span><b>r${human(candidate.registry.revision)}</b></button>`).join('')}</div>
+      <section class="model-map" aria-label="Data model relationship map">
+        <header><span>RECORD TYPES</span><span>RELATION PATHS</span><span>EVENT TYPES</span></header>
+        <div class="model-column">${records.map(([kind]) => `<div class="model-node record"><i></i><strong>${escapeHtml(kind.replaceAll('_', ' '))}</strong></div>`).join('') || '<div class="model-empty">No records</div>'}</div>
+        <div class="model-column relations">${relations.map(([kind, definition]) => `<div class="model-relation"><small>${escapeHtml((definition.from || []).join(' | '))}</small><strong>— ${escapeHtml(kind)} →</strong><small>${escapeHtml((definition.to || []).join(' | '))}</small></div>`).join('') || '<div class="model-empty">No relations</div>'}</div>
+        <div class="model-column">${events.map(([kind, definition]) => `<div class="model-node event"><i></i><strong>${escapeHtml(kind.replaceAll('_', ' '))}</strong><small>${definition.subject_required ? 'subject required' : 'subject optional'}</small></div>`).join('') || '<div class="model-empty">No events</div>'}</div>
+      </section>
+      <section class="schema-contract-line" aria-label="Schema enforcement sequence">
+        <div><span>01</span><strong>Registry</strong><small>revision ${human(schema.revision)}</small></div><i>→</i>
+        <div><span>02</span><strong>Bind</strong><small>legal types + fields</small></div><i>→</i>
+        <div><span>03</span><strong>Validate</strong><small>cardinality + identity</small></div><i>→</i>
+        <div><span>04</span><strong>Deny or commit</strong><small>one ACID boundary</small></div>
+      </section>
+      <section class="schema-revision"><span class="eyebrow">CURRENT MIGRATION</span><strong>${escapeHtml(schema.migration)}</strong><small>Scope ${escapeHtml(model.scope)} · every later registry advances exactly one revision.</small></section>
+      <section class="schema-groups">
+        ${schemaGroup('Record types', 'Persistent graph objects with required, optional, and unique properties.', records, 'record')}
+        ${schemaGroup('Event types', 'Immutable lifecycle facts with governed subject types and payloads.', events, 'event')}
+        ${schemaGroup('Relation types', 'Directed edges with legal endpoints and temporal cardinality.', relations, 'relation')}
+      </section>`;
+    $$('[data-model-scope]').forEach((button) => button.addEventListener('click', () => { state.modelScope = button.dataset.modelScope; renderModels(); }));
+  }
+
+  function renderVisuals() {
+    const events = state.data.temporal_events || [];
+    if (state.visualCursor == null || !events.some((event) => event.cursor === state.visualCursor)) state.visualCursor = events.at(-1)?.cursor || null;
+    const activeIndex = Math.max(0, events.findIndex((event) => event.cursor === state.visualCursor));
+    const active = events[activeIndex];
+    const windowed = events.slice(Math.max(0, events.length - 48));
+    const lanes = [['reasoning', 'REASONING'], ['workflow', 'LIFECYCLE'], ['routing', 'ROUTING'], ['search', 'SEARCH'], ['storage', 'STORAGE'], ['data', 'DATA']];
+    const modes = [
+      ['flight', 'Prompt flight', 'Provider events, reasoning effort, tokens, and acceptance'],
+      ['stream', 'Temporal flow', 'Every committed mutation with replay and audit evidence'],
+      ['traces', 'Causal traces', 'Parent/child spans, critical path, and integrity diagnostics'],
+      ['graph', 'Runtime graph', 'Claims, reasoning, source, and provenance neighborhoods'],
+      ['cluster', 'Estate topology', 'Node history, replication lag, transport, and alerts'],
+    ];
+    $('#main').innerHTML = pageHead('Visuals', 'Choose one faithful runtime lens, then freeze, rewind, inspect, or open it at full depth. Every mark below comes from the current snapshot.', `<span class="badge ready">${human(events.length)} events loaded</span>`) + `
+      <nav class="visual-deck" aria-label="Available runtime visualizations">${modes.map(([view, title, detail]) => `<button type="button" data-open-visual="${view}"><span>${escapeHtml(title)}</span><small>${escapeHtml(detail)}</small><b>Open →</b></button>`).join('')}</nav>
+      <section class="observatory">
+        <header><div><span class="eyebrow">LIVE BASELINE / GLOBAL LOG</span><h2>Runtime signal observatory</h2></div><div class="observatory-controls"><button type="button" id="visual-prev" aria-label="Previous event">◀</button><strong>${active ? `cursor ${human(active.cursor)}` : 'waiting'}</strong><button type="button" id="visual-next" aria-label="Next event">▶</button></div></header>
+        ${active ? `<div class="signal-observatory">${lanes.map(([family, label]) => `<div class="observatory-lane"><label>${label}</label><div>${windowed.map((event) => event.family === family ? `<button type="button" class="observatory-packet ${event.cursor === active.cursor ? 'active' : ''}" data-visual-cursor="${event.cursor}" aria-label="cursor ${event.cursor}: ${escapeHtml(event.label)}"><i></i></button>` : '<span></span>').join('')}</div></div>`).join('')}</div>
+        <article class="observatory-readout"><span class="event-kind">${escapeHtml(active.family)} / ${escapeHtml(active.action)}</span><h3>${escapeHtml(active.label)}</h3><p>${escapeHtml(active.detail)}</p><footer><code>${escapeHtml(active.scope)} · ${escapeHtml(active.commit_id.slice(0, 14))}…</code><button type="button" id="visual-inspect">Inspect mutation + audit</button></footer></article>` : empty('No runtime events', 'Committed mutations will form the first visual baseline.')}
+      </section>`;
+    $$('[data-open-visual]').forEach((button) => button.addEventListener('click', () => navigate(button.dataset.openVisual)));
+    $$('[data-visual-cursor]').forEach((button) => button.addEventListener('click', () => { state.visualCursor = Number(button.dataset.visualCursor); renderVisuals(); }));
+    $('#visual-prev')?.addEventListener('click', () => { if (events.length) { state.visualCursor = events[Math.max(0, activeIndex - 1)].cursor; renderVisuals(); } });
+    $('#visual-next')?.addEventListener('click', () => { if (events.length) { state.visualCursor = events[Math.min(events.length - 1, activeIndex + 1)].cursor; renderVisuals(); } });
+    $('#visual-inspect')?.addEventListener('click', () => select(`runtime-change:${active.cursor}`));
   }
 
   function currentFlight() {
@@ -527,6 +724,100 @@
     }, 850 / state.flightSpeed);
   }
 
+  function renderTraces() {
+    const bundle = state.data.traces || { traces: [], events: [], diagnostics: [] };
+    const traces = bundle.traces || [];
+    if (!traces.length) {
+      $('#main').innerHTML = pageHead(
+        'Causal trace lab',
+        'Reconstruct complete, incomplete, and summary spans from persisted runtime evidence.'
+      ) + empty('No retained control traces', 'Run a traced query, lifecycle hook, vector operation, or provider flight to create causal evidence.');
+      return;
+    }
+    if (!state.traceId || !traces.some((trace) => trace.trace_id === state.traceId)) {
+      state.traceId = traces.at(-1).trace_id;
+      state.traceSpanId = null;
+    }
+    const trace = traces.find((value) => value.trace_id === state.traceId);
+    const critical = new Set(trace.critical_path_span_ids || []);
+    const spans = trace.spans || [];
+    if (!state.traceSpanId || !spans.some((span) => span.span_id === state.traceSpanId)) {
+      state.traceSpanId = (trace.critical_path_span_ids || [])[0] || spans[0]?.span_id || null;
+    }
+    const selected = spans.find((span) => span.span_id === state.traceSpanId) || spans[0];
+    const positions = new Map(spans.map((span) => [span.span_id, span]));
+    const depthOf = (span) => {
+      let depth = 0;
+      let parent = span.parent_span_id;
+      const seen = new Set([span.span_id]);
+      while (parent && positions.has(parent) && !seen.has(parent)) {
+        seen.add(parent); depth += 1; parent = positions.get(parent).parent_span_id;
+      }
+      return depth;
+    };
+    const ordered = [...spans].sort((left, right) => {
+      const leftCursor = Math.min(...left.event_cursors);
+      const rightCursor = Math.min(...right.event_cursors);
+      return leftCursor - rightCursor || left.span_id.localeCompare(right.span_id);
+    });
+    const maxDuration = Math.max(1, ...spans.map((span) => span.duration_micros || 0));
+    const traceEvents = (bundle.events || []).filter((event) => event.trace_id === trace.trace_id);
+    const selectedEvents = selected
+      ? traceEvents.filter((event) => event.span_id === selected.span_id)
+      : [];
+    const complete = spans.filter((span) => ['complete', 'summary'].includes(span.status)).length;
+    const domainCount = new Set(spans.map((span) => span.domain)).size;
+    $('#main').innerHTML = pageHead(
+      'Causal trace lab',
+      'Measured parent/child lifecycles reconstructed from the project store. Missing finishes and retained-window boundaries stay visible.',
+      `<a class="secondary-button" href="/api/runtime/traces?limit=4096&classes=control" target="_blank" rel="noopener">Export control JSON</a>`
+    ) + `
+      <section class="trace-lab">
+        <div class="trace-summary-strip">
+          <div><span>TRACE STATE</span><strong class="trace-state ${escapeHtml(trace.status)}">${escapeHtml(trace.status)}</strong></div>
+          <div><span>LIFECYCLES</span><strong>${complete}/${spans.length} closed</strong></div>
+          <div><span>DOMAINS</span><strong>${domainCount} observed</strong></div>
+          <div><span>MEASURED ROOT</span><strong>${trace.critical_path_duration_micros == null ? 'open' : `${human(trace.critical_path_duration_micros)} µs`}</strong></div>
+        </div>
+        <div class="trace-history" aria-label="Retained traces">
+          ${traces.slice(-24).reverse().map((value) => {
+            const first = value.spans[0];
+            return `<button type="button" data-trace-id="${escapeHtml(value.trace_id)}" class="${value.trace_id === trace.trace_id ? 'active' : ''}"><i class="trace-state ${escapeHtml(value.status)}"></i><span>${escapeHtml(first?.name || 'trace')}</span><code>${escapeHtml(value.trace_id.slice(0, 8))}</code><b>${value.spans.length}</b></button>`;
+          }).join('')}
+        </div>
+        <section class="causal-stage">
+          <header><div><span class="eyebrow">CAUSAL TOPOLOGY</span><h2>${escapeHtml(trace.trace_id)}</h2></div><span>${escapeHtml(bundle.critical_path_basis || '')}</span></header>
+          <div class="critical-route"><label>MEASURED CRITICAL CANDIDATE</label>${(trace.critical_path_span_ids || []).map((id, index) => {
+            const span = positions.get(id);
+            return `${index ? '<i>→</i>' : ''}<button type="button" data-trace-span="${escapeHtml(id)}">${escapeHtml(span?.name || id)}</button>`;
+          }).join('') || '<span>Unavailable until a measured root is retained.</span>'}</div>
+          <div class="causal-lanes">
+            ${ordered.map((span) => {
+              const depth = depthOf(span);
+              const width = span.duration_micros == null ? 12 : Math.max(12, Math.round((span.duration_micros / maxDuration) * 100));
+              return `<button type="button" data-trace-span="${escapeHtml(span.span_id)}" class="causal-span ${span.span_id === selected?.span_id ? 'active' : ''} ${critical.has(span.span_id) ? 'critical' : ''}" style="--trace-depth:${depth};--trace-width:${width}%">
+                <i></i><span><small>${escapeHtml(span.domain)} · ${escapeHtml(span.status)}</small><strong>${escapeHtml(span.name)}</strong><code>${escapeHtml(span.span_id)}</code></span><b>${span.duration_micros == null ? 'open' : `${human(span.duration_micros)} µs`}</b>
+              </button>`;
+            }).join('')}
+          </div>
+        </section>
+        ${selected ? `<article class="trace-inspection">
+          <header><div><span class="eyebrow">FROZEN SPAN</span><h2>${escapeHtml(selected.name)}</h2></div><span class="badge ${selected.status === 'incomplete' || selected.status === 'invalid' ? 'error' : 'ready'}">${escapeHtml(selected.status)}</span></header>
+          <div class="event-data-strip"><div><span>domain</span><strong>${escapeHtml(selected.domain)}</strong></div><div><span>outcome</span><strong>${escapeHtml(selected.outcome)}</strong></div><div><span>data class</span><strong>${escapeHtml(selected.data_class)}</strong></div><div><span>children</span><strong>${selected.child_span_ids.length}</strong></div></div>
+          <div class="trace-event-list">${selectedEvents.map((event) => `<button type="button" data-trace-cursor="${event.cursor}"><span>cursor ${event.cursor}</span><strong>${escapeHtml(event.phase)}</strong><b>${escapeHtml(event.outcome)}</b><code>${escapeHtml(event.change_digest.slice(0, 12))}…</code></button>`).join('')}</div>
+          ${selected.diagnostics.length ? `<ul>${selected.diagnostics.map((value) => `<li>${escapeHtml(value)}</li>`).join('')}</ul>` : ''}
+        </article>` : ''}
+        ${(trace.diagnostics.length || bundle.diagnostics.length) ? `<section class="trace-diagnostics"><strong>Integrity diagnostics</strong>${[...trace.diagnostics, ...bundle.diagnostics].map((value) => `<p>${escapeHtml(value)}</p>`).join('')}</section>` : ''}
+      </section>`;
+    $$('[data-trace-id]').forEach((button) => button.addEventListener('click', () => {
+      state.traceId = button.dataset.traceId; state.traceSpanId = null; renderTraces();
+    }));
+    $$('[data-trace-span]').forEach((button) => button.addEventListener('click', () => {
+      state.traceSpanId = button.dataset.traceSpan; renderTraces();
+    }));
+    $$('[data-trace-cursor]').forEach((button) => button.addEventListener('click', () => select(`runtime-change:${button.dataset.traceCursor}`)));
+  }
+
   function renderStream() {
     const events = state.data.temporal_events || [];
     if (!events.length) {
@@ -714,7 +1005,8 @@
           <section class="query-contract-grid">
             <article><span>READ MANIFEST</span><strong>${escapeHtml(contract.read_manifest.slice(0, 14))}…</strong><small>cursor ${human(contract.known_at_cursor)} · schema r${human(contract.schema_revision)}</small></article>
             <article><span>SEMANTICS</span><strong>${contract.exact ? 'Exact' : 'Approximate'}</strong><small>valid ${human(contract.valid_at)} · ${escapeHtml(contract.deterministic_order)}</small></article>
-            <article><span>EXECUTION</span><strong>${human(value.execution.returned_rows)} rows</strong><small>${human(value.execution.scanned_changes)} changes · ${human(value.execution.output_bytes)} bytes</small></article>
+            <article><span>EXECUTION</span><strong>${human(value.execution.returned_rows)} rows</strong><small>${human(value.execution.scanned_changes)} result positions · ${human(value.execution.output_bytes)} bytes</small></article>
+            <article><span>READ PROOF</span><strong>${escapeHtml(value.execution.stamp_validation.replaceAll('_', ' '))}</strong><small>${human(value.execution.stamp_validation_max_changes)} change reads · ${human(value.execution.stamp_validation_proof_nodes)} proof nodes</small></article>
             <article><span>BOUNDARY</span><strong>${escapeHtml(contract.scope)}</strong><small>network ${contract.network_required ? 'yes' : 'no'} · GPU ${contract.gpu_required ? 'yes' : 'no'}</small></article>
           </section>
           <section class="query-paths">${value.plan.explanation.candidates.map((candidate) => `<article class="${candidate.selected ? 'selected' : 'rejected'}"><span>${candidate.selected ? 'SELECTED' : 'REJECTED'}</span><strong>${escapeHtml(candidate.name.replaceAll('_', ' '))}</strong><p>${escapeHtml(candidate.reason)}</p></article>`).join('')}</section>
@@ -724,6 +1016,154 @@
         target.innerHTML = empty('Query denied', error.message);
       }
     });
+  }
+
+  function renderCluster() {
+    const history = state.data.cluster || { baseline_samples: [], samples: [], nodes: [], alerts: [], total_samples: 0 };
+    const samples = history.samples || [];
+    if (!samples.length) {
+      clearTimeout(state.clusterTimer);
+      state.clusterPlaying = false;
+      $('#main').innerHTML = pageHead('Cluster flight recorder', 'Retained project-node observations with exact cluster, shard, process-reset, runtime cursor, and audit coordinates.')
+        + empty('No retained node observations', 'Import a validated control-v4 node status through POST /api/cluster/samples. Live process counters are never presented as history until that observation is hash-linked and committed.');
+      return;
+    }
+    let index = state.clusterCursor == null
+      ? samples.length - 1
+      : samples.findIndex((sample) => sample.digest === state.clusterCursor);
+    if (index < 0) index = samples.length - 1;
+    const sample = samples[index];
+    state.clusterCursor = sample.digest;
+    const visibleNodes = clusterNodesAt(history.baseline_samples || [], samples, index);
+    const delta = sample.delta || {};
+    const alertTone = sample.alerts.some((alert) => alert.severity === 'critical') ? 'error'
+      : sample.alerts.some((alert) => alert.severity === 'warning') ? 'attention' : 'ready';
+    const operationTotal = Number(delta.transport_allowed || 0) + Number(delta.transport_denied || 0) + Number(delta.transport_failed || 0);
+    $('#main').innerHTML = pageHead(
+      'Cluster flight recorder',
+      'Freeze, rewind, and compare retained node observations. Every value resolves to a validated status digest, runtime cursor, commit, and hash-chained audit.',
+      `<span class="badge ${alertTone}">${sample.process_reset ? 'process reset' : `${sample.alerts.length} alert(s)`}</span>`,
+    ) + `
+      <section class="cluster-summary-strip">
+        <div><span>NODES AT CURSOR</span><strong>${human(visibleNodes.length)}</strong><small>${escapeHtml(sample.status.cluster)} · shard ${human(sample.status.shard)}</small></div>
+        <div><span>RPC OUTCOMES Δ</span><strong>${human(operationTotal)}</strong><small>${human(delta.transport_denied || 0)} denied · ${human(delta.transport_failed || 0)} failed</small></div>
+        <div><span>ARTIFACTS Δ</span><strong>${human(delta.artifact_completed || 0)}</strong><small>${formatBytes(delta.artifact_gc_reclaimed_bytes || 0)} reclaimed</small></div>
+        <div><span>TRACE COMMITS Δ</span><strong>${human(delta.trace_commit_acknowledgements || 0)}</strong><small>${human(delta.trace_cursor_conflicts || 0)} cursor conflicts</small></div>
+      </section>
+      <section class="cluster-shell">
+        <div class="cluster-controls" aria-label="Cluster history playback">
+          <button type="button" id="cluster-start" class="transport-button" title="First cluster sample">⏮ First</button>
+          <button type="button" id="cluster-rewind" class="transport-button" title="Rewind cluster samples">◀ Rewind</button>
+          <button type="button" id="cluster-play" class="play-button" title="Play or freeze cluster history">${state.clusterPlaying ? 'Freeze time' : 'Resume time'}</button>
+          <button type="button" id="cluster-forward" class="transport-button" title="Fast-forward cluster samples">Forward ▶</button>
+          <button type="button" id="cluster-end" class="transport-button" title="Latest cluster sample">Latest ⏭</button>
+          <input id="cluster-scrub" type="range" min="0" max="${samples.length - 1}" value="${index}" aria-label="Cluster history cursor">
+          <select id="cluster-speed" aria-label="Cluster playback speed"><option value="1" ${state.clusterSpeed === 1 ? 'selected' : ''}>1×</option><option value="2" ${state.clusterSpeed === 2 ? 'selected' : ''}>2×</option><option value="4" ${state.clusterSpeed === 4 ? 'selected' : ''}>4×</option><option value="8" ${state.clusterSpeed === 8 ? 'selected' : ''}>8×</option></select>
+          <span class="cluster-clock">sample ${index + 1}/${samples.length} · runtime cursor ${human(sample.cursor)}</span>
+        </div>
+        <div class="cluster-topology" role="group" aria-label="Cluster topology at selected sample">
+          <header><span>TOPOLOGY AT CURSOR ${human(sample.cursor)}</span><b>${escapeHtml(new Date(sample.status.telemetry.observed_at).toLocaleString())}</b></header>
+          <div class="cluster-node-grid">${visibleNodes.map((node) => clusterNode(node, sample.digest)).join('')}</div>
+        </div>
+        <article class="cluster-event-detail ${alertTone}">
+          <header><div><span class="eyebrow">FROZEN NODE OBSERVATION · SEQUENCE ${human(sample.sequence)}</span><h2>${escapeHtml(sample.status.canonical_node_id)}</h2></div><div class="event-clock"><strong>${escapeHtml(sample.status.state)}</strong><span>term ${human(sample.status.current_term)} · leader ${sample.status.current_leader ?? 'none'}</span></div></header>
+          <div class="event-data-strip"><div><span>applied / log</span><strong>${human(sample.status.last_applied_index ?? 0)} / ${human(sample.status.last_log_index ?? 0)}</strong></div><div><span>request bytes Δ</span><strong>${formatBytes(delta.transport_request_bytes || 0)}</strong></div><div><span>response bytes Δ</span><strong>${formatBytes(delta.transport_response_bytes || 0)}</strong></div><div><span>work duration Δ</span><strong>${formatMicros(delta.transport_duration_micros || 0)}</strong></div></div>
+          <div class="cluster-alert-list">${sample.alerts.length ? sample.alerts.map((alert) => `<div class="cluster-alert ${escapeHtml(alert.severity)}"><b>${escapeHtml(alert.code.replaceAll('_', ' '))}</b><span>${human(alert.value)}</span><p>${escapeHtml(alert.detail)}</p></div>`).join('') : '<div class="cluster-clear">No derived alert in this observation interval.</div>'}</div>
+          <footer><span>status ${escapeHtml(sample.source_status_digest.slice(0, 14))}…</span><span>previous ${sample.previous_sample_digest ? `${escapeHtml(sample.previous_sample_digest.slice(0, 14))}…` : 'chain origin'}</span><button type="button" id="inspect-cluster-sample">Inspect raw status + audit</button></footer>
+        </article>
+        <div class="cluster-filmstrip" aria-label="Retained cluster observation timeline">${samples.map((item, sampleIndex) => `<button type="button" class="cluster-frame ${sampleIndex === index ? 'active' : ''} ${item.process_reset ? 'reset' : ''}" data-cluster-sample="${sampleIndex}"><span>#${human(item.sequence)}</span><i class="${clusterSampleTone(item)}"></i><b>${escapeHtml(item.status.canonical_node_id)}</b><small>c${human(item.cursor)} · ${item.alerts.length} alert(s)</small></button>`).join('')}</div>
+      </section>`;
+    bindClusterControls(samples, index);
+  }
+
+  function clusterNodesAt(baseline, samples, index) {
+    const latest = new Map(baseline.map((sample) => [sample.node_key, sample]));
+    samples.slice(0, index + 1).forEach((sample) => latest.set(sample.node_key, sample));
+    return [...latest.values()].sort((left, right) => left.status.shard - right.status.shard || left.status.raft_node_id - right.status.raft_node_id);
+  }
+
+  function clusterNode(sample, selectedDigest) {
+    const status = sample.status;
+    const lag = Math.max(0, Number(status.last_log_index || 0) - Number(status.last_applied_index || 0));
+    const leader = status.current_leader === status.raft_node_id;
+    return `<button type="button" class="cluster-node ${leader ? 'leader' : ''} ${sample.digest === selectedDigest ? 'selected' : ''}" data-cluster-digest="${escapeHtml(sample.digest)}"><span class="cluster-node-orbit ${sample.alerts.some((alert) => alert.severity === 'critical' || alert.severity === 'warning') ? 'attention' : ''}"></span><strong>${escapeHtml(status.canonical_node_id)}</strong><code>raft ${human(status.raft_node_id)} · shard ${human(status.shard)}</code><small>${leader ? 'LEADER' : `leader → ${status.current_leader ?? 'none'}`} · lag ${human(lag)}</small></button>`;
+  }
+
+  function clusterSampleTone(sample) {
+    if (sample.alerts.some((alert) => alert.severity === 'critical')) return 'critical';
+    if (sample.alerts.some((alert) => alert.severity === 'warning')) return 'warning';
+    return sample.process_reset ? 'reset' : 'healthy';
+  }
+
+  function bindClusterControls(samples, index) {
+    $('#cluster-start')?.addEventListener('click', () => freezeClusterAt(samples, 0));
+    $('#cluster-end')?.addEventListener('click', () => freezeClusterAt(samples, samples.length - 1));
+    $('#cluster-rewind')?.addEventListener('click', () => playCluster(-1));
+    $('#cluster-forward')?.addEventListener('click', () => playCluster(1));
+    $('#cluster-play')?.addEventListener('click', () => {
+      state.clusterPlaying = !state.clusterPlaying;
+      renderCluster();
+      scheduleClusterStep();
+    });
+    $('#cluster-scrub')?.addEventListener('input', (event) => freezeClusterAt(samples, Number(event.target.value)));
+    $('#cluster-speed')?.addEventListener('change', (event) => { state.clusterSpeed = Number(event.target.value); scheduleClusterStep(); });
+    $$('[data-cluster-sample]').forEach((button) => button.addEventListener('click', () => freezeClusterAt(samples, Number(button.dataset.clusterSample))));
+    $$('[data-cluster-digest]').forEach((button) => button.addEventListener('click', () => {
+      const target = samples.findIndex((sample) => sample.digest === button.dataset.clusterDigest);
+      if (target >= 0) freezeClusterAt(samples, target);
+      else select(`cluster-sample:${button.dataset.clusterDigest}`);
+    }));
+    $('#inspect-cluster-sample')?.addEventListener('click', () => select(`cluster-sample:${samples[index].digest}`));
+    scheduleClusterStep();
+  }
+
+  function freezeClusterAt(samples, index) {
+    state.clusterPlaying = false;
+    state.clusterCursor = samples[Math.max(0, Math.min(samples.length - 1, index))].digest;
+    clearTimeout(state.clusterTimer);
+    renderCluster();
+  }
+
+  function playCluster(direction) {
+    state.clusterPlaying = true;
+    const samples = state.data.cluster?.samples || [];
+    const current = samples.findIndex((sample) => sample.digest === state.clusterCursor);
+    if (direction < 0 && current <= 0) state.clusterCursor = samples.at(-1)?.digest || null;
+    if (direction > 0 && current >= samples.length - 1) state.clusterCursor = samples[0]?.digest || null;
+    state.clusterDirection = direction;
+    renderCluster();
+    scheduleClusterStep();
+  }
+
+  function scheduleClusterStep() {
+    clearTimeout(state.clusterTimer);
+    if (!state.clusterPlaying || state.view !== 'cluster') return;
+    state.clusterTimer = setTimeout(() => {
+      const samples = state.data.cluster?.samples || [];
+      const current = samples.findIndex((sample) => sample.digest === state.clusterCursor);
+      const next = current + (state.clusterDirection || 1);
+      if (next >= 0 && next < samples.length) {
+        state.clusterCursor = samples[next].digest;
+        renderCluster();
+      } else {
+        state.clusterPlaying = false;
+        renderCluster();
+      }
+    }, 850 / state.clusterSpeed);
+  }
+
+  function formatBytes(value) {
+    const bytes = Number(value || 0);
+    if (bytes < 1024) return `${human(bytes)} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KiB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MiB`;
+  }
+
+  function formatMicros(value) {
+    const micros = Number(value || 0);
+    if (micros < 1000) return `${human(micros)} µs`;
+    if (micros < 1000000) return `${(micros / 1000).toFixed(1)} ms`;
+    return `${(micros / 1000000).toFixed(2)} s`;
   }
 
   function renderGraph() {
@@ -885,6 +1325,7 @@
     if (id.startsWith('file:')) return state.data.files.find((item) => `file:${item.path}` === id) || state.data.graph.nodes.find((item) => item.id === id);
     if (id.startsWith('invocation:')) return state.data.invocations.find((item) => `invocation:${item.ordinal}` === id);
     if (id.startsWith('runtime-change:')) return state.data.temporal_events.find((item) => `runtime-change:${item.cursor}` === id);
+    if (id.startsWith('cluster-sample:')) return [...(state.data.cluster?.baseline_samples || []), ...(state.data.cluster?.samples || [])].find((item) => `cluster-sample:${item.digest}` === id) || null;
     if (id.startsWith('flight-event:')) {
       const [, , flightId, ordinal] = id.match(/^(flight-event):(.*):(\d+)$/) || [];
       const flight = state.data.flights.find((item) => item.id === flightId);
@@ -908,6 +1349,7 @@
     if (object.events) return [['Type', 'reasoning run'], ['Run', object.id], ['State', object.state], ['Complete', object.complete], ['Transitions', object.events.length]];
     if (object.payload) return [['Type', 'reasoning event'], ['Transition', object.payload.kind], ['Run', object.run_id], ['Ordinal', object.ordinal], ['Actor', object.actor], ['Digest', object.digest, 'digest'], ['Summary', eventSummary(object)]];
     if (object.command) return [['Type', 'invocation'], ['Command', object.command], ['Ordinal', object.ordinal], ['Trigger', object.trigger], ['Outcome', object.outcome], ['Duration', `${object.duration_ms} ms`], ['Detail', object.detail || '—']];
+    if (object.node_key && object.source_status_digest) return [['Type', 'retained cluster observation'], ['Node', object.status.canonical_node_id], ['Cluster / shard', `${object.status.cluster} / ${object.status.shard}`], ['Sample sequence', object.sequence], ['Runtime cursor', object.cursor], ['Process reset', object.process_reset], ['Status digest', object.source_status_digest, 'digest'], ['Sample digest', object.digest, 'digest'], ['Previous sample', object.previous_sample_digest || 'chain origin', 'digest'], ['Commit', object.commit_id], ['Audit digest', object.audit_digest || 'missing', 'digest'], ['Alerts', object.alerts.length]];
     if (object.commit_id && object.cursor != null) return [['Type', 'runtime mutation'], ['Cursor', object.cursor], ['Family', object.family], ['Action', object.action], ['Scope', object.scope], ['Actor', object.actor], ['Commit', object.commit_id], ['Change digest', object.digest, 'digest'], ['Audit digest', object.audit?.digest || 'missing', 'digest'], ['Detail', object.detail]];
     if (object.stage && object.kind) return [['Type', 'prompt flight event'], ['Stage', object.stage], ['Kind', object.kind], ['Ordinal', object.ordinal], ['Elapsed', `${object.elapsed_ms} ms`], ['Label', object.label], ['Detail', object.detail]];
     if (object.path) return [['Type', 'indexed file'], ['Path', object.path], ['Language', object.language], ['Lines', object.lines], ['Symbols', object.symbols], ['Terms', object.terms]];
@@ -964,8 +1406,10 @@
     if (key === 'g') navigate('graph');
     if (key === 's') navigate('schema');
     if (key === 'q') navigate('query');
+    if (key === 'p') navigate('capabilities');
     if (key === 'f') navigate('flight');
     if (key === 't') navigate('stream');
+    if (key === 'k') navigate('cluster');
     if (key === 'r') navigate('runs');
     if (key === 'c') navigate('claims');
     if (key === 'a') navigate('activity');

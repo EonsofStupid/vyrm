@@ -9,7 +9,7 @@ copy Anytype's branding or source.
 |---|---|
 | Objects accumulate properties and relationships | Claims, runs, evidence, files, and invocations are inspectable objects with stable identities |
 | A Channel/Space owns its objects and sidebar | A vyrm instance owns its runtime state and navigation; an umbrella must still name members explicitly |
-| Sidebar widgets provide persistent lenses | Overview, Graph, Runs, Claims, Routes, and Activity are stable developer lenses |
+| Sidebar widgets provide persistent lenses | Estates, Tables, Data models, and Visuals are stable operator workspaces; the deeper runtime labs remain directly reachable |
 | Types, Queries, and Collections can render through different Views | The same runtime snapshot can render as graph, timeline, table, route result, or inspector |
 | Global and local graph navigation | Global instance map exists, but local selection-centered graphs are the default |
 | Desktop frontend is separated from local middleware | The workbench is a browser UI over a local read-only Rust API; the store remains authoritative |
@@ -40,17 +40,17 @@ the existing typed lifecycle surfaces; a visual button must not become a path
 around policy. Later controls should call the same commands and expose their
 contract differential before execution.
 
-## First information architecture
+## Current information architecture
 
 ```text
 instance sidebar          active lens                         inspector
 ├─ Overview               health + active run                selected object
-├─ Temporal stream        scoped mutation lanes + clock      mutation + audit
-├─ Graph                  local/global runtime map            identity
-├─ Runs                   typed event timeline                provenance
-├─ Claims                 current claim table                 validity
-├─ Routes                 query + ranked files                justification
-└─ Activity               invocation stream                   outcome
+├─ Estates                boundary + node topology            instance/sample
+├─ Tables                 logical catalog + row preview       row identity
+├─ Data models            scoped type/relationship map        schema contract
+├─ Visuals                one active evidence visual          frozen event
+├─ Visual labs            flight/stream/trace/graph/cluster   raw evidence
+└─ Developer tools        query/run/claim/route/activity       plan/provenance
 ```
 
 The top command field searches across all loaded objects and doubles as the
@@ -62,6 +62,15 @@ search; `t`, `g`, `r`, `c`, and `a` open the main lenses.
 The `connectome` binary serves embedded HTML, CSS, and JavaScript from the same
 local Rust process as its instance-bound API. It currently provides:
 
+- typed estate, table-catalog, and scoped-model snapshot projections;
+- a local estate topology with explicit store/member binding and an unattached
+  cloud-control boundary;
+- logical table browsing that identifies authoritative, projected, catalog,
+  and bounded-log surfaces before showing rows;
+- multi-scope data-model navigation with relationship paths and the full
+  persisted enforcement contract;
+- a visual observatory over real committed events plus direct entry into one
+  full-depth visual lab at a time;
 - runtime health and freshness overview;
 - selection-centered and global object graphs with semantic filters;
 - claims, reasoning transitions, and evidence as first-class graph objects;

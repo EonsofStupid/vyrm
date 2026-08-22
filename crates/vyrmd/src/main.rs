@@ -4,7 +4,7 @@ use serde_json::{json, Value};
 use std::io::{BufRead, Write};
 use std::path::{Path, PathBuf};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
-use vyrm_core::{Millis, Reader, RecallQuery, ReasoningPayload, Subject};
+use vyrm_core::{digest, Millis, Reader, RecallQuery, ReasoningPayload, ScopeId, Subject};
 use vyrm_store::{Effectiveness, Engine, InvocationInput, Outcome, PersistentEngine, Trigger};
 
 struct Config {
@@ -111,7 +111,7 @@ fn dispatch(store: &PersistentEngine, root: &Path, id: Value, request: &Value) -
                 Ok(result) => (Outcome::Ok, result.detail.clone(), result.effectiveness.clone()),
                 Err(error) => (Outcome::Error, Some(error.to_string()), None),
             };
-            let arguments = vec![args.to_string()];
+            let arguments = invocation_arguments(name, &args);
             let _ = store.record_invocation(InvocationInput {
                 at: now(),
                 trigger: Trigger::Manual,
@@ -193,6 +193,46 @@ fn call_tool(
             let routed = index.route(query, arg_u64(args, "limit").unwrap_or(5) as usize);
             Ok(ToolResult { text: serde_json::to_string_pretty(&json!({"freshness": ready.render(), "files": routed}))?, effectiveness: None, detail: Some(ready.render()) })
         }
+        "vyrm_query" => {
+            let reader = reader(args)?;
+            let scope = ScopeId::new(
+                args.get("scope")
+                    .and_then(Value::as_str)
+                    .unwrap_or(vyrm_node::REASONING_SCOPE),
+            )?;
+            let empty_parameters = json!({});
+            let parameters = vyrm_node::query_parameters_from_json(
+                args.get("parameters").unwrap_or(&empty_parameters),
+            )?;
+            let budget = vyrm_node::ExecutionBudget {
+                max_scanned_changes: arg_u64(args, "max_scanned_changes")
+                    .unwrap_or(100_000)
+                    .clamp(1, 1_000_000) as usize,
+                max_rows: arg_u64(args, "max_rows")
+                    .unwrap_or(10_000)
+                    .clamp(1, 100_000) as usize,
+                max_output_bytes: arg_u64(args, "max_output_bytes")
+                    .unwrap_or(8 * 1024 * 1024)
+                    .clamp(1, 64 * 1024 * 1024) as usize,
+                max_batch_rows: arg_u64(args, "max_batch_rows")
+                    .unwrap_or(256)
+                    .clamp(1, 4_096) as usize,
+            };
+            let result = vyrm_node::execute_traced_query(
+                store,
+                scope,
+                arg_str(args, "ql")?,
+                &parameters,
+                &budget,
+                reader.as_str(),
+                arg_u64(args, "at").unwrap_or_else(now),
+            )?;
+            Ok(ToolResult {
+                text: serde_json::to_string_pretty(&result)?,
+                effectiveness: None,
+                detail: Some(format!("plan={}", result.plan.digest)),
+            })
+        }
         "vyrm_reasoning_record" => {
             let run = arg_str(args, "run_id")?;
             let actor = args.get("actor").and_then(Value::as_str).unwrap_or("agent:mcp");
@@ -233,6 +273,7 @@ fn tools() -> Value {
         tool("vyrm_preflight", "Attune, refresh routing, and inject current memory before reasoning", json!({"type":"object","properties":{"at":{"type":"integer"},"budget":{"type":"integer"},"harness":{"type":"string"}}})),
         tool("vyrm_recall", "Recall current claims for exact subjects", json!({"type":"object","required":["subjects"],"properties":{"subjects":{"type":"array","items":{"type":"string"}},"at":{"type":"integer"},"budget":{"type":"integer"}}})),
         tool("vyrm_route", "Refresh and route a symbol/query to complete files", json!({"type":"object","required":["query"],"properties":{"query":{"type":"string"},"limit":{"type":"integer"}}})),
+        tool("vyrm_query", "Execute a project-scoped vyrmQL read with durable parse, plan, and execution evidence", json!({"type":"object","required":["ql"],"properties":{"ql":{"type":"string"},"scope":{"type":"string"},"parameters":{"type":"object"},"at":{"type":"integer"},"max_scanned_changes":{"type":"integer"},"max_rows":{"type":"integer"},"max_output_bytes":{"type":"integer"},"max_batch_rows":{"type":"integer"}}})),
         tool("vyrm_reasoning_record", "Append one typed goal/plan/attempt/observation/decision/verification/outcome transition", json!({"type":"object","required":["run_id","payload"],"properties":{"run_id":{"type":"string"},"actor":{"type":"string"},"at":{"type":"integer"},"payload":{"type":"object"}}})),
         tool("vyrm_reasoning_show", "Show a run or the active reasoning run", json!({"type":"object","properties":{"run_id":{"type":"string"}}})),
         tool("vyrm_lifecycle", "Apply the same session/pre-tool/post-tool lifecycle semantics as hook runtimes", json!({"type":"object","required":["event","input"],"properties":{"event":{"type":"string","enum":["session-start","user-prompt-submit","pre-tool-use","post-tool-use","stop","pre-compact"]},"input":{"type":"object"},"at":{"type":"integer"},"budget":{"type":"integer"}}}))
@@ -245,10 +286,33 @@ fn known_tool(name: &str) -> bool {
         "vyrm_preflight"
             | "vyrm_recall"
             | "vyrm_route"
+            | "vyrm_query"
             | "vyrm_reasoning_record"
             | "vyrm_reasoning_show"
             | "vyrm_lifecycle"
     )
+}
+
+fn invocation_arguments(name: &str, args: &Value) -> Vec<String> {
+    if name != "vyrm_query" {
+        return vec![args.to_string()];
+    }
+    let query = args.get("ql").and_then(Value::as_str).unwrap_or_default();
+    let parameters = args.get("parameters").cloned().unwrap_or_else(|| json!({}));
+    let parameter_bytes = serde_json::to_vec(&parameters).unwrap_or_default();
+    vec![
+        format!(
+            "scope={}",
+            args.get("scope")
+                .and_then(Value::as_str)
+                .unwrap_or(vyrm_node::REASONING_SCOPE)
+        ),
+        format!("query_digest={}", digest::sha256_hex(query.as_bytes())),
+        format!(
+            "parameter_digest={}",
+            digest::sha256_hex(&parameter_bytes)
+        ),
+    ]
 }
 
 fn tool(name: &str, description: &str, schema: Value) -> Value {

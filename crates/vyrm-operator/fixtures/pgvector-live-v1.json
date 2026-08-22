@@ -1,0 +1,35 @@
+{
+  "delete_payload": {
+    "contract_version": 1,
+    "external_id": "document:42:body",
+    "source_cursor": 18
+  },
+  "deployment": {
+    "applied_work_table": "applied_work",
+    "contract_version": 1,
+    "control_schema": "vyrm_control",
+    "metadata_table": "metadata",
+    "model_digest_column": "model_digest",
+    "relation": {
+      "id_column": "external_id",
+      "relation": "knowledge",
+      "schema": "operator_data",
+      "subject_column": "subject_id",
+      "tenant_column": "tenant_id",
+      "vector_column": "embedding"
+    },
+    "revision_table": "project_revision",
+    "source_cursor_column": "source_cursor"
+  },
+  "sync_payload": {
+    "contract_version": 1,
+    "external_id": "document:42:body",
+    "source_cursor": 17,
+    "subject_id": "document:42",
+    "vector": [
+      0.25,
+      -0.5,
+      0.75
+    ]
+  }
+}

@@ -342,6 +342,59 @@ fn init_writes_real_wiring_idempotently_and_refuses_a_dead_harness() {
 }
 
 #[test]
+fn query_command_is_project_bound_observer_safe_and_durably_traced() {
+    let root = scratch("query-project");
+    let db = root.join(".vyrm/store");
+    let root_str = root.to_str().unwrap();
+    let (ok, _, err) = vyrm(
+        &db,
+        &["init", "--harness", "claude-code", "--root", root_str],
+        None,
+    );
+    assert!(ok, "init failed: {err}");
+
+    let ql = "FROM event:runtime_trace AT VALID 18446744073709551615 KNOWN HEAD PROJECT name, phase EXPLAIN CONTRACT";
+    let (ok, out, err) = vyrm(
+        &db,
+        &[
+            "--json",
+            "query",
+            "--root",
+            root_str,
+            "--ql",
+            ql,
+            "--parameter",
+            "unused=\"super-secret-query-marker\"",
+        ],
+        None,
+    );
+    assert!(ok, "query failed: {err}");
+    let result: serde_json::Value = serde_json::from_str(&out).unwrap();
+    assert_eq!(result["execution"]["known_at_cursor"], 2);
+    assert_eq!(result["execution"]["returned_rows"], 1);
+    assert_eq!(result["execution"]["scanned_changes"], 2);
+
+    let store = PersistentEngine::open(&db).unwrap();
+    assert_eq!(store.runtime_cursor().unwrap(), 12);
+    let changes = store
+        .runtime_changes_since(
+            0,
+            usize::MAX,
+            Some(&ScopeId::new(vyrm_node::REASONING_SCOPE).unwrap()),
+        )
+        .unwrap();
+    let encoded_changes = serde_json::to_string(&changes).unwrap();
+    assert!(!encoded_changes.contains("super-secret-query-marker"));
+    let invocations = serde_json::to_string(&store.invocations_since(0).unwrap()).unwrap();
+    assert!(!invocations.contains("super-secret-query-marker"));
+    assert!(!invocations.contains(ql));
+    assert!(encoded_changes.contains("vyrmql.parse_bind"));
+    assert!(encoded_changes.contains("vyrmmx.plan"));
+    assert!(encoded_changes.contains("vyrmmx.execute"));
+    assert!(encoded_changes.contains("vyrmkv.runtime_read"));
+}
+
+#[test]
 fn runtime_entry_points_refuse_cross_instance_state() {
     let first = scratch("isolation-first");
     let second = scratch("isolation-second");

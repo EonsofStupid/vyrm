@@ -1,10 +1,11 @@
-# vyrm — Connectome runtime substrate
+# vyrm — native storage engine for RRD
 
-The product architecture is **Automaton → LFG → Connectome**. Automaton owns
-conversation/provider orchestration, LFG constructs and routes just-in-time
-context, and Connectome owns persistent runtime intelligence and its developer
-workbench. This repository is **Vyrm**, the persistence and lifecycle substrate
-being evolved inside Connectome; it is not a fourth peer product.
+The umbrella is **RRFlow**: RRO orchestrates Automaton and LFG, RRD composes the
+durable data/runtime contract, and Connectome Panel is the operator client and
+visualizer. This repository is **Vyrm**, RRD's native persistence engine. Vyrm
+owns the LSM authority and evidence needed by those layers; it does not own
+workflow orchestration or UI semantics. A columnar analytical path remains a
+measured future addition, not a property of the current row/key-value engine.
 
 The system makes operational reasoning observable and enforceable without
 claiming access to a model's hidden chain-of-thought. It records goals, plans,
@@ -29,12 +30,39 @@ Vyrm provides:
 - atomic typed runtime commits spanning claims, graph records, relations,
   lifecycle events, vectors, series samples, geospatial values, and verified
   object references;
-- one hash-chained global runtime cursor with resumable, scope-filtered replay;
+- one hash-chained global runtime cursor with resumable, scope-filtered replay,
+  plus an RFC 9162-style authenticated accumulator for logarithmic point proofs;
 - bounded persisted runtime traces with W3C-width identities and typed links to
   reasoning runs, cursors, read stamps, snapshots, plans, projections,
   workflows, providers, and external operator-knowledge revisions; project
   initialization installs their strict schema, while lifecycle hooks/MCP write
   separate durable start and finish events so crashes remain visible;
+- observer-safe query, storage-read, vector-plan/search, projection-publication,
+  and embedding-inference/commit trace trees; native reads include bounded
+  manifest/memtable/segment/cache/block deltas plus configured mutable-state
+  limits, automatic-flush/backpressure deltas, block-filter effectiveness, and
+  leveled-compaction debt/byte-flow/buffer evidence, while raw queries,
+  parameters, vectors, filters, and embedding source bytes remain outside
+  persisted traces;
+- authoritative per-project vector artifact catalogs: exact, compact-dense, and
+  HNSW bytes are content-addressed first, then their strict catalog record and
+  verified object reference commit atomically through `vyrmDS`; restart
+  reconstruction rejects revision gaps, substituted descriptors, non-atomic
+  bindings, corruption, and missing objects before serving;
+- a retention-filtered causal trace workbench that reconstructs complete,
+  incomplete, summary, and invalid lifecycles from the authoritative log,
+  identifies a non-double-counted measured critical-path candidate, and joins
+  real provider/tool envelopes by digest without retaining their content;
+- a versioned project-scoped shared operator-knowledge port for external
+  systems such as PostgreSQL/pgvector: exact model/tenant/config binding,
+  snapshot and stable-revision
+  evidence, explicit vector-kind and path-specific metric capabilities,
+  exact/HNSW/IVFFlat controls and fallback, parameterized SQL shapes, and
+  idempotent vector-outbox work without a cross-store ACID claim;
+- an opt-in live pgvector transport with repeatable-read snapshot/catalog
+  capture, atomic project revisions and applied-work receipts, exact/HNSW/
+  IVFFlat plan inspection, typed upsert/delete payloads, reconnect recovery,
+  and a TLS-only production connector that rejects downgrade-capable modes;
 - optimistic concurrency that rejects stale writers instead of losing updates;
 - content-addressed read stamps, persisted snapshot leases, and replay that is
   bounded to the exact captured cursor/hash/schema state;
@@ -65,8 +93,31 @@ Vyrm provides:
   denial, hot leaf and trust-root rotation, CRL revocation, stale restart denial,
   corrupt-pointer refusal, and bounded file-backed snapshot transfer with
   crash-orphan cleanup and disk-resident immutable segment v3 with bounded
-  shared-cache telemetry (automatic workload issuance and production clustering
+  shared-cache telemetry. Transport telemetry v1 adds reset-explicit
+  per-operation/per-identity decisions, byte/latency/in-flight accounting,
+  configurable global and identity rate bounds, and a golden JSON contract;
+  node control v4 binds it beside artifact-session and consensus-trace health
+  to the configured project, cluster, shard, Raft id, and canonical node id.
+  Connectome can validate and retain imported statuses as immutable per-node
+  hash chains with restart-aware deltas, alerts, runtime cursors, and audit
+  evidence. A typed Raft timing policy replaces fragile
+  library development defaults with per-project heartbeat/election bounds
+  (automatic workload issuance, retained exporters, and production clustering
   remain gated);
+- grounded replica-artifact hydration for project-scoped vector/index bytes:
+  typed manifests bind source/target, placement epoch, shard snapshot, exact
+  runtime read, sorted object references, and digest closure. OpenRaft's real
+  mTLS path now hydrates that closure through durable, resumable, exact-offset
+  sessions with independently digested chunks before sending snapshot byte
+  zero; retries re-check the same closure and reuse verified content. The
+  target independently scans the authenticated VyrmKV snapshot and denies
+  activation if any referenced bytes are missing or corrupt. Typed bounded
+  observations expose attempts, progress, duration, counts, bytes, and receipt
+  identities without persisting object content; `vyrm-node` commits them as
+  causal project traces through the current Raft leader. Restart-reconstructed
+  receiver inventories enforce active-session/reserved-byte quotas, bounded
+  receipt retention and stale-session GC while allowing distinct sessions to
+  transfer concurrently;
 - identical lifecycle semantics through hooks, CLI, and MCP;
 - isolated per-platform instances with explicit store/root binding.
 
@@ -96,15 +147,29 @@ The workbench has no authentication. Keep remote binding on a trusted network
 or tunnel the loopback address over SSH. Frontier runners remain disabled
 unless `--enable-runners` is also explicit.
 
-Connectome provides ten lenses:
+Connectome Panel starts with four operator workspaces. The snapshot API makes
+their scope explicit: an estate is a project-owned runtime boundary, a table is
+a logical surface with named authority and boundedness, and each data model is
+paired with the runtime scope that owns its schema revision.
+
+| Workspace | Purpose |
+|---|---|
+| Estates | Inspect the local project boundary, instance/store ownership, observed nodes, and retained cluster state; cloud fleet control is intentionally not attached |
+| Tables | Browse claims, reasoning runs, prompt flights, temporal changes, traces, source, invocations, cluster samples, and vector artifacts without presenting projections as physical SQL tables |
+| Data models | Switch between scoped schema registries and inspect record, event, relation, property, uniqueness, endpoint, and cardinality rules |
+| Visuals | Choose one evidence-backed runtime visual, freeze its current event, and open the full prompt, temporal, trace, graph, or cluster lab |
+
+The deeper labs remain available from the same panel:
 
 | Lens | Purpose |
 |---|---|
 | Prompt flights | Launch, replay, freeze, inspect, and compare prompt experiments |
 | Temporal stream | Freeze and scrub persisted mutations across instance scopes with their change and audit evidence |
-| Schema | Inspect the persisted type, property, endpoint, uniqueness, and cardinality contract |
+| Schema | Compatibility route for the reasoning schema; Data models is the multi-scope view |
 | Query lab | Parse, bind, explain, and execute exact bitemporal `vyrmQL` reads |
+| Cluster | Freeze, rewind, and inspect validated project-node observations, topology, restart boundaries, deltas, alerts, and raw audit evidence |
 | Overview | Runtime health, freshness, grounding, and active work |
+| Causal traces | Parent/child span lifecycles, incomplete work, measured bottleneck candidates, exact cursors, and control-only JSON export |
 | Graph | Selection-centered claim, evidence, run, flight, and source topology |
 | Runs | Typed reasoning timelines |
 | Claims | Current bi-temporal state and provenance |
@@ -115,21 +180,50 @@ The local API also exposes the authoritative persistence layer:
 
 | Endpoint | Purpose |
 |---|---|
+| `GET /api/runtime/capabilities` | Negotiate the versioned developer-diagnostics contract, replay controls, enabled runners, and evidence-backed engine maturity without presenting roadmap items as shipped |
 | `GET /api/changes?after=N&limit=N&scope=...` | Resume the verified global runtime changefeed, optionally restricted to one scope |
 | `GET /api/runtime/events?limit=N` | Read the newest bounded, audit-attached temporal event projection |
+| `GET /api/runtime/traces?limit=N&classes=control` | Export bounded per-project causal traces; operator/content classes require explicit inclusion |
+| `GET /api/runtime/vector-artifacts?scope=...` | Inspect typed artifact generations, projection/config/source coordinates, object receipts, byte digests, and catalog revisions without returning raw vectors |
 | `GET /api/runtime/schema?scope=...` | Read the active persisted schema revision for one scope |
 | `GET /api/runtime/retention` | Inspect live snapshot leases and their logical GC retention pins |
 | `GET /api/runtime/query?scope=...&ql=...` | Parse, bind, explain, and execute an exact bitemporal `vyrmQL` query |
 | `GET /api/runtime/graph?scope=...&valid_at=T&cursor=N` | Freeze one scoped typed graph at valid time and transaction cursor |
 | `GET /api/runtime/diff?scope=...&from=A&to=B&valid_at=T` | Inspect exact scoped structural change between cursors |
+| `GET /api/cluster/history?limit=N` | Read bounded retained cluster observations plus the per-node baseline anchors needed for exact topology reconstruction |
+| `POST /api/cluster/samples` | Validate and commit one control-v4 project-node status as an immutable, source-digested observation |
 | `POST /api/demos/prompt-strength` | Persist a deterministic weak/strong trace pair for temporal playback |
+
+The Query Lab and its GET endpoint remain read-only inspection. When the query
+itself should become optimization evidence, use the explicit project-bound
+operator path (also exposed as MCP tool `vyrm_query`):
+
+```bash
+cargo run -p vyrm-cli -- \
+  --db .vyrm/store --json query --root . \
+  --scope instance:default \
+  --ql 'FROM event:runtime_trace AT VALID 18446744073709551615 KNOWN HEAD PROJECT name, phase EXPLAIN CONTRACT'
+```
+
+That path captures `KNOWN HEAD` before observability writes, then persists one
+parent query span and child parse/bind, planning, execution, and physical-store
+read spans. Query and parameter content remains caller-visible but trace and
+invocation state retain only digests, counts, budgets, plan/read coordinates,
+result metrics, and bounded storage counter deltas.
 
 The temporal stream is a read-only projection of the newest 512 authoritative
 runtime mutations in the snapshot (up to 4,096 through the event API), not an
 independent telemetry store. It attaches the full mutation and available
 hash-chained audit envelope. The lanes describe persisted logical mutations;
-they do not imply physical WAL micro-events, unpersisted search execution, or
-private model chain-of-thought.
+search, embedding, and storage lanes now include their persisted runtime spans.
+The Causal traces lens rebuilds parent/child lifecycle state and exposes exact
+event/audit coordinates. The separate Cluster lens visualizes explicitly
+ingested node-status observations; it never upgrades process counters into
+consensus truth, and bounded history carries a pre-window anchor per node so
+rewind does not silently erase quiet nodes. Armed prompt flights add a durable
+provider root, digest-only observable-envelope annotations, and tool-envelope children. They
+do not imply per-operation physical WAL micro-events, automatic node polling,
+unpersisted activity, or private model chain-of-thought.
 
 At the Rust port today, `MemoryEngine` and the transitional Fjall adapter expose
 the same versioned read-stamp, snapshot, and data-transaction semantics. The
@@ -202,6 +296,7 @@ measurement contract.
 |---|---|
 | `vyrm-core` | Claim, reasoning, typed runtime graph, durable trace, traversal, and differential contracts; serde-only boundary |
 | `vyrm-store` | `vyrmDS` coordination plus native `vyrmKV`, transitional Fjall, and memory adapters; unified atomic commits, content-addressed objects, outbox/audit, sequences, projections |
+| `vyrm-operator` | External operator-knowledge contracts, exact reference adapter, optional live pgvector transport, SQL planning, and idempotent upsert/delete synchronization |
 | `vyrm-graph` | Parsing, incremental freshness, grounding, source routing |
 | `vyrm-node` | Runtime lifecycle, instance binding, policy, append-only reasoning composition |
 | `vyrm-cli` | Operator surface |
@@ -225,15 +320,42 @@ Vyrm owns the storage contract. `vyrm_store::NativeEngine` now implements the
 same `Engine` port as the in-memory reference and transitional Fjall adapter;
 claim recall, projections, schema enforcement, hash-chained commits, snapshots,
 concurrent CAS, restart, and exact `vyrmQL` results run through a three-backend
-differential. Fjall remains live until broader benchmark regression runs
-reproduce the native engine's first strict local equal-or-better pass. That
-checked-in five-trial workload has native ahead in write/read throughput,
-write/read p95, maintained recovery, steady RSS, and disk while preserving
-correctness. A nine-trial small-batch/standard/read-heavy/sustained matrix also
-passes every cell. These are scoped append/replay M3 results, not a general
-database-superiority claim. A separate 20,000-operation physical differential
-now proves put/overwrite/delete behavior across reopen and compaction against
-both Fjall and an independent ordered-map oracle.
+differential. `vyrmMX` now lowers an event query with a bound built-in `cursor`
+to one stamped authoritative cursor result lookup; unbound records, relations,
+events, and claims retain the exact log-replay fallback. The planner publishes
+both the selected path and rejection reason, and execution revalidates the path
+against the logical filter and `ReadStamp` before storage access. Its contract
+advertises authenticated-proof support with a legacy replay fallback, while
+execution reports the path actually observed. Current stamped cursor lookup
+reads one authoritative change and verifies an RFC 9162 inclusion path; a
+4,096-event test bounds that path to 13 proof nodes. Historical prefixes can
+reconstruct their compact frontier from retained complete-subtree nodes, but
+still report replay-plus-proof while schema history lacks an authenticated
+absence/index proof. Legacy databases retain full replay until the first atomic
+accumulator bootstrap. Fjall remains live as a compatibility and performance
+oracle. The former M3 performance pass used asymmetric maintenance and treated
+Fjall's sparse 64 MiB journal as physically consumed space, so it is retained
+only as legacy diagnostic evidence. The corrected lifecycle harness measures
+both engines while active, after clean reopen, and after explicit maintenance,
+with apparent and allocated-byte accounting. Exact semantics pass, but the
+general append/replay promotion is currently red. A corrected ordered range
+walk makes native win both clean-reopen and maintained reads; write throughput/
+p95, steady RSS, and clean-reopen allocated footprint remain behind Fjall.
+The dedicated eight-profile AI-read matrix passes its bounded correctness,
+throughput, p95, and clean-reopen allocation gates. See the
+[benchmark audit](docs/vyrmkv-benchmark.md) and
+[corrected raw evidence](eval/results/2026-08-22-vyrmkv-corrected-standard.json).
+A separate 20,000-operation
+physical differential now proves put/overwrite/delete behavior across reopen
+and compaction against both Fjall and an independent ordered-map oracle.
+Native compaction is now a bounded leveled streaming step with deterministic
+candidate selection, key-partitioned output, protected-snapshot pruning, and
+non-overlapping levels above L0. Segment-v3 validation derives authenticated
+block-local negative filters that reject point misses before block I/O without
+introducing another persisted truth. The next storage-performance targets are
+write latency, recovered-memtable residency, and WAL footprint. Asynchronous
+immutable-memtable flush and family-aware maintenance remain explicit gates
+rather than implied capabilities.
 The canonical `PersistentEngine` now creates native stores for missing paths and
 reopens them by their authenticated `CURRENT` marker. CLI, `vyrmd`, and
 Connectome use that selector. Existing non-native directories remain on the

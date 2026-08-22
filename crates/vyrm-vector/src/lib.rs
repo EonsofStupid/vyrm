@@ -24,7 +24,10 @@ pub use accelerator::{
     DenseBuildBackend, DenseBuildOutcome,
 };
 
-pub use catalog::{VectorCatalog, VectorProjectionDescriptor};
+pub use catalog::{
+    VectorArtifactCatalogEntry, VectorCatalog, VectorProjectionDescriptor,
+    VECTOR_ARTIFACT_CATALOG_VERSION, VECTOR_ARTIFACT_RECORD_TYPE,
+};
 pub use compact::{
     CompactDenseSegment, DenseKernel, DenseMemoryPlacement, COMPACT_DENSE_FORMAT_VERSION,
 };
@@ -40,7 +43,9 @@ pub use plan::{
     EXACT_SCAN_PROJECTION_ID,
 };
 pub use quantization::ScalarQuantizedVector;
-pub use runtime::{SearchExecution, VectorArtifact, VectorRuntime};
+pub use runtime::{
+    PreparedVectorSearch, SearchExecution, VectorArtifact, VectorArtifactKind, VectorRuntime,
+};
 pub use segment::{
     ImmutableVectorSegment, SegmentDescriptor, VectorSegmentConfig, VECTOR_SEGMENT_FORMAT_VERSION,
 };

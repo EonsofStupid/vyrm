@@ -1,18 +1,25 @@
 //! Local API and embedded frontend for the connectome workbench.
 
+mod cluster;
 mod flight;
 
+pub use cluster::{
+    cluster_history, ClusterAlert, ClusterAlertSeverity, ClusterHistoryView, ClusterNodeView,
+    ClusterTelemetryDelta, ClusterTelemetryRecorder, ClusterTelemetrySample,
+    ClusterTelemetrySampleView, RecordClusterTelemetry,
+};
 pub use flight::{
     ContextMode, Flight, FlightEvent, FlightMetrics, FlightStatus, LaunchFlight, ReasoningProfile,
 };
 
 use serde::Serialize;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tiny_http::{Header, Method, Request, Response, Server, StatusCode};
+use vyrm_cluster::VYRM_NODE_MAX_CONTROL_LINE_BYTES;
 use vyrm_core::{
     resolve_as_of, AuditEnvelope, Claim, ClaimSource, ReasoningEvent, ReasoningPayload,
     RetentionPin, RuntimeGraphSnapshot, RuntimeMutation, RuntimeSchemaRegistry, RuntimeValue,
@@ -22,6 +29,7 @@ use vyrm_mx::{BoundQuery, Catalog, ExecutionBudget, Parameters, PhysicalPlan, Qu
 use vyrm_node::{InstanceBinding, InstanceMode};
 use vyrm_ql::Query;
 use vyrm_store::{Engine, Invocation, PersistentEngine, ProjectionStatus};
+use vyrm_vector::VectorArtifactCatalogEntry;
 
 const INDEX: &str = include_str!("../static/index.html");
 const CSS: &str = include_str!("../static/app.css");
@@ -31,6 +39,9 @@ const JS: &str = include_str!("../static/app.js");
 pub struct Snapshot {
     pub generated_at: u64,
     pub instance: InstanceView,
+    pub estates: Vec<EstateView>,
+    pub tables: Vec<TableView>,
+    pub models: Vec<DataModelView>,
     pub health: HealthView,
     pub claims: Vec<ClaimView>,
     pub runs: Vec<RunView>,
@@ -38,15 +49,233 @@ pub struct Snapshot {
     pub invocations: Vec<Invocation>,
     pub flights: Vec<Flight>,
     pub temporal_events: Vec<TemporalEventView>,
+    pub traces: TraceExportView,
+    pub cluster: ClusterHistoryView,
+    pub vector_artifacts: Vec<VectorArtifactCatalogEntry>,
     pub schema: Option<RuntimeSchemaRegistry>,
     pub capabilities: CapabilitiesView,
     pub graph: GraphView,
 }
 
-#[derive(Debug, Default, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct CapabilitiesView {
+    pub protocol: &'static str,
+    pub version: u16,
+    pub developer_diagnostics: bool,
     pub runners_enabled: bool,
     pub providers: Vec<&'static str>,
+    pub replay: ReplayCapabilitiesView,
+    pub engine: Vec<EngineCapabilityView>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ReplayCapabilitiesView {
+    pub persisted: bool,
+    pub restart_recoverable: bool,
+    pub seekable: bool,
+    pub reversible: bool,
+    pub speeds: Vec<f32>,
+    pub lenses: Vec<&'static str>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CapabilityMaturity {
+    Alpha,
+    Partial,
+    Experimental,
+    Planned,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct EngineCapabilityView {
+    pub id: &'static str,
+    pub label: &'static str,
+    pub category: &'static str,
+    pub maturity: CapabilityMaturity,
+    pub summary: &'static str,
+    pub evidence: &'static str,
+    pub limitation: &'static str,
+}
+
+/// The diagnostics handshake consumed by Connectome. This catalog is
+/// deliberately conservative: a roadmap item remains `planned` until an
+/// executable, persisted path and its verification evidence exist.
+pub fn capabilities(runners_enabled: bool) -> CapabilitiesView {
+    CapabilitiesView {
+        protocol: "vyrm-diagnostics",
+        version: 1,
+        developer_diagnostics: true,
+        runners_enabled,
+        providers: if runners_enabled {
+            vec!["observe", "codex", "claude"]
+        } else {
+            vec!["observe"]
+        },
+        replay: ReplayCapabilitiesView {
+            persisted: true,
+            restart_recoverable: true,
+            seekable: true,
+            reversible: true,
+            speeds: vec![0.5, 1.0, 2.0, 4.0, 8.0],
+            lenses: vec!["prompt_flights", "temporal_stream", "causal_traces", "cluster_history"],
+        },
+        engine: vec![
+            EngineCapabilityView {
+                id: "multi_model_engine",
+                label: "Multi-model engine",
+                category: "data",
+                maturity: CapabilityMaturity::Alpha,
+                summary: "One atomic runtime commit spans records, relations, events, claims, vectors, series, geo values, and object references.",
+                evidence: "Memory, Fjall compatibility, and native VyrmKV share mixed-family rollback and reopen differentials.",
+                limitation: "Index and VyrmQL coverage is not yet equally mature for every canonical value family.",
+            },
+            EngineCapabilityView {
+                id: "frontier_reasoning_runtime",
+                label: "Frontier reasoning runtime",
+                category: "ai_runtime",
+                maturity: CapabilityMaturity::Alpha,
+                summary: "Observe, Codex, and Claude flight envelopes share one persisted reasoning-run contract.",
+                evidence: "Prompt-flight provider envelopes and same-prompt effort cohorts are persisted and replayable.",
+                limitation: "Frontier runners are explicit opt-in adapters, not an in-database model scheduler.",
+            },
+            EngineCapabilityView {
+                id: "real_time_live_queries",
+                label: "Real-time live queries",
+                category: "query",
+                maturity: CapabilityMaturity::Planned,
+                summary: "Push-based query subscriptions over committed runtime changes.",
+                evidence: "A resumable cursor changefeed exists and is currently polled by diagnostics clients.",
+                limitation: "No native subscription protocol or backpressure contract is shipped yet.",
+            },
+            EngineCapabilityView {
+                id: "vyrmql_security",
+                label: "VyrmQL granular security",
+                category: "query",
+                maturity: CapabilityMaturity::Partial,
+                summary: "Strict parse, bind, resource budget, scope, and read-stamp enforcement.",
+                evidence: "Query plans publish authorization/resource contracts and deny stale or over-budget reads.",
+                limitation: "Fine-grained persisted RBAC/ABAC policy administration is not complete.",
+            },
+            EngineCapabilityView {
+                id: "audit_logging",
+                label: "Structured audit logging",
+                category: "security",
+                maturity: CapabilityMaturity::Partial,
+                summary: "Accepted runtime operations carry JSON-serializable hash-chained audit envelopes.",
+                evidence: "Runtime commits bind actor, scope, cursor, mutation digest, and prior audit digest atomically.",
+                limitation: "Queries, deletes, schema administration, and every HTTP action do not yet share one comprehensive audit stream.",
+            },
+            EngineCapabilityView {
+                id: "embedded_distributed",
+                label: "Embedded or distributed runtime",
+                category: "deployment",
+                maturity: CapabilityMaturity::Experimental,
+                summary: "One logical runtime contract spans embedded engines and a typed Raft adapter slice.",
+                evidence: "Memory, Fjall compatibility, native VyrmKV, and the M7 consensus simulation share differentials.",
+                limitation: "Production Multi-AZ operation and remote lifecycle automation are not certified.",
+            },
+            EngineCapabilityView {
+                id: "turboquant",
+                label: "TurboQuant compression",
+                category: "vector",
+                maturity: CapabilityMaturity::Planned,
+                summary: "Quantized vector artifacts behind the exact-search oracle.",
+                evidence: "The artifact catalog and exact differential boundary required for experiments exist.",
+                limitation: "No TurboQuant codec, recall matrix, or promoted storage format is shipped.",
+            },
+            EngineCapabilityView {
+                id: "native_embedding_generation",
+                label: "Native embedding generation",
+                category: "vector",
+                maturity: CapabilityMaturity::Alpha,
+                summary: "Local embedding jobs bind source, model bytes, network policy, read stamp, inference, and commit in one governed path.",
+                evidence: "Deterministic FeatureHash and caller-supplied local FastEmbed adapters pass provenance, freshness, and atomic-commit tests.",
+                limitation: "This is not a distributed in-cluster inference scheduler and physical model quality remains provider-dependent.",
+            },
+            EngineCapabilityView {
+                id: "gpu_indexing",
+                label: "GPU-accelerated indexing",
+                category: "vector",
+                maturity: CapabilityMaturity::Experimental,
+                summary: "A verified accelerator boundary can admit deterministic dense artifacts with explicit fallback policy.",
+                evidence: "Accelerated builders must produce CPU-identical authenticated bytes before catalog publication.",
+                limitation: "No physical GPU backend or GPU performance/recall evidence is promoted.",
+            },
+            EngineCapabilityView {
+                id: "filtered_hnsw",
+                label: "Filtered HNSW traversal",
+                category: "vector",
+                maturity: CapabilityMaturity::Alpha,
+                summary: "Dense HNSW performs filter-aware candidate admission followed by exact reranking.",
+                evidence: "Deterministic recall, backend differential, and update/delete/reopen soak gates pass locally.",
+                limitation: "Sparse and multivector ANN plus compact graph storage remain open.",
+            },
+            EngineCapabilityView {
+                id: "multivector_late_interaction",
+                label: "Multivector and late interaction",
+                category: "vector",
+                maturity: CapabilityMaturity::Partial,
+                summary: "Objects can carry exact dense, sparse, and multivector values under typed validation.",
+                evidence: "The exact oracle and hand-calculated metric tests cover all three vector forms.",
+                limitation: "Native ColBERT late-interaction scoring and multivector ANN are not implemented.",
+            },
+            EngineCapabilityView {
+                id: "memory_tiers",
+                label: "Fine-grained memory tiers",
+                category: "storage",
+                maturity: CapabilityMaturity::Planned,
+                summary: "Policy-driven hot, warm, cold, and object-backed placement.",
+                evidence: "Snapshot pins, content-addressed objects, and physical artifact generations provide prerequisites.",
+                limitation: "No automatic tiering controller or promotion/demotion policy is shipped.",
+            },
+            EngineCapabilityView {
+                id: "object_storage",
+                label: "Local and S3 object storage",
+                category: "storage",
+                maturity: CapabilityMaturity::Alpha,
+                summary: "Content-addressed object bytes become visible only with a verified atomic runtime reference.",
+                evidence: "Local and capability-explicit S3-compatible adapters pass the same publication and failure differential.",
+                limitation: "Automatic placement across hot, warm, cold, and object tiers remains open.",
+            },
+            EngineCapabilityView {
+                id: "offline_edge",
+                label: "Offline edge vector runtime",
+                category: "deployment",
+                maturity: CapabilityMaturity::Alpha,
+                summary: "A no-network executable performs local embedding and mmap exact vector search with a minimal dependency surface.",
+                evidence: "The retained 10k×128 profile is bounded for binary size, artifact size, RSS, and latency.",
+                limitation: "The deterministic baseline does not establish state-of-the-art semantic quality or ANN-scale throughput.",
+            },
+            EngineCapabilityView {
+                id: "hardware_io",
+                label: "Hardware-level I/O optimization",
+                category: "storage",
+                maturity: CapabilityMaturity::Partial,
+                summary: "Native reads expose memtable, cache, block-load, byte, and manifest work counters.",
+                evidence: "Storage spans and benchmark artifacts measure the physical read path.",
+                limitation: "Direct I/O, io_uring, GPU indexing, and architecture-specific kernels are not promoted.",
+            },
+            EngineCapabilityView {
+                id: "discovery_recommendation",
+                label: "Discovery and recommendation queries",
+                category: "query",
+                maturity: CapabilityMaturity::Planned,
+                summary: "Composable recommendation, discovery, and hybrid retrieval operators.",
+                evidence: "Exact vector search, filters, graph traversal, and deterministic planning exist independently.",
+                limitation: "A unified recommendation query algebra and evaluation corpus are not shipped.",
+            },
+            EngineCapabilityView {
+                id: "kubernetes_hybrid_cloud",
+                label: "Kubernetes-native hybrid cloud",
+                category: "deployment",
+                maturity: CapabilityMaturity::Planned,
+                summary: "Per-project runtime deployment with an optional enterprise control plane.",
+                evidence: "Project manifests, node control contracts, artifact transfer, and Connectome boundaries exist.",
+                limitation: "Operators, CRDs, upgrade orchestration, Multi-AZ certification, and cloud transport remain open.",
+            },
+        ],
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -55,6 +284,45 @@ pub struct InstanceView {
     pub mode: &'static str,
     pub root: PathBuf,
     pub member: PathBuf,
+}
+
+/// One project-owned runtime boundary. Connectome deliberately models this as
+/// an estate even when it currently contains a single dedicated instance so a
+/// later cloud control plane can add deployments without changing the local
+/// inspection contract.
+#[derive(Debug, Serialize)]
+pub struct EstateView {
+    pub id: String,
+    pub scope: String,
+    pub mode: &'static str,
+    pub state: &'static str,
+    pub storage_backend: &'static str,
+    pub runtime_cursor: u64,
+    pub observed_nodes: usize,
+    pub root: PathBuf,
+    pub member: PathBuf,
+    pub control_plane: &'static str,
+}
+
+/// A logical, inspectable runtime surface. These are not presented as physical
+/// SQL tables: authority and boundedness stay explicit so projections cannot be
+/// mistaken for the underlying runtime log.
+#[derive(Debug, Serialize)]
+pub struct TableView {
+    pub id: &'static str,
+    pub label: &'static str,
+    pub category: &'static str,
+    pub authority: &'static str,
+    pub rows: usize,
+    pub known_at_cursor: u64,
+    pub bounded: bool,
+    pub description: &'static str,
+}
+
+#[derive(Debug, Serialize)]
+pub struct DataModelView {
+    pub scope: String,
+    pub registry: RuntimeSchemaRegistry,
 }
 
 #[derive(Debug, Serialize)]
@@ -76,6 +344,8 @@ pub struct HealthView {
     pub snapshot_leases: usize,
     pub retention_pins: usize,
     pub oldest_retained_cursor: Option<u64>,
+    pub vector_artifacts: usize,
+    pub vector_catalog_revision: u64,
 }
 
 #[derive(Debug, Serialize)]
@@ -136,6 +406,75 @@ pub struct TemporalEventView {
     pub digest: String,
     pub mutation: RuntimeMutation,
     pub audit: Option<AuditEnvelope>,
+}
+
+/// One persisted trace micro-event with its authoritative runtime coordinate.
+/// Raw links and attributes remain typed `RuntimeValue`s so this diagnostic
+/// surface cannot silently weaken a newer trace contract it does not yet know.
+#[derive(Debug, Clone, Serialize)]
+pub struct TraceEventView {
+    pub cursor: u64,
+    pub commit_id: String,
+    pub scope: String,
+    pub actor: String,
+    pub change_digest: String,
+    pub audit_digest: Option<String>,
+    pub trace_id: String,
+    pub span_id: String,
+    pub parent_span_id: Option<String>,
+    pub phase: String,
+    pub domain: String,
+    pub name: String,
+    pub at: u64,
+    pub duration_micros: Option<u64>,
+    pub outcome: String,
+    pub data_class: String,
+    pub links: Vec<RuntimeValue>,
+    pub attributes: BTreeMap<String, RuntimeValue>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct TraceSpanView {
+    pub span_id: String,
+    pub parent_span_id: Option<String>,
+    pub domain: String,
+    pub name: String,
+    pub data_class: String,
+    pub outcome: String,
+    pub status: &'static str,
+    pub started_at: Option<u64>,
+    pub finished_at: Option<u64>,
+    pub duration_micros: Option<u64>,
+    pub event_cursors: Vec<u64>,
+    pub child_span_ids: Vec<String>,
+    pub diagnostics: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct CausalTraceView {
+    pub trace_id: String,
+    pub status: &'static str,
+    pub root_span_ids: Vec<String>,
+    pub critical_path_span_ids: Vec<String>,
+    pub critical_path_duration_micros: Option<u64>,
+    pub spans: Vec<TraceSpanView>,
+    pub diagnostics: Vec<String>,
+}
+
+/// A bounded, retention-filtered export from one physically bound project
+/// store. Control evidence is the default; operator/content classes require an
+/// explicit request so a diagnostic GET cannot accidentally widen retention.
+#[derive(Debug, Clone, Serialize)]
+pub struct TraceExportView {
+    pub format: &'static str,
+    pub instance_id: String,
+    pub runtime_head: u64,
+    pub truncated_before_cursor: Option<u64>,
+    pub included_data_classes: Vec<String>,
+    pub critical_path_basis: &'static str,
+    pub diagnostics: Vec<String>,
+    pub events: Vec<TraceEventView>,
+    pub traces: Vec<CausalTraceView>,
 }
 
 #[derive(Debug, Default, Serialize)]
@@ -238,6 +577,10 @@ pub fn snapshot(
     let invocations = store.invocations_since(0)?;
     let flights = flight::stored_flights(store)?;
     let temporal_events = temporal_events(store, 512)?;
+    let traces = runtime_traces(store, &binding.manifest.id, 512, &["control"])?;
+    let cluster = cluster::cluster_history(store, binding, 256)?;
+    let instance_scope = ScopeId::new(binding.manifest.id.clone())?;
+    let vector_artifacts = vyrm_node::vector_artifact_catalog_entries(store, &instance_scope)?;
     let graph = build_graph(
         &binding.manifest.id,
         &claims,
@@ -246,7 +589,9 @@ pub fn snapshot(
         &invocations,
         &flights,
     );
-    let schema = store.runtime_schema(&ScopeId::new(vyrm_node::REASONING_SCOPE)?)?;
+    let reasoning_scope = ScopeId::new(vyrm_node::REASONING_SCOPE)?;
+    let schema = store.runtime_schema(&reasoning_scope)?;
+    let models = scoped_models(store, [&reasoning_scope, &instance_scope])?;
     let retention = runtime_retention(store, at)?;
     let health = HealthView {
         state: if quarantined {
@@ -272,19 +617,54 @@ pub fn snapshot(
         snapshot_leases: retention.snapshots.len(),
         retention_pins: retention.pins.len(),
         oldest_retained_cursor: retention.pins.iter().map(|pin| pin.minimum_cursor).min(),
+        vector_artifacts: vector_artifacts.len(),
+        vector_catalog_revision: vector_artifacts
+            .last()
+            .map_or(0, |entry| entry.catalog_revision),
     };
+
+    let instance_mode = match binding.manifest.mode {
+        InstanceMode::Dedicated => "dedicated",
+        InstanceMode::Umbrella => "umbrella",
+    };
+    let instance_state = health.state;
+    let runtime_cursor = health.runtime_cursor;
+    let estates = vec![EstateView {
+        id: binding.manifest.id.clone(),
+        scope: binding.manifest.id.clone(),
+        mode: instance_mode,
+        state: instance_state,
+        storage_backend: health.storage_backend,
+        runtime_cursor,
+        observed_nodes: cluster.nodes.len(),
+        root: binding.instance_root.clone(),
+        member: binding.member.clone(),
+        control_plane: "local",
+    }];
+    let tables = table_catalog(
+        runtime_cursor,
+        &claims,
+        &runs,
+        &files,
+        &invocations,
+        &flights,
+        &temporal_events,
+        &traces,
+        &cluster,
+        &vector_artifacts,
+    );
 
     Ok(Snapshot {
         generated_at: at,
         instance: InstanceView {
             id: binding.manifest.id.clone(),
-            mode: match binding.manifest.mode {
-                InstanceMode::Dedicated => "dedicated",
-                InstanceMode::Umbrella => "umbrella",
-            },
+            mode: instance_mode,
             root: binding.instance_root.clone(),
             member: binding.member.clone(),
         },
+        estates,
+        tables,
+        models,
         health,
         claims,
         runs,
@@ -292,13 +672,145 @@ pub fn snapshot(
         invocations,
         flights,
         temporal_events,
+        traces,
+        cluster,
+        vector_artifacts,
         schema,
-        capabilities: CapabilitiesView {
-            runners_enabled: false,
-            providers: vec!["observe"],
-        },
+        capabilities: capabilities(false),
         graph,
     })
+}
+
+fn scoped_models(
+    store: &PersistentEngine,
+    scopes: [&ScopeId; 2],
+) -> Result<Vec<DataModelView>, Box<dyn std::error::Error>> {
+    let mut seen = BTreeSet::new();
+    let mut models = Vec::new();
+    for scope in scopes {
+        if !seen.insert(scope.as_str().to_owned()) {
+            continue;
+        }
+        if let Some(registry) = store.runtime_schema(scope)? {
+            models.push(DataModelView {
+                scope: scope.as_str().to_owned(),
+                registry,
+            });
+        }
+    }
+    Ok(models)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn table_catalog(
+    known_at_cursor: u64,
+    claims: &[ClaimView],
+    runs: &[RunView],
+    files: &[FileView],
+    invocations: &[Invocation],
+    flights: &[Flight],
+    temporal_events: &[TemporalEventView],
+    traces: &TraceExportView,
+    cluster: &ClusterHistoryView,
+    vector_artifacts: &[VectorArtifactCatalogEntry],
+) -> Vec<TableView> {
+    [
+        (
+            "claims",
+            "Current claims",
+            "knowledge",
+            "authoritative",
+            claims.len(),
+            false,
+            "Bi-temporal assertions currently in force.",
+        ),
+        (
+            "reasoning_runs",
+            "Reasoning runs",
+            "reasoning",
+            "authoritative",
+            runs.len(),
+            false,
+            "Typed goal-to-outcome reasoning contracts.",
+        ),
+        (
+            "prompt_flights",
+            "Prompt flights",
+            "reasoning",
+            "authoritative",
+            flights.len(),
+            false,
+            "Persisted prompt experiments and provider envelopes.",
+        ),
+        (
+            "temporal_events",
+            "Temporal events",
+            "runtime",
+            "bounded log window",
+            temporal_events.len(),
+            true,
+            "Newest runtime mutations with commit and audit identity.",
+        ),
+        (
+            "causal_traces",
+            "Causal traces",
+            "runtime",
+            "authoritative",
+            traces.traces.len(),
+            true,
+            "Retention-filtered causal span trees and critical paths.",
+        ),
+        (
+            "source_files",
+            "Source files",
+            "source",
+            "projection",
+            files.len(),
+            false,
+            "Complete files in the current source-routing generation.",
+        ),
+        (
+            "invocations",
+            "Invocations",
+            "audit",
+            "authoritative",
+            invocations.len(),
+            false,
+            "Operator and lifecycle command activity.",
+        ),
+        (
+            "cluster_samples",
+            "Cluster samples",
+            "estate",
+            "authoritative",
+            cluster.samples.len(),
+            true,
+            "Retained and hash-linked node observations.",
+        ),
+        (
+            "vector_artifacts",
+            "Vector artifacts",
+            "search",
+            "catalog",
+            vector_artifacts.len(),
+            false,
+            "Durable vector index generations and provenance.",
+        ),
+    ]
+    .into_iter()
+    .map(
+        |(id, label, category, authority, rows, bounded, description)| TableView {
+            id,
+            label,
+            category,
+            authority,
+            rows,
+            known_at_cursor,
+            bounded,
+            description,
+        },
+    )
+    .collect()
 }
 
 /// Returns the newest persisted runtime mutations in global cursor order.
@@ -341,6 +853,343 @@ pub fn temporal_events(
         });
     }
     Ok(events)
+}
+
+/// Reconstructs causal trace lifecycles from the bounded authoritative change
+/// log. The physical store is already project-bound by `InstanceBinding`; this
+/// method intentionally does not accept an arbitrary filesystem or database.
+pub fn runtime_traces(
+    store: &PersistentEngine,
+    instance_id: &str,
+    limit: usize,
+    included_data_classes: &[&str],
+) -> Result<TraceExportView, Box<dyn std::error::Error>> {
+    let allowed = included_data_classes
+        .iter()
+        .map(|value| value.to_ascii_lowercase())
+        .collect::<BTreeSet<_>>();
+    if allowed.is_empty()
+        || allowed
+            .iter()
+            .any(|value| !matches!(value.as_str(), "control" | "operator" | "content"))
+    {
+        return Err(
+            "trace data classes must be an explicit non-empty subset of control, operator, content"
+                .into(),
+        );
+    }
+
+    let limit = limit.clamp(1, 4_096);
+    let head = store.runtime_cursor()?;
+    let after = head.saturating_sub(limit as u64);
+    let page = store.runtime_changes_since(after, limit, None)?;
+    let mut audits = BTreeMap::<String, Option<AuditEnvelope>>::new();
+    let mut diagnostics = Vec::new();
+    let mut events = Vec::new();
+
+    for change in page.changes {
+        let RuntimeMutation::Event { event } = &change.mutation else {
+            continue;
+        };
+        if event.kind.as_str() != vyrm_core::RUNTIME_TRACE_EVENT_TYPE {
+            continue;
+        }
+        let Some(data_class) = runtime_string(&event.properties, "data_class") else {
+            diagnostics.push(format!(
+                "cursor {} trace event has no typed data_class and was denied from export",
+                change.cursor
+            ));
+            continue;
+        };
+        if !allowed.contains(&data_class) {
+            continue;
+        }
+        let audit = match audits.get(&change.commit_id) {
+            Some(audit) => audit.clone(),
+            None => {
+                let audit = store.runtime_audit(&change.commit_id)?;
+                audits.insert(change.commit_id.clone(), audit.clone());
+                audit
+            }
+        };
+        match trace_event_view(&change, event, audit.as_ref()) {
+            Ok(event) => events.push(event),
+            Err(reason) => diagnostics.push(format!(
+                "cursor {} malformed trace event retained but not analyzed: {reason}",
+                change.cursor
+            )),
+        }
+    }
+    events.sort_by_key(|event| event.cursor);
+    let traces = analyze_traces(&events);
+    Ok(TraceExportView {
+        format: "vyrm-trace-export-v1",
+        instance_id: instance_id.to_owned(),
+        runtime_head: head,
+        truncated_before_cursor: (after > 0).then_some(after.saturating_add(1)),
+        included_data_classes: allowed.into_iter().collect(),
+        critical_path_basis: "longest measured root span followed by its longest measured child at each causal branch; nested durations are never summed",
+        diagnostics,
+        events,
+        traces,
+    })
+}
+
+fn trace_event_view(
+    change: &vyrm_core::RuntimeChange,
+    event: &vyrm_core::RuntimeEvent,
+    audit: Option<&AuditEnvelope>,
+) -> Result<TraceEventView, String> {
+    let required_string = |name| {
+        runtime_string(&event.properties, name)
+            .ok_or_else(|| format!("required string property {name:?} is absent"))
+    };
+    let required_unsigned = |name| {
+        runtime_unsigned(&event.properties, name)
+            .ok_or_else(|| format!("required unsigned property {name:?} is absent"))
+    };
+    let links = match event.properties.get("links") {
+        Some(RuntimeValue::List(values)) => values.clone(),
+        _ => return Err("required list property \"links\" is absent".into()),
+    };
+    let attributes = match event.properties.get("attributes") {
+        Some(RuntimeValue::Map(values)) => values.clone(),
+        _ => return Err("required map property \"attributes\" is absent".into()),
+    };
+    Ok(TraceEventView {
+        cursor: change.cursor,
+        commit_id: change.commit_id.clone(),
+        scope: change.scope.as_str().to_owned(),
+        actor: change.actor.clone(),
+        change_digest: change.digest.clone(),
+        audit_digest: audit.map(|value| value.digest.clone()),
+        trace_id: required_string("trace_id")?,
+        span_id: required_string("span_id")?,
+        parent_span_id: runtime_string(&event.properties, "parent_span_id"),
+        phase: required_string("phase")?,
+        domain: required_string("domain")?,
+        name: required_string("name")?,
+        at: required_unsigned("at")?,
+        duration_micros: runtime_unsigned(&event.properties, "duration_micros"),
+        outcome: required_string("outcome")?,
+        data_class: required_string("data_class")?,
+        links,
+        attributes,
+    })
+}
+
+fn analyze_traces(events: &[TraceEventView]) -> Vec<CausalTraceView> {
+    let mut grouped = BTreeMap::<String, BTreeMap<String, Vec<&TraceEventView>>>::new();
+    for event in events {
+        grouped
+            .entry(event.trace_id.clone())
+            .or_default()
+            .entry(event.span_id.clone())
+            .or_default()
+            .push(event);
+    }
+    let mut traces = grouped
+        .into_iter()
+        .map(|(trace_id, span_events)| {
+            let newest_cursor = span_events
+                .values()
+                .flatten()
+                .map(|event| event.cursor)
+                .max()
+                .unwrap_or(0);
+            (newest_cursor, analyze_trace(trace_id, span_events))
+        })
+        .collect::<Vec<_>>();
+    traces.sort_by(|left, right| {
+        left.0
+            .cmp(&right.0)
+            .then_with(|| left.1.trace_id.cmp(&right.1.trace_id))
+    });
+    traces.into_iter().map(|(_, trace)| trace).collect()
+}
+
+fn analyze_trace(
+    trace_id: String,
+    span_events: BTreeMap<String, Vec<&TraceEventView>>,
+) -> CausalTraceView {
+    let mut spans = Vec::new();
+    for (span_id, mut events) in span_events {
+        events.sort_by_key(|event| event.cursor);
+        let starts = events
+            .iter()
+            .copied()
+            .filter(|event| event.phase == "start")
+            .collect::<Vec<_>>();
+        let finishes = events
+            .iter()
+            .copied()
+            .filter(|event| event.phase == "finish")
+            .collect::<Vec<_>>();
+        let first = events[0];
+        let mut span_diagnostics = Vec::new();
+        if starts.len() > 1 {
+            span_diagnostics.push(format!("{} start events were persisted", starts.len()));
+        }
+        if finishes.len() > 1 {
+            span_diagnostics.push(format!("{} finish events were persisted", finishes.len()));
+        }
+        let lifecycle = starts
+            .first()
+            .copied()
+            .or_else(|| finishes.first().copied())
+            .unwrap_or(first);
+        for event in &events {
+            if event.parent_span_id != lifecycle.parent_span_id
+                || event.domain != lifecycle.domain
+                || event.name != lifecycle.name
+                || event.data_class != lifecycle.data_class
+            {
+                span_diagnostics.push(format!(
+                    "cursor {} disagrees with the span lifecycle identity",
+                    event.cursor
+                ));
+            }
+        }
+        let status = if !span_diagnostics.is_empty() {
+            "invalid"
+        } else if !starts.is_empty() && finishes.is_empty() {
+            "incomplete"
+        } else if starts.is_empty() && !finishes.is_empty() {
+            "summary"
+        } else if !starts.is_empty() && !finishes.is_empty() {
+            "complete"
+        } else {
+            "annotation"
+        };
+        spans.push(TraceSpanView {
+            span_id,
+            parent_span_id: lifecycle.parent_span_id.clone(),
+            domain: lifecycle.domain.clone(),
+            name: lifecycle.name.clone(),
+            data_class: lifecycle.data_class.clone(),
+            outcome: finishes
+                .first()
+                .map_or_else(|| lifecycle.outcome.clone(), |event| event.outcome.clone()),
+            status,
+            started_at: starts.first().map(|event| event.at),
+            finished_at: finishes.first().map(|event| event.at),
+            duration_micros: finishes.first().and_then(|event| event.duration_micros),
+            event_cursors: events.iter().map(|event| event.cursor).collect(),
+            child_span_ids: Vec::new(),
+            diagnostics: span_diagnostics,
+        });
+    }
+    spans.sort_by(|left, right| left.span_id.cmp(&right.span_id));
+    let positions = spans
+        .iter()
+        .enumerate()
+        .map(|(index, span)| (span.span_id.clone(), index))
+        .collect::<BTreeMap<_, _>>();
+    let mut diagnostics = Vec::new();
+    for index in 0..spans.len() {
+        let Some(parent) = spans[index].parent_span_id.clone() else {
+            continue;
+        };
+        if let Some(parent_index) = positions.get(&parent).copied() {
+            let child = spans[index].span_id.clone();
+            spans[parent_index].child_span_ids.push(child);
+        } else {
+            diagnostics.push(format!(
+                "span {} has parent {} outside the retained export window",
+                spans[index].span_id, parent
+            ));
+        }
+    }
+    for span in &mut spans {
+        span.child_span_ids.sort();
+    }
+    for span in &spans {
+        let mut seen = BTreeSet::new();
+        let mut cursor = Some(span.span_id.as_str());
+        while let Some(id) = cursor {
+            if !seen.insert(id.to_owned()) {
+                diagnostics.push(format!("causal parent cycle includes span {id}"));
+                break;
+            }
+            cursor = positions
+                .get(id)
+                .and_then(|index| spans[*index].parent_span_id.as_deref());
+        }
+    }
+    diagnostics.sort();
+    diagnostics.dedup();
+    let mut roots = spans
+        .iter()
+        .filter(|span| {
+            span.parent_span_id
+                .as_ref()
+                .is_none_or(|parent| !positions.contains_key(parent))
+        })
+        .map(|span| span.span_id.clone())
+        .collect::<Vec<_>>();
+    roots.sort();
+    let critical_root = roots.iter().max_by(|left, right| {
+        span_duration(&spans, &positions, left)
+            .cmp(&span_duration(&spans, &positions, right))
+            .then_with(|| right.cmp(left))
+    });
+    let mut critical_path = Vec::new();
+    let mut seen = BTreeSet::new();
+    let mut current = critical_root.cloned();
+    while let Some(span_id) = current {
+        if !seen.insert(span_id.clone()) {
+            break;
+        }
+        critical_path.push(span_id.clone());
+        let span = &spans[positions[&span_id]];
+        current = span
+            .child_span_ids
+            .iter()
+            .max_by(|left, right| {
+                span_duration(&spans, &positions, left)
+                    .cmp(&span_duration(&spans, &positions, right))
+                    .then_with(|| right.cmp(left))
+            })
+            .cloned();
+    }
+    let critical_path_duration_micros =
+        critical_root.and_then(|root| spans[positions[root]].duration_micros);
+    let status = if !diagnostics
+        .iter()
+        .all(|value| value.contains("outside the retained"))
+        || spans.iter().any(|span| span.status == "invalid")
+    {
+        "invalid"
+    } else if spans.iter().any(|span| span.status == "incomplete") {
+        "incomplete"
+    } else if spans
+        .iter()
+        .all(|span| matches!(span.status, "summary" | "annotation"))
+    {
+        "summary"
+    } else {
+        "complete"
+    };
+    CausalTraceView {
+        trace_id,
+        status,
+        root_span_ids: roots,
+        critical_path_span_ids: critical_path,
+        critical_path_duration_micros,
+        spans,
+        diagnostics,
+    }
+}
+
+fn span_duration(
+    spans: &[TraceSpanView],
+    positions: &BTreeMap<String, usize>,
+    span_id: &str,
+) -> u64 {
+    positions
+        .get(span_id)
+        .and_then(|index| spans[*index].duration_micros)
+        .unwrap_or(0)
 }
 
 fn describe_mutation(mutation: &RuntimeMutation) -> (&'static str, String, String, String) {
@@ -415,9 +1264,9 @@ fn describe_mutation(mutation: &RuntimeMutation) -> (&'static str, String, Strin
                 "reasoning" => "reasoning",
                 "lifecycle" | "tool" => "workflow",
                 "query" | "planning" => "routing",
-                "projection" | "search" | "embedding" => "search",
+                "projection" | "search" | "embedding" | "adapter" => "search",
                 "model" => "model",
-                "storage" | "adapter" | "cluster" => "storage",
+                "storage" | "cluster" => "storage",
                 _ => "storage",
             };
             let phase =
@@ -795,6 +1644,10 @@ pub fn serve(
         binding.clone(),
         runners_enabled,
     ));
+    let cluster_recorder = Arc::new(cluster::ClusterTelemetryRecorder::new(
+        Arc::clone(&store),
+        binding.clone(),
+    ));
     eprintln!(
         "connectome: http://{bind} [{}] runners={}",
         binding.manifest.id,
@@ -805,7 +1658,13 @@ pub fn serve(
         }
     );
     for request in server.incoming_requests() {
-        respond(request, store.as_ref(), &binding, &recorder);
+        respond(
+            request,
+            store.as_ref(),
+            &binding,
+            &recorder,
+            &cluster_recorder,
+        );
     }
     Ok(())
 }
@@ -815,6 +1674,7 @@ fn respond(
     store: &PersistentEngine,
     binding: &InstanceBinding,
     recorder: &Arc<flight::FlightRecorder>,
+    cluster_recorder: &Arc<cluster::ClusterTelemetryRecorder>,
 ) {
     let url = request.url().to_owned();
     let (path, query) = url.split_once('?').unwrap_or((&url, ""));
@@ -848,10 +1708,38 @@ fn respond(
         let _ = request.respond(response);
         return;
     }
+    if request.method() == &Method::Post && path == "/api/cluster/samples" {
+        let mut bytes = Vec::new();
+        let parsed = request
+            .as_reader()
+            .take((VYRM_NODE_MAX_CONTROL_LINE_BYTES + 1) as u64)
+            .read_to_end(&mut bytes)
+            .map_err(|error| error.to_string())
+            .and_then(|_| {
+                if bytes.len() > VYRM_NODE_MAX_CONTROL_LINE_BYTES {
+                    Err("cluster telemetry request exceeds 1 MiB".into())
+                } else {
+                    serde_json::from_slice::<RecordClusterTelemetry>(&bytes)
+                        .map_err(|error| format!("invalid cluster telemetry request: {error}"))
+                }
+            });
+        let response = match parsed {
+            Ok(sample) => match cluster_recorder.record(sample, now()) {
+                Ok(sample) => json_response(StatusCode(201), &sample),
+                Err(error) => json_response(
+                    StatusCode(400),
+                    &serde_json::json!({"error":error.to_string()}),
+                ),
+            },
+            Err(error) => json_response(StatusCode(400), &serde_json::json!({"error":error})),
+        };
+        let _ = request.respond(response);
+        return;
+    }
     if request.method() != &Method::Get && request.method() != &Method::Head {
         let _ = request.respond(json_response(
             StatusCode(405),
-            &serde_json::json!({"error":"connectome workbench is read-only except for explicit prompt flights"}),
+            &serde_json::json!({"error":"connectome workbench is read-only except for explicit prompt flights and validated cluster observations"}),
         ));
         return;
     }
@@ -864,14 +1752,7 @@ fn respond(
             Ok(mut value) => match recorder.flights() {
                 Ok(flights) => {
                     value.flights = flights;
-                    value.capabilities = CapabilitiesView {
-                        runners_enabled: recorder.runners_enabled(),
-                        providers: if recorder.runners_enabled() {
-                            vec!["observe", "codex", "claude"]
-                        } else {
-                            vec!["observe"]
-                        },
-                    };
+                    value.capabilities = capabilities(recorder.runners_enabled());
                     json_response(StatusCode(200), &value)
                 }
                 Err(error) => json_response(
@@ -891,6 +1772,24 @@ fn respond(
                 &serde_json::json!({"error":error.to_string()}),
             ),
         },
+        "/api/runtime/capabilities" => {
+            json_response(StatusCode(200), &capabilities(recorder.runners_enabled()))
+        }
+        "/api/cluster/history" => {
+            let params = query_params(query);
+            let limit = params
+                .get("limit")
+                .and_then(|value| value.parse().ok())
+                .unwrap_or(256usize)
+                .clamp(1, 4_096);
+            match cluster_recorder.history(limit) {
+                Ok(history) => json_response(StatusCode(200), &history),
+                Err(error) => json_response(
+                    StatusCode(500),
+                    &serde_json::json!({"error":error.to_string()}),
+                ),
+            }
+        }
         "/api/changes" => {
             let params = query_params(query);
             let after = params
@@ -924,6 +1823,43 @@ fn respond(
                 .clamp(1, 4_096);
             match temporal_events(store, limit) {
                 Ok(events) => json_response(StatusCode(200), &events),
+                Err(error) => json_response(
+                    StatusCode(500),
+                    &serde_json::json!({"error":error.to_string()}),
+                ),
+            }
+        }
+        "/api/runtime/traces" => {
+            let params = query_params(query);
+            let limit = params
+                .get("limit")
+                .and_then(|value| value.parse().ok())
+                .unwrap_or(1_024usize)
+                .clamp(1, 4_096);
+            let requested = params
+                .get("classes")
+                .map(String::as_str)
+                .unwrap_or("control");
+            let classes = requested
+                .split(',')
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .collect::<Vec<_>>();
+            match runtime_traces(store, &binding.manifest.id, limit, &classes) {
+                Ok(traces) => json_response(StatusCode(200), &traces),
+                Err(error) => json_response(
+                    StatusCode(400),
+                    &serde_json::json!({"error":error.to_string()}),
+                ),
+            }
+        }
+        "/api/runtime/vector-artifacts" => {
+            let params = query_params(query);
+            match requested_scope(&params, Some(&binding.manifest.id))
+                .and_then(required_scope)
+                .and_then(|scope| vyrm_node::vector_artifact_catalog_entries(store, &scope))
+            {
+                Ok(entries) => json_response(StatusCode(200), &entries),
                 Err(error) => json_response(
                     StatusCode(500),
                     &serde_json::json!({"error":error.to_string()}),

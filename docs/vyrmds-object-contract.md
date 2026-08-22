@@ -86,3 +86,12 @@ version/ETag preservation, pagination, error mapping, credentials, retries,
 timeouts, and fault behavior against that service. Retention-aware automated GC
 also remains gated on mapping runtime snapshot pins to object reachability; the
 current reclamation API deletes only an explicit caller-proven digest set.
+
+M7 now carries canonical object references through physical Raft snapshots and
+hydrates their immutable bytes before activating a replica. The transfer
+manifest is not trusted by itself: the target scans the authenticated VyrmKV
+bundle and requires the exact project-scoped `runtime_objects` closure. Local
+streaming is fixed-buffer and content-addressed; the current synchronous
+S3-compatible client still materializes one object. Multipart/resumable remote
+transport, admission/backpressure, and independent-host fault evidence remain
+deployment gates.

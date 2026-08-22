@@ -13,6 +13,7 @@ pub enum Error {
         object: &'static str,
         version: u16,
     },
+    InvalidConfiguration(String),
     InvalidBatch(String),
     InvalidManifest(String),
     ManifestConflict {
@@ -39,6 +40,9 @@ impl fmt::Display for Error {
             }
             Self::UnsupportedVersion { object, version } => {
                 write!(formatter, "unsupported {object} format version {version}")
+            }
+            Self::InvalidConfiguration(reason) => {
+                write!(formatter, "invalid vyrmKV configuration: {reason}")
             }
             Self::InvalidBatch(reason) => write!(formatter, "invalid WAL batch: {reason}"),
             Self::InvalidManifest(reason) => write!(formatter, "invalid manifest: {reason}"),

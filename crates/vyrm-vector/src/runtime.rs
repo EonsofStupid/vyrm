@@ -6,7 +6,10 @@ use crate::{
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
-use vyrm_core::{ProjectionId, Result};
+use vyrm_core::{
+    digest, Error, ProjectionId, ProjectionStamp, ProjectionState, Result,
+    DATA_RUNTIME_CONTRACT_VERSION,
+};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum VectorArtifact {
@@ -15,7 +18,64 @@ pub enum VectorArtifact {
     Hnsw(HnswIndex),
 }
 
+/// Exact on-disk codec identity for a cataloged vector artifact. A projection
+/// descriptor alone cannot distinguish the JSON exact segment from the compact
+/// dense representation because both intentionally plan as `ExactSegment`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum VectorArtifactKind {
+    ExactSegment,
+    CompactDense,
+    Hnsw,
+}
+
+impl VectorArtifactKind {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::ExactSegment => "exact_segment",
+            Self::CompactDense => "compact_dense",
+            Self::Hnsw => "hnsw",
+        }
+    }
+
+    pub const fn media_type(self) -> &'static str {
+        match self {
+            Self::ExactSegment => "application/vnd.vyrm.vector-exact-segment+json",
+            Self::CompactDense => "application/vnd.vyrm.vector-compact-dense",
+            Self::Hnsw => "application/vnd.vyrm.vector-hnsw+json",
+        }
+    }
+}
+
 impl VectorArtifact {
+    pub const fn kind(&self) -> VectorArtifactKind {
+        match self {
+            Self::ExactSegment(_) => VectorArtifactKind::ExactSegment,
+            Self::CompactDense(_) => VectorArtifactKind::CompactDense,
+            Self::Hnsw(_) => VectorArtifactKind::Hnsw,
+        }
+    }
+
+    pub fn as_bytes(&self) -> &[u8] {
+        match self {
+            Self::ExactSegment(segment) => segment.as_bytes(),
+            Self::CompactDense(segment) => segment.as_bytes(),
+            Self::Hnsw(index) => index.as_bytes(),
+        }
+    }
+
+    pub fn from_bytes(kind: VectorArtifactKind, bytes: &[u8]) -> Result<Self> {
+        match kind {
+            VectorArtifactKind::ExactSegment => {
+                ImmutableVectorSegment::from_bytes(bytes).map(Self::ExactSegment)
+            }
+            VectorArtifactKind::CompactDense => {
+                CompactDenseSegment::from_bytes(bytes).map(Self::CompactDense)
+            }
+            VectorArtifactKind::Hnsw => HnswIndex::from_bytes(bytes).map(Self::Hnsw),
+        }
+    }
+
     pub fn descriptor(&self) -> VectorProjectionDescriptor {
         match self {
             Self::ExactSegment(segment) => segment.descriptor().clone().into(),
@@ -47,6 +107,63 @@ impl From<CompactDenseSegment> for VectorArtifact {
 pub struct SearchExecution {
     pub plan: SearchPlan,
     pub hits: Vec<SearchHit>,
+}
+
+/// A sealed, request-bound planner result. Private fields prevent callers from
+/// substituting a cheaper or stale access path between planning and execution.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct PreparedVectorSearch {
+    request_digest: String,
+    catalog_revision: u64,
+    ef_search: usize,
+    plan_digest: String,
+    selected_stamp: ProjectionStamp,
+    plan: SearchPlan,
+}
+
+impl PreparedVectorSearch {
+    pub fn request_digest(&self) -> &str {
+        &self.request_digest
+    }
+
+    pub const fn catalog_revision(&self) -> u64 {
+        self.catalog_revision
+    }
+
+    pub const fn ef_search(&self) -> usize {
+        self.ef_search
+    }
+
+    pub fn plan_digest(&self) -> &str {
+        &self.plan_digest
+    }
+
+    pub fn selected_stamp(&self) -> &ProjectionStamp {
+        &self.selected_stamp
+    }
+
+    pub fn plan(&self) -> &SearchPlan {
+        &self.plan
+    }
+
+    fn validate(&self) -> Result<()> {
+        self.selected_stamp.validate()?;
+        if self.ef_search == 0 || self.ef_search > 1_000_000 {
+            return invalid("prepared vector ef_search must be in 1..=1000000");
+        }
+        if self.plan_digest
+            != prepared_plan_digest(
+                &self.request_digest,
+                self.catalog_revision,
+                self.ef_search,
+                &self.selected_stamp,
+                &self.plan,
+            )?
+        {
+            return invalid("prepared vector plan digest does not match its coordinates");
+        }
+        Ok(())
+    }
 }
 
 /// In-process vector search coordinator.
@@ -113,7 +230,23 @@ impl VectorRuntime {
         reclaimed
     }
 
-    pub fn search(&self, request: &SearchRequest, ef_search: usize) -> Result<SearchExecution> {
+    pub fn prepare_search(
+        &self,
+        request: &SearchRequest,
+        ef_search: usize,
+    ) -> Result<PreparedVectorSearch> {
+        self.prepare_search_at(request, request.read.commit_cursor, ef_search)
+    }
+
+    pub fn prepare_search_at(
+        &self,
+        request: &SearchRequest,
+        required_source_cursor: u64,
+        ef_search: usize,
+    ) -> Result<PreparedVectorSearch> {
+        if ef_search == 0 || ef_search > 1_000_000 {
+            return invalid("vector ef_search must be in 1..=1000000");
+        }
         let mut paths = Vec::with_capacity(self.catalog.entries.len());
         for descriptor in self.catalog.entries.values() {
             let estimated_cost = match descriptor {
@@ -133,7 +266,71 @@ impl VectorRuntime {
             };
             paths.push(descriptor.candidate_path(estimated_cost));
         }
-        let plan = VectorPlanner::new(self.canonical.len() as u64).plan(request, paths)?;
+        let plan = VectorPlanner::new(self.canonical.len() as u64).plan_at(
+            request,
+            required_source_cursor,
+            paths,
+        )?;
+        let selected_stamp = if plan.selected.id.as_str() == crate::EXACT_SCAN_PROJECTION_ID {
+            ProjectionStamp {
+                contract_version: DATA_RUNTIME_CONTRACT_VERSION,
+                id: plan.selected.id.clone(),
+                generation: plan.selected.generation,
+                source_cursor: plan.selected.source_cursor,
+                config_digest: "00".repeat(32),
+                artifact_digest: "00".repeat(32),
+                state: ProjectionState::Ready,
+            }
+        } else {
+            self.catalog
+                .entries
+                .get(&plan.selected.id)
+                .map(|descriptor| descriptor.stamp().clone())
+                .ok_or_else(|| Error::InvalidRuntime {
+                    reason: "selected vector projection is absent from the catalog".into(),
+                })?
+        };
+        let request_digest = request.digest()?;
+        let plan_digest = prepared_plan_digest(
+            &request_digest,
+            self.catalog.revision,
+            ef_search,
+            &selected_stamp,
+            &plan,
+        )?;
+        let prepared = PreparedVectorSearch {
+            request_digest,
+            catalog_revision: self.catalog.revision,
+            ef_search,
+            plan_digest,
+            selected_stamp,
+            plan,
+        };
+        prepared.validate()?;
+        Ok(prepared)
+    }
+
+    pub fn execute_search(
+        &self,
+        request: &SearchRequest,
+        prepared: &PreparedVectorSearch,
+    ) -> Result<SearchExecution> {
+        prepared.validate()?;
+        if request.digest()? != prepared.request_digest {
+            return invalid("prepared vector plan belongs to another request");
+        }
+        if self.catalog.revision != prepared.catalog_revision {
+            return invalid("prepared vector plan uses a stale catalog revision");
+        }
+        let expected = self.prepare_search_at(
+            request,
+            prepared.plan.required_source_cursor,
+            prepared.ef_search,
+        )?;
+        if &expected != prepared {
+            return invalid("prepared vector plan no longer matches planner output");
+        }
+        let plan = &prepared.plan;
         let hits = match plan.selected.kind {
             AccessPathKind::ExactScan => search_exact_ref(request, &self.canonical)?,
             AccessPathKind::ExactSegment | AccessPathKind::Hnsw => {
@@ -154,20 +351,54 @@ impl VectorRuntime {
                 }
                 match (plan.selected.kind, artifact) {
                     (AccessPathKind::ExactSegment, VectorArtifact::ExactSegment(segment)) => {
-                        segment.search(request)?
+                        segment.search_at(request, plan.required_source_cursor)?
                     }
                     (AccessPathKind::ExactSegment, VectorArtifact::CompactDense(segment)) => {
-                        segment.search(request, crate::DenseKernel::Auto)?
+                        segment.search_at(
+                            request,
+                            crate::DenseKernel::Auto,
+                            plan.required_source_cursor,
+                        )?
                     }
                     (AccessPathKind::Hnsw, VectorArtifact::Hnsw(index)) => {
-                        index.search(request, ef_search)?
+                        index.search_at(request, prepared.ef_search, plan.required_source_cursor)?
                     }
                     _ => return invalid("selected vector access path has the wrong artifact kind"),
                 }
             }
         };
-        Ok(SearchExecution { plan, hits })
+        Ok(SearchExecution {
+            plan: plan.clone(),
+            hits,
+        })
     }
+
+    pub fn search(&self, request: &SearchRequest, ef_search: usize) -> Result<SearchExecution> {
+        let prepared = self.prepare_search(request, ef_search)?;
+        self.execute_search(request, &prepared)
+    }
+}
+
+fn prepared_plan_digest(
+    request_digest: &str,
+    catalog_revision: u64,
+    ef_search: usize,
+    selected_stamp: &ProjectionStamp,
+    plan: &SearchPlan,
+) -> Result<String> {
+    let encoded = serde_json::to_vec(&(
+        request_digest,
+        catalog_revision,
+        ef_search,
+        selected_stamp,
+        plan,
+    ))
+    .map_err(|error| Error::InvalidRuntime {
+        reason: format!("prepared vector plan cannot be encoded: {error}"),
+    })?;
+    let mut bytes = b"vyrm-prepared-vector-search-v1\0".to_vec();
+    bytes.extend_from_slice(&encoded);
+    Ok(digest::sha256_hex(&bytes))
 }
 
 #[cfg(test)]
@@ -252,6 +483,11 @@ mod tests {
             .unwrap();
         assert_eq!(approximate.plan.selected.kind, AccessPathKind::Hnsw);
         assert_eq!(approximate.hits[0].reference.id.as_str(), "a");
+        let prepared_request = request(
+            scope.clone(),
+            SearchMode::RequireApproximate { exact_rerank: 2 },
+        );
+        let prepared = runtime.prepare_search(&prepared_request, 3).unwrap();
 
         let exact = ImmutableVectorSegment::build(
             VectorSegmentConfig {
@@ -269,10 +505,68 @@ mod tests {
         )
         .unwrap();
         runtime.publish(1, exact).unwrap();
+        assert!(runtime
+            .execute_search(&prepared_request, &prepared)
+            .unwrap_err()
+            .to_string()
+            .contains("stale catalog revision"));
         let exact = runtime
             .search(&request(scope, SearchMode::Exact), 3)
             .unwrap();
         assert_eq!(exact.plan.selected.kind, AccessPathKind::ExactScan);
         assert_eq!(exact.hits[0].reference.id.as_str(), "a");
+    }
+
+    #[test]
+    fn every_artifact_codec_round_trips_with_exact_descriptor_identity() {
+        let scope = ScopeId::new("instance:vector-codecs").unwrap();
+        let values = vec![
+            candidate(&scope, 1, "a", vec![1.0, 0.0]),
+            candidate(&scope, 2, "b", vec![0.0, 1.0]),
+        ];
+        let segment_config = VectorSegmentConfig {
+            id: ProjectionId::new("vector:exact:codec").unwrap(),
+            scope: scope.clone(),
+            field: "body".into(),
+            dimensions: 2,
+            metric: ScoreMetric::Dot,
+            embedding_model: None,
+            filter_properties: BTreeSet::new(),
+        };
+        let exact = VectorArtifact::from(
+            ImmutableVectorSegment::build(segment_config.clone(), 1, 2, values.clone()).unwrap(),
+        );
+        let compact = VectorArtifact::from(
+            CompactDenseSegment::build(segment_config, 1, 2, values.clone()).unwrap(),
+        );
+        let hnsw = VectorArtifact::from(
+            HnswIndex::build(
+                HnswConfig {
+                    id: ProjectionId::new("vector:hnsw:codec").unwrap(),
+                    scope,
+                    field: "body".into(),
+                    dimensions: 2,
+                    metric: ScoreMetric::Dot,
+                    embedding_model: None,
+                    m: 2,
+                    ef_construction: 4,
+                    max_level: 3,
+                    seed: 11,
+                    filter_properties: BTreeSet::new(),
+                },
+                1,
+                2,
+                values,
+            )
+            .unwrap(),
+        );
+
+        for artifact in [exact, compact, hnsw] {
+            let reopened =
+                VectorArtifact::from_bytes(artifact.kind(), artifact.as_bytes()).unwrap();
+            assert_eq!(reopened.kind(), artifact.kind());
+            assert_eq!(reopened.descriptor(), artifact.descriptor());
+            assert_eq!(reopened.as_bytes(), artifact.as_bytes());
+        }
     }
 }

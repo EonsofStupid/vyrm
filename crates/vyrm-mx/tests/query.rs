@@ -5,7 +5,7 @@ use vyrm_core::{
     RuntimeRecordSchema, RuntimeRef, RuntimeRelation, RuntimeRelationSchema, RuntimeSchemaRegistry,
     RuntimeType, RuntimeValue, RuntimeValueType, ScopeId, Subject,
 };
-use vyrm_mx::{bind, execute, plan, Catalog, Error, ExecutionBudget, Parameters};
+use vyrm_mx::{bind, execute, plan, Catalog, Error, ExecutionBudget, Parameters, PhysicalOperator};
 use vyrm_ql::{parse, CursorExpr, Projection, Query, Source, TemporalSelector, TimeExpr};
 use vyrm_store::{Engine, MemoryEngine, NativeEngine, Store};
 
@@ -215,6 +215,151 @@ fn all_source_families_execute_at_explicit_time() {
         assert_eq!(result.returned_rows, 1, "{text}");
         assert_eq!(result.batches[0].rows[0].identity, identity);
     }
+}
+
+#[test]
+fn bound_event_cursor_uses_one_exact_authoritative_position_on_every_engine() {
+    fn exercise<E: Engine>(engine: &E) -> vyrm_mx::QueryExecution {
+        engine.commit_runtime(&fixture_commit()).unwrap();
+        let catalog = Catalog::capture(engine, &ScopeId::new("instance:test").unwrap()).unwrap();
+        let query = parse(
+            "FROM event:tool_result AT VALID 100 KNOWN HEAD WHERE cursor = 5 AND ok = true PROJECT cursor",
+        )
+        .unwrap();
+        let physical = plan(&bind(&query, &Parameters::new(), &catalog).unwrap()).unwrap();
+        assert!(matches!(
+            physical.operators.as_slice(),
+            [
+                PhysicalOperator::AuthoritativeEventCursorLookup {
+                    cursor: 5,
+                    through_cursor: 6,
+                    exact: true,
+                    ..
+                },
+                PhysicalOperator::ReferenceEvaluate
+            ]
+        ));
+        assert_eq!(
+            physical
+                .explanation
+                .candidates
+                .iter()
+                .find(|candidate| candidate.selected)
+                .unwrap()
+                .name,
+            "authoritative_event_cursor_lookup"
+        );
+        execute(
+            engine,
+            &physical,
+            &ExecutionBudget {
+                max_scanned_changes: 1,
+                ..ExecutionBudget::default()
+            },
+        )
+        .unwrap()
+    }
+
+    let memory = MemoryEngine::new();
+    let fjall_root = tempfile::tempdir().unwrap();
+    let fjall = Store::open(fjall_root.path()).unwrap();
+    let native_root = tempfile::tempdir().unwrap();
+    let native = NativeEngine::open(&native_root.path().join("native")).unwrap();
+    let expected = exercise(&memory);
+    assert_eq!(expected, exercise(&fjall));
+    assert_eq!(expected, exercise(&native));
+    assert_eq!(expected.scanned_changes, 1);
+    assert_eq!(expected.stamp_validation, "rfc9162_inclusion_proof");
+    assert_eq!(expected.stamp_validation_max_changes, 1);
+    assert!(expected.stamp_validation_proof_nodes > 0);
+    assert_eq!(expected.returned_rows, 1);
+    assert_eq!(expected.batches[0].rows[0].identity, "event:tool_result:5");
+}
+
+#[test]
+fn event_cursor_outside_the_stamp_is_an_exact_empty_path() {
+    let engine = MemoryEngine::new();
+    engine.commit_runtime(&fixture_commit()).unwrap();
+    let catalog = Catalog::capture(&engine, &ScopeId::new("instance:test").unwrap()).unwrap();
+    let query =
+        parse("FROM event:tool_result AT VALID 100 KNOWN HEAD WHERE cursor = 99 PROJECT cursor")
+            .unwrap();
+    let physical = plan(&bind(&query, &Parameters::new(), &catalog).unwrap()).unwrap();
+    let result = execute(
+        &engine,
+        &physical,
+        &ExecutionBudget {
+            max_scanned_changes: 1,
+            ..ExecutionBudget::default()
+        },
+    )
+    .unwrap();
+    assert_eq!(result.scanned_changes, 0);
+    assert_eq!(result.returned_rows, 0);
+}
+
+#[test]
+fn cursor_lookup_uses_authenticated_logarithmic_validation() {
+    const EVENTS: u64 = 4_096;
+    let engine = MemoryEngine::new();
+    engine.commit_runtime(&fixture_commit()).unwrap();
+    let subject = RuntimeRef::new("document", "a").unwrap();
+    engine
+        .commit_runtime(&RuntimeCommit {
+            scope: ScopeId::new("instance:test").unwrap(),
+            at: 101,
+            actor: "agent:bulk".into(),
+            expected_cursor: 6,
+            mutations: (0..EVENTS)
+                .map(|_| RuntimeMutation::Event {
+                    event: RuntimeEvent {
+                        kind: RuntimeType::new("tool_result").unwrap(),
+                        subject: Some(subject.clone()),
+                        properties: BTreeMap::from([("ok".into(), RuntimeValue::Bool(true))]),
+                    },
+                })
+                .collect(),
+        })
+        .unwrap();
+    let catalog = Catalog::capture(&engine, &ScopeId::new("instance:test").unwrap()).unwrap();
+    let head = 6 + EVENTS;
+
+    let point = parse(&format!(
+        "FROM event:tool_result AT VALID 101 KNOWN HEAD WHERE cursor = {head} PROJECT cursor"
+    ))
+    .unwrap();
+    let point_plan = plan(&bind(&point, &Parameters::new(), &catalog).unwrap()).unwrap();
+    let point_result = execute(
+        &engine,
+        &point_plan,
+        &ExecutionBudget {
+            max_scanned_changes: 1,
+            ..ExecutionBudget::default()
+        },
+    )
+    .unwrap();
+    assert_eq!(point_result.scanned_changes, 1);
+    assert_eq!(point_result.stamp_validation, "rfc9162_inclusion_proof");
+    assert_eq!(point_result.stamp_validation_max_changes, 1);
+    assert!(point_result.stamp_validation_proof_nodes > 0);
+    assert!(point_result.stamp_validation_proof_nodes <= 13);
+    assert_eq!(point_result.returned_rows, 1);
+
+    let unbound =
+        parse("FROM event:tool_result AT VALID 101 KNOWN HEAD WHERE ok = true PROJECT cursor")
+            .unwrap();
+    let unbound_plan = plan(&bind(&unbound, &Parameters::new(), &catalog).unwrap()).unwrap();
+    assert!(matches!(
+        execute(
+            &engine,
+            &unbound_plan,
+            &ExecutionBudget {
+                max_scanned_changes: 1,
+                ..ExecutionBudget::default()
+            }
+        ),
+        Err(Error::Budget(_))
+    ));
 }
 
 #[test]

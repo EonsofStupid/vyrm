@@ -22,6 +22,10 @@ fn file_backed_bundle_preserves_wire_bytes_and_installs() {
         file.get_many(&[b"alpha", b"missing"]).unwrap(),
         vec![Some(b"one".to_vec()), None]
     );
+    assert_eq!(
+        file.scan(b"alpha", Some(b"omega".as_slice())).unwrap(),
+        vec![(b"alpha".to_vec(), b"one".to_vec())]
+    );
 
     let reopened = SnapshotBundleFile::open(&spool).unwrap();
     assert_eq!(reopened.digest, file.digest);
@@ -120,7 +124,9 @@ fn physical_snapshot_bundle_round_trips_installs_atomically_and_continues_writes
         .collect::<String>();
     let legacy_bytes = legacy_hex
         .as_bytes()
-        .chunks_exact(2)
+        .as_chunks::<2>()
+        .0
+        .iter()
         .map(|pair| u8::from_str_radix(std::str::from_utf8(pair).unwrap(), 16).unwrap())
         .collect::<Vec<_>>();
     let legacy = SnapshotBundle::decode(&legacy_bytes).unwrap();

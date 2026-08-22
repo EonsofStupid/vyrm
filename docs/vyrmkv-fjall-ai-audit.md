@@ -1,6 +1,8 @@
 # Fjall → vyrmKV AI-runtime audit
 
-Status: first executable optimization and benchmark profile, 2026-08-20.
+Status: sparse-aware footprint correction and eight-profile AI-read matrix
+pass, 2026-08-22. The general append/replay promotion is revoked pending write,
+steady-RSS, and clean-reopen WAL-footprint gaps.
 
 ## Decision
 
@@ -68,50 +70,122 @@ while an older snapshot loads and returns the correct immutable values. The
 20,000-operation Fjall/native/independent-model mutation soak, runtime hash-chain
 tests, and snapshot differential remain green.
 
-The new `ai_hotset_benchmark` runs both engines in alternating isolated
-processes. Setup publishes 8,192 cold keys into immutable storage, overwrites
-128 control-like keys in the active memtable, then measures 65,536 verified
-current point reads. Five local x86-64 Linux trials produced these medians:
+The `ai_hotset_benchmark` runs both engines in alternating isolated processes.
+Setup publishes 8,192 cold keys into immutable storage and overwrites 128
+control-like keys in the active memtable. Each mode performs 8,192 verified
+requests in each of five local x86-64 Linux trials. Fan-out requests resolve 32
+mixed hot, cold, and absent metadata keys; its throughput is resolved items per
+second and its latency is for the complete 32-key request.
 
-| Metric | Fjall 3.1.8 | Native VyrmKV | Ratio |
+| Profile | Fjall items/s | Native items/s | Native/Fjall throughput | Fjall p95 | Native p95 | Native/Fjall p95 |
+|---|---:|---:|---:|---:|---:|---:|
+| Current hot hit, repeated | 1,321,784 | 2,936,465 | 2.222× | 770 ns | 294 ns | 0.382× |
+| Cold immutable hit, repeated | 457,661 | 746,409 | 1.631× | 2,203 ns | 1,309 ns | 0.594× |
+| Point miss, repeated | 2,063,394 | 3,137,016 | 1.520× | 433 ns | 282 ns | 0.651× |
+| Historical hot-key version, repeated | 491,285 | 1,050,642 | 2.139× | 2,130 ns | 978 ns | 0.459× |
+| Metadata fan-out, repeated | 723,698 | 1,321,738 | 1.826× | 44,343 ns | 22,885 ns | 0.516× |
+| Metadata fan-out, structured JSON | 569,268 | 913,358 | 1.604× | 44,270 ns | 22,518 ns | 0.509× |
+| Metadata fan-out, deterministic entropy | 628,669 | 1,033,822 | 1.644× | 43,899 ns | 22,345 ns | 0.509× |
+| Metadata fan-out, embedding f32 | 689,971 | 1,232,528 | 1.786× | 44,355 ns | 22,368 ns | 0.504× |
+
+All raw trials passed exact-value correctness and the strict native-throughput,
+p95, and symmetric clean-reopen allocated-footprint gate. The former 1,588,171
+versus 68,300,360-byte statement was invalid: it summed apparent file lengths
+while Fjall held a sparse 64 MiB journal. The corrected clean-reopen result is:
+
+| Payload | Fjall allocated | Native allocated | Native/Fjall |
 |---|---:|---:|---:|
-| Hot current reads/s | 1,379,005 | 3,117,435 | 2.261× native/Fjall |
-| Hot current p95 | 746 ns | 283 ns | 0.379× native/Fjall |
+| Repeated byte | 2,686,976 | 1,609,728 | 0.599× |
+| Structured JSON | 2,686,976 | 2,310,144 | 0.860× |
+| Deterministic entropy | 2,686,976 | 2,625,536 | 0.977× |
+| Embedding f32 | 2,686,976 | 2,625,536 | 0.977× |
+
+The real local advantage therefore ranges from 2.3% for high-entropy/vector
+bytes to 40.1% for deliberately compressible control values. Apparent bytes,
+allocated bytes (`st_blocks * 512` on Unix), logical live/written payload,
+file-class attribution, and active/reopened/maintained states are all retained.
+Only clean reopen without explicit maintenance is cross-backend promotion
+evidence. Backend-native maintained states remain diagnostic because their
+actions differ.
 
 Run it with:
 
 ```console
 cargo run --release --locked -p vyrm-store --example ai_hotset_benchmark -- \
-  --trials 5 --cold-keys 8192 --hot-keys 128 --reads 65536 \
-  --batch-size 128 --value-bytes 128 --output target/vyrmkv-ai-hotset.json
+  --workload metadata-fanout --trials 5 --cold-keys 8192 --hot-keys 128 \
+  --payload-profile embedding-f32 --reads 8192 --batch-size 128 \
+  --value-bytes 128 --fanout-width 32 \
+  --output target/vyrmkv-ai-metadata-fanout.json --require-promotion
 ```
 
-This result validates one hypothesis only. Setup time is excluded, both paths
-copy the returned value for equal validation, and correctness is checked on
-every read. It does not prove general superiority, negative-read performance,
-range performance, sustained maintenance, or multi-writer behavior. The
-versioned benchmark output retains every raw per-trial result so repeated runs
-can expose regressions across machines.
+Setup time is excluded, both paths copy returned values for equal validation,
+and correctness is checked on every item. These profiles establish their five
+bounded hypotheses; they do not prove general superiority, range performance,
+sustained maintenance, or multi-writer behavior. A proposed one-segment
+multi-get allocation shortcut was also measured in five before/after trials
+and rejected when it failed to improve the median. The kernel was restored to
+the measured baseline rather than retaining unearned complexity.
+
+Raw evidence:
+
+- [`current hot hit`](../eval/results/2026-08-22-vyrmkv-ai-current-hot-hit.json)
+- [`cold immutable hit`](../eval/results/2026-08-22-vyrmkv-ai-cold-hit.json)
+- [`point miss`](../eval/results/2026-08-22-vyrmkv-ai-point-miss.json)
+- [`historical hot-key version`](../eval/results/2026-08-22-vyrmkv-ai-historical-hot-hit.json)
+- [`metadata fan-out`](../eval/results/2026-08-22-vyrmkv-ai-metadata-fanout.json)
+- [`metadata fan-out, structured JSON`](../eval/results/2026-08-22-vyrmkv-ai-metadata-fanout-structured-json.json)
+- [`metadata fan-out, deterministic entropy`](../eval/results/2026-08-22-vyrmkv-ai-metadata-fanout-deterministic-entropy.json)
+- [`metadata fan-out, embedding f32`](../eval/results/2026-08-22-vyrmkv-ai-metadata-fanout-embedding-f32.json)
+
+The scheduled/manual workflow now reruns four single-key read modes plus four
+fan-out payload profiles with a deny-by-default promotion gate and retains
+every raw trial as an artifact.
+
+The corrected general harness initially exposed a full recovered-memtable clone
+on every bounded range. Replacing it with an ordered range walk preserved MVCC
+tombstones and moved clean-reopen read throughput from 0.115× to 1.553× Fjall
+and p95 from 7.987× to 0.675×. The general gate remains red because write
+throughput is 0.881×, write p95 is 1.181×, steady RSS is 1.186×, and allocated
+WAL footprint is 1.213× Fjall. The corrected evidence is
+[`2026-08-22-vyrmkv-corrected-standard.json`](../eval/results/2026-08-22-vyrmkv-corrected-standard.json).
 
 ## Ordered implementation gates
 
 1. **Complete:** memtable-first single/multi-get with MVCC/cache-traffic proof
    and an isolated hot-control-set comparison.
-2. Add bounded native memtable/WAL thresholds, explicit backpressure, automatic
-   flush, and observability; compare burst latency and acknowledged-write
-   durability against Fjall.
-3. Add authenticated per-segment negative filters only after point-miss and
-   multi-get fan-out baselines; freeze the format and false-positive policy.
-4. Replace full-materialization, all-to-one compaction with bounded leveled
-   streaming compaction that respects snapshot/checkpoint pins and family
-   retention policy.
+2. **Complete locally:** configurable encoded-WAL-payload and memtable-version
+   thresholds synchronously flush the existing WAL-backed memtable before
+   admitting a batch that would cross either bound. Atomic batches are never
+   split; a single oversized batch is accepted as one durable WAL frame,
+   retained for the next synchronous
+   flush, and counted explicitly. Native physical evidence exposes the limits
+   and process-local automatic-flush, write-stall, failure, and oversized-batch
+   counters. Admission uses cached O(1) version cardinality and the encoded WAL
+   payload length already produced for the write; it never rescans the live
+   memtable or batch. Crash recovery across the segment/continuation-WAL
+   boundary is covered. Retain threshold-crossing burst latency and remote
+   sustained evidence as promotion gates.
+3. **Complete locally:** derive authenticated block-local negative filters from
+   validated v3 bytes using ten bits per physical entry and seven hashes.
+   Deterministic point-miss evidence proves negative probes avoid block loads;
+   false positives retain the exact read path and cannot change results. No
+   wire-format revision was needed because filters are derived acceleration
+   state.
+4. **Complete locally:** replace full-materialization, all-to-one compaction
+   with bounded deterministic level selection, forward-only k-way record merge,
+   key-boundary output partitioning, higher-level non-overlap enforcement,
+   lower-level tombstone protection, and physical maintenance evidence.
+   Automatic steps retain all versions; explicit protected-snapshot compaction
+   is the only pruning path. Asynchronous immutable-memtable flush remains a
+   separate latency gate.
 5. Test family-aware blocks/cache admission and prefix/restart compression
    against the simpler single-space design. Reject it if mixed-family evidence
    does not improve.
-6. Run the complete AI matrix: hot hits, misses, historical reads, append/replay,
-   mixed atomic families, vector metadata fan-out, compaction interference,
-   restart, disk, RSS, and crash/storage-full boundaries.
+6. **Partial:** hot hits, cold hits, misses, historical reads, and vector
+   metadata fan-out now have correctness-checked isolated Fjall/native gates.
+   Append/replay and mixed atomic-family coverage already exist in the general
+   promotion and semantic suites. Compaction interference, long-duration
+   restart/RSS, and crash/storage-full performance cells remain.
 
 Fjall removal requires all semantic/migration differentials plus repeated
-remote AI-matrix evidence. A favorable append benchmark or this hot-set cell is
-not enough.
+remote AI-matrix evidence. Favorable local matrix cells are not enough.

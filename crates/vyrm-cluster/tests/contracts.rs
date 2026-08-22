@@ -1,5 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 use vyrm_cluster::*;
+use vyrm_core::{ObjectReceipt, ObjectReference, ReadStamp, RuntimeRef, ScopeId};
 
 fn node(value: &str) -> NodeId {
     NodeId::new(value).unwrap()
@@ -118,6 +119,145 @@ fn transfer_is_grounded_snapshot_plus_contiguous_wal_delta() {
     let mut gap = plan;
     gap.wal_from_exclusive = 9;
     assert!(gap.validate().is_err());
+}
+
+#[test]
+fn artifact_manifest_binds_project_read_plan_objects_and_receipt() {
+    let scope = ScopeId::new("instance:cluster-artifacts").unwrap();
+    let bytes = b"artifact";
+    let sha256 = vyrm_core::digest::sha256_hex(bytes);
+    let object = ObjectReference::for_bytes(
+        "artifact:one",
+        Some(RuntimeRef::new("document", "one").unwrap()),
+        "application/octet-stream",
+        bytes,
+        ObjectReceipt {
+            backend: "source".into(),
+            key: ObjectReference::canonical_key(&sha256).unwrap(),
+            version: Some("1".into()),
+            etag: Some(sha256.clone()),
+        },
+    )
+    .unwrap();
+    let plan = ReplicaTransferPlan {
+        contract_version: CLUSTER_CONTRACT_VERSION,
+        shard: ShardId(3),
+        placement_epoch: 2,
+        source: node("a"),
+        target: node("d"),
+        grounded_snapshot: ShardReadStamp {
+            placement_epoch: 2,
+            ..stamp(10, 'a')
+        },
+        wal_from_exclusive: 10,
+        wal_through_inclusive: 10,
+        artifact_digests: BTreeSet::from([sha256.clone()]),
+    };
+    let read = ReadStamp::new(scope.clone(), None, 0, 4, Some("44".repeat(32))).unwrap();
+    let manifest = ArtifactTransferManifest::new(plan, scope, read, vec![object.clone()]).unwrap();
+    manifest.validate().unwrap();
+
+    let target = ObjectReceipt {
+        backend: "target".into(),
+        key: ObjectReference::canonical_key(&sha256).unwrap(),
+        version: None,
+        etag: Some(sha256.clone()),
+    };
+    let receipt = ArtifactTransferReceipt::new(
+        &manifest,
+        vec![ArtifactReplicaObjectReceipt {
+            reference: object.reference,
+            sha256,
+            length: bytes.len() as u64,
+            target,
+            transferred: true,
+        }],
+        20,
+    )
+    .unwrap();
+    receipt.validate(&manifest).unwrap();
+    let prepared = ArtifactTransferObservation::prepared(&manifest, 1, 18).unwrap();
+    prepared.validate().unwrap();
+    let progress = ArtifactTransferObservation::progress(
+        &manifest,
+        1,
+        19,
+        &ArtifactObjectProgress {
+            sha256: manifest.objects[0].sha256.clone(),
+            expected_length: manifest.objects[0].length,
+            next_offset: manifest.objects[0].length,
+            complete: true,
+        },
+    )
+    .unwrap();
+    progress.validate().unwrap();
+    let completed =
+        ArtifactTransferObservation::completed(&manifest, 1, 20, 1_000, &receipt).unwrap();
+    completed.validate().unwrap();
+    let failed =
+        ArtifactTransferObservation::failed(&manifest, 2, 21, 500, "secret failure").unwrap();
+    assert_eq!(
+        failed.error_digest,
+        Some(vyrm_core::digest::sha256_hex(b"secret failure"))
+    );
+    assert!(!serde_json::to_string(&failed)
+        .unwrap()
+        .contains("secret failure"));
+    let prepared_trace = artifact_transfer_trace_event(&prepared).unwrap();
+    let progress_trace = artifact_transfer_trace_event(&progress).unwrap();
+    let completed_trace = artifact_transfer_trace_event(&completed).unwrap();
+    let failed_trace = artifact_transfer_trace_event(&failed).unwrap();
+    assert_eq!(prepared_trace.name, "cluster.artifact_transfer");
+    assert_eq!(prepared_trace.trace_id, completed_trace.trace_id);
+    assert_eq!(prepared_trace.span_id, completed_trace.span_id);
+    assert_eq!(progress_trace.name, "cluster.artifact_chunk");
+    assert_eq!(progress_trace.parent_span_id, Some(prepared_trace.span_id));
+    assert_eq!(failed_trace.outcome, vyrm_core::TraceOutcome::Error);
+    assert!(!serde_json::to_string(&failed_trace)
+        .unwrap()
+        .contains("secret failure"));
+
+    let mut tampered = manifest.clone();
+    tampered.objects[0].media_type = "application/substituted".into();
+    assert!(tampered.validate().is_err());
+    let mut tampered_receipt = receipt;
+    tampered_receipt.transferred_bytes += 1;
+    assert!(tampered_receipt.validate(&manifest).is_err());
+}
+
+#[test]
+fn transport_telemetry_v1_fixture_round_trips_and_denies_shape_drift() {
+    let fixture = include_str!("../fixtures/transport-telemetry-v1.json");
+    let snapshot: vyrm_cluster::VyrmTransportTelemetrySnapshot =
+        serde_json::from_str(fixture).unwrap();
+    assert_eq!(
+        snapshot.contract_version,
+        vyrm_cluster::VYRM_CLUSTER_TELEMETRY_VERSION
+    );
+    snapshot.policy.validate().unwrap();
+    snapshot.validate().unwrap();
+    assert_eq!(
+        serde_json::to_value(&snapshot).unwrap(),
+        serde_json::from_str::<serde_json::Value>(fixture).unwrap()
+    );
+
+    let mut unknown: serde_json::Value = serde_json::from_str(fixture).unwrap();
+    unknown["secret_payload"] = serde_json::Value::String("must fail closed".into());
+    assert!(
+        serde_json::from_value::<vyrm_cluster::VyrmTransportTelemetrySnapshot>(unknown).is_err()
+    );
+}
+
+#[test]
+fn raft_timing_policy_rejects_election_windows_that_cannot_tolerate_a_heartbeat() {
+    let policy = vyrm_cluster::VyrmRaftTimingPolicy::default();
+    policy.validate().unwrap();
+    let invalid = vyrm_cluster::VyrmRaftTimingPolicy {
+        heartbeat_interval_millis: 250,
+        election_timeout_min_millis: 250,
+        election_timeout_max_millis: 500,
+    };
+    assert!(invalid.validate().is_err());
 }
 
 #[test]

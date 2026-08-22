@@ -11,17 +11,25 @@ use rcgen::{
 use rustls::pki_types::{CertificateRevocationListDer, PrivateKeyDer, PrivatePkcs8KeyDer};
 use rustls::RootCertStore;
 use std::collections::{BTreeMap, BTreeSet};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tempfile::TempDir;
 use tokio::net::TcpListener;
 use tokio::task::JoinHandle;
 use vyrm_cluster::{
-    build_vyrm_tls_configs, ClusterId, NodeId, PlacementPolicy, ReplicaPlacement, ReplicaRole,
-    ShardId, ShardPlacement, VyrmRaftCommand, VyrmRaftNetworkFactory, VyrmRaftNode, VyrmRaftStore,
-    VyrmRaftTlsServer, VyrmTlsMaterial, VyrmTlsReloader, VyrmTransportBinding, VyrmTransportGate,
-    VyrmTransportTrust, ZoneId, CLUSTER_CONTRACT_VERSION,
+    build_vyrm_tls_configs, ArtifactTransferObservation, ArtifactTransferObservationPhase,
+    ArtifactTransferObserver, ArtifactTransferReceiver, ClusterId, NodeId, PlacementPolicy,
+    ReplicaPlacement, ReplicaRole, ShardId, ShardPlacement, VyrmRaftCommand,
+    VyrmRaftNetworkFactory, VyrmRaftNode, VyrmRaftStateMachine, VyrmRaftStore, VyrmRaftTlsServer,
+    VyrmTlsMaterial, VyrmTlsReloader, VyrmTransportBinding, VyrmTransportGate,
+    VyrmTransportOperation, VyrmTransportTrust, ZoneId, CLUSTER_CONTRACT_VERSION,
 };
+use vyrm_core::{
+    ObjectReference, RuntimeCommit, RuntimeMutation, RuntimeRecordSchema, RuntimeSchemaRegistry,
+    RuntimeTraceEvent, RuntimeType, ScopeId, SpanId, TraceDataClass, TraceDomain, TraceId,
+    TraceOutcome,
+};
+use vyrm_store::LocalObjectStore;
 
 type VyrmRaft = Raft<vyrm_cluster::VyrmRaftTypeConfig>;
 
@@ -29,12 +37,34 @@ struct TestNode {
     _directory: TempDir,
     raft: VyrmRaft,
     server: JoinHandle<()>,
+    telemetry: VyrmRaftTlsServer,
+    objects: LocalObjectStore,
+    state_machine: VyrmRaftStateMachine,
+}
+
+#[derive(Default)]
+struct RecordingArtifactObserver {
+    observations: Mutex<Vec<ArtifactTransferObservation>>,
+}
+
+impl ArtifactTransferObserver for RecordingArtifactObserver {
+    fn observe(
+        &self,
+        observation: ArtifactTransferObservation,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = vyrm_cluster::Result<()>> + Send + '_>>
+    {
+        Box::pin(async move {
+            self.observations.lock().unwrap().push(observation);
+            Ok(())
+        })
+    }
 }
 
 #[test]
 fn mutual_tls_transport_replicates_and_denies_identity_confusion() {
     tokio::runtime::Runtime::new().unwrap().block_on(async {
         let cluster = ClusterId::new("cluster:tls-transport").unwrap();
+        let project_scope = ScopeId::new("instance:tls-artifact-transfer").unwrap();
         let trust_domain = "vyrm.test";
         let (ca, issuer) = test_ca();
         let trust = VyrmTransportTrust::new(
@@ -83,6 +113,7 @@ fn mutual_tls_transport_replicates_and_denies_identity_confusion() {
             .unwrap(),
         );
         let mut running = BTreeMap::new();
+        let artifact_observer = Arc::new(RecordingArtifactObserver::default());
         let mut client_configs = BTreeMap::new();
         let mut reloaders = BTreeMap::new();
         for id in 1..=4 {
@@ -99,24 +130,33 @@ fn mutual_tls_transport_replicates_and_denies_identity_confusion() {
             let (client, _) = build_vyrm_tls_configs(confusion_material).unwrap();
             client_configs.insert(id, client);
             let gate = VyrmTransportGate::enabled();
-            let network = VyrmRaftNetworkFactory::new_reloadable(
+            let (log, state_machine) = VyrmRaftStore::open(directory.path(), ShardId(7)).unwrap();
+            let objects = state_machine.application_objects();
+            let receiver = ArtifactTransferReceiver::open(objects.clone()).unwrap();
+            let network = VyrmRaftNetworkFactory::new_reloadable_with_artifacts(
                 binding.clone(),
                 reloader.clone(),
                 gate.clone(),
+                state_machine.clone(),
+                objects.clone(),
+                project_scope.clone(),
             )
-            .unwrap();
-            let (log, state_machine) = VyrmRaftStore::open(directory.path(), ShardId(7)).unwrap();
-            let raft = Raft::new(id, Arc::clone(&config), network, log, state_machine)
+            .unwrap()
+            .with_artifact_observer(artifact_observer.clone());
+            let raft = Raft::new(id, Arc::clone(&config), network, log, state_machine.clone())
                 .await
                 .unwrap();
-            let tls_server = VyrmRaftTlsServer::new_reloadable(
+            let tls_server = VyrmRaftTlsServer::new_reloadable_with_artifacts(
                 binding,
                 trust.clone(),
                 raft.clone(),
                 reloader.clone(),
                 gate,
+                receiver,
+                project_scope.clone(),
             )
             .unwrap();
+            let telemetry = tls_server.clone();
             let listener = listeners.remove(&id).unwrap();
             let server = tokio::spawn(async move {
                 tls_server.serve(listener).await.unwrap();
@@ -127,6 +167,9 @@ fn mutual_tls_transport_replicates_and_denies_identity_confusion() {
                     _directory: directory,
                     raft,
                     server,
+                    telemetry,
+                    objects,
+                    state_machine,
                 },
             );
             reloaders.insert(id, reloader);
@@ -198,6 +241,137 @@ fn mutual_tls_transport_replicates_and_denies_identity_confusion() {
                 .await
                 .unwrap();
         }
+        let artifact_bytes = (0..(vyrm_cluster::ARTIFACT_TRANSFER_CHUNK_MAX_BYTES + 91_337))
+            .map(|index| (index % 239) as u8)
+            .collect::<Vec<_>>();
+        let staged = running[&1].objects.put(&artifact_bytes).unwrap();
+        for id in 2..=3 {
+            let replica = running[&id].objects.put(&artifact_bytes).unwrap();
+            assert_eq!(replica.sha256, staged.sha256);
+        }
+        let artifact = ObjectReference::for_bytes(
+            "vector:hnsw:tls-fixture@1:bytes",
+            None,
+            "application/vnd.vyrm.vector-hnsw+json",
+            &artifact_bytes,
+            staged.receipt,
+        )
+        .unwrap();
+        let mut artifact_schema = RuntimeSchemaRegistry::empty(1, "TLS artifact transfer fixture");
+        artifact_schema.records.insert(
+            RuntimeType::new("artifact_fixture").unwrap(),
+            RuntimeRecordSchema::default(),
+        );
+        let runtime_response = running[&1]
+            .raft
+            .client_write(
+                VyrmRaftCommand::runtime_commit(
+                    "tls-runtime-artifact-1",
+                    ShardId(7),
+                    1,
+                    Some(response.log_id.index),
+                    RuntimeCommit {
+                        scope: project_scope.clone(),
+                        at: 10,
+                        actor: "cluster:tls-test".into(),
+                        expected_cursor: 0,
+                        mutations: vec![
+                            RuntimeMutation::Schema {
+                                registry: artifact_schema,
+                            },
+                            RuntimeMutation::Object {
+                                object: artifact.clone(),
+                            },
+                        ],
+                    },
+                )
+                .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert!(runtime_response.data.accepted);
+        for id in 1..=3 {
+            running[&id]
+                .raft
+                .wait(Some(Duration::from_secs(5)))
+                .ge(
+                    Metric::AppliedIndex(Some(runtime_response.log_id.index)),
+                    "artifact reference applies on every voter",
+                )
+                .await
+                .unwrap();
+        }
+        let (trace_read, trace_schema) = running[&1]
+            .state_machine
+            .runtime_commit_context(&project_scope)
+            .unwrap();
+        let trace_event = RuntimeTraceEvent::annotation(
+            TraceId::new("1".repeat(32)).unwrap(),
+            SpanId::new("2".repeat(16)).unwrap(),
+            None,
+            TraceDomain::Cluster,
+            "cluster.consensus_route",
+            11,
+            TraceOutcome::Ok,
+            TraceDataClass::Control,
+            Vec::new(),
+            Default::default(),
+        )
+        .unwrap();
+        let trace_commit = trace_event
+            .prepare_commit(&trace_read, trace_schema.as_ref(), "cluster:route-test")
+            .unwrap();
+        let route = VyrmRaftNetworkFactory::new_reloadable(
+            binding(trust_domain, &cluster, 2),
+            reloaders[&2].clone(),
+            VyrmTransportGate::enabled(),
+        )
+        .unwrap();
+        let routed = route
+            .submit_runtime_commit(
+                1,
+                &nodes[&1],
+                VyrmRaftCommand::runtime_commit(
+                    "tls-consensus-route-1",
+                    ShardId(7),
+                    1,
+                    Some(runtime_response.log_id.index),
+                    trace_commit.clone(),
+                )
+                .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert!(routed.data.accepted);
+        for id in 1..=3 {
+            running[&id]
+                .raft
+                .wait(Some(Duration::from_secs(5)))
+                .ge(
+                    Metric::AppliedIndex(Some(routed.log_id.index)),
+                    "authenticated internal runtime commit route",
+                )
+                .await
+                .unwrap();
+        }
+        let mut foreign = trace_commit;
+        foreign.scope = ScopeId::new("instance:foreign-route").unwrap();
+        let denied = route
+            .submit_runtime_commit(
+                1,
+                &nodes[&1],
+                VyrmRaftCommand::runtime_commit(
+                    "tls-consensus-route-foreign",
+                    ShardId(7),
+                    1,
+                    Some(routed.log_id.index),
+                    foreign,
+                )
+                .unwrap(),
+            )
+            .await
+            .unwrap_err();
+        assert!(denied.to_string().contains("configured project"));
 
         let rotated_node_one = test_tls_material(
             &ca,
@@ -224,7 +398,7 @@ fn mutual_tls_transport_replicates_and_denies_identity_confusion() {
                     "tls-probe-after-hot-rotation",
                     ShardId(7),
                     1,
-                    Some(response.log_id.index),
+                    Some(routed.log_id.index),
                     b"hot-rotation-without-raft-restart".to_vec(),
                 )
                 .unwrap(),
@@ -383,34 +557,60 @@ fn mutual_tls_transport_replicates_and_denies_identity_confusion() {
             "retired CA leaf must fail client authentication"
         );
 
-        running[&1].raft.trigger().snapshot().await.unwrap();
-        let snapshot_metrics = running[&1]
-            .raft
-            .wait(Some(Duration::from_secs(5)))
-            .ge(
-                Metric::Snapshot(Some(response.log_id)),
-                "authenticated snapshot publication",
-            )
-            .await
-            .unwrap();
-        let snapshot_log = snapshot_metrics.snapshot.unwrap();
-        running[&1]
-            .raft
-            .trigger()
-            .purge_log(snapshot_log.index)
-            .await
-            .unwrap();
+        running[&1].raft.trigger().elect().await.unwrap();
         running[&1]
             .raft
             .wait(Some(Duration::from_secs(5)))
-            .purged(Some(snapshot_log), "authenticated snapshot log purge")
+            .current_leader(1, "stable source before authenticated snapshot")
             .await
             .unwrap();
+        let mut snapshot_logs = BTreeMap::new();
+        for id in 1..=3 {
+            running[&id].raft.trigger().snapshot().await.unwrap();
+        }
+        for id in 1..=3 {
+            let metrics = running[&id]
+                .raft
+                .wait(Some(Duration::from_secs(5)))
+                .ge(
+                    Metric::Snapshot(Some(after_root_cutover.log_id)),
+                    "authenticated snapshot publication on every voter",
+                )
+                .await
+                .unwrap();
+            snapshot_logs.insert(id, metrics.snapshot.unwrap());
+        }
+        for id in 1..=3 {
+            let snapshot_log = snapshot_logs[&id];
+            running[&id]
+                .raft
+                .trigger()
+                .purge_log(snapshot_log.index)
+                .await
+                .unwrap();
+            running[&id]
+                .raft
+                .wait(Some(Duration::from_secs(5)))
+                .purged(Some(snapshot_log), "authenticated snapshot log purge")
+                .await
+                .unwrap();
+        }
         running[&1]
             .raft
             .add_learner(4, nodes[&4].clone(), true)
             .await
             .unwrap();
+        let artifact_deadline = std::time::Instant::now() + Duration::from_secs(5);
+        loop {
+            if running[&4].objects.get(&artifact).is_ok() {
+                break;
+            }
+            assert!(
+                std::time::Instant::now() < artifact_deadline,
+                "artifact bytes did not reach the learner before snapshot activation"
+            );
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
         running[&4]
             .raft
             .wait(Some(Duration::from_secs(5)))
@@ -420,6 +620,57 @@ fn mutual_tls_transport_replicates_and_denies_identity_confusion() {
             )
             .await
             .unwrap();
+        assert_eq!(running[&4].objects.get(&artifact).unwrap(), artifact_bytes);
+        let observations = artifact_observer.observations.lock().unwrap().clone();
+        let learner_observations = observations
+            .iter()
+            .filter(|observation| observation.target.as_str() == "node-4")
+            .collect::<Vec<_>>();
+        let prepared = learner_observations
+            .iter()
+            .filter(|observation| observation.phase == ArtifactTransferObservationPhase::Prepared)
+            .collect::<Vec<_>>();
+        assert!(!prepared.is_empty());
+        assert_eq!(
+            prepared
+                .iter()
+                .map(|observation| (observation.source.as_str().to_owned(), observation.attempt))
+                .collect::<BTreeSet<_>>()
+                .len(),
+            prepared.len(),
+            "snapshot retries must retain distinct source-local attempt identities"
+        );
+        assert!(
+            learner_observations
+                .iter()
+                .filter(|observation| {
+                    observation.phase == ArtifactTransferObservationPhase::ChunkAccepted
+                })
+                .count()
+                >= 2
+        );
+        let completed_observations = learner_observations
+            .iter()
+            .filter(|observation| observation.phase == ArtifactTransferObservationPhase::Completed)
+            .collect::<Vec<_>>();
+        assert_eq!(completed_observations.len(), prepared.len());
+        let completed = completed_observations
+            .last()
+            .expect("artifact transfer emits bounded terminal evidence");
+        assert!(completed.transferred_objects <= 1);
+        assert_eq!(
+            completed.transferred_bytes,
+            if completed.transferred_objects == 1 {
+                artifact_bytes.len() as u64
+            } else {
+                0
+            }
+        );
+        assert!(completed.receipt_digest.is_some());
+        assert!(!serde_json::to_vec(&learner_observations)
+            .unwrap()
+            .windows(64)
+            .any(|window| window == &artifact_bytes[..64]));
 
         let mut confused_factory = VyrmRaftNetworkFactory::new(
             binding(trust_domain, &cluster, 1),
@@ -455,6 +706,29 @@ fn mutual_tls_transport_replicates_and_denies_identity_confusion() {
             denied.is_err(),
             "authenticated node-3 must not send a Raft vote claiming node-1"
         );
+
+        let telemetry = running[&2].telemetry.telemetry_snapshot(u64::MAX).unwrap();
+        assert!(telemetry.accepted_connections > 0);
+        assert!(telemetry.denied_connections >= 2);
+        assert!(telemetry
+            .identities
+            .contains_key(&NodeId::new("node-1").unwrap()));
+        assert!(
+            telemetry.operations[&VyrmTransportOperation::Append].allowed > 0
+                || telemetry.operations[&VyrmTransportOperation::Snapshot].allowed > 0
+        );
+        assert_eq!(
+            telemetry.operations[&VyrmTransportOperation::RuntimeCommit].denied,
+            0,
+            "the foreign runtime commit was denied on node one, not node two"
+        );
+        let node_one_telemetry = running[&1].telemetry.telemetry_snapshot(u64::MAX).unwrap();
+        assert!(node_one_telemetry.operations[&VyrmTransportOperation::RuntimeCommit].allowed > 0);
+        assert!(node_one_telemetry.operations[&VyrmTransportOperation::RuntimeCommit].denied > 0);
+        let encoded = serde_json::to_vec(&node_one_telemetry).unwrap();
+        assert!(!encoded
+            .windows(64)
+            .any(|window| window == &artifact_bytes[..64]));
 
         for node in running.values() {
             node.raft.shutdown().await.unwrap();

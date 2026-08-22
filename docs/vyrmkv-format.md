@@ -1,11 +1,26 @@
 # vyrmKV native format contract
 
-Status: M3 local promotion baseline passes. WAL, atomic-batch, manifest,
+Status: M3 persistence and semantic gates pass; corrected general performance
+promotion is blocked on write latency, steady RSS, and clean-reopen WAL
+footprint. WAL, atomic-batch, manifest,
 checkpoint, and physical snapshot-bundle formats are version 1; new immutable
 segments are version 3 and the reader retains explicit version-1/version-2
 compatibility.
 The format is pre-release. Any format change before alpha must increment its
 explicit version and update the checked-in vectors; readers never guess.
+
+The active mutable layer is bounded by configurable encoded-WAL-payload and
+memtable-version limits (64 MiB and 524,288 versions by default). Before
+admitting a batch that would cross either limit, the single writer synchronously
+publishes the existing WAL-backed memtable through the normal crash-ordered
+flush path. This is
+intentional backpressure: the new batch is not appended until maintenance
+succeeds. One atomic batch is never split; a batch larger than a configured
+limit remains one WAL frame and is reported as oversized. Maintenance counters
+are operational evidence and reset on reopen. The same evidence reports L0
+count/trigger/debt, automatic compaction count/failures, compacted input/output
+bytes, and peak merge-buffer bytes. WAL, segment, manifest, and `CURRENT`
+remain the canonical persistence truth.
 
 Runtime entry points use `PersistentEngine`: a missing path creates this native
 format, and an authenticated `CURRENT` pointer selects it on reopen. An existing
@@ -91,7 +106,8 @@ only its own `digest` field.
 Every segment descriptor carries its content identity/checksum, key range,
 sequence range, entry count, and byte count. Duplicate identities, inverted
 ranges, empty segments, and segments newer than the manifest's durable sequence
-fail closed.
+fail closed. L0 may overlap by definition; every higher level must contain
+strictly ordered, non-overlapping key ranges.
 
 Immutable segment v3 stores a fixed 64-byte `VYRSEG03` header, independently
 compressed LZ4 record blocks, a bounded `VYRIX003` footer index, and a lowercase
@@ -113,7 +129,13 @@ overlap, and trailing bytes are denied.
 Point reads return owned values and load only candidate blocks. A single
 immutable segment reduces ordered MVCC groups directly into range results;
 multi-segment reads retain the general version merge. Snapshot and compaction
-traversal process blocks sequentially. All immutable
+traversal process blocks sequentially. During authenticated v3 validation Vyrm
+derives one block-local Bloom filter using ten bits per physical entry and seven
+deterministic double-hash probes. These filters are acceleration state derived
+from checksum-verified canonical bytes, not a second persistence truth; a
+negative result skips block load/decode, while positives still execute the
+ordinary exact MVCC path. Probe and negative counts join physical evidence.
+All immutable
 segments in one `Database` share a decoded-block LRU: 4 MiB by default,
 configurable at create/open, with capacity/resident/entry/hit/miss/eviction
 counters exposed by `block_cache_stats`. A block larger than the configured
@@ -188,22 +210,35 @@ commit, purge, and snapshot-cache records live in a separate node-local VyrmKV
 domain and therefore cannot appear in the bundle.
 
 The native `Engine` adapter passes Memory/Fjall/native semantic and exact query
-differentials, including flush/reopen. Compaction retains the newest version
-visible at every explicitly protected physical sequence plus the durable head;
-an obsolete tombstone with no retained older value disappears. Runtime leases
-create physical manifest checkpoints and reconcile them on reopen,
-compaction, release, and expiry. GC validates the complete root inventory,
-then removes only manifests, segments, and WALs unreachable from `CURRENT` or
-a named checkpoint.
+differentials, including flush/reopen. One compaction step selects a bounded,
+deterministic source-level range plus every overlapping target-level segment,
+then performs a k-way merge through forward-only segment cursors. Output is
+split at key boundaries against an 8 MiB default target, retaining at most the
+target plus one key's complete MVCC history in the merge map. Manifest CAS
+publishes all output partitions together.
+
+Explicit compaction retains the newest version visible at every protected
+physical sequence plus the durable head; an obsolete tombstone disappears only
+when no unselected segment can contain the shadowed key. Cooperative automatic
+maintenance deliberately retains every MVCC version because the low-level
+copyable `Snapshot` is not a lifetime-tracked reclamation lease. Runtime leases
+create physical manifest checkpoints and reconcile them on reopen, compaction,
+release, and expiry. GC validates the complete root inventory, then removes
+only manifests, segments, and WALs unreachable from `CURRENT` or a named
+checkpoint.
 
 Deterministic crash and storage-full injection covers the WAL-sync,
 segment-sync, successor-WAL-sync, and manifest-publication flush boundaries,
 plus compaction segment and manifest publication. Every cell reopens, verifies
-the accepted data, continues writing, and reopens again. The comparative
-benchmark is recorded in `vyrmkv-benchmark.md`. The current five-trial isolated
-local baseline passes its strict equal-or-better gate in every measured cell.
-Fjall remains live as a compatibility oracle until the result is reproduced in
-CI and across broader workloads; no general native performance claim is made.
+the accepted data, continues writing, and reopens again. Comparative evidence
+is recorded in `vyrmkv-benchmark.md`. The corrected lifecycle harness measures
+both engines while active, after clean reopen, and after explicit maintenance,
+and reports physical allocation rather than sparse apparent length. Semantics
+and the bounded AI-read matrix pass; an ordered bounded memtable walk also wins
+the clean-reopen read gate. General promotion remains blocked on write
+throughput/p95, steady RSS, and WAL footprint. Fjall remains live as a
+compatibility and performance oracle; no general native performance claim is
+made.
 
 Manifest publication now holds an OS-level exclusive lock for the publication
 session. It validates expected `CURRENT`, generation, and parent; syncs immutable

@@ -1,0 +1,150 @@
+{
+  "contract_version": 1,
+  "started_at": 100,
+  "observed_at": 200,
+  "policy": {
+    "max_global_in_flight": 256,
+    "max_identity_in_flight": 64,
+    "max_identity_requests_per_window": 4096,
+    "window_millis": 1000,
+    "max_tracked_identities": 1024
+  },
+  "operations": {
+    "append": {
+      "attempted": 2,
+      "allowed": 1,
+      "denied": 1,
+      "failed": 0,
+      "current_in_flight": 0,
+      "peak_in_flight": 1,
+      "request_bytes": 128,
+      "response_bytes": 64,
+      "total_duration_micros": 25,
+      "max_duration_micros": 25
+    },
+    "snapshot": {
+      "attempted": 0,
+      "allowed": 0,
+      "denied": 0,
+      "failed": 0,
+      "current_in_flight": 0,
+      "peak_in_flight": 0,
+      "request_bytes": 0,
+      "response_bytes": 0,
+      "total_duration_micros": 0,
+      "max_duration_micros": 0
+    },
+    "vote": {
+      "attempted": 0,
+      "allowed": 0,
+      "denied": 0,
+      "failed": 0,
+      "current_in_flight": 0,
+      "peak_in_flight": 0,
+      "request_bytes": 0,
+      "response_bytes": 0,
+      "total_duration_micros": 0,
+      "max_duration_micros": 0
+    },
+    "artifact": {
+      "attempted": 0,
+      "allowed": 0,
+      "denied": 0,
+      "failed": 0,
+      "current_in_flight": 0,
+      "peak_in_flight": 0,
+      "request_bytes": 0,
+      "response_bytes": 0,
+      "total_duration_micros": 0,
+      "max_duration_micros": 0
+    },
+    "runtime_commit": {
+      "attempted": 0,
+      "allowed": 0,
+      "denied": 0,
+      "failed": 0,
+      "current_in_flight": 0,
+      "peak_in_flight": 0,
+      "request_bytes": 0,
+      "response_bytes": 0,
+      "total_duration_micros": 0,
+      "max_duration_micros": 0
+    }
+  },
+  "identities": {
+    "node-1": {
+      "operations": {
+        "append": {
+          "attempted": 2,
+          "allowed": 1,
+          "denied": 1,
+          "failed": 0,
+          "current_in_flight": 0,
+          "peak_in_flight": 1,
+          "request_bytes": 128,
+          "response_bytes": 64,
+          "total_duration_micros": 25,
+          "max_duration_micros": 25
+        },
+        "snapshot": {
+          "attempted": 0,
+          "allowed": 0,
+          "denied": 0,
+          "failed": 0,
+          "current_in_flight": 0,
+          "peak_in_flight": 0,
+          "request_bytes": 0,
+          "response_bytes": 0,
+          "total_duration_micros": 0,
+          "max_duration_micros": 0
+        },
+        "vote": {
+          "attempted": 0,
+          "allowed": 0,
+          "denied": 0,
+          "failed": 0,
+          "current_in_flight": 0,
+          "peak_in_flight": 0,
+          "request_bytes": 0,
+          "response_bytes": 0,
+          "total_duration_micros": 0,
+          "max_duration_micros": 0
+        },
+        "artifact": {
+          "attempted": 0,
+          "allowed": 0,
+          "denied": 0,
+          "failed": 0,
+          "current_in_flight": 0,
+          "peak_in_flight": 0,
+          "request_bytes": 0,
+          "response_bytes": 0,
+          "total_duration_micros": 0,
+          "max_duration_micros": 0
+        },
+        "runtime_commit": {
+          "attempted": 0,
+          "allowed": 0,
+          "denied": 0,
+          "failed": 0,
+          "current_in_flight": 0,
+          "peak_in_flight": 0,
+          "request_bytes": 0,
+          "response_bytes": 0,
+          "total_duration_micros": 0,
+          "max_duration_micros": 0
+        }
+      },
+      "current_in_flight": 0,
+      "peak_in_flight": 1,
+      "rate_window_started_at": 100,
+      "requests_in_rate_window": 2
+    }
+  },
+  "current_in_flight": 0,
+  "peak_in_flight": 1,
+  "accepted_connections": 1,
+  "denied_connections": 1,
+  "connection_request_bytes": 192,
+  "overflowed": false
+}

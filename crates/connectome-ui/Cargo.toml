@@ -8,10 +8,12 @@ description = "Local developer workbench and visualizer for vyrm/connectome inst
 
 [dependencies]
 vyrm-core = { path = "../vyrm-core" }
+vyrm-cluster = { path = "../vyrm-cluster", features = ["openraft-transport"] }
 vyrm-ql = { path = "../vyrm-ql" }
 vyrm-mx = { path = "../vyrm-mx" }
 vyrm-node = { path = "../vyrm-node" }
 vyrm-store = { path = "../vyrm-store" }
+vyrm-vector = { path = "../vyrm-vector" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tiny_http = "0.12"

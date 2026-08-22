@@ -10,7 +10,11 @@
 // generic threshold, so adapter helpers preserve that required type too.
 #![allow(clippy::result_large_err)]
 
-use crate::{ClusterError, Result as ClusterResult, ShardId, ShardPlacement};
+use crate::{
+    transfer_artifacts, ArtifactTransferManifest, ArtifactTransferReceipt, ClusterError, NodeId,
+    ReplicaTransferPlan, Result as ClusterResult, ShardId, ShardPlacement, ShardReadStamp,
+    CLUSTER_CONTRACT_VERSION,
+};
 use openraft::storage::{RaftLogStorage, RaftStateMachine};
 use openraft::{
     Entry, EntryPayload, ErrorSubject, ErrorVerb, LogId, LogState, RaftLogReader,
@@ -28,12 +32,17 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::task::{Context, Poll};
 use tokio::io::{AsyncRead, AsyncSeek, AsyncWrite, ReadBuf};
-use vyrm_core::{digest::sha256_hex, ObjectReference, RuntimeCommit, RuntimeCommitOutcome};
+use vyrm_core::{
+    digest::sha256_hex, ObjectReference, ReadStamp, RuntimeCommit, RuntimeCommitOutcome,
+    RuntimeSchemaRegistry, ScopeId,
+};
 use vyrm_kv::{
     Database, Durability, Mutation, SnapshotBundleFile, WriteBatch, SNAPSHOT_BUNDLE_MAX_BYTES,
 };
 use vyrm_store::{
-    native_runtime_commit_outcome, prepare_native_runtime_commit, Error as StoreError,
+    native_runtime_commit_context, native_runtime_commit_outcome,
+    native_snapshot_all_object_references, native_snapshot_artifact_view,
+    native_snapshot_object_references, prepare_native_runtime_commit, Error as StoreError,
     LocalObjectStore,
 };
 
@@ -41,6 +50,7 @@ const ADAPTER_FORMAT_VERSION: u16 = 4;
 const LOCAL_DATABASE_DIRECTORY: &str = "raft-local-v4";
 const SNAPSHOT_OBJECT_DIRECTORY: &str = "snapshot-objects";
 const SNAPSHOT_SPOOL_DIRECTORY: &str = "snapshot-spool";
+pub const APPLICATION_OBJECT_DIRECTORY: &str = "application-objects";
 const KEY_STATE_CONFIG: &[u8] = b"vyrm/raft/v4/state/config";
 const KEY_LOCAL_CONFIG: &[u8] = b"vyrm/raft/v4/local/config";
 const KEY_VOTE: &[u8] = b"vyrm/raft/v4/local/vote";
@@ -471,6 +481,7 @@ pub struct VyrmRaftStateMachine {
     state_database: SharedDatabase,
     local_database: SharedDatabase,
     snapshot_objects: LocalObjectStore,
+    application_objects: LocalObjectStore,
     snapshot_spool: PathBuf,
     shard: ShardId,
 }
@@ -508,6 +519,8 @@ impl VyrmRaftStore {
         )?;
         let snapshot_objects = LocalObjectStore::open(local_root.join(SNAPSHOT_OBJECT_DIRECTORY))
             .map_err(|error| ClusterError::Unavailable(error.to_string()))?;
+        let application_objects = LocalObjectStore::open(root.join(APPLICATION_OBJECT_DIRECTORY))
+            .map_err(|error| ClusterError::Unavailable(error.to_string()))?;
         let snapshot_spool = local_root.join(SNAPSHOT_SPOOL_DIRECTORY);
         clean_snapshot_spool(&snapshot_spool)?;
 
@@ -521,6 +534,7 @@ impl VyrmRaftStore {
                 state_database: database,
                 local_database,
                 snapshot_objects,
+                application_objects,
                 snapshot_spool,
                 shard,
             },
@@ -630,11 +644,15 @@ impl RaftLogReader<VyrmRaftTypeConfig> for VyrmRaftLogStore {
         range: RB,
     ) -> std::result::Result<Vec<VyrmRaftEntry>, StorageError<u64>> {
         let database = lock_database(&self.local_database, ErrorSubject::Logs, ErrorVerb::Read)?;
-        let rows = database.scan(
-            LOG_PREFIX,
-            prefix_end(LOG_PREFIX).as_deref(),
-            database.snapshot(),
-        ).map_err(|error| storage_error(ErrorSubject::Logs, ErrorVerb::Read, error.to_string()))?;
+        let rows = database
+            .scan(
+                LOG_PREFIX,
+                prefix_end(LOG_PREFIX).as_deref(),
+                database.snapshot(),
+            )
+            .map_err(|error| {
+                storage_error(ErrorSubject::Logs, ErrorVerb::Read, error.to_string())
+            })?;
         let mut entries = Vec::new();
         for (key, value) in rows {
             let index = decode_log_key(&key)?;
@@ -949,6 +967,27 @@ impl RaftStateMachine<VyrmRaftTypeConfig> for VyrmRaftStateMachine {
                 "snapshot id does not bind the exact VyrmKV bundle",
             ));
         }
+        let mut verified_digests = BTreeSet::new();
+        for object in native_snapshot_all_object_references(&bundle)
+            .map_err(|error| storage_error(subject.clone(), ErrorVerb::Read, error.to_string()))?
+        {
+            if !verified_digests.insert(object.sha256.clone()) {
+                continue;
+            }
+            let verified = self
+                .application_objects
+                .verify(&object.sha256)
+                .map_err(|error| {
+                    storage_error(subject.clone(), ErrorVerb::Read, error.to_string())
+                })?;
+            if verified.length != object.length {
+                return Err(storage_error(
+                    subject.clone(),
+                    ErrorVerb::Read,
+                    "snapshot artifact length differs from its canonical reference",
+                ));
+            }
+        }
         let at = meta.last_log_id.map_or(0, |log_id| log_id.index);
         lock_database(
             &self.state_database,
@@ -1006,6 +1045,231 @@ impl RaftStateMachine<VyrmRaftTypeConfig> for VyrmRaftStateMachine {
 }
 
 impl VyrmRaftStateMachine {
+    pub fn application_objects(&self) -> LocalObjectStore {
+        self.application_objects.clone()
+    }
+
+    /// Returns one internally consistent canonical read/schema pair for a
+    /// coordinator that will submit the resulting runtime transaction through
+    /// Raft rather than writing the state database directly.
+    pub fn runtime_commit_context(
+        &self,
+        scope: &ScopeId,
+    ) -> ClusterResult<(ReadStamp, Option<RuntimeSchemaRegistry>)> {
+        let database = lock_database(
+            &self.state_database,
+            ErrorSubject::StateMachine,
+            ErrorVerb::Read,
+        )
+        .map_err(|error| ClusterError::Unavailable(error.to_string()))?;
+        native_runtime_commit_context(&database, scope)
+            .map_err(|error| ClusterError::Unavailable(error.to_string()))
+    }
+
+    /// Returns the metadata of the exact authenticated snapshot persisted by
+    /// this node. OpenRaft's `metrics.snapshot` describes locally built
+    /// snapshots and is not evidence that a learner activated a received one.
+    pub fn persisted_snapshot_meta(
+        &self,
+    ) -> ClusterResult<Option<SnapshotMeta<u64, VyrmRaftNode>>> {
+        let stored: Option<StoredSnapshot> = read_json(
+            &self.local_database,
+            KEY_SNAPSHOT,
+            ErrorSubject::Snapshot(None),
+        )
+        .map_err(|error| ClusterError::Unavailable(error.to_string()))?;
+        let Some(snapshot) = stored else {
+            return Ok(None);
+        };
+        let subject = ErrorSubject::Snapshot(Some(snapshot.meta.signature()));
+        let path = self
+            .snapshot_objects
+            .verified_path(&snapshot.object)
+            .map_err(|error| ClusterError::Unavailable(error.to_string()))?;
+        let bundle = SnapshotBundleFile::open(path)
+            .map_err(|error| ClusterError::Unavailable(error.to_string()))?;
+        let state = state_from_snapshot_file(&bundle, self.shard, subject)
+            .map_err(|error| ClusterError::Unavailable(error.to_string()))?;
+        if state.last_applied != snapshot.meta.last_log_id
+            || state.last_membership != snapshot.meta.last_membership
+            || snapshot.meta.snapshot_id != expected_snapshot_file_id(&state, &bundle)
+        {
+            return Err(ClusterError::Unavailable(
+                "persisted snapshot metadata does not match its authenticated bundle".into(),
+            ));
+        }
+        Ok(Some(snapshot.meta))
+    }
+
+    /// Binds the exact cached physical snapshot to the project-scoped object
+    /// closure that must be hydrated before a target may activate it.
+    pub fn artifact_manifest_for_cached_snapshot(
+        &self,
+        meta: &SnapshotMeta<u64, VyrmRaftNode>,
+        scope: &vyrm_core::ScopeId,
+        source: NodeId,
+        target: NodeId,
+    ) -> std::result::Result<Option<ArtifactTransferManifest>, StorageError<u64>> {
+        let subject = ErrorSubject::Snapshot(Some(meta.signature()));
+        let stored: Option<StoredSnapshot> =
+            read_json(&self.local_database, KEY_SNAPSHOT, subject.clone())?;
+        let stored = stored.ok_or_else(|| {
+            storage_error(
+                subject.clone(),
+                ErrorVerb::Read,
+                "artifact transfer requires the exact cached snapshot",
+            )
+        })?;
+        if &stored.meta != meta {
+            return Err(storage_error(
+                subject.clone(),
+                ErrorVerb::Read,
+                "cached snapshot metadata differs from the artifact transfer snapshot",
+            ));
+        }
+        let path = self
+            .snapshot_objects
+            .verified_path(&stored.object)
+            .map_err(|error| storage_error(subject.clone(), ErrorVerb::Read, error.to_string()))?;
+        let bundle = SnapshotBundleFile::open(path)
+            .map_err(|error| storage_error(subject.clone(), ErrorVerb::Read, error.to_string()))?;
+        let state = state_from_snapshot_file(&bundle, self.shard, subject.clone())?;
+        if state.last_applied != meta.last_log_id
+            || state.last_membership != meta.last_membership
+            || meta.snapshot_id != expected_snapshot_file_id(&state, &bundle)
+        {
+            return Err(storage_error(
+                subject,
+                ErrorVerb::Read,
+                "cached snapshot state differs from its transfer metadata",
+            ));
+        }
+        let (read, objects) = native_snapshot_artifact_view(&bundle, scope).map_err(|error| {
+            storage_error(
+                ErrorSubject::Snapshot(Some(meta.signature())),
+                ErrorVerb::Read,
+                error.to_string(),
+            )
+        })?;
+        if objects.is_empty() {
+            return Ok(None);
+        }
+        let placement_epoch = state.placement_epoch.ok_or_else(|| {
+            storage_error(
+                ErrorSubject::Snapshot(Some(meta.signature())),
+                ErrorVerb::Read,
+                "artifact-bearing snapshot has no applied placement epoch",
+            )
+        })?;
+        let commit_index = meta.last_log_id.map_or(0, |log_id| log_id.index);
+        let term = meta.last_log_id.map_or(0, |log_id| log_id.leader_id.term);
+        let artifact_digests = objects.iter().map(|object| object.sha256.clone()).collect();
+        ArtifactTransferManifest::new(
+            ReplicaTransferPlan {
+                contract_version: CLUSTER_CONTRACT_VERSION,
+                shard: self.shard,
+                placement_epoch,
+                source,
+                target,
+                grounded_snapshot: ShardReadStamp {
+                    term,
+                    commit_index,
+                    placement_epoch,
+                    state_digest: state.state_digest,
+                },
+                wal_from_exclusive: commit_index,
+                wal_through_inclusive: commit_index,
+                artifact_digests,
+            },
+            scope.clone(),
+            read,
+            objects,
+        )
+        .map(Some)
+        .map_err(|error| {
+            storage_error(
+                ErrorSubject::Snapshot(Some(meta.signature())),
+                ErrorVerb::Read,
+                error.to_string(),
+            )
+        })
+    }
+
+    /// Hydrates the immutable object closure before activating its canonical
+    /// snapshot. A failed snapshot install may leave content-addressed orphans,
+    /// but the supported path never exposes canonical references first and
+    /// hopes their bytes arrive later.
+    pub async fn install_snapshot_with_artifacts<S, T>(
+        &mut self,
+        meta: &SnapshotMeta<u64, VyrmRaftNode>,
+        snapshot: Box<VyrmSnapshotData>,
+        source: &S,
+        target: &T,
+        manifest: &ArtifactTransferManifest,
+        completed_at: u64,
+    ) -> std::result::Result<ArtifactTransferReceipt, StorageError<u64>>
+    where
+        S: vyrm_store::ImmutableObjectStore,
+        T: vyrm_store::ImmutableObjectStore,
+    {
+        let subject = ErrorSubject::Snapshot(Some(meta.signature()));
+        snapshot
+            .sync_all()
+            .await
+            .map_err(|error| storage_error(subject.clone(), ErrorVerb::Write, error.to_string()))?;
+        let bundle = SnapshotBundleFile::open(snapshot.path())
+            .map_err(|error| storage_error(subject.clone(), ErrorVerb::Read, error.to_string()))?;
+        let state = state_from_snapshot_file(&bundle, self.shard, subject.clone())?;
+        let snapshot_index = meta.last_log_id.map_or(0, |log_id| log_id.index);
+        manifest
+            .validate()
+            .map_err(|error| storage_error(subject.clone(), ErrorVerb::Write, error.to_string()))?;
+        let snapshot_objects = native_snapshot_object_references(&bundle, &manifest.scope)
+            .map_err(|error| storage_error(subject.clone(), ErrorVerb::Read, error.to_string()))?;
+        if state.last_applied != meta.last_log_id
+            || state.last_membership != meta.last_membership
+            || meta.snapshot_id != expected_snapshot_file_id(&state, &bundle)
+            || manifest.plan.shard != self.shard
+            || manifest.plan.grounded_snapshot.commit_index != snapshot_index
+            || manifest.plan.grounded_snapshot.state_digest != state.state_digest
+            || manifest.plan.wal_from_exclusive != snapshot_index
+            || manifest.objects != snapshot_objects
+        {
+            return Err(storage_error(
+                subject,
+                ErrorVerb::Write,
+                "artifact manifest does not bind the exact canonical snapshot state",
+            ));
+        }
+        let receipt =
+            transfer_artifacts(source, target, manifest, completed_at).map_err(|error| {
+                storage_error(
+                    ErrorSubject::Snapshot(Some(meta.signature())),
+                    ErrorVerb::Write,
+                    error.to_string(),
+                )
+            })?;
+        for object in &manifest.objects {
+            let verified = target.verify(&object.sha256).map_err(|error| {
+                storage_error(
+                    ErrorSubject::Snapshot(Some(meta.signature())),
+                    ErrorVerb::Read,
+                    error.to_string(),
+                )
+            })?;
+            if verified.length != object.length {
+                return Err(storage_error(
+                    ErrorSubject::Snapshot(Some(meta.signature())),
+                    ErrorVerb::Read,
+                    "installed artifact object length differs from its manifest",
+                ));
+            }
+        }
+        <Self as RaftStateMachine<VyrmRaftTypeConfig>>::install_snapshot(self, meta, snapshot)
+            .await?;
+        Ok(receipt)
+    }
+
     fn read_state(&self) -> std::result::Result<StateMachineData, StorageError<u64>> {
         let database = lock_database(
             &self.state_database,
@@ -1112,7 +1376,13 @@ fn read_state_from_database(
 ) -> std::result::Result<StateMachineData, StorageError<u64>> {
     database
         .get(KEY_STATE, database.snapshot())
-        .map_err(|error| storage_error(ErrorSubject::StateMachine, ErrorVerb::Read, error.to_string()))?
+        .map_err(|error| {
+            storage_error(
+                ErrorSubject::StateMachine,
+                ErrorVerb::Read,
+                error.to_string(),
+            )
+        })?
         .map(|bytes| decode_json(&bytes, ErrorSubject::StateMachine, ErrorVerb::Read))
         .transpose()?
         .ok_or_else(|| {
@@ -1466,11 +1736,13 @@ fn log_delete_operations<R: RangeBounds<u64> + Clone + Debug + Send>(
     range: R,
 ) -> std::result::Result<Vec<Mutation>, StorageError<u64>> {
     let database = lock_database(database, ErrorSubject::Logs, ErrorVerb::Read)?;
-    let rows = database.scan(
-        LOG_PREFIX,
-        prefix_end(LOG_PREFIX).as_deref(),
-        database.snapshot(),
-    ).map_err(|error| storage_error(ErrorSubject::Logs, ErrorVerb::Read, error.to_string()))?;
+    let rows = database
+        .scan(
+            LOG_PREFIX,
+            prefix_end(LOG_PREFIX).as_deref(),
+            database.snapshot(),
+        )
+        .map_err(|error| storage_error(ErrorSubject::Logs, ErrorVerb::Read, error.to_string()))?;
     rows.into_iter()
         .filter_map(|(key, _)| match decode_log_key(&key) {
             Ok(index) if range_contains(&range, index) => Some(Ok(Mutation::Delete { key })),

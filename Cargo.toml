@@ -6,6 +6,7 @@ members = [
     "crates/vyrm-store",
     "crates/vyrm-mx",
     "crates/vyrm-vector",
+    "crates/vyrm-operator",
     "crates/vyrm-embed",
     "crates/vyrm-edge",
     "crates/vyrm-cluster",

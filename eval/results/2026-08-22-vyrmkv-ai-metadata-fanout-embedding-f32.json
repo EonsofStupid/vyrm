@@ -1,0 +1,1319 @@
+{
+  "format_version": 3,
+  "measured_at_unix_ms": 1787415824850,
+  "architecture": "x86_64",
+  "operating_system": "linux",
+  "workload": "metadata_fanout",
+  "aggregation": "median of per-trial metrics; latency percentiles are medians of each isolated trial's percentile",
+  "throughput_unit": "resolved key items per second",
+  "latency_unit": "nanoseconds per point request or complete fan-out request",
+  "footprint_contract": "active is measured while the read snapshot is open; reopened follows a clean close/open with no explicit maintenance; maintained follows backend-native flush, major compaction, unreachable-file collection where available, and a second clean reopen; promotion does not compare backend-native maintained states",
+  "config": {
+    "workload": "metadata_fanout",
+    "payload_profile": "embedding_f32",
+    "trials": 5,
+    "cold_keys": 8192,
+    "hot_keys": 128,
+    "reads": 8192,
+    "batch_size": 128,
+    "value_bytes": 128,
+    "fanout_width": 32
+  },
+  "fjall_version": "3.1.8",
+  "fjall_trials": [
+    {
+      "backend": "fjall",
+      "correctness_verified": true,
+      "reads_per_second": 689971.0923526507,
+      "items_per_sample": 32,
+      "latency": {
+        "samples": 8192,
+        "p50_ns": 35840,
+        "p95_ns": 44355,
+        "p99_ns": 52816,
+        "maximum_ns": 167348
+      },
+      "footprint": {
+        "logical_live_payload_bytes": 1277952,
+        "logical_written_payload_bytes": 1297920,
+        "active": {
+          "apparent_bytes": 68300360,
+          "allocated_bytes": 2703360,
+          "allocated_bytes_source": "unix_st_blocks_times_512",
+          "files": 13,
+          "by_class": {
+            "journal": {
+              "apparent_bytes": 67108864,
+              "allocated_bytes": 1474560,
+              "files": 1
+            },
+            "manifest": {
+              "apparent_bytes": 54,
+              "allocated_bytes": 12288,
+              "files": 3
+            },
+            "metadata": {
+              "apparent_bytes": 1990,
+              "allocated_bytes": 24576,
+              "files": 7
+            },
+            "table": {
+              "apparent_bytes": 1189452,
+              "allocated_bytes": 1191936,
+              "files": 2
+            }
+          }
+        },
+        "reopened": {
+          "apparent_bytes": 2664524,
+          "allocated_bytes": 2686976,
+          "allocated_bytes_source": "unix_st_blocks_times_512",
+          "files": 9,
+          "by_class": {
+            "journal": {
+              "apparent_bytes": 1474330,
+              "allocated_bytes": 1474560,
+              "files": 1
+            },
+            "manifest": {
+              "apparent_bytes": 54,
+              "allocated_bytes": 12288,
+              "files": 3
+            },
+            "metadata": {
+              "apparent_bytes": 688,
+              "allocated_bytes": 8192,
+              "files": 3
+            },
+            "table": {
+              "apparent_bytes": 1189452,
+              "allocated_bytes": 1191936,
+              "files": 2
+            }
+          }
+        },
+        "maintained": {
+          "apparent_bytes": 2639523,
+          "allocated_bytes": 2662400,
+          "allocated_bytes_source": "unix_st_blocks_times_512",
+          "files": 9,
+          "by_class": {
+            "journal": {
+              "apparent_bytes": 1474330,
+              "allocated_bytes": 1474560,
+              "files": 1
+            },
+            "manifest": {
+              "apparent_bytes": 54,
+              "allocated_bytes": 12288,
+              "files": 3
+            },
+            "metadata": {
+              "apparent_bytes": 688,
+              "allocated_bytes": 8192,
+              "files": 3
+            },
+            "table": {
+              "apparent_bytes": 1164451,
+              "allocated_bytes": 1167360,
+              "files": 2
+            }
+          }
+        },
+        "maintained_actions": [
+          "flush_active_memtable",
+          "major_compact",
+          "persist_and_clean_reopen"
+        ]
+      }
+    },
+    {
+      "backend": "fjall",
+      "correctness_verified": true,
+      "reads_per_second": 684007.1782345108,
+      "items_per_sample": 32,
+      "latency": {
+        "samples": 8192,
+        "p50_ns": 36020,
+        "p95_ns": 45330,
+        "p99_ns": 53419,
+        "maximum_ns": 89113
+      },
+      "footprint": {
+        "logical_live_payload_bytes": 1277952,
+        "logical_written_payload_bytes": 1297920,
+        "active": {
+          "apparent_bytes": 68300360,
+          "allocated_bytes": 2703360,
+          "allocated_bytes_source": "unix_st_blocks_times_512",
+          "files": 13,
+          "by_class": {
+            "journal": {
+              "apparent_bytes": 67108864,
+              "allocated_bytes": 1474560,
+              "files": 1
+            },
+            "manifest": {
+              "apparent_bytes": 54,
+              "allocated_bytes": 12288,
+              "files": 3
+            },
+            "metadata": {
+              "apparent_bytes": 1990,
+              "allocated_bytes": 24576,
+              "files": 7
+            },
+            "table": {
+              "apparent_bytes": 1189452,
+              "allocated_bytes": 1191936,
+              "files": 2
+            }
+          }
+        },
+        "reopened": {
+          "apparent_bytes": 2664524,
+          "allocated_bytes": 2686976,
+          "allocated_bytes_source": "unix_st_blocks_times_512",
+          "files": 9,
+          "by_class": {
+            "journal": {
+              "apparent_bytes": 1474330,
+              "allocated_bytes": 1474560,
+              "files": 1
+            },
+            "manifest": {
+              "apparent_bytes": 54,
+              "allocated_bytes": 12288,
+              "files": 3
+            },
+            "metadata": {
+              "apparent_bytes": 688,
+              "allocated_bytes": 8192,
+              "files": 3
+            },
+            "table": {
+              "apparent_bytes": 1189452,
+              "allocated_bytes": 1191936,
+              "files": 2
+            }
+          }
+        },
+        "maintained": {
+          "apparent_bytes": 2639523,
+          "allocated_bytes": 2662400,
+          "allocated_bytes_source": "unix_st_blocks_times_512",
+          "files": 9,
+          "by_class": {
+            "journal": {
+              "apparent_bytes": 1474330,
+              "allocated_bytes": 1474560,
+              "files": 1
+            },
+            "manifest": {
+              "apparent_bytes": 54,
+              "allocated_bytes": 12288,
+              "files": 3
+            },
+            "metadata": {
+              "apparent_bytes": 688,
+              "allocated_bytes": 8192,
+              "files": 3
+            },
+            "table": {
+              "apparent_bytes": 1164451,
+              "allocated_bytes": 1167360,
+              "files": 2
+            }
+          }
+        },
+        "maintained_actions": [
+          "flush_active_memtable",
+          "major_compact",
+          "persist_and_clean_reopen"
+        ]
+      }
+    },
+    {
+      "backend": "fjall",
+      "correctness_verified": true,
+      "reads_per_second": 679304.8400837827,
+      "items_per_sample": 32,
+      "latency": {
+        "samples": 8192,
+        "p50_ns": 36135,
+        "p95_ns": 46995,
+        "p99_ns": 54902,
+        "maximum_ns": 86684
+      },
+      "footprint": {
+        "logical_live_payload_bytes": 1277952,
+        "logical_written_payload_bytes": 1297920,
+        "active": {
+          "apparent_bytes": 68300360,
+          "allocated_bytes": 2703360,
+          "allocated_bytes_source": "unix_st_blocks_times_512",
+          "files": 13,
+          "by_class": {
+            "journal": {
+              "apparent_bytes": 67108864,
+              "allocated_bytes": 1474560,
+              "files": 1
+            },
+            "manifest": {
+              "apparent_bytes": 54,
+              "allocated_bytes": 12288,
+              "files": 3
+            },
+            "metadata": {
+              "apparent_bytes": 1990,
+              "allocated_bytes": 24576,
+              "files": 7
+            },
+            "table": {
+              "apparent_bytes": 1189452,
+              "allocated_bytes": 1191936,
+              "files": 2
+            }
+          }
+        },
+        "reopened": {
+          "apparent_bytes": 2664524,
+          "allocated_bytes": 2686976,
+          "allocated_bytes_source": "unix_st_blocks_times_512",
+          "files": 9,
+          "by_class": {
+            "journal": {
+              "apparent_bytes": 1474330,
+              "allocated_bytes": 1474560,
+              "files": 1
+            },
+            "manifest": {
+              "apparent_bytes": 54,
+              "allocated_bytes": 12288,
+              "files": 3
+            },
+            "metadata": {
+              "apparent_bytes": 688,
+              "allocated_bytes": 8192,
+              "files": 3
+            },
+            "table": {
+              "apparent_bytes": 1189452,
+              "allocated_bytes": 1191936,
+              "files": 2
+            }
+          }
+        },
+        "maintained": {
+          "apparent_bytes": 2639523,
+          "allocated_bytes": 2662400,
+          "allocated_bytes_source": "unix_st_blocks_times_512",
+          "files": 9,
+          "by_class": {
+            "journal": {
+              "apparent_bytes": 1474330,
+              "allocated_bytes": 1474560,
+              "files": 1
+            },
+            "manifest": {
+              "apparent_bytes": 54,
+              "allocated_bytes": 12288,
+              "files": 3
+            },
+            "metadata": {
+              "apparent_bytes": 688,
+              "allocated_bytes": 8192,
+              "files": 3
+            },
+            "table": {
+              "apparent_bytes": 1164451,
+              "allocated_bytes": 1167360,
+              "files": 2
+            }
+          }
+        },
+        "maintained_actions": [
+          "flush_active_memtable",
+          "major_compact",
+          "persist_and_clean_reopen"
+        ]
+      }
+    },
+    {
+      "backend": "fjall",
+      "correctness_verified": true,
+      "reads_per_second": 698795.1554791097,
+      "items_per_sample": 32,
+      "latency": {
+        "samples": 8192,
+        "p50_ns": 35511,
+        "p95_ns": 42912,
+        "p99_ns": 47518,
+        "maximum_ns": 117877
+      },
+      "footprint": {
+        "logical_live_payload_bytes": 1277952,
+        "logical_written_payload_bytes": 1297920,
+        "active": {
+          "apparent_bytes": 68300360,
+          "allocated_bytes": 2703360,
+          "allocated_bytes_source": "unix_st_blocks_times_512",
+          "files": 13,
+          "by_class": {
+            "journal": {
+              "apparent_bytes": 67108864,
+              "allocated_bytes": 1474560,
+              "files": 1
+            },
+            "manifest": {
+              "apparent_bytes": 54,
+              "allocated_bytes": 12288,
+              "files": 3
+            },
+            "metadata": {
+              "apparent_bytes": 1990,
+              "allocated_bytes": 24576,
+              "files": 7
+            },
+            "table": {
+              "apparent_bytes": 1189452,
+              "allocated_bytes": 1191936,
+              "files": 2
+            }
+          }
+        },
+        "reopened": {
+          "apparent_bytes": 2664524,
+          "allocated_bytes": 2686976,
+          "allocated_bytes_source": "unix_st_blocks_times_512",
+          "files": 9,
+          "by_class": {
+            "journal": {
+              "apparent_bytes": 1474330,
+              "allocated_bytes": 1474560,
+              "files": 1
+            },
+            "manifest": {
+              "apparent_bytes": 54,
+              "allocated_bytes": 12288,
+              "files": 3
+            },
+            "metadata": {
+              "apparent_bytes": 688,
+              "allocated_bytes": 8192,
+              "files": 3
+            },
+            "table": {
+              "apparent_bytes": 1189452,
+              "allocated_bytes": 1191936,
+              "files": 2
+            }
+          }
+        },
+        "maintained": {
+          "apparent_bytes": 2639523,
+          "allocated_bytes": 2662400,
+          "allocated_bytes_source": "unix_st_blocks_times_512",
+          "files": 9,
+          "by_class": {
+            "journal": {
+              "apparent_bytes": 1474330,
+              "allocated_bytes": 1474560,
+              "files": 1
+            },
+            "manifest": {
+              "apparent_bytes": 54,
+              "allocated_bytes": 12288,
+              "files": 3
+            },
+            "metadata": {
+              "apparent_bytes": 688,
+              "allocated_bytes": 8192,
+              "files": 3
+            },
+            "table": {
+              "apparent_bytes": 1164451,
+              "allocated_bytes": 1167360,
+              "files": 2
+            }
+          }
+        },
+        "maintained_actions": [
+          "flush_active_memtable",
+          "major_compact",
+          "persist_and_clean_reopen"
+        ]
+      }
+    },
+    {
+      "backend": "fjall",
+      "correctness_verified": true,
+      "reads_per_second": 694608.7621790934,
+      "items_per_sample": 32,
+      "latency": {
+        "samples": 8192,
+        "p50_ns": 35688,
+        "p95_ns": 44309,
+        "p99_ns": 48910,
+        "maximum_ns": 85338
+      },
+      "footprint": {
+        "logical_live_payload_bytes": 1277952,
+        "logical_written_payload_bytes": 1297920,
+        "active": {
+          "apparent_bytes": 68300360,
+          "allocated_bytes": 2703360,
+          "allocated_bytes_source": "unix_st_blocks_times_512",
+          "files": 13,
+          "by_class": {
+            "journal": {
+              "apparent_bytes": 67108864,
+              "allocated_bytes": 1474560,
+              "files": 1
+            },
+            "manifest": {
+              "apparent_bytes": 54,
+              "allocated_bytes": 12288,
+              "files": 3
+            },
+            "metadata": {
+              "apparent_bytes": 1990,
+              "allocated_bytes": 24576,
+              "files": 7
+            },
+            "table": {
+              "apparent_bytes": 1189452,
+              "allocated_bytes": 1191936,
+              "files": 2
+            }
+          }
+        },
+        "reopened": {
+          "apparent_bytes": 2664524,
+          "allocated_bytes": 2686976,
+          "allocated_bytes_source": "unix_st_blocks_times_512",
+          "files": 9,
+          "by_class": {
+            "journal": {
+              "apparent_bytes": 1474330,
+              "allocated_bytes": 1474560,
+              "files": 1
+            },
+            "manifest": {
+              "apparent_bytes": 54,
+              "allocated_bytes": 12288,
+              "files": 3
+            },
+            "metadata": {
+              "apparent_bytes": 688,
+              "allocated_bytes": 8192,
+              "files": 3
+            },
+            "table": {
+              "apparent_bytes": 1189452,
+              "allocated_bytes": 1191936,
+              "files": 2
+            }
+          }
+        },
+        "maintained": {
+          "apparent_bytes": 2639523,
+          "allocated_bytes": 2662400,
+          "allocated_bytes_source": "unix_st_blocks_times_512",
+          "files": 9,
+          "by_class": {
+            "journal": {
+              "apparent_bytes": 1474330,
+              "allocated_bytes": 1474560,
+              "files": 1
+            },
+            "manifest": {
+              "apparent_bytes": 54,
+              "allocated_bytes": 12288,
+              "files": 3
+            },
+            "metadata": {
+              "apparent_bytes": 688,
+              "allocated_bytes": 8192,
+              "files": 3
+            },
+            "table": {
+              "apparent_bytes": 1164451,
+              "allocated_bytes": 1167360,
+              "files": 2
+            }
+          }
+        },
+        "maintained_actions": [
+          "flush_active_memtable",
+          "major_compact",
+          "persist_and_clean_reopen"
+        ]
+      }
+    }
+  ],
+  "native_trials": [
+    {
+      "backend": "native",
+      "correctness_verified": true,
+      "reads_per_second": 1208520.447184099,
+      "items_per_sample": 32,
+      "latency": {
+        "samples": 8192,
+        "p50_ns": 16881,
+        "p95_ns": 22787,
+        "p99_ns": 34222,
+        "maximum_ns": 155557
+      },
+      "footprint": {
+        "logical_live_payload_bytes": 1277952,
+        "logical_written_payload_bytes": 1297920,
+        "active": {
+          "apparent_bytes": 2602612,
+          "allocated_bytes": 2625536,
+          "allocated_bytes_source": "unix_st_blocks_times_512",
+          "files": 7,
+          "by_class": {
+            "manifest": {
+              "apparent_bytes": 1113,
+              "allocated_bytes": 12288,
+              "files": 3
+            },
+            "metadata": {
+              "apparent_bytes": 0,
+              "allocated_bytes": 0,
+              "files": 1
+            },
+            "segment": {
+              "apparent_bytes": 1200587,
+              "allocated_bytes": 1204224,
+              "files": 1
+            },
+            "wal": {
+              "apparent_bytes": 1400912,
+              "allocated_bytes": 1409024,
+              "files": 2
+            }
+          }
+        },
+        "reopened": {
+          "apparent_bytes": 2602612,
+          "allocated_bytes": 2625536,
+          "allocated_bytes_source": "unix_st_blocks_times_512",
+          "files": 7,
+          "by_class": {
+            "manifest": {
+              "apparent_bytes": 1113,
+              "allocated_bytes": 12288,
+              "files": 3
+            },
+            "metadata": {
+              "apparent_bytes": 0,
+              "allocated_bytes": 0,
+              "files": 1
+            },
+            "segment": {
+              "apparent_bytes": 1200587,
+              "allocated_bytes": 1204224,
+              "files": 1
+            },
+            "wal": {
+              "apparent_bytes": 1400912,
+              "allocated_bytes": 1409024,
+              "files": 2
+            }
+          }
+        },
+        "maintained": {
+          "apparent_bytes": 1201539,
+          "allocated_bytes": 1216512,
+          "allocated_bytes_source": "unix_st_blocks_times_512",
+          "files": 5,
+          "by_class": {
+            "manifest": {
+              "apparent_bytes": 917,
+              "allocated_bytes": 8192,
+              "files": 2
+            },
+            "metadata": {
+              "apparent_bytes": 0,
+              "allocated_bytes": 0,
+              "files": 1
+            },
+            "segment": {
+              "apparent_bytes": 1200606,
+              "allocated_bytes": 1204224,
+              "files": 1
+            },
+            "wal": {
+              "apparent_bytes": 16,
+              "allocated_bytes": 4096,
+              "files": 1
+            }
+          }
+        },
+        "maintained_actions": [
+          "flush_active_memtable",
+          "compact_unpinned_history",
+          "collect_unreachable_files",
+          "clean_reopen"
+        ]
+      }
+    },
+    {
+      "backend": "native",
+      "correctness_verified": true,
+      "reads_per_second": 1233826.0947008403,
+      "items_per_sample": 32,
+      "latency": {
+        "samples": 8192,
+        "p50_ns": 16407,
+        "p95_ns": 22165,
+        "p99_ns": 32703,
+        "maximum_ns": 142902
+      },
+      "footprint": {
+        "logical_live_payload_bytes": 1277952,
+        "logical_written_payload_bytes": 1297920,
+        "active": {
+          "apparent_bytes": 2602612,
+          "allocated_bytes": 2625536,
+          "allocated_bytes_source": "unix_st_blocks_times_512",
+          "files": 7,
+          "by_class": {
+            "manifest": {
+              "apparent_bytes": 1113,
+              "allocated_bytes": 12288,
+              "files": 3
+            },
+            "metadata": {
+              "apparent_bytes": 0,
+              "allocated_bytes": 0,
+              "files": 1
+            },
+            "segment": {
+              "apparent_bytes": 1200587,
+              "allocated_bytes": 1204224,
+              "files": 1
+            },
+            "wal": {
+              "apparent_bytes": 1400912,
+              "allocated_bytes": 1409024,
+              "files": 2
+            }
+          }
+        },
+        "reopened": {
+          "apparent_bytes": 2602612,
+          "allocated_bytes": 2625536,
+          "allocated_bytes_source": "unix_st_blocks_times_512",
+          "files": 7,
+          "by_class": {
+            "manifest": {
+              "apparent_bytes": 1113,
+              "allocated_bytes": 12288,
+              "files": 3
+            },
+            "metadata": {
+              "apparent_bytes": 0,
+              "allocated_bytes": 0,
+              "files": 1
+            },
+            "segment": {
+              "apparent_bytes": 1200587,
+              "allocated_bytes": 1204224,
+              "files": 1
+            },
+            "wal": {
+              "apparent_bytes": 1400912,
+              "allocated_bytes": 1409024,
+              "files": 2
+            }
+          }
+        },
+        "maintained": {
+          "apparent_bytes": 1201539,
+          "allocated_bytes": 1216512,
+          "allocated_bytes_source": "unix_st_blocks_times_512",
+          "files": 5,
+          "by_class": {
+            "manifest": {
+              "apparent_bytes": 917,
+              "allocated_bytes": 8192,
+              "files": 2
+            },
+            "metadata": {
+              "apparent_bytes": 0,
+              "allocated_bytes": 0,
+              "files": 1
+            },
+            "segment": {
+              "apparent_bytes": 1200606,
+              "allocated_bytes": 1204224,
+              "files": 1
+            },
+            "wal": {
+              "apparent_bytes": 16,
+              "allocated_bytes": 4096,
+              "files": 1
+            }
+          }
+        },
+        "maintained_actions": [
+          "flush_active_memtable",
+          "compact_unpinned_history",
+          "collect_unreachable_files",
+          "clean_reopen"
+        ]
+      }
+    },
+    {
+      "backend": "native",
+      "correctness_verified": true,
+      "reads_per_second": 1206674.3308543093,
+      "items_per_sample": 32,
+      "latency": {
+        "samples": 8192,
+        "p50_ns": 16765,
+        "p95_ns": 23584,
+        "p99_ns": 33169,
+        "maximum_ns": 161785
+      },
+      "footprint": {
+        "logical_live_payload_bytes": 1277952,
+        "logical_written_payload_bytes": 1297920,
+        "active": {
+          "apparent_bytes": 2602612,
+          "allocated_bytes": 2625536,
+          "allocated_bytes_source": "unix_st_blocks_times_512",
+          "files": 7,
+          "by_class": {
+            "manifest": {
+              "apparent_bytes": 1113,
+              "allocated_bytes": 12288,
+              "files": 3
+            },
+            "metadata": {
+              "apparent_bytes": 0,
+              "allocated_bytes": 0,
+              "files": 1
+            },
+            "segment": {
+              "apparent_bytes": 1200587,
+              "allocated_bytes": 1204224,
+              "files": 1
+            },
+            "wal": {
+              "apparent_bytes": 1400912,
+              "allocated_bytes": 1409024,
+              "files": 2
+            }
+          }
+        },
+        "reopened": {
+          "apparent_bytes": 2602612,
+          "allocated_bytes": 2625536,
+          "allocated_bytes_source": "unix_st_blocks_times_512",
+          "files": 7,
+          "by_class": {
+            "manifest": {
+              "apparent_bytes": 1113,
+              "allocated_bytes": 12288,
+              "files": 3
+            },
+            "metadata": {
+              "apparent_bytes": 0,
+              "allocated_bytes": 0,
+              "files": 1
+            },
+            "segment": {
+              "apparent_bytes": 1200587,
+              "allocated_bytes": 1204224,
+              "files": 1
+            },
+            "wal": {
+              "apparent_bytes": 1400912,
+              "allocated_bytes": 1409024,
+              "files": 2
+            }
+          }
+        },
+        "maintained": {
+          "apparent_bytes": 1201539,
+          "allocated_bytes": 1216512,
+          "allocated_bytes_source": "unix_st_blocks_times_512",
+          "files": 5,
+          "by_class": {
+            "manifest": {
+              "apparent_bytes": 917,
+              "allocated_bytes": 8192,
+              "files": 2
+            },
+            "metadata": {
+              "apparent_bytes": 0,
+              "allocated_bytes": 0,
+              "files": 1
+            },
+            "segment": {
+              "apparent_bytes": 1200606,
+              "allocated_bytes": 1204224,
+              "files": 1
+            },
+            "wal": {
+              "apparent_bytes": 16,
+              "allocated_bytes": 4096,
+              "files": 1
+            }
+          }
+        },
+        "maintained_actions": [
+          "flush_active_memtable",
+          "compact_unpinned_history",
+          "collect_unreachable_files",
+          "clean_reopen"
+        ]
+      }
+    },
+    {
+      "backend": "native",
+      "correctness_verified": true,
+      "reads_per_second": 1232804.9691995098,
+      "items_per_sample": 32,
+      "latency": {
+        "samples": 8192,
+        "p50_ns": 16412,
+        "p95_ns": 22274,
+        "p99_ns": 31722,
+        "maximum_ns": 144691
+      },
+      "footprint": {
+        "logical_live_payload_bytes": 1277952,
+        "logical_written_payload_bytes": 1297920,
+        "active": {
+          "apparent_bytes": 2602612,
+          "allocated_bytes": 2625536,
+          "allocated_bytes_source": "unix_st_blocks_times_512",
+          "files": 7,
+          "by_class": {
+            "manifest": {
+              "apparent_bytes": 1113,
+              "allocated_bytes": 12288,
+              "files": 3
+            },
+            "metadata": {
+              "apparent_bytes": 0,
+              "allocated_bytes": 0,
+              "files": 1
+            },
+            "segment": {
+              "apparent_bytes": 1200587,
+              "allocated_bytes": 1204224,
+              "files": 1
+            },
+            "wal": {
+              "apparent_bytes": 1400912,
+              "allocated_bytes": 1409024,
+              "files": 2
+            }
+          }
+        },
+        "reopened": {
+          "apparent_bytes": 2602612,
+          "allocated_bytes": 2625536,
+          "allocated_bytes_source": "unix_st_blocks_times_512",
+          "files": 7,
+          "by_class": {
+            "manifest": {
+              "apparent_bytes": 1113,
+              "allocated_bytes": 12288,
+              "files": 3
+            },
+            "metadata": {
+              "apparent_bytes": 0,
+              "allocated_bytes": 0,
+              "files": 1
+            },
+            "segment": {
+              "apparent_bytes": 1200587,
+              "allocated_bytes": 1204224,
+              "files": 1
+            },
+            "wal": {
+              "apparent_bytes": 1400912,
+              "allocated_bytes": 1409024,
+              "files": 2
+            }
+          }
+        },
+        "maintained": {
+          "apparent_bytes": 1201539,
+          "allocated_bytes": 1216512,
+          "allocated_bytes_source": "unix_st_blocks_times_512",
+          "files": 5,
+          "by_class": {
+            "manifest": {
+              "apparent_bytes": 917,
+              "allocated_bytes": 8192,
+              "files": 2
+            },
+            "metadata": {
+              "apparent_bytes": 0,
+              "allocated_bytes": 0,
+              "files": 1
+            },
+            "segment": {
+              "apparent_bytes": 1200606,
+              "allocated_bytes": 1204224,
+              "files": 1
+            },
+            "wal": {
+              "apparent_bytes": 16,
+              "allocated_bytes": 4096,
+              "files": 1
+            }
+          }
+        },
+        "maintained_actions": [
+          "flush_active_memtable",
+          "compact_unpinned_history",
+          "collect_unreachable_files",
+          "clean_reopen"
+        ]
+      }
+    },
+    {
+      "backend": "native",
+      "correctness_verified": true,
+      "reads_per_second": 1232528.3288650983,
+      "items_per_sample": 32,
+      "latency": {
+        "samples": 8192,
+        "p50_ns": 16446,
+        "p95_ns": 22368,
+        "p99_ns": 32047,
+        "maximum_ns": 137535
+      },
+      "footprint": {
+        "logical_live_payload_bytes": 1277952,
+        "logical_written_payload_bytes": 1297920,
+        "active": {
+          "apparent_bytes": 2602612,
+          "allocated_bytes": 2625536,
+          "allocated_bytes_source": "unix_st_blocks_times_512",
+          "files": 7,
+          "by_class": {
+            "manifest": {
+              "apparent_bytes": 1113,
+              "allocated_bytes": 12288,
+              "files": 3
+            },
+            "metadata": {
+              "apparent_bytes": 0,
+              "allocated_bytes": 0,
+              "files": 1
+            },
+            "segment": {
+              "apparent_bytes": 1200587,
+              "allocated_bytes": 1204224,
+              "files": 1
+            },
+            "wal": {
+              "apparent_bytes": 1400912,
+              "allocated_bytes": 1409024,
+              "files": 2
+            }
+          }
+        },
+        "reopened": {
+          "apparent_bytes": 2602612,
+          "allocated_bytes": 2625536,
+          "allocated_bytes_source": "unix_st_blocks_times_512",
+          "files": 7,
+          "by_class": {
+            "manifest": {
+              "apparent_bytes": 1113,
+              "allocated_bytes": 12288,
+              "files": 3
+            },
+            "metadata": {
+              "apparent_bytes": 0,
+              "allocated_bytes": 0,
+              "files": 1
+            },
+            "segment": {
+              "apparent_bytes": 1200587,
+              "allocated_bytes": 1204224,
+              "files": 1
+            },
+            "wal": {
+              "apparent_bytes": 1400912,
+              "allocated_bytes": 1409024,
+              "files": 2
+            }
+          }
+        },
+        "maintained": {
+          "apparent_bytes": 1201539,
+          "allocated_bytes": 1216512,
+          "allocated_bytes_source": "unix_st_blocks_times_512",
+          "files": 5,
+          "by_class": {
+            "manifest": {
+              "apparent_bytes": 917,
+              "allocated_bytes": 8192,
+              "files": 2
+            },
+            "metadata": {
+              "apparent_bytes": 0,
+              "allocated_bytes": 0,
+              "files": 1
+            },
+            "segment": {
+              "apparent_bytes": 1200606,
+              "allocated_bytes": 1204224,
+              "files": 1
+            },
+            "wal": {
+              "apparent_bytes": 16,
+              "allocated_bytes": 4096,
+              "files": 1
+            }
+          }
+        },
+        "maintained_actions": [
+          "flush_active_memtable",
+          "compact_unpinned_history",
+          "collect_unreachable_files",
+          "clean_reopen"
+        ]
+      }
+    }
+  ],
+  "fjall": {
+    "backend": "fjall",
+    "correctness_verified": true,
+    "reads_per_second": 689971.0923526507,
+    "items_per_sample": 32,
+    "latency": {
+      "samples": 40960,
+      "p50_ns": 35840,
+      "p95_ns": 44355,
+      "p99_ns": 52816,
+      "maximum_ns": 89113
+    },
+    "footprint": {
+      "logical_live_payload_bytes": 1277952,
+      "logical_written_payload_bytes": 1297920,
+      "active": {
+        "apparent_bytes": 68300360,
+        "allocated_bytes": 2703360,
+        "allocated_bytes_source": "unix_st_blocks_times_512",
+        "files": 13,
+        "by_class": {
+          "journal": {
+            "apparent_bytes": 67108864,
+            "allocated_bytes": 1474560,
+            "files": 1
+          },
+          "manifest": {
+            "apparent_bytes": 54,
+            "allocated_bytes": 12288,
+            "files": 3
+          },
+          "metadata": {
+            "apparent_bytes": 1990,
+            "allocated_bytes": 24576,
+            "files": 7
+          },
+          "table": {
+            "apparent_bytes": 1189452,
+            "allocated_bytes": 1191936,
+            "files": 2
+          }
+        }
+      },
+      "reopened": {
+        "apparent_bytes": 2664524,
+        "allocated_bytes": 2686976,
+        "allocated_bytes_source": "unix_st_blocks_times_512",
+        "files": 9,
+        "by_class": {
+          "journal": {
+            "apparent_bytes": 1474330,
+            "allocated_bytes": 1474560,
+            "files": 1
+          },
+          "manifest": {
+            "apparent_bytes": 54,
+            "allocated_bytes": 12288,
+            "files": 3
+          },
+          "metadata": {
+            "apparent_bytes": 688,
+            "allocated_bytes": 8192,
+            "files": 3
+          },
+          "table": {
+            "apparent_bytes": 1189452,
+            "allocated_bytes": 1191936,
+            "files": 2
+          }
+        }
+      },
+      "maintained": {
+        "apparent_bytes": 2639523,
+        "allocated_bytes": 2662400,
+        "allocated_bytes_source": "unix_st_blocks_times_512",
+        "files": 9,
+        "by_class": {
+          "journal": {
+            "apparent_bytes": 1474330,
+            "allocated_bytes": 1474560,
+            "files": 1
+          },
+          "manifest": {
+            "apparent_bytes": 54,
+            "allocated_bytes": 12288,
+            "files": 3
+          },
+          "metadata": {
+            "apparent_bytes": 688,
+            "allocated_bytes": 8192,
+            "files": 3
+          },
+          "table": {
+            "apparent_bytes": 1164451,
+            "allocated_bytes": 1167360,
+            "files": 2
+          }
+        }
+      },
+      "maintained_actions": [
+        "flush_active_memtable",
+        "major_compact",
+        "persist_and_clean_reopen"
+      ]
+    }
+  },
+  "native": {
+    "backend": "native",
+    "correctness_verified": true,
+    "reads_per_second": 1232528.3288650983,
+    "items_per_sample": 32,
+    "latency": {
+      "samples": 40960,
+      "p50_ns": 16446,
+      "p95_ns": 22368,
+      "p99_ns": 32703,
+      "maximum_ns": 144691
+    },
+    "footprint": {
+      "logical_live_payload_bytes": 1277952,
+      "logical_written_payload_bytes": 1297920,
+      "active": {
+        "apparent_bytes": 2602612,
+        "allocated_bytes": 2625536,
+        "allocated_bytes_source": "unix_st_blocks_times_512",
+        "files": 7,
+        "by_class": {
+          "manifest": {
+            "apparent_bytes": 1113,
+            "allocated_bytes": 12288,
+            "files": 3
+          },
+          "metadata": {
+            "apparent_bytes": 0,
+            "allocated_bytes": 0,
+            "files": 1
+          },
+          "segment": {
+            "apparent_bytes": 1200587,
+            "allocated_bytes": 1204224,
+            "files": 1
+          },
+          "wal": {
+            "apparent_bytes": 1400912,
+            "allocated_bytes": 1409024,
+            "files": 2
+          }
+        }
+      },
+      "reopened": {
+        "apparent_bytes": 2602612,
+        "allocated_bytes": 2625536,
+        "allocated_bytes_source": "unix_st_blocks_times_512",
+        "files": 7,
+        "by_class": {
+          "manifest": {
+            "apparent_bytes": 1113,
+            "allocated_bytes": 12288,
+            "files": 3
+          },
+          "metadata": {
+            "apparent_bytes": 0,
+            "allocated_bytes": 0,
+            "files": 1
+          },
+          "segment": {
+            "apparent_bytes": 1200587,
+            "allocated_bytes": 1204224,
+            "files": 1
+          },
+          "wal": {
+            "apparent_bytes": 1400912,
+            "allocated_bytes": 1409024,
+            "files": 2
+          }
+        }
+      },
+      "maintained": {
+        "apparent_bytes": 1201539,
+        "allocated_bytes": 1216512,
+        "allocated_bytes_source": "unix_st_blocks_times_512",
+        "files": 5,
+        "by_class": {
+          "manifest": {
+            "apparent_bytes": 917,
+            "allocated_bytes": 8192,
+            "files": 2
+          },
+          "metadata": {
+            "apparent_bytes": 0,
+            "allocated_bytes": 0,
+            "files": 1
+          },
+          "segment": {
+            "apparent_bytes": 1200606,
+            "allocated_bytes": 1204224,
+            "files": 1
+          },
+          "wal": {
+            "apparent_bytes": 16,
+            "allocated_bytes": 4096,
+            "files": 1
+          }
+        }
+      },
+      "maintained_actions": [
+        "flush_active_memtable",
+        "compact_unpinned_history",
+        "collect_unreachable_files",
+        "clean_reopen"
+      ]
+    }
+  },
+  "native_to_fjall_read_throughput": 1.7863477796764584,
+  "native_to_fjall_p95_latency": 0.5042948934731146,
+  "footprint_comparison": {
+    "promotion_state": "clean_reopen_without_explicit_maintenance",
+    "native_to_fjall_reopened_apparent": 0.9767643301392669,
+    "native_to_fjall_reopened_allocated": 0.9771341463414634,
+    "fjall_reopened_allocated_to_live_payload": 2.1025641025641026,
+    "native_reopened_allocated_to_live_payload": 2.0544871794871793,
+    "maintained_cross_backend_comparable": false
+  },
+  "promotion": {
+    "passes": true,
+    "failures": []
+  }
+}

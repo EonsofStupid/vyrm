@@ -5,7 +5,7 @@
 //! database's physical MVCC sequence is deliberately independent of claim and
 //! runtime cursors stored in the batch.
 
-use crate::engine::Engine;
+use crate::engine::{Engine, PhysicalStoreEvidence};
 use crate::error::{Error, Result};
 use crate::gc::{build_report, RemovalReport, Tally};
 use crate::invocation::{self, Invocation, InvocationInput, RecallOutcome};
@@ -16,13 +16,15 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard};
 use vyrm_core::{
-    key, projection_family, AuditEnvelope, Claim, ClaimSource, Millis, Predicate, ProjectionWork,
-    ReadStamp, Reader, RetentionPin, RuntimeChange, RuntimeChangePage, RuntimeCommit,
-    RuntimeCommitOutcome, RuntimeMutation, RuntimeRecord, RuntimeRef, RuntimeRelation,
-    RuntimeSchemaRegistry, ScopeId, SnapshotHandle, SnapshotId, Subject,
+    key, projection_family, AuditEnvelope, Claim, ClaimSource, Millis, ObjectReference, Predicate,
+    ProjectionWork, ReadStamp, Reader, RetentionPin, RuntimeChange, RuntimeChangePage,
+    RuntimeCommit, RuntimeCommitOutcome, RuntimeLogAccumulator, RuntimeMerkleNode, RuntimeMutation,
+    RuntimeRecord, RuntimeRef, RuntimeRelation, RuntimeSchemaRegistry, ScopeId, SnapshotHandle,
+    SnapshotId, Subject,
 };
 use vyrm_kv::{
-    CompactionOutcome, Database, GarbageCollectionReport, Manifest, Mutation, Snapshot, WriteBatch,
+    CompactionOutcome, Database, DatabaseOptions, GarbageCollectionReport, Manifest, Mutation,
+    Snapshot, SnapshotBundleFile, WriteBatch,
 };
 
 const RUNTIME_CHECKPOINT_PREFIX: &str = "runtime-";
@@ -38,6 +40,12 @@ impl NativeEngine {
     /// An existing but invalid directory fails closed rather than being
     /// silently reinitialized.
     pub fn open(path: &Path) -> Result<Self> {
+        Self::open_with_options(path, DatabaseOptions::default())
+    }
+
+    /// Opens with explicit native cache and mutable-state bounds. Persistent
+    /// format identity is unchanged; these are process-local operating limits.
+    pub fn open_with_options(path: &Path, options: DatabaseOptions) -> Result<Self> {
         if !path.exists() {
             if let Some(parent) = path.parent() {
                 std::fs::create_dir_all(parent)
@@ -51,9 +59,9 @@ impl NativeEngine {
                 .next()
                 .is_none();
         let mut database = if !path.exists() || empty {
-            Database::create(path)?
+            Database::create_with_options(path, options)?
         } else {
-            Database::open(path)?
+            Database::open_with_options(path, options)?
         };
         reconcile_runtime_checkpoints(&mut database, None, 0)?;
         let path = database.root().to_owned();
@@ -268,6 +276,55 @@ impl ClaimSource for NativeEngine {
 }
 
 impl Engine for NativeEngine {
+    fn physical_store_evidence(&self) -> Result<PhysicalStoreEvidence> {
+        let database = self.lock()?;
+        let manifest = database.manifest();
+        let cache = database.block_cache_stats();
+        let maintenance = database.maintenance_policy();
+        let compaction = database.compaction_policy();
+        let maintenance_stats = database.maintenance_stats();
+        Ok(PhysicalStoreEvidence {
+            backend: "vyrmkv_native".into(),
+            evidence_level: "native_counters".into(),
+            physical_sequence: Some(database.snapshot().sequence),
+            manifest_generation: Some(manifest.generation),
+            durable_sequence: Some(manifest.durable_sequence),
+            memtable_versions: Some(database.memtable().version_count() as u64),
+            memtable_bytes: Some(database.memtable().approximate_bytes() as u64),
+            memtable_max_versions: Some(maintenance.memtable_max_versions as u64),
+            wal_payload_bytes: Some(database.wal_payload_bytes() as u64),
+            wal_payload_max_bytes: Some(maintenance.wal_payload_max_bytes as u64),
+            automatic_flushes: Some(maintenance_stats.automatic_flushes),
+            maintenance_write_stalls: Some(maintenance_stats.write_stalls),
+            failed_maintenance_flushes: Some(maintenance_stats.failed_flushes),
+            oversized_batches: Some(maintenance_stats.oversized_batches),
+            automatic_compactions: Some(maintenance_stats.automatic_compactions),
+            failed_compactions: Some(maintenance_stats.failed_compactions),
+            compaction_input_bytes: Some(maintenance_stats.compaction_input_bytes),
+            compaction_output_bytes: Some(maintenance_stats.compaction_output_bytes),
+            peak_compaction_buffer_bytes: Some(
+                maintenance_stats.peak_compaction_buffer_bytes as u64,
+            ),
+            l0_segment_count: Some(database.l0_segment_count() as u64),
+            l0_compaction_trigger: Some(compaction.l0_compaction_trigger as u64),
+            compaction_debt_segments: Some(database.compaction_debt_segments() as u64),
+            compaction_target_segment_bytes: Some(compaction.target_segment_bytes as u64),
+            segment_count: Some(manifest.segments.len() as u64),
+            segment_bytes: Some(manifest.segments.iter().map(|segment| segment.bytes).sum()),
+            cache_capacity_bytes: Some(cache.capacity_bytes as u64),
+            cache_resident_bytes: Some(cache.resident_bytes as u64),
+            cache_entries: Some(cache.entries as u64),
+            cache_hits: Some(cache.hits),
+            cache_misses: Some(cache.misses),
+            cache_evictions: Some(cache.evictions),
+            block_loads: Some(cache.loads),
+            block_bytes_loaded: Some(cache.bytes_loaded),
+            block_bytes_decoded: Some(cache.bytes_decoded),
+            filter_checks: Some(cache.filter_checks),
+            filter_negatives: Some(cache.filter_negatives),
+        })
+    }
+
     #[tracing::instrument(level = "debug", skip_all, fields(claims = claims.len()))]
     fn append_batch(&self, claims: &[Claim]) -> Result<AppendOutcome> {
         for claim in claims {
@@ -582,15 +639,28 @@ impl Engine for NativeEngine {
     ) -> Result<RuntimeChangePage> {
         let database = self.lock()?;
         let snapshot = database.snapshot();
-        validate_native_read_stamp(&database, snapshot, read)?;
-        native_change_page(
+        let validation = validate_native_read_stamp(&database, snapshot, read)?;
+        if limit == 1 && after < read.commit_cursor && read.accumulator_root.is_some() {
+            let mut page = native_authenticated_point_page(&database, snapshot, read, after + 1)?;
+            if validation.method == "full_hash_chain_replay" {
+                page.validation.method = "full_hash_chain_replay_then_rfc9162_inclusion".into();
+                page.validation.change_reads = page
+                    .validation
+                    .change_reads
+                    .saturating_add(validation.change_reads);
+            }
+            return Ok(page);
+        }
+        let mut page = native_change_page(
             &database,
             snapshot,
             read.commit_cursor,
             after,
             limit,
             Some(&read.scope),
-        )
+        )?;
+        page.validation = validation;
+        Ok(page)
     }
 
     fn commit_runtime(&self, commit: &RuntimeCommit) -> Result<RuntimeCommitOutcome> {
@@ -692,6 +762,34 @@ pub struct NativeRuntimeCommitPlan {
     operations: Vec<Mutation>,
 }
 
+/// Reads the exact native cursor/schema pair needed to prepare a runtime
+/// transaction outside `NativeEngine` while retaining one database snapshot.
+/// Coordinators use this before submitting the resulting commit through their
+/// own durability boundary (for example, a Raft log).
+pub fn native_runtime_commit_context(
+    database: &Database,
+    scope: &ScopeId,
+) -> Result<(ReadStamp, Option<RuntimeSchemaRegistry>)> {
+    let snapshot = database.snapshot();
+    let read = native_read_stamp(database, snapshot, scope)?;
+    let schema = get_json(
+        database,
+        snapshot,
+        keyspaces::RUNTIME_SCHEMAS,
+        scope.as_str().as_bytes(),
+    )?;
+    if schema
+        .as_ref()
+        .map(|value: &RuntimeSchemaRegistry| value.revision)
+        != read.schema_revision
+    {
+        return Err(Error::Substrate(
+            "native runtime schema differs from its read stamp".into(),
+        ));
+    }
+    Ok((read, schema))
+}
+
 impl NativeRuntimeCommitPlan {
     pub fn outcome(&self) -> &RuntimeCommitOutcome {
         &self.outcome
@@ -719,6 +817,8 @@ pub fn prepare_native_runtime_commit(
             actual: start,
         });
     }
+    let (mut accumulator, bootstrap_nodes) =
+        native_runtime_accumulator_with(database, snapshot, start)?;
 
     let previous_schema: Option<RuntimeSchemaRegistry> = get_json(
         database,
@@ -849,6 +949,14 @@ pub fn prepare_native_runtime_commit(
     .map_err(|error| Error::CorruptWatermark(error.to_string()))?
     .filter(|digest| !digest.is_empty());
     let mut operations = Vec::new();
+    for node in bootstrap_nodes {
+        put(
+            &mut operations,
+            keyspaces::META,
+            &keyspaces::runtime_accumulator_node_key(node.level, node.index),
+            node.digest.into_bytes(),
+        );
+    }
     let mut outbox_count = 0;
 
     for (ordinal, mutation) in commit.mutations.iter().cloned().enumerate() {
@@ -892,6 +1000,14 @@ pub fn prepare_native_runtime_commit(
             &cursor.to_be_bytes(),
             serde_json::to_vec(&change)?,
         );
+        for node in accumulator.append_change(&change)? {
+            put(
+                &mut operations,
+                keyspaces::META,
+                &keyspaces::runtime_accumulator_node_key(node.level, node.index),
+                node.digest.into_bytes(),
+            );
+        }
         if let Some(family) = projection_family(&mutation) {
             let work = ProjectionWork::for_change(
                 commit.scope.clone(),
@@ -968,6 +1084,12 @@ pub fn prepare_native_runtime_commit(
         keyspaces::META,
         keyspaces::RUNTIME_LAST_DIGEST,
         previous_digest.as_deref().unwrap_or("").as_bytes().to_vec(),
+    );
+    put(
+        &mut operations,
+        keyspaces::META,
+        keyspaces::RUNTIME_ACCUMULATOR_STATE,
+        serde_json::to_vec(&accumulator)?,
     );
     let audit = AuditEnvelope::accepted_commit(commit, &commit_id, cursor, previous_audit_digest)?;
     put(
@@ -1124,13 +1246,23 @@ fn native_read_stamp(
     .transpose()
     .map_err(|error| Error::CorruptWatermark(error.to_string()))?
     .filter(|digest| !digest.is_empty());
-    ReadStamp::new(
-        scope.clone(),
-        schema_revision,
-        0,
-        commit_cursor,
-        head_digest,
-    )
+    match load_native_runtime_accumulator(database, snapshot, commit_cursor)? {
+        Some(accumulator) => ReadStamp::authenticated(
+            scope.clone(),
+            schema_revision,
+            0,
+            commit_cursor,
+            head_digest,
+            accumulator.root,
+        ),
+        None => ReadStamp::new(
+            scope.clone(),
+            schema_revision,
+            0,
+            commit_cursor,
+            head_digest,
+        ),
+    }
     .map_err(Error::from)
 }
 
@@ -1138,11 +1270,44 @@ fn validate_native_read_stamp(
     database: &Database,
     snapshot: Snapshot,
     read: &ReadStamp,
-) -> Result<()> {
+) -> Result<vyrm_core::RuntimeReadValidation> {
     read.validate()?;
     let current = read_sequence(database, snapshot, keyspaces::RUNTIME_CURSOR)?;
     if read.commit_cursor > current {
         return Err(Error::ReadStampUnavailable(read.manifest_id.clone()));
+    }
+    if read.commit_cursor == current && read.accumulator_root.is_some() {
+        let accumulator = load_native_runtime_accumulator(database, snapshot, current)?
+            .ok_or_else(|| Error::ReadStampMismatch(read.manifest_id.clone()))?;
+        let head_digest = get(
+            database,
+            snapshot,
+            keyspaces::META,
+            keyspaces::RUNTIME_LAST_DIGEST,
+        )?
+        .map(String::from_utf8)
+        .transpose()
+        .map_err(|error| Error::CorruptWatermark(error.to_string()))?
+        .filter(|digest| !digest.is_empty());
+        let schema_revision = get_json::<RuntimeSchemaRegistry>(
+            database,
+            snapshot,
+            keyspaces::RUNTIME_SCHEMAS,
+            read.scope.as_str().as_bytes(),
+        )?
+        .map(|schema| schema.revision);
+        if read.catalog_revision != 0
+            || read.head_digest != head_digest
+            || read.schema_revision != schema_revision
+            || read.accumulator_root.as_deref() != Some(accumulator.root.as_str())
+        {
+            return Err(Error::ReadStampMismatch(read.manifest_id.clone()));
+        }
+        return Ok(vyrm_core::RuntimeReadValidation::new(
+            "authenticated_current_head",
+            0,
+            0,
+        ));
     }
     let retained_head = if read.commit_cursor == 0 {
         None
@@ -1178,13 +1343,138 @@ fn validate_native_read_stamp(
             _ => None,
         })
         .next_back();
+    if let Some(root) = read.accumulator_root.as_deref() {
+        RuntimeLogAccumulator::from_nodes(read.commit_cursor, root, |level, index| {
+            read_native_accumulator_node(database, snapshot, level, index)
+        })?;
+    }
     if read.catalog_revision != 0
         || read.head_digest != retained_head
         || read.schema_revision != schema_revision
     {
         return Err(Error::ReadStampMismatch(read.manifest_id.clone()));
     }
-    Ok(())
+    Ok(vyrm_core::RuntimeReadValidation::new(
+        "full_hash_chain_replay",
+        read.commit_cursor,
+        0,
+    ))
+}
+
+fn load_native_runtime_accumulator(
+    database: &Database,
+    snapshot: Snapshot,
+    expected_size: u64,
+) -> Result<Option<RuntimeLogAccumulator>> {
+    let stored: Option<RuntimeLogAccumulator> = get_json(
+        database,
+        snapshot,
+        keyspaces::META,
+        keyspaces::RUNTIME_ACCUMULATOR_STATE,
+    )?;
+    match stored {
+        Some(accumulator) => {
+            accumulator.validate()?;
+            if accumulator.tree_size != expected_size {
+                return Err(Error::Substrate(format!(
+                    "runtime accumulator size {} differs from cursor {expected_size}",
+                    accumulator.tree_size
+                )));
+            }
+            Ok(Some(accumulator))
+        }
+        None if expected_size == 0 => Ok(Some(RuntimeLogAccumulator::new())),
+        None => Ok(None),
+    }
+}
+
+fn native_runtime_accumulator_with(
+    database: &Database,
+    snapshot: Snapshot,
+    expected_size: u64,
+) -> Result<(RuntimeLogAccumulator, Vec<RuntimeMerkleNode>)> {
+    if let Some(accumulator) = load_native_runtime_accumulator(database, snapshot, expected_size)? {
+        return Ok((accumulator, Vec::new()));
+    }
+    let page = native_change_page(database, snapshot, expected_size, 0, usize::MAX, None)?;
+    let mut accumulator = RuntimeLogAccumulator::new();
+    let mut nodes = Vec::new();
+    for change in &page.changes {
+        nodes.extend(accumulator.append_change(change)?);
+    }
+    if accumulator.tree_size != expected_size {
+        return Err(Error::Substrate(
+            "runtime accumulator bootstrap did not cover the full log".into(),
+        ));
+    }
+    Ok((accumulator, nodes))
+}
+
+fn native_authenticated_point_page(
+    database: &Database,
+    snapshot: Snapshot,
+    read: &ReadStamp,
+    cursor: u64,
+) -> Result<RuntimeChangePage> {
+    let root = read
+        .accumulator_root
+        .as_deref()
+        .ok_or_else(|| Error::ReadStampMismatch(read.manifest_id.clone()))?;
+    let accumulator = match load_native_runtime_accumulator(database, snapshot, read.commit_cursor)
+    {
+        Ok(Some(accumulator)) if accumulator.root == root => accumulator,
+        Ok(_) | Err(_) => {
+            RuntimeLogAccumulator::from_nodes(read.commit_cursor, root, |level, index| {
+                read_native_accumulator_node(database, snapshot, level, index)
+            })?
+        }
+    };
+    let change: RuntimeChange = get_json(
+        database,
+        snapshot,
+        keyspaces::RUNTIME_CHANGES,
+        &cursor.to_be_bytes(),
+    )?
+    .ok_or_else(|| Error::ReadStampUnavailable(read.manifest_id.clone()))?;
+    let proof = accumulator.inclusion_proof(cursor - 1, |level, index| {
+        read_native_accumulator_node(database, snapshot, level, index)
+    })?;
+    let proof_nodes = proof.path.len();
+    proof.verify_change(&change, root)?;
+    let selected = (change.scope == read.scope).then_some(change);
+    Ok(RuntimeChangePage {
+        requested_after: cursor - 1,
+        through_cursor: cursor,
+        head_cursor: read.commit_cursor,
+        validation: vyrm_core::RuntimeReadValidation::new(
+            "rfc9162_inclusion_proof",
+            1,
+            proof_nodes,
+        ),
+        changes: selected.into_iter().collect(),
+    })
+}
+
+fn read_native_accumulator_node(
+    database: &Database,
+    snapshot: Snapshot,
+    level: u8,
+    index: u64,
+) -> vyrm_core::Result<Option<String>> {
+    get(
+        database,
+        snapshot,
+        keyspaces::META,
+        &keyspaces::runtime_accumulator_node_key(level, index),
+    )
+    .map_err(|error| vyrm_core::Error::InvalidRuntime {
+        reason: format!("cannot read runtime accumulator node: {error}"),
+    })?
+    .map(String::from_utf8)
+    .transpose()
+    .map_err(|error| vyrm_core::Error::InvalidRuntime {
+        reason: format!("runtime accumulator node is not UTF-8: {error}"),
+    })
 }
 
 fn native_change_page(
@@ -1205,6 +1495,7 @@ fn native_change_page(
             requested_after: after,
             through_cursor: after,
             head_cursor: head,
+            validation: vyrm_core::RuntimeReadValidation::new("bounded_hash_chain_page", 0, 0),
             changes: Vec::new(),
         });
     }
@@ -1256,6 +1547,11 @@ fn native_change_page(
         requested_after: after,
         through_cursor: through,
         head_cursor: head,
+        validation: vyrm_core::RuntimeReadValidation::new(
+            "bounded_hash_chain_page",
+            through.saturating_sub(after),
+            0,
+        ),
         changes: selected,
     })
 }
@@ -1272,6 +1568,170 @@ fn native_values_for_scope<T: DeserializeOwned>(
         .into_iter()
         .map(|(_, value)| serde_json::from_slice(&value).map_err(Error::from))
         .collect()
+}
+
+/// Reads the exact immutable-object closure for one scope from an authenticated
+/// physical snapshot before that snapshot is installed on a replica.
+pub fn native_snapshot_object_references(
+    bundle: &SnapshotBundleFile,
+    scope: &ScopeId,
+) -> Result<Vec<ObjectReference>> {
+    native_snapshot_artifact_view(bundle, scope).map(|(_, objects)| objects)
+}
+
+/// Reads the exact project read stamp and immutable-object closure directly
+/// from an authenticated physical snapshot.
+pub fn native_snapshot_artifact_view(
+    bundle: &SnapshotBundleFile,
+    scope: &ScopeId,
+) -> Result<(ReadStamp, Vec<ObjectReference>)> {
+    let cursor_key = storage_key(keyspaces::META, keyspaces::RUNTIME_CURSOR);
+    let digest_key = storage_key(keyspaces::META, keyspaces::RUNTIME_LAST_DIGEST);
+    let accumulator_key = storage_key(keyspaces::META, keyspaces::RUNTIME_ACCUMULATOR_STATE);
+    let schema_key = storage_key(keyspaces::RUNTIME_SCHEMAS, scope.as_str().as_bytes());
+    let values = bundle
+        .get_many(&[&cursor_key, &digest_key, &accumulator_key, &schema_key])
+        .map_err(Error::from)?;
+    let commit_cursor = values[0]
+        .as_deref()
+        .map(decode_sequence)
+        .transpose()?
+        .unwrap_or_default();
+    let head_digest = values[1]
+        .clone()
+        .map(String::from_utf8)
+        .transpose()
+        .map_err(|error| Error::CorruptWatermark(error.to_string()))?
+        .filter(|digest| !digest.is_empty());
+    let accumulator = values[2]
+        .as_deref()
+        .map(serde_json::from_slice::<RuntimeLogAccumulator>)
+        .transpose()?;
+    if let Some(accumulator) = &accumulator {
+        accumulator.validate()?;
+        if accumulator.tree_size != commit_cursor {
+            return Err(Error::Substrate(format!(
+                "snapshot runtime accumulator size {} differs from cursor {commit_cursor}",
+                accumulator.tree_size
+            )));
+        }
+    }
+    let schema_revision = values[3]
+        .as_deref()
+        .map(serde_json::from_slice::<RuntimeSchemaRegistry>)
+        .transpose()?
+        .map(|schema| schema.revision);
+    let read = match accumulator {
+        Some(accumulator) => ReadStamp::authenticated(
+            scope.clone(),
+            schema_revision,
+            0,
+            commit_cursor,
+            head_digest,
+            accumulator.root,
+        )?,
+        None if commit_cursor == 0 => ReadStamp::authenticated(
+            scope.clone(),
+            schema_revision,
+            0,
+            commit_cursor,
+            head_digest,
+            RuntimeLogAccumulator::new().root,
+        )?,
+        None => ReadStamp::new(
+            scope.clone(),
+            schema_revision,
+            0,
+            commit_cursor,
+            head_digest,
+        )?,
+    };
+    let objects = native_snapshot_objects(bundle, Some(scope))?;
+    Ok((read, objects))
+}
+
+/// Reads the project artifact view from a live native database snapshot. This
+/// is used by the cluster adapter without reopening a second database handle.
+pub fn native_database_artifact_view(
+    database: &Database,
+    scope: &ScopeId,
+) -> Result<(ReadStamp, Vec<ObjectReference>)> {
+    let snapshot = database.snapshot();
+    let read = native_read_stamp(database, snapshot, scope)?;
+    let rows = scan_space(database, snapshot, keyspaces::RUNTIME_OBJECTS, &[])?;
+    let objects = decode_snapshot_objects(rows, Some(scope))?;
+    Ok((read, objects))
+}
+
+/// Reads every immutable reference in a physical snapshot. Unlike the
+/// project-specific transfer view, this permits multiple scopes and is the
+/// final target-side activation gate.
+pub fn native_snapshot_all_object_references(
+    bundle: &SnapshotBundleFile,
+) -> Result<Vec<ObjectReference>> {
+    native_snapshot_objects(bundle, None)
+}
+
+fn native_snapshot_objects(
+    bundle: &SnapshotBundleFile,
+    required_scope: Option<&ScopeId>,
+) -> Result<Vec<ObjectReference>> {
+    let start = storage_key(keyspaces::RUNTIME_OBJECTS, &[]);
+    let end = prefix_end(&start);
+    let values = bundle.scan(&start, end.as_deref()).map_err(Error::from)?;
+    decode_snapshot_objects(values, required_scope)
+}
+
+fn decode_snapshot_objects(
+    values: Vec<(Vec<u8>, Vec<u8>)>,
+    required_scope: Option<&ScopeId>,
+) -> Result<Vec<ObjectReference>> {
+    if values.len() > 1_000_000 {
+        return Err(Error::Substrate(
+            "native snapshot object-reference limit exceeded".into(),
+        ));
+    }
+    let mut objects = values
+        .into_iter()
+        .map(|(stored_key, value)| {
+            let object: ObjectReference = serde_json::from_slice(&value)?;
+            object.validate()?;
+            let logical = strip_space(keyspaces::RUNTIME_OBJECTS, &stored_key)?;
+            let split = logical.iter().position(|byte| *byte == 0).ok_or_else(|| {
+                Error::Substrate("native snapshot object key has no scope boundary".into())
+            })?;
+            let encoded_scope = std::str::from_utf8(&logical[..split])
+                .map_err(|error| Error::Substrate(error.to_string()))?;
+            let encoded_scope = ScopeId::new(encoded_scope)?;
+            if required_scope.is_some_and(|scope| scope != &encoded_scope) {
+                return Err(Error::Substrate(
+                    "native snapshot object project scope differs from the transfer".into(),
+                ));
+            }
+            let expected = storage_key(
+                keyspaces::RUNTIME_OBJECTS,
+                &runtime_identity_key(&encoded_scope, &object.reference),
+            );
+            if stored_key != expected {
+                return Err(Error::Substrate(
+                    "native snapshot object key/value identity differs from its canonical reference"
+                        .into(),
+                ));
+            }
+            Ok(object)
+        })
+        .collect::<Result<Vec<_>>>()?;
+    objects.sort_by(|left, right| left.reference.cmp(&right.reference));
+    if required_scope.is_some()
+        && objects
+            .windows(2)
+            .any(|pair| pair[0].reference >= pair[1].reference)
+    {
+        return Err(Error::Substrate(
+            "native snapshot contains duplicate object references".into(),
+        ));
+    }
+    Ok(objects)
 }
 
 fn runtime_identity_key(scope: &ScopeId, reference: &RuntimeRef) -> Vec<u8> {
@@ -1406,7 +1866,7 @@ fn prefix_end(prefix: &[u8]) -> Option<Vec<u8>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use vyrm_core::Producer;
+    use vyrm_core::{ObjectReceipt, Producer};
 
     fn claim() -> Claim {
         Claim::new(
@@ -1478,5 +1938,59 @@ mod tests {
 
         let engine = NativeEngine::open(&root).unwrap();
         assert_eq!(Engine::claims_in_range(&engine, 0, 1).unwrap(), vec![claim]);
+    }
+
+    #[test]
+    fn snapshot_object_closure_denies_foreign_project_references() {
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path().join("multi-project-native");
+        let mut database = Database::create(&root).unwrap();
+        let first_scope = ScopeId::new("project:first").unwrap();
+        let second_scope = ScopeId::new("project:second").unwrap();
+        let object = |id: &str, bytes: &[u8]| {
+            let sha256 = vyrm_core::digest::sha256_hex(bytes);
+            ObjectReference::for_bytes(
+                id,
+                None,
+                "application/octet-stream",
+                bytes,
+                ObjectReceipt {
+                    backend: "fixture".into(),
+                    key: ObjectReference::canonical_key(&sha256).unwrap(),
+                    version: None,
+                    etag: None,
+                },
+            )
+            .unwrap()
+        };
+        let first = object("first:bytes", b"first");
+        let second = object("second:bytes", b"second");
+        database
+            .write_owned(
+                WriteBatch::new(vec![
+                    Mutation::Put {
+                        key: storage_key(
+                            keyspaces::RUNTIME_OBJECTS,
+                            &runtime_identity_key(&first_scope, &first.reference),
+                        ),
+                        value: serde_json::to_vec(&first).unwrap(),
+                    },
+                    Mutation::Put {
+                        key: storage_key(
+                            keyspaces::RUNTIME_OBJECTS,
+                            &runtime_identity_key(&second_scope, &second.reference),
+                        ),
+                        value: serde_json::to_vec(&second).unwrap(),
+                    },
+                ])
+                .unwrap(),
+                vyrm_kv::Durability::Authoritative,
+            )
+            .unwrap();
+        let spool = directory.path().join("multi-project.snapshot");
+        let bundle = database.export_snapshot_file(1, &spool).unwrap();
+
+        let error = native_snapshot_object_references(&bundle, &first_scope).unwrap_err();
+        assert!(error.to_string().contains("project scope"));
     }
 }

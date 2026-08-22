@@ -343,6 +343,63 @@ fn hot_memtable_point_reads_bypass_immutable_blocks_without_changing_mvcc_result
 }
 
 #[test]
+fn bounded_memtable_scan_preserves_mvcc_tombstones_over_segments() {
+    let parent = tempfile::tempdir().unwrap();
+    let root = parent.path().join("native");
+    let mut database = Database::create(&root).unwrap();
+    database
+        .write_owned(
+            WriteBatch::new(vec![
+                Mutation::Put {
+                    key: b"outside:a".to_vec(),
+                    value: b"outside".to_vec(),
+                },
+                Mutation::Put {
+                    key: b"range:a".to_vec(),
+                    value: b"old".to_vec(),
+                },
+                Mutation::Put {
+                    key: b"range:b".to_vec(),
+                    value: b"kept".to_vec(),
+                },
+                Mutation::Put {
+                    key: b"range:z".to_vec(),
+                    value: b"excluded".to_vec(),
+                },
+            ])
+            .unwrap(),
+            Durability::Authoritative,
+        )
+        .unwrap();
+    database.flush_memtable(1).unwrap();
+    database
+        .write_owned(
+            WriteBatch::new(vec![
+                Mutation::Delete {
+                    key: b"range:a".to_vec(),
+                },
+                Mutation::Put {
+                    key: b"range:c".to_vec(),
+                    value: b"new".to_vec(),
+                },
+            ])
+            .unwrap(),
+            Durability::Authoritative,
+        )
+        .unwrap();
+
+    assert_eq!(
+        database
+            .scan(b"range:a", Some(b"range:z"), database.snapshot())
+            .unwrap(),
+        vec![
+            (b"range:b".to_vec(), b"kept".to_vec()),
+            (b"range:c".to_vec(), b"new".to_vec()),
+        ]
+    );
+}
+
+#[test]
 fn flush_rotates_wal_publishes_manifest_and_preserves_old_snapshots() {
     let parent = tempfile::tempdir().unwrap();
     let root = parent.path().join("native");

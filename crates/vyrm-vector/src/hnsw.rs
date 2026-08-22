@@ -354,7 +354,19 @@ impl HnswIndex {
     /// Generates HNSW candidates, then delegates final scoring, filtering, and
     /// deterministic ordering to the exact oracle.
     pub fn search(&self, request: &SearchRequest, ef_search: usize) -> Result<Vec<SearchHit>> {
+        self.search_at(request, ef_search, request.read.commit_cursor)
+    }
+
+    pub fn search_at(
+        &self,
+        request: &SearchRequest,
+        ef_search: usize,
+        required_source_cursor: u64,
+    ) -> Result<Vec<SearchHit>> {
         request.validate()?;
+        if required_source_cursor > request.read.commit_cursor {
+            return invalid("HNSW source cursor exceeds the request read stamp");
+        }
         let exact_rerank = match request.mode {
             SearchMode::Exact => return invalid("HNSW cannot serve an exact-only request"),
             SearchMode::AllowApproximate { exact_rerank }
@@ -369,7 +381,7 @@ impl HnswIndex {
             || self.descriptor.metric != request.metric
             || self.descriptor.embedding_model != request.embedding_model
             || self.descriptor.dimensions != request.query.dimensions()
-            || self.descriptor.stamp.source_cursor < request.read.commit_cursor
+            || self.descriptor.stamp.source_cursor < required_source_cursor
         {
             return invalid("HNSW artifact does not satisfy request identity or freshness");
         }

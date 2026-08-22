@@ -23,6 +23,7 @@ fn stdio_server_negotiates_lists_tools_and_uses_the_shared_contract_gate() {
         serde_json::json!({"jsonrpc":"2.0","id":2,"method":"tools/list"}),
         serde_json::json!({"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"vyrm_preflight","arguments":{"at":1000}}}),
         serde_json::json!({"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"vyrm_lifecycle","arguments":{"event":"pre-tool-use","at":1001,"input":{"tool_name":"Edit","tool_input":{"file_path":"lib.rs"}}}}}),
+        serde_json::json!({"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"vyrm_query","arguments":{"at":1002,"ql":"FROM event:runtime_trace AT VALID 18446744073709551615 KNOWN HEAD PROJECT name, phase EXPLAIN CONTRACT"}}}),
     ];
     let stdin = child.stdin.as_mut().unwrap();
     for request in requests {
@@ -37,13 +38,18 @@ fn stdio_server_negotiates_lists_tools_and_uses_the_shared_contract_gate() {
         .lines()
         .map(|line| serde_json::from_str(line).unwrap())
         .collect();
-    assert_eq!(responses.len(), 4, "notification must not receive a response");
+    assert_eq!(responses.len(), 5, "notification must not receive a response");
     assert_eq!(responses[0]["result"]["protocolVersion"], "2025-11-25");
     assert!(responses[1]["result"]["tools"]
         .as_array()
         .unwrap()
         .iter()
         .any(|tool| tool["name"] == "vyrm_lifecycle"));
+    assert!(responses[1]["result"]["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|tool| tool["name"] == "vyrm_query"));
     assert!(responses[2]["result"]["content"][0]["text"]
         .as_str()
         .unwrap()
@@ -51,6 +57,15 @@ fn stdio_server_negotiates_lists_tools_and_uses_the_shared_contract_gate() {
     let gate = responses[3]["result"]["content"][0]["text"].as_str().unwrap();
     assert!(gate.contains("permissionDecision"));
     assert!(gate.contains("no active run"));
+    let query: serde_json::Value = serde_json::from_str(
+        responses[4]["result"]["content"][0]["text"]
+            .as_str()
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(responses[4]["result"]["isError"], false);
+    assert_eq!(query["execution"]["returned_rows"], 2);
+    assert_eq!(query["execution"]["known_at_cursor"], 3);
 }
 
 #[test]

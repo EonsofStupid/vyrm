@@ -6,14 +6,19 @@ It is intentionally release-gated rather than calendar-gated.
 
 ## Product boundary
 
-The canonical chain remains **Automaton → LFG → Connectome**:
+The canonical umbrella is **RRFlow**:
 
-- Automaton brokers provider sessions and subscription-backed AI surfaces.
-- LFG parses and composes just-in-time context.
-- Connectome records, explains, visualizes, and enforces runtime intelligence.
-- Vyrm is Connectome's embeddable kernel: contracts, persistence, query and
-  execution, projections, lifecycle policy, and evidence.
-- Clyffy will package those capabilities into installable per-platform and
+- RRO composes Automaton's provider/session brokerage with LFG's just-in-time
+  context encoding and routing.
+- RRD owns the durable data/runtime contracts, query semantics, projections,
+  lifecycle evidence, and storage capabilities.
+- Vyrm is RRD's native LSM persistence engine. A columnar path remains a future
+  measured capability and must not be implied by the current implementation.
+- Connectome Panel records, explains, visualizes, and controls those contracts.
+- PostgreSQL/pgvector is project-scoped shared operator knowledge behind the
+  external adapter; it is neither Vyrm's canonical persistence nor LFG's JIT
+  compiler.
+- Clyffy will package the RRFlow capabilities into installable per-platform and
   umbrella deployments. It consumes versioned Vyrm interfaces; it does not
   fork Vyrm internals into a second implementation.
 
@@ -160,10 +165,21 @@ measured local results, never universal superiority.
    and corrupt-pointer restart denial on one host. A real-TCP matrix also passes
    two-root overlap and old-root retirement. Snapshot build/receive/install and
    local object publication are now file-backed, hard-capped, crash-cleaned,
-   and regression-gated against whole-bundle RSS growth. Independent-host and
-   hardware chaos, broader disk-resident segment workloads, automatic SPIFFE
-   issuance/streaming, durable supervisor generation, production telemetry,
-   and Multi-AZ evidence remain open.
+   and regression-gated against whole-bundle RSS growth. Project-scoped vector
+   artifacts now cross the real mTLS/process learner path through durable
+   resumable sessions before activation; the target independently verifies the
+   snapshot's complete object closure. Typed fail-closed transfer observations
+   now route bounded causal trace commits through the current Raft leader and
+   prove identical voter/learner trace state after purge and failover. Receiver
+   admission, durable inventory reconstruction, stale-session/receipt GC, and
+   distinct-session concurrency are bounded and tested. Identity-scoped/global
+   transport admission, bounded Raft timing, and reset-explicit transport,
+   artifact-session, and consensus-trace telemetry now ship through project
+   node status.
+   Independent-host and hardware chaos, larger retained closure workloads,
+   automatic SPIFFE issuance/streaming, durable supervisor generation,
+   automatic telemetry collection/export and Multi-AZ evidence remain open;
+   Connectome now retains and replays explicitly submitted control-v4 status.
 8. **Local gate complete:** declared package workflows now bind preflight,
    pre-tool freshness/authorization, and post-tool atomic evidence across the
    shared hook/MCP handler. A durable cross-process authorization lease remains
@@ -172,7 +188,22 @@ measured local results, never universal superiority.
    persisted mutation stream into reasoning, routing, workflow, model/flight,
    search, and storage/data lanes. Freeze, scrub, rewind, forward, and inspection
    retain the exact cursor, scope, mutation digest, full mutation, and available
-   hash-chained audit envelope. Cursor-delta transport and controlled provider
-   evaluations remain open.
-10. Cut the Vyrm alpha manifest; only then scaffold the separate Clyffy master
+   hash-chained audit envelope. Query/storage, projection/vector, and embedding
+   runtime spans now feed those lanes with three-engine and native-reopen proof.
+   Causal lifecycle reconstruction, integrity diagnostics, a non-summed
+   measured critical candidate, control-only default JSON export, and
+   provider/tool-envelope spans are now complete for the local workbench.
+   Cluster spans, cursor-delta transport, OTLP translation, cross-run resource
+   analysis, and controlled provider evaluations remain open.
+10. **Portable and first live operator-knowledge gates complete:** versioned project/member,
+    source/relation/tenant, model, snapshot/revision, path/control, result, and
+    idempotent outbox contracts now have an exact reference adapter, safe
+    pgvector SQL plan, durable search/sync spans, three-engine denial/privacy
+    proof, native reopen, and Connectome visibility. The opt-in live transport
+    adds repeatable-read snapshot/catalog evidence, atomic revision/idempotency
+    controls, typed upsert/delete, ordered exact/HNSW/IVFFlat endpoint parity,
+    and reconnect proof in CI. Payload filters, certificate-backed TLS endpoint,
+    process restart/concurrency failure injection, and retained performance
+    evidence remain required before the pgvector row can be fully promoted.
+11. Cut the Vyrm alpha manifest; only then scaffold the separate Clyffy master
    repository and its signed tier/update system.

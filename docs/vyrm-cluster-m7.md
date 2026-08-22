@@ -136,7 +136,7 @@ the installed immutable image disk-resident behind a database-wide bounded
 decoded-block cache; transfer and query residency therefore have separate
 executable RSS bounds.
 
-## Authenticated transport v1
+## Authenticated transport v2
 
 The separate `openraft-transport` feature adds real TCP transport without
 putting async, TLS, or X.509 dependencies in the default contract/simulator or
@@ -146,10 +146,14 @@ CA-validated server certificate. The leaf must contain exactly one SPIFFE-style
 URI SAN derived from a configured trust domain plus canonical digests of the
 cluster and node ids; DNS/IP endpoint validation still runs independently.
 
-Transport envelope v1 additionally binds the protocol version, cluster, shard,
+Transport envelope v2 additionally binds the protocol version, cluster, shard,
 numeric and canonical source/target identities, serialized request digest, and
 the source carried inside the OpenRaft vote. A static authorization map prevents
 a trusted certificate from relabeling itself as another numeric Raft node.
+The v2 envelope also carries one narrowly typed internal `RuntimeCommit` RPC.
+It accepts only the configured project scope, validates the canonical command,
+and follows the current leader through the same authenticated node map; it is
+not a general administrative or cross-project write endpoint.
 Frames are rejected above 16 MiB before allocation, client work honors
 OpenRaft's hard TTL, ingress work has a 30-second lifetime, and the listener
 admits at most 256 concurrent RPCs. One RPC is sent per TLS connection; no
@@ -181,19 +185,28 @@ request-correlated JSON-lines contract over inherited stdin/stdout, not a public
 unauthenticated admin listener. Unknown envelope fields, unsupported versions,
 invalid request identities, empty frames, and frames above 1 MiB fail closed;
 oversized input is drained only to the next newline without unbounded allocation.
+Config v2 requires one project scope and accepts a bounded transport-admission
+policy. Control v4 adds typed `RuntimeCommit` submission, rejects commits for
+any other scope before Raft submission, and returns reset-explicit operational
+telemetry with exact project/cluster/shard/node coordinates in node status.
 
 A black-box integration run owns four child processes and four independent data
 roots. It:
 
-1. forms three voters, commits placement and application probes, abruptly kills
-   a voter, commits with quorum, restarts that voter, and waits for catch-up;
+1. forms three voters, commits placement, application probes, and a
+   project-scoped vector-artifact reference, rejects a foreign-scope runtime
+   commit, abruptly kills a voter, commits with quorum, restarts that voter,
+   and waits for catch-up;
 2. abruptly kills the leader, elects another voter, and commits after the
    leadership no-op is durably applied;
 3. disables both ingress and egress at the live leader's transport boundary,
    elects and commits on the majority side, heals the partition, and proves the
    isolated process advances to at least the committed index;
-4. creates a physical snapshot, purges the leader log, starts the fourth process
-   as a learner, and proves its applied state and snapshot cursor catch up;
+4. snapshots and purges every voter so a leadership change cannot bypass
+   recovery through an unpurged log, starts the fourth process as a learner,
+   and proves its applied state, persisted snapshot cursor, artifact bytes,
+   authenticated manifest, terminal transfer receipt, and consensus-applied
+   transfer trace tail;
 5. denies readiness when a node-four config is paired with node three's trusted
    leaf; and
 6. shuts down the learner, corrupts its VyrmKV `CURRENT` pointer, and proves
@@ -329,12 +342,121 @@ The model-check tests enumerate both possible first-follower quorum paths
 crossed with every single disk loss in a three-voter/three-zone placement. They
 also enumerate leader-minority partitions and require no acknowledgement.
 
+## Immutable artifact closure and activation ordering
+
+Canonical runtime snapshots contain `ObjectReference` values but intentionally
+do not embed potentially large vector/index artifact bytes in the Raft log or
+VyrmKV bundle. Replica recovery therefore uses a separate, versioned
+`ArtifactTransferManifest` bound to one shard, placement epoch, grounded Raft
+snapshot, exact project `ReadStamp`, source/target pair, sorted reference list,
+and digest set. Its completion receipt retains target-local object-store
+evidence without rewriting the source receipt in canonical truth.
+
+The local object path streams through a fixed 64 KiB buffer. The real mTLS
+transport uses versioned begin/chunk/complete RPCs with at most 1 MiB per
+chunk, request digests, authenticated source/target binding, and an fsynced
+session directory keyed by the manifest digest. Begin returns authoritative
+per-object offsets, so disconnect, cancellation, and process restart resume
+without trusting a caller-supplied offset. Full length and SHA-256 verification
+precedes content-addressed publication; duplicate content transfers once and
+already verified target bytes are reused. Completion publishes one idempotent
+receipt. A failed transfer emits no completion receipt and can leave only an
+fsynced partial session or harmless unreachable content-addressed bytes.
+
+OpenRaft now performs hydration once at the full-snapshot lifecycle boundary,
+outside its 200 ms per-chunk deadline, before snapshot byte zero. Every fresh
+full-snapshot attempt reopens the idempotent session rather than trusting a
+process-local success bit; the first snapshot chunk cannot repeat that
+hydration inside the short chunk deadline. Administrative learner admission
+also does not trust OpenRaft's membership-write response as catch-up evidence:
+Vyrm acknowledges only while the caller remains leader and its replication
+metrics prove the learner matched through the committed membership log. The
+source authenticates the exact cached physical
+snapshot, derives its project closure, and sends only that manifest. Ordinary
+target `install_snapshot` independently scans every canonical object reference
+in the received bundle and verifies local length/digest before activating
+state; this safety check does not depend on the source helper. A self-consistent
+manifest that omits an object is therefore denied before activation.
+Missing/corrupt source bytes, corrupt target content, substitution,
+length/digest mismatch, foreign project scope, and stale/forged snapshot
+bindings fail closed. The success path survives reopen while preserving the
+target's local vote and Raft history.
+
+The transport emits a strict `ArtifactTransferObservation` sequence for
+prepared, accepted-chunk, completed, and failed phases. A configured observer
+is fail-closed. Observations carry project scope, attempt, read and grounded
+snapshot coordinates, digests, offsets, duration, counts, and receipt identity;
+source-local attempt ordinals remain monotonic when OpenRaft rebuilds network
+clients. They never carry object bytes or raw errors. `vyrm-node` supplies a durable
+adapter that maps these into one `cluster.artifact_transfer` start/finish span
+with causal `cluster.artifact_chunk` annotations. The existing synchronous
+wrapper retains its `object.replicate` storage child. Normalized causal traces
+are tested across Memory, Fjall, and native engines and are consumable by
+Connectome. The real node runtime now prepares that canonical trace commit from
+one exact native read/schema snapshot and routes it to the current Raft leader.
+Cursor conflicts alone retry; foreign scope, authentication, validation, or
+consensus failures stay fail-closed. The four-process post-purge test proves the
+same trace changes on all voters and the fresh learner and proves serialized
+trace mutations contain no transferred object bytes. The direct local adapter
+remains explicitly local and is not represented as a replicated commit.
+
+The receiver reconstructs its session inventory from authenticated manifests,
+partial files, state, and receipts on restart. Admission caps active sessions
+and reserves the complete still-missing object closure before accepting work,
+so partial progress cannot oversubscribe the receiver. A global lifecycle lock
+serializes admission/GC while distinct session locks permit concurrent chunk
+work. Stale incomplete sessions and completed receipts have explicit retention
+and count bounds; GC validates every digest-scoped target, rejects symlinks and
+unexpected entries, and deletes only transfer metadata. Completion idempotency
+therefore has a documented retention window while immutable object bytes remain
+content-addressed. Deterministic-clock tests cover quota refusal, stale reclaim,
+restart reconstruction, receipt replay/expiry, and distinct-session concurrency.
+
+The synchronous S3-compatible port has the same verify-before-publish
+semantics, but currently materializes one object because its transport contract
+does not expose multipart streaming. Multipart S3, retained large-closure soak,
+automatic telemetry collection/export, and independent-machine chaos remain
+required before calling this production artifact replication.
+
+## Operational telemetry and per-identity admission
+
+Transport telemetry v1 is a typed JSON contract with a checked-in golden
+fixture. Every snapshot carries process start and observation times, configured
+policy, accepted/denied connections, and per-operation plus
+per-authenticated-identity attempted/allowed/denied/failed counts, request/response bytes,
+current/peak in-flight work, and total/maximum duration. Counter saturation sets
+an explicit overflow flag rather than wrapping. It retains no frame content,
+credentials, errors, prompts, embeddings, or artifact bytes.
+
+The same admission coordinator enforces a bounded identity table, global and
+per-identity concurrency, and a fixed-window request budget before application
+dispatch. A dropped or timed-out guard records failed work. Receiver telemetry
+reports durable inventory separately from process-local begin/chunk/complete,
+receipt replay, quota, GC, denial, and failure counters. Consensus trace health
+reports observation phases, commit acknowledgements, cursor conflicts, leader
+changes, unavailable leaders, denials, and failures. Node control v4 returns
+all three sections under one observation time and binds the status to the
+configured project, cluster, shard, Raft id, and canonical node id. This is
+scrapeable operator/benchmark evidence; it is not substituted for canonical
+runtime traces or hash-chained audit truth and resets explicitly on restart.
+
+Connectome now supplies the first retained observation path. Its explicit
+ingest endpoint validates the complete control-v4 status, denies a foreign
+project, deduplicates the source-status digest, rejects observation-time and
+same-process counter regression, and commits an immutable sample to the
+project runtime. Each node has an independently verified sample sequence and
+digest chain. Process-coordinate changes make the reset explicit and suppress
+an invalid cross-process delta. Bounded history includes the last pre-window
+sample per node, allowing the browser to reconstruct topology faithfully while
+rewinding. This proves retained manual ingestion and inspection; it is not an
+automatic scrape/export pipeline.
+
 ## What is not yet claimed
 
 This gate still does not contain dynamic membership discovery, automatic
 certificate issuance or Workload API streaming, durable supervisor generation,
-per-identity rate policy, production transport telemetry, multi-shard atomic
-commit, or metadata-shard reshard cutover.
+automatic telemetry collection/export, multi-shard atomic commit, or
+metadata-shard reshard cutover.
 Application state currently proves ordered identity/CAS/digest semantics and
 now atomically dispatches canonical `RuntimeCommit` transactions into native
 VyrmKV and transfers that runtime state in file-backed Raft snapshots. The
@@ -347,10 +469,21 @@ limited to 1 MiB and physical snapshot envelopes to 1 GiB. The compact RPC
 codec remains open; the disk-resident segment path is executable, while broader
 mixed-workload and hardware reproduction remain promotion gates.
 
-The next M7 slice must extend the passing one-host process matrix to independent
+The four-process matrix now commits a project-scoped vector artifact through
+the version-4 control protocol, stages its immutable bytes on all voters,
+forces every possible source beyond the snapshot/purge boundary, and verifies
+the fresh learner's activated snapshot, exact bytes, manifest, and durable
+receipt after leadership changes. Node config v2 requires the project scope and
+may configure transport admission and bounded Raft heartbeat/election timing;
+control v4 accepts typed runtime commits,
+denies a foreign scope, and exposes privacy-bounded operational telemetry.
+
+The next M7 slice must extend that passing one-host process matrix to independent
 hosts and real network/disk fault mechanisms, connect the passing credential
-state machine to an attested Workload API source, and retain production
-telemetry. File-backed, bounded-memory snapshot creation/receipt is now closed
-for the scoped fixture, but larger retained segment/query soak evidence is still
-required before high-volume cluster claims.
+state machine to an attested Workload API source, and add automatic telemetry
+collection/export. File-backed, bounded-memory snapshot creation/receipt,
+resumable scoped artifact transfer, bounded receiver lifecycle, and
+consensus-replicated transfer traces are closed for the fixture, but larger retained
+segment/query/closure soak evidence is still required before high-volume
+cluster claims.
 Only that evidence can advance a Multi-AZ claim.

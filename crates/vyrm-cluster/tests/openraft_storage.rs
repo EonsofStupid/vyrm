@@ -12,21 +12,25 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use tempfile::TempDir;
 use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
 use vyrm_cluster::{
-    ClusterError, ClusterId, NodeId, PlacementPolicy, ReplicaPlacement, ReplicaRole, ShardId,
-    ShardPlacement, VyrmRaftCommand, VyrmRaftLogStore, VyrmRaftNode, VyrmRaftStateMachine,
+    prepare_artifact_transfer, ArtifactTransferManifest, ClusterError, ClusterId, NodeId,
+    PlacementPolicy, ReplicaPlacement, ReplicaRole, ReplicaTransferPlan, ShardId, ShardPlacement,
+    ShardReadStamp, VyrmRaftCommand, VyrmRaftLogStore, VyrmRaftNode, VyrmRaftStateMachine,
     VyrmRaftStore, VyrmRaftTypeConfig, VyrmSnapshotData, ZoneId, CLUSTER_CONTRACT_VERSION,
 };
 use vyrm_core::{
-    RuntimeCommit, RuntimeMutation, RuntimeRecordSchema, RuntimeSchemaRegistry, RuntimeType,
-    ScopeId,
+    ObjectReference, RuntimeCommit, RuntimeMutation, RuntimeRecordSchema, RuntimeSchemaRegistry,
+    RuntimeType, ScopeId,
 };
 use vyrm_kv::{recover, Database, Durability, Mutation, SnapshotBundle, WriteBatch};
-use vyrm_store::{Engine, NativeEngine};
+use vyrm_store::{Engine, LocalObjectStore, NativeEngine};
 
 struct VyrmStoreBuilder;
 
 static TEST_SNAPSHOT_ORDINAL: AtomicU64 = AtomicU64::new(1);
 
+// OpenRaft fixes the conformance helper error type; keeping it unboxed lets
+// `?` compose directly with the suite's storage operations.
+#[allow(clippy::result_large_err)]
 async fn snapshot_bytes(mut snapshot: Box<VyrmSnapshotData>) -> Result<Vec<u8>, StorageError<u64>> {
     snapshot
         .seek(std::io::SeekFrom::Start(0))
@@ -40,6 +44,7 @@ async fn snapshot_bytes(mut snapshot: Box<VyrmSnapshotData>) -> Result<Vec<u8>, 
     Ok(bytes)
 }
 
+#[allow(clippy::result_large_err)]
 async fn snapshot_handle(
     root: &std::path::Path,
     bytes: &[u8],
@@ -339,7 +344,25 @@ fn canonical_runtime_commit_is_atomic_idempotent_durable_and_transferable() {
                     payload: EntryPayload::Normal(transition),
                 }])
                 .await?;
-            let commit = bootstrap_runtime_commit("cluster:atomic", 0);
+            let artifact_bytes = b"cluster-transferred-vector-artifact";
+            let source_artifacts =
+                LocalObjectStore::open(directory.path().join("application-objects"))
+                    .map_err(test_storage_error)?;
+            let staged = source_artifacts
+                .put(artifact_bytes)
+                .map_err(test_storage_error)?;
+            let artifact = ObjectReference::for_bytes(
+                "vector:hnsw:body@1:bytes",
+                None,
+                "application/vnd.vyrm.vector-hnsw+json",
+                artifact_bytes,
+                staged.receipt,
+            )
+            .map_err(test_storage_error)?;
+            let mut commit = bootstrap_runtime_commit("cluster:atomic", 0);
+            commit
+                .mutations
+                .push(RuntimeMutation::Object { object: artifact });
             let command = VyrmRaftCommand::runtime_commit(
                 "runtime-1",
                 ShardId(12),
@@ -358,7 +381,7 @@ fn canonical_runtime_commit_is_atomic_idempotent_durable_and_transferable() {
             assert!(first[0].accepted);
             let outcome = first[0].runtime_outcome.clone().unwrap();
             assert_eq!(outcome.commit_id, commit.digest());
-            assert_eq!(outcome.last_cursor, 1);
+            assert_eq!(outcome.last_cursor, 2);
 
             let duplicate_log = LogId::new(CommittedLeaderId::new(4, 1), 4);
             let duplicate = state_machine
@@ -407,9 +430,43 @@ fn canonical_runtime_commit_is_atomic_idempotent_durable_and_transferable() {
                 .get(b"vyrm/raft/v4/local/vote")
                 .map_err(test_storage_error)?
                 .is_none());
+            let cached_transfer = state_machine
+                .artifact_manifest_for_cached_snapshot(
+                    &snapshot_meta,
+                    &ScopeId::new("cluster:atomic").map_err(test_storage_error)?,
+                    NodeId::new("node:source").map_err(test_storage_error)?,
+                    NodeId::new("node:target").map_err(test_storage_error)?,
+                )?
+                .expect("artifact-bearing snapshot must produce a transfer manifest");
             drop(builder);
             drop(state_machine);
             drop(log_store);
+
+            let source_native = NativeEngine::open(directory.path()).map_err(test_storage_error)?;
+            let transfer = prepare_artifact_transfer(
+                ReplicaTransferPlan {
+                    contract_version: CLUSTER_CONTRACT_VERSION,
+                    shard: ShardId(12),
+                    placement_epoch: 1,
+                    source: NodeId::new("node:source").map_err(test_storage_error)?,
+                    target: NodeId::new("node:target").map_err(test_storage_error)?,
+                    grounded_snapshot: ShardReadStamp {
+                        term: retry_log.leader_id.term,
+                        commit_index: retry_log.index,
+                        placement_epoch: 1,
+                        state_digest: retried[0].state_digest.clone(),
+                    },
+                    wal_from_exclusive: retry_log.index,
+                    wal_through_inclusive: retry_log.index,
+                    artifact_digests: BTreeSet::new(),
+                },
+                &source_native,
+                &ScopeId::new("cluster:atomic").map_err(test_storage_error)?,
+            )
+            .map_err(test_storage_error)?;
+            assert_eq!(transfer.objects.len(), 1);
+            assert_eq!(cached_transfer, transfer);
+            drop(source_native);
 
             let wal = recover(&directory.path().join("wal/00000000000000000001.wal"))
                 .map_err(test_storage_error)?;
@@ -431,7 +488,7 @@ fn canonical_runtime_commit_is_atomic_idempotent_durable_and_transferable() {
             );
 
             let native = NativeEngine::open(directory.path()).map_err(test_storage_error)?;
-            assert_eq!(native.runtime_cursor().map_err(test_storage_error)?, 1);
+            assert_eq!(native.runtime_cursor().map_err(test_storage_error)?, 2);
             assert_eq!(
                 native
                     .runtime_commit_outcome(&outcome.commit_id)
@@ -466,10 +523,76 @@ fn canonical_runtime_commit_is_atomic_idempotent_durable_and_transferable() {
                 .await
                 .is_err());
             assert_eq!(target_state.applied_state().await?.0, None);
+            let unhydrated_snapshot =
+                snapshot_handle(target_directory.path(), &snapshot_data).await?;
+            let unhydrated = target_state
+                .install_snapshot(&snapshot_meta, unhydrated_snapshot)
+                .await
+                .unwrap_err();
+            assert!(unhydrated.to_string().contains("object missing"));
+            assert_eq!(target_state.applied_state().await?.0, None);
+            let target_artifacts =
+                LocalObjectStore::open(target_directory.path().join("application-objects"))
+                    .map_err(test_storage_error)?;
+            let mut incomplete_plan = transfer.plan.clone();
+            incomplete_plan.artifact_digests.clear();
+            let incomplete = ArtifactTransferManifest::new(
+                incomplete_plan,
+                transfer.scope.clone(),
+                transfer.read.clone(),
+                Vec::new(),
+            )
+            .map_err(test_storage_error)?;
+            let incomplete_snapshot =
+                snapshot_handle(target_directory.path(), &snapshot_data).await?;
+            assert!(target_state
+                .install_snapshot_with_artifacts(
+                    &snapshot_meta,
+                    incomplete_snapshot,
+                    &source_artifacts,
+                    &target_artifacts,
+                    &incomplete,
+                    19,
+                )
+                .await
+                .is_err());
+            assert_eq!(target_state.applied_state().await?.0, None);
+            assert!(target_artifacts
+                .verify(&transfer.objects[0].sha256)
+                .is_err());
+            let missing_source =
+                LocalObjectStore::open(target_directory.path().join("intentionally-empty-source"))
+                    .map_err(test_storage_error)?;
+            let missing_snapshot = snapshot_handle(target_directory.path(), &snapshot_data).await?;
+            assert!(target_state
+                .install_snapshot_with_artifacts(
+                    &snapshot_meta,
+                    missing_snapshot,
+                    &missing_source,
+                    &target_artifacts,
+                    &transfer,
+                    20,
+                )
+                .await
+                .is_err());
+            assert_eq!(target_state.applied_state().await?.0, None);
+
             let first_install = snapshot_handle(target_directory.path(), &snapshot_data).await?;
-            target_state
-                .install_snapshot(&snapshot_meta, first_install)
+            let artifact_receipt = target_state
+                .install_snapshot_with_artifacts(
+                    &snapshot_meta,
+                    first_install,
+                    &source_artifacts,
+                    &target_artifacts,
+                    &transfer,
+                    21,
+                )
                 .await?;
+            assert_eq!(artifact_receipt.transferred_objects, 1);
+            assert_eq!(
+                artifact_receipt.transferred_bytes,
+                artifact_bytes.len() as u64
+            );
             let idempotent_install =
                 snapshot_handle(target_directory.path(), &snapshot_data).await?;
             target_state
@@ -507,13 +630,34 @@ fn canonical_runtime_commit_is_atomic_idempotent_durable_and_transferable() {
                 NativeEngine::open(target_directory.path()).map_err(test_storage_error)?;
             assert_eq!(
                 target_native.runtime_cursor().map_err(test_storage_error)?,
-                1
+                2
             );
             assert_eq!(
                 target_native
                     .runtime_commit_outcome(&outcome.commit_id)
                     .map_err(test_storage_error)?,
                 Some(outcome.clone())
+            );
+            let target_objects = target_native
+                .runtime_changes_since(
+                    0,
+                    usize::MAX,
+                    Some(&ScopeId::new("cluster:atomic").map_err(test_storage_error)?),
+                )
+                .map_err(test_storage_error)?
+                .changes
+                .into_iter()
+                .filter_map(|change| match change.mutation {
+                    RuntimeMutation::Object { object } => Some(object),
+                    _ => None,
+                })
+                .collect::<Vec<_>>();
+            assert_eq!(target_objects.len(), 1);
+            assert_eq!(
+                target_artifacts
+                    .get(&target_objects[0])
+                    .map_err(test_storage_error)?,
+                artifact_bytes
             );
             drop(target_native);
             let (mut target_log, mut target_state) =

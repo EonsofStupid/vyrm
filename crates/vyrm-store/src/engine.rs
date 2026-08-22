@@ -34,10 +34,97 @@ use vyrm_core::{
     projection_family, resolve_as_of, AuditEnvelope, Claim, ClaimSource, DataTransaction,
     DataTransactionView, Millis, ObjectReference, Predicate, ProjectionWork, ReadStamp, Reader,
     RetentionPin, RuntimeChange, RuntimeChangePage, RuntimeCommit, RuntimeCommitOutcome,
-    RuntimeGeo, RuntimeGraphSnapshot, RuntimeMutation, RuntimeRecord, RuntimeRef, RuntimeRelation,
-    RuntimeSchemaRegistry, RuntimeSeriesSample, RuntimeVector, ScopeId, SnapshotHandle, SnapshotId,
-    Subject,
+    RuntimeGeo, RuntimeGraphSnapshot, RuntimeLogAccumulator, RuntimeMutation, RuntimeRecord,
+    RuntimeRef, RuntimeRelation, RuntimeSchemaRegistry, RuntimeSeriesSample, RuntimeVector,
+    ScopeId, SnapshotHandle, SnapshotId, Subject,
 };
+
+/// A read-only physical counter snapshot used to attribute bounded storage
+/// work to one logical operation. Counters are cumulative; callers difference
+/// two snapshots taken immediately around the work. Backends without stable
+/// physical counters return `logical_only` evidence instead of inventing it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PhysicalStoreEvidence {
+    pub backend: String,
+    pub evidence_level: String,
+    pub physical_sequence: Option<u64>,
+    pub manifest_generation: Option<u64>,
+    pub durable_sequence: Option<u64>,
+    pub memtable_versions: Option<u64>,
+    pub memtable_bytes: Option<u64>,
+    pub memtable_max_versions: Option<u64>,
+    pub wal_payload_bytes: Option<u64>,
+    pub wal_payload_max_bytes: Option<u64>,
+    pub automatic_flushes: Option<u64>,
+    pub maintenance_write_stalls: Option<u64>,
+    pub failed_maintenance_flushes: Option<u64>,
+    pub oversized_batches: Option<u64>,
+    pub automatic_compactions: Option<u64>,
+    pub failed_compactions: Option<u64>,
+    pub compaction_input_bytes: Option<u64>,
+    pub compaction_output_bytes: Option<u64>,
+    pub peak_compaction_buffer_bytes: Option<u64>,
+    pub l0_segment_count: Option<u64>,
+    pub l0_compaction_trigger: Option<u64>,
+    pub compaction_debt_segments: Option<u64>,
+    pub compaction_target_segment_bytes: Option<u64>,
+    pub segment_count: Option<u64>,
+    pub segment_bytes: Option<u64>,
+    pub cache_capacity_bytes: Option<u64>,
+    pub cache_resident_bytes: Option<u64>,
+    pub cache_entries: Option<u64>,
+    pub cache_hits: Option<u64>,
+    pub cache_misses: Option<u64>,
+    pub cache_evictions: Option<u64>,
+    pub block_loads: Option<u64>,
+    pub block_bytes_loaded: Option<u64>,
+    pub block_bytes_decoded: Option<u64>,
+    pub filter_checks: Option<u64>,
+    pub filter_negatives: Option<u64>,
+}
+
+impl PhysicalStoreEvidence {
+    pub fn logical_only(backend: impl Into<String>) -> Self {
+        Self {
+            backend: backend.into(),
+            evidence_level: "logical_only".into(),
+            physical_sequence: None,
+            manifest_generation: None,
+            durable_sequence: None,
+            memtable_versions: None,
+            memtable_bytes: None,
+            memtable_max_versions: None,
+            wal_payload_bytes: None,
+            wal_payload_max_bytes: None,
+            automatic_flushes: None,
+            maintenance_write_stalls: None,
+            failed_maintenance_flushes: None,
+            oversized_batches: None,
+            automatic_compactions: None,
+            failed_compactions: None,
+            compaction_input_bytes: None,
+            compaction_output_bytes: None,
+            peak_compaction_buffer_bytes: None,
+            l0_segment_count: None,
+            l0_compaction_trigger: None,
+            compaction_debt_segments: None,
+            compaction_target_segment_bytes: None,
+            segment_count: None,
+            segment_bytes: None,
+            cache_capacity_bytes: None,
+            cache_resident_bytes: None,
+            cache_entries: None,
+            cache_hits: None,
+            cache_misses: None,
+            cache_evictions: None,
+            block_loads: None,
+            block_bytes_loaded: None,
+            block_bytes_decoded: None,
+            filter_checks: None,
+            filter_negatives: None,
+        }
+    }
+}
 
 pub trait Engine: ClaimSource<Error = Error> {
     // ---- primitives every backend supplies ----
@@ -137,6 +224,13 @@ pub trait Engine: ClaimSource<Error = Error> {
 
     /// Looks up a durably accepted content identity for coordinator retry.
     fn runtime_commit_outcome(&self, commit_id: &str) -> Result<Option<RuntimeCommitOutcome>>;
+
+    /// Captures cumulative, non-mutating physical counters. This deliberately
+    /// does not emit a trace: callers bracket logical work and persist one
+    /// bounded summary afterward, avoiding recursive tracing of the trace log.
+    fn physical_store_evidence(&self) -> Result<PhysicalStoreEvidence> {
+        Ok(PhysicalStoreEvidence::logical_only("unspecified"))
+    }
 
     /// Commits a mutation envelope bound to its exact read stamp. The existing
     /// runtime CAS remains the final race-proof authority.
@@ -308,6 +402,10 @@ pub trait Engine: ClaimSource<Error = Error> {
 }
 
 impl Engine for Store {
+    fn physical_store_evidence(&self) -> Result<PhysicalStoreEvidence> {
+        Ok(PhysicalStoreEvidence::logical_only("fjall_compatibility"))
+    }
+
     fn append_batch(&self, claims: &[Claim]) -> Result<AppendOutcome> {
         Store::append_batch(self, claims)
     }
@@ -418,6 +516,8 @@ struct MemoryEngineInner {
     projections: BTreeMap<String, Vec<u8>>,
     observes: u64,
     runtime_changes: Vec<RuntimeChange>,
+    runtime_accumulator: RuntimeLogAccumulator,
+    runtime_merkle_nodes: BTreeMap<(u8, u64), String>,
     runtime_records: BTreeMap<(ScopeId, RuntimeRef), RuntimeRecord>,
     runtime_relations: BTreeMap<(ScopeId, RuntimeRef), RuntimeRelation>,
     runtime_vectors: BTreeMap<(ScopeId, RuntimeRef), RuntimeVector>,
@@ -478,6 +578,10 @@ fn infallible<T>(result: std::result::Result<T, std::convert::Infallible>) -> T 
 }
 
 impl Engine for MemoryEngine {
+    fn physical_store_evidence(&self) -> Result<PhysicalStoreEvidence> {
+        Ok(PhysicalStoreEvidence::logical_only("memory"))
+    }
+
     fn append_batch(&self, claims: &[Claim]) -> Result<AppendOutcome> {
         let mut inner = self.inner.lock().expect("engine mutex");
         // Match Fjall rollback: reject the whole batch before mutating either
@@ -662,14 +766,27 @@ impl Engine for MemoryEngine {
             ));
         }
         let inner = self.inner.lock().expect("engine mutex");
-        memory_validate_read_stamp(&inner, read)?;
-        Ok(memory_change_page(
+        let validation = memory_validate_read_stamp(&inner, read)?;
+        if limit == 1 && after < read.commit_cursor {
+            let mut page = memory_authenticated_point_page(&inner, read, after + 1)?;
+            if validation.method == "full_hash_chain_replay" {
+                page.validation.method = "full_hash_chain_replay_then_rfc9162_inclusion".into();
+                page.validation.change_reads = page
+                    .validation
+                    .change_reads
+                    .saturating_add(validation.change_reads);
+            }
+            return Ok(page);
+        }
+        let mut page = memory_change_page(
             &inner.runtime_changes,
             read.commit_cursor,
             after,
             limit,
             Some(&read.scope),
-        ))
+        );
+        page.validation = validation;
+        Ok(page)
     }
 
     fn commit_runtime(&self, commit: &RuntimeCommit) -> Result<RuntimeCommitOutcome> {
@@ -785,6 +902,8 @@ impl Engine for MemoryEngine {
             .last()
             .map(|change| change.digest.clone());
         let mut committed = Vec::with_capacity(commit.mutations.len());
+        let mut accumulator = inner.runtime_accumulator.clone();
+        let mut merkle_nodes = Vec::new();
         let mut pending_work = Vec::new();
         for (ordinal, mutation) in commit.mutations.iter().cloned().enumerate() {
             let cursor = start + ordinal as u64 + 1;
@@ -806,6 +925,7 @@ impl Engine for MemoryEngine {
                 previous_digest.clone(),
             );
             previous_digest = Some(change.digest.clone());
+            merkle_nodes.extend(accumulator.append_change(&change)?);
             committed.push(change);
         }
         let last_cursor = start + commit.mutations.len() as u64;
@@ -861,6 +981,12 @@ impl Engine for MemoryEngine {
             }
         }
         inner.runtime_changes.extend(committed);
+        inner.runtime_accumulator = accumulator;
+        for node in merkle_nodes {
+            inner
+                .runtime_merkle_nodes
+                .insert((node.level, node.index), node.digest);
+        }
         let outbox_count = pending_work.len();
         for work in pending_work {
             inner.runtime_outbox.insert(work.source_cursor, work);
@@ -941,7 +1067,7 @@ impl Engine for MemoryEngine {
 }
 
 fn memory_read_stamp(inner: &MemoryEngineInner, scope: &ScopeId) -> Result<ReadStamp> {
-    ReadStamp::new(
+    ReadStamp::authenticated(
         scope.clone(),
         inner
             .runtime_schemas
@@ -953,14 +1079,40 @@ fn memory_read_stamp(inner: &MemoryEngineInner, scope: &ScopeId) -> Result<ReadS
             .runtime_changes
             .last()
             .map(|change| change.digest.clone()),
+        inner.runtime_accumulator.root.clone(),
     )
     .map_err(Error::from)
 }
 
-fn memory_validate_read_stamp(inner: &MemoryEngineInner, read: &ReadStamp) -> Result<()> {
+fn memory_validate_read_stamp(
+    inner: &MemoryEngineInner,
+    read: &ReadStamp,
+) -> Result<vyrm_core::RuntimeReadValidation> {
     read.validate()?;
     if read.commit_cursor > inner.runtime_changes.len() as u64 {
         return Err(Error::ReadStampUnavailable(read.manifest_id.clone()));
+    }
+    if read.commit_cursor == inner.runtime_changes.len() as u64 && read.accumulator_root.is_some() {
+        let head_digest = inner
+            .runtime_changes
+            .last()
+            .map(|change| change.digest.clone());
+        let schema_revision = inner
+            .runtime_schemas
+            .get(&read.scope)
+            .map(|schema| schema.revision);
+        if read.catalog_revision != 0
+            || read.head_digest != head_digest
+            || read.schema_revision != schema_revision
+            || read.accumulator_root.as_deref() != Some(inner.runtime_accumulator.root.as_str())
+        {
+            return Err(Error::ReadStampMismatch(read.manifest_id.clone()));
+        }
+        return Ok(vyrm_core::RuntimeReadValidation::new(
+            "authenticated_current_head",
+            0,
+            0,
+        ));
     }
     let head_digest = if read.commit_cursor == 0 {
         None
@@ -981,13 +1133,64 @@ fn memory_validate_read_stamp(inner: &MemoryEngineInner, read: &ReadStamp) -> Re
             _ => None,
         })
         .next_back();
+    if let Some(root) = read.accumulator_root.as_deref() {
+        RuntimeLogAccumulator::from_nodes(read.commit_cursor, root, |level, index| {
+            Ok(inner.runtime_merkle_nodes.get(&(level, index)).cloned())
+        })?;
+    }
     if read.catalog_revision != 0
         || read.head_digest != head_digest
         || read.schema_revision != schema_revision
     {
         return Err(Error::ReadStampMismatch(read.manifest_id.clone()));
     }
-    Ok(())
+    Ok(vyrm_core::RuntimeReadValidation::new(
+        "full_hash_chain_replay",
+        read.commit_cursor,
+        0,
+    ))
+}
+
+fn memory_authenticated_point_page(
+    inner: &MemoryEngineInner,
+    read: &ReadStamp,
+    cursor: u64,
+) -> Result<RuntimeChangePage> {
+    let root = read
+        .accumulator_root
+        .as_deref()
+        .ok_or_else(|| Error::ReadStampMismatch(read.manifest_id.clone()))?;
+    let accumulator = if inner.runtime_accumulator.tree_size == read.commit_cursor
+        && inner.runtime_accumulator.root == root
+    {
+        inner.runtime_accumulator.clone()
+    } else {
+        RuntimeLogAccumulator::from_nodes(read.commit_cursor, root, |level, index| {
+            Ok(inner.runtime_merkle_nodes.get(&(level, index)).cloned())
+        })?
+    };
+    let change = inner
+        .runtime_changes
+        .get(cursor as usize - 1)
+        .cloned()
+        .ok_or_else(|| Error::ReadStampUnavailable(read.manifest_id.clone()))?;
+    let proof = accumulator.inclusion_proof(cursor - 1, |level, index| {
+        Ok(inner.runtime_merkle_nodes.get(&(level, index)).cloned())
+    })?;
+    let proof_nodes = proof.path.len();
+    proof.verify_change(&change, root)?;
+    let selected = (change.scope == read.scope).then_some(change);
+    Ok(RuntimeChangePage {
+        requested_after: cursor - 1,
+        through_cursor: cursor,
+        head_cursor: read.commit_cursor,
+        validation: vyrm_core::RuntimeReadValidation::new(
+            "rfc9162_inclusion_proof",
+            1,
+            proof_nodes,
+        ),
+        changes: selected.into_iter().collect(),
+    })
 }
 
 fn memory_change_page(
@@ -1002,6 +1205,7 @@ fn memory_change_page(
             requested_after: after,
             through_cursor: after,
             head_cursor: head,
+            validation: vyrm_core::RuntimeReadValidation::new("bounded_hash_chain_page", 0, 0),
             changes: Vec::new(),
         };
     }
@@ -1018,6 +1222,11 @@ fn memory_change_page(
         requested_after: after,
         through_cursor: end as u64,
         head_cursor: head,
+        validation: vyrm_core::RuntimeReadValidation::new(
+            "bounded_hash_chain_page",
+            end.saturating_sub(after as usize) as u64,
+            0,
+        ),
         changes: selected,
     }
 }

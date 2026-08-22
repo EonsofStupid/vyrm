@@ -1,6 +1,6 @@
 use crate::{Error, Result};
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs::{File, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -147,6 +147,7 @@ impl Manifest {
             ));
         }
         let mut identities = BTreeSet::new();
+        let mut level_last_keys = BTreeMap::<u8, Vec<u8>>::new();
         for segment in &self.segments {
             segment.validate()?;
             if !identities.insert(&segment.id) {
@@ -160,6 +161,18 @@ impl Manifest {
                     "segment {} extends beyond the durable sequence",
                     segment.id
                 )));
+            }
+            if segment.level != 0 {
+                if level_last_keys
+                    .get(&segment.level)
+                    .is_some_and(|last_key| last_key >= &segment.first_key)
+                {
+                    return Err(Error::InvalidManifest(format!(
+                        "level {} contains overlapping or unordered segment ranges",
+                        segment.level
+                    )));
+                }
+                level_last_keys.insert(segment.level, segment.last_key.clone());
             }
         }
         Ok(())

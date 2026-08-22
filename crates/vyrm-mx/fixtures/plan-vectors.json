@@ -1,85 +1,191 @@
-{
-  "source": "FROM record:document AT VALID 100 KNOWN 4 PROJECT id LIMIT 5 EXPLAIN CONTRACT",
-  "plan": {
-    "logical": {
-      "contract_version": 1,
-      "read": {
+[
+  {
+    "source": "FROM record:document AT VALID 100 KNOWN 4 PROJECT id LIMIT 5 EXPLAIN CONTRACT",
+    "plan": {
+      "logical": {
         "contract_version": 1,
-        "scope": "instance:golden",
+        "read": {
+          "contract_version": 1,
+          "scope": "instance:golden",
+          "schema_revision": 1,
+          "catalog_revision": 1,
+          "commit_cursor": 4,
+          "head_digest": "1111111111111111111111111111111111111111111111111111111111111111",
+          "manifest_id": "338388a17b0b54e1fba9fb30f7b5632a8a4eab4367dfce88d10c7d4f1950e5fd"
+        },
         "schema_revision": 1,
-        "catalog_revision": 1,
-        "commit_cursor": 4,
-        "head_digest": "1111111111111111111111111111111111111111111111111111111111111111",
-        "manifest_id": "338388a17b0b54e1fba9fb30f7b5632a8a4eab4367dfce88d10c7d4f1950e5fd"
+        "operators": [
+          {
+            "operator": "scan",
+            "source": {
+              "family": "record",
+              "kind": "document"
+            }
+          },
+          {
+            "operator": "temporal",
+            "valid_at": 100,
+            "known_at_cursor": 4
+          },
+          {
+            "operator": "project",
+            "projection": {
+              "kind": "fields",
+              "fields": [
+                "id"
+              ]
+            }
+          },
+          {
+            "operator": "limit",
+            "rows": 5
+          }
+        ]
       },
-      "schema_revision": 1,
       "operators": [
         {
-          "operator": "scan",
-          "source": {
-            "family": "record",
-            "kind": "document"
-          }
-        },
-        {
-          "operator": "temporal",
-          "valid_at": 100,
-          "known_at_cursor": 4
-        },
-        {
-          "operator": "project",
-          "projection": {
-            "kind": "fields",
-            "fields": [
-              "id"
-            ]
-          }
-        },
-        {
-          "operator": "limit",
-          "rows": 5
-        }
-      ]
-    },
-    "operators": [
-      {
-        "operator": "authoritative_log_scan",
-        "through_cursor": 4,
-        "exact": true,
-        "stable_order": "global_cursor"
-      },
-      {
-        "operator": "reference_evaluate"
-      }
-    ],
-    "explanation": {
-      "contract": {
-        "read_manifest": "338388a17b0b54e1fba9fb30f7b5632a8a4eab4367dfce88d10c7d4f1950e5fd",
-        "scope": "instance:golden",
-        "valid_at": 100,
-        "known_at_cursor": 4,
-        "schema_revision": 1,
-        "exact": true,
-        "deterministic_order": "identity_ascending",
-        "network_required": false,
-        "gpu_required": false,
-        "authorization_boundary": "scope:instance:golden"
-      },
-      "candidates": [
-        {
-          "name": "authoritative_log_scan",
-          "selected": true,
+          "operator": "authoritative_log_scan",
+          "through_cursor": 4,
           "exact": true,
-          "reason": "replays the immutable log at the captured read stamp"
+          "stable_order": "global_cursor"
         },
         {
-          "name": "derived_projection",
-          "selected": false,
-          "exact": false,
-          "reason": "rejected: no projection generation and grounding proof supplied"
+          "operator": "reference_evaluate"
         }
-      ]
-    },
-    "digest": "bcd75afccd54e6435027bcc1b44a623d2992ac02e2267a789dcf29ad63e59b00"
+      ],
+      "explanation": {
+        "contract": {
+          "read_manifest": "338388a17b0b54e1fba9fb30f7b5632a8a4eab4367dfce88d10c7d4f1950e5fd",
+          "scope": "instance:golden",
+          "valid_at": 100,
+          "known_at_cursor": 4,
+          "schema_revision": 1,
+          "exact": true,
+          "deterministic_order": "identity_ascending",
+          "stamp_validation": "full_hash_chain_replay",
+          "stamp_validation_max_changes": 4,
+          "network_required": false,
+          "gpu_required": false,
+          "authorization_boundary": "scope:instance:golden"
+        },
+        "candidates": [
+          {
+            "name": "authoritative_log_scan",
+            "selected": true,
+            "exact": true,
+            "reason": "replays the immutable log at the captured read stamp"
+          },
+          {
+            "name": "derived_projection",
+            "selected": false,
+            "exact": false,
+            "reason": "rejected: no projection generation and grounding proof supplied"
+          }
+        ]
+      },
+      "digest": "b3cc32f61dee1dcae935b61fed74c71bc869dd7b63e91b014f073d464d41611a"
+    }
+  },
+  {
+    "source": "FROM event:tool_result AT VALID 100 KNOWN 4 WHERE cursor = 4 PROJECT cursor EXPLAIN CONTRACT",
+    "plan": {
+      "logical": {
+        "contract_version": 1,
+        "read": {
+          "contract_version": 1,
+          "scope": "instance:golden",
+          "schema_revision": 1,
+          "catalog_revision": 1,
+          "commit_cursor": 4,
+          "head_digest": "1111111111111111111111111111111111111111111111111111111111111111",
+          "manifest_id": "338388a17b0b54e1fba9fb30f7b5632a8a4eab4367dfce88d10c7d4f1950e5fd"
+        },
+        "schema_revision": 1,
+        "operators": [
+          {
+            "operator": "scan",
+            "source": {
+              "family": "event",
+              "kind": "tool_result"
+            }
+          },
+          {
+            "operator": "temporal",
+            "valid_at": 100,
+            "known_at_cursor": 4
+          },
+          {
+            "operator": "filter",
+            "predicates": [
+              {
+                "field": "cursor",
+                "value": {
+                  "type": "unsigned",
+                  "value": 4
+                }
+              }
+            ]
+          },
+          {
+            "operator": "project",
+            "projection": {
+              "kind": "fields",
+              "fields": [
+                "cursor"
+              ]
+            }
+          }
+        ]
+      },
+      "operators": [
+        {
+          "operator": "authoritative_event_cursor_lookup",
+          "cursor": 4,
+          "through_cursor": 4,
+          "exact": true,
+          "stable_order": "global_cursor"
+        },
+        {
+          "operator": "reference_evaluate"
+        }
+      ],
+      "explanation": {
+        "contract": {
+          "read_manifest": "338388a17b0b54e1fba9fb30f7b5632a8a4eab4367dfce88d10c7d4f1950e5fd",
+          "scope": "instance:golden",
+          "valid_at": 100,
+          "known_at_cursor": 4,
+          "schema_revision": 1,
+          "exact": true,
+          "deterministic_order": "identity_ascending",
+          "stamp_validation": "full_hash_chain_replay",
+          "stamp_validation_max_changes": 4,
+          "network_required": false,
+          "gpu_required": false,
+          "authorization_boundary": "scope:instance:golden"
+        },
+        "candidates": [
+          {
+            "name": "authoritative_event_cursor_lookup",
+            "selected": true,
+            "exact": true,
+            "reason": "uses bound global cursor 4 after the captured stamp is validated"
+          },
+          {
+            "name": "authoritative_log_scan",
+            "selected": false,
+            "exact": true,
+            "reason": "rejected: exact cursor lookup requests fewer result positions after shared stamp validation"
+          },
+          {
+            "name": "derived_projection",
+            "selected": false,
+            "exact": false,
+            "reason": "rejected: no projection generation and grounding proof supplied"
+          }
+        ]
+      },
+      "digest": "67be0109f4e5bdf713bd3e5e2be468b01d565824e8bdff11cde6c51a7facac26"
+    }
   }
-}
+]

@@ -1,6 +1,8 @@
 use serde::Serialize;
 use std::collections::BTreeMap;
-use vyrm_core::{ReadStamp, RuntimeRecordSchema, RuntimeSchemaRegistry, RuntimeType, ScopeId};
+use vyrm_core::{
+    ReadStamp, RuntimeEventSchema, RuntimeRecordSchema, RuntimeSchemaRegistry, RuntimeType, ScopeId,
+};
 use vyrm_mx::{bind, plan, Catalog, Parameters, SchemaVersion};
 use vyrm_ql::parse;
 
@@ -23,6 +25,10 @@ fn physical_plan_matches_golden_vector() {
             ..RuntimeRecordSchema::default()
         },
     );
+    schema.events.insert(
+        RuntimeType::new("tool_result").unwrap(),
+        RuntimeEventSchema::default(),
+    );
     let catalog = Catalog {
         read,
         schemas: vec![SchemaVersion {
@@ -30,13 +36,20 @@ fn physical_plan_matches_golden_vector() {
             registry: schema,
         }],
     };
-    let source = "FROM record:document AT VALID 100 KNOWN 4 PROJECT id LIMIT 5 EXPLAIN CONTRACT";
-    let query = parse(source).unwrap();
-    let vector = Vector {
-        source,
-        plan: plan(&bind(&query, &Parameters::new(), &catalog).unwrap()).unwrap(),
-    };
-    let actual = format!("{}\n", serde_json::to_string_pretty(&vector).unwrap());
+    let vectors = [
+        "FROM record:document AT VALID 100 KNOWN 4 PROJECT id LIMIT 5 EXPLAIN CONTRACT",
+        "FROM event:tool_result AT VALID 100 KNOWN 4 WHERE cursor = 4 PROJECT cursor EXPLAIN CONTRACT",
+    ]
+    .into_iter()
+    .map(|source| {
+        let query = parse(source).unwrap();
+        Vector {
+            source,
+            plan: plan(&bind(&query, &Parameters::new(), &catalog).unwrap()).unwrap(),
+        }
+    })
+    .collect::<Vec<_>>();
+    let actual = format!("{}\n", serde_json::to_string_pretty(&vectors).unwrap());
     let path = concat!(env!("CARGO_MANIFEST_DIR"), "/fixtures/plan-vectors.json");
     if std::env::var_os("VYRM_UPDATE_GOLDENS").is_some() {
         std::fs::create_dir_all(format!("{}/fixtures", env!("CARGO_MANIFEST_DIR"))).unwrap();

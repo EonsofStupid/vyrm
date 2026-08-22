@@ -2,7 +2,11 @@
 
 | Layer | Meaning |
 |---|---|
-| Product | vyrm/connectome: the reusable runtime pattern and shared kernel |
+| Suite | RRFlow: umbrella brand and deployable system |
+| Orchestration | RRO: Automaton/LFG execution, policy, and lifecycle composition |
+| Data runtime | RRD: unified durable contracts over storage capabilities |
+| Storage engine | Vyrm: native LSM authority; columnar path only after measured implementation |
+| Operator client | Connectome Panel: visualization, replay, comparison, and control |
 | Instance | One deployed, isolated runtime molded to a platform or an explicit umbrella |
 | Member | A project admitted to an umbrella instance |
 | Upstream | A capability source such as SurrealDB or Qdrant; never an automatic merge target |
@@ -12,6 +16,12 @@
 A major platform gets a dedicated instance. Its claims, reasoning ledger,
 routing projection, policy evidence, and runtime configuration remain local to
 that platform.
+
+The deployable Raft node config now carries a required `project_scope`. Its
+typed supervisor `runtime_commit` command denies any commit for another scope,
+and snapshot artifact derivation uses the same scope before authenticated
+transfer. This makes the per-project boundary executable at the storage-node
+edge rather than relying only on directory convention.
 
 A set of genuinely related small projects may use one umbrella instance. The
 umbrella has an explicit member list; filesystem proximity is not membership.
@@ -46,6 +56,16 @@ audit, trace, graph, projection freshness, and adapter decisions; Postgres owns
 its rows and transaction history. An idempotent outbox coordinates writes and a
 persisted trace link records the exact project and external source revision.
 See [`runtime-tracing-operator-knowledge.md`](runtime-tracing-operator-knowledge.md).
+
+The portable boundary is now executable in `vyrm-operator`: immutable
+project/member and source/tenant/model bindings, snapshot/catalog/stable-revision
+evidence, exact/HNSW/IVFFlat controls, bounded results, safe pgvector SQL shapes,
+and idempotent vector-outbox work. A live PostgreSQL connection and deployment
+now have repeatable-read snapshot/catalog capture, project revision controls,
+typed upsert/delete work, and exact/HNSW/IVFFlat endpoint differentials behind
+an opt-in feature. Certificate-backed TLS endpoint, process-restart, concurrent
+failure injection, typed payload filters, and scale evidence remain before
+promotion.
 
 ## Upstream capability adoption
 

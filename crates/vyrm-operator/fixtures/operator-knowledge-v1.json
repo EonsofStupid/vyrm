@@ -1,0 +1,112 @@
+{
+  "binding": {
+    "adapter": "pgvector",
+    "config_digest": "2222222222222222222222222222222222222222222222222222222222222222",
+    "contract_version": 1,
+    "dimensions": 3,
+    "member": ".",
+    "model": {
+      "digest": "1111111111111111111111111111111111111111111111111111111111111111",
+      "name": "fixture-model"
+    },
+    "project_id": "operator-golden",
+    "projection": {
+      "artifact_digest": "6666666666666666666666666666666666666666666666666666666666666666",
+      "config_digest": "2222222222222222222222222222222222222222222222222222222222222222",
+      "contract_version": 1,
+      "generation": 2,
+      "id": "operator:pgvector:fixture",
+      "source_cursor": 9,
+      "state": "ready"
+    },
+    "relation_digest": "4444444444444444444444444444444444444444444444444444444444444444",
+    "scope": "instance:operator-golden",
+    "source_identity_digest": "3333333333333333333333333333333333333333333333333333333333333333",
+    "tenant_digest": "5555555555555555555555555555555555555555555555555555555555555555"
+  },
+  "descriptor": {
+    "adapter": "pgvector",
+    "contract_version": 1,
+    "implementation_digest": "7777777777777777777777777777777777777777777777777777777777777777",
+    "max_dimensions": 2000,
+    "search_capabilities": {
+      "exact": [
+        "cosine",
+        "dot",
+        "euclidean",
+        "manhattan"
+      ],
+      "hnsw": [
+        "cosine",
+        "dot",
+        "euclidean",
+        "manhattan"
+      ],
+      "ivf_flat": [
+        "cosine",
+        "dot",
+        "euclidean"
+      ]
+    },
+    "supports_payload_filter": false,
+    "supports_stable_revision": true,
+    "supports_tenant_filter": true,
+    "vector_kinds": [
+      "dense"
+    ]
+  },
+  "request": {
+    "binding_digest": "f3954b107b232995bca3ffcbbe23bb9dcd8aed36df52df1e9cf9e1e12feb6319",
+    "contract_version": 1,
+    "controls": {
+      "hnsw_ef_search": 80,
+      "hnsw_max_scan_tuples": 20000,
+      "iterative_scan": "strict_order",
+      "requested_path": "hnsw"
+    },
+    "expected_stable_revision": "project-revision-9",
+    "required_source_cursor": 9,
+    "search": {
+      "embedding_model": {
+        "digest": "1111111111111111111111111111111111111111111111111111111111111111",
+        "name": "fixture-model"
+      },
+      "field": "body",
+      "metric": "cosine",
+      "mode": {
+        "exact_rerank": 20,
+        "mode": "require_approximate"
+      },
+      "query": {
+        "kind": "dense",
+        "values": [
+          1.0,
+          0.0,
+          0.5
+        ]
+      },
+      "read": {
+        "catalog_revision": 4,
+        "commit_cursor": 9,
+        "contract_version": 1,
+        "head_digest": "8888888888888888888888888888888888888888888888888888888888888888",
+        "manifest_id": "713813a82f2ed62822918671d0b39acdf3c6c4bf0a91464cf1165f0a6f93196e",
+        "schema_revision": 4,
+        "scope": "instance:operator-golden"
+      },
+      "scope": "instance:operator-golden",
+      "top_k": 10,
+      "valid_at": 1000
+    }
+  },
+  "revision": {
+    "adapter": "pgvector",
+    "catalog_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "contract_version": 1,
+    "project_id": "operator-golden",
+    "snapshot_digest": "9999999999999999999999999999999999999999999999999999999999999999",
+    "source_identity_digest": "3333333333333333333333333333333333333333333333333333333333333333",
+    "stable_revision": "project-revision-9",
+    "wal_lsn_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+  }
+}

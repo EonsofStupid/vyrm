@@ -20,23 +20,29 @@
         <div class="instance-title skeleton">Loading</div>
         <div class="instance-meta">Connecting to local runtime…</div>
       </section>
-      <nav class="primary-nav" aria-label="Workbench lenses">
+      <nav class="primary-nav" aria-label="Connectome Panel">
         <button data-view="overview" class="nav-item active"><span class="nav-icon">⌂</span>Overview<span class="shortcut">1</span></button>
-        <button data-view="flight" class="nav-item"><span class="nav-icon">✦</span>Prompt flights<span class="nav-count" id="flight-count">0</span></button>
-        <button data-view="stream" class="nav-item"><span class="nav-icon">∿</span>Temporal stream<span class="nav-count" id="stream-count">0</span></button>
-        <button data-view="graph" class="nav-item"><span class="nav-icon">⌘</span>Graph<span class="shortcut">G</span></button>
-        <button data-view="schema" class="nav-item"><span class="nav-icon">▦</span>Schema<span class="nav-count" id="schema-count">0</span></button>
-        <button data-view="query" class="nav-item"><span class="nav-icon">⌬</span>Query lab<span class="shortcut">Q</span></button>
-        <button data-view="runs" class="nav-item"><span class="nav-icon">↳</span>Runs<span class="nav-count" id="run-count">0</span></button>
-        <button data-view="claims" class="nav-item"><span class="nav-icon">◇</span>Claims<span class="nav-count" id="claim-count">0</span></button>
-        <button data-view="routes" class="nav-item"><span class="nav-icon">⌁</span>Routes<span class="nav-count" id="file-count">0</span></button>
-        <button data-view="activity" class="nav-item"><span class="nav-icon">≋</span>Activity<span class="shortcut">A</span></button>
+        <button data-view="estates" class="nav-item"><span class="nav-icon">⎔</span>Estates<span class="nav-count" id="estate-count">0</span></button>
+        <button data-view="tables" class="nav-item"><span class="nav-icon">▤</span>Tables<span class="nav-count" id="table-count">0</span></button>
+        <button data-view="models" class="nav-item"><span class="nav-icon">⌘</span>Data models<span class="nav-count" id="model-count">0</span></button>
+        <button data-view="visuals" class="nav-item"><span class="nav-icon">✦</span>Visuals<span class="nav-count" id="visual-count">0</span></button>
       </nav>
       <div class="sidebar-section">
-        <div class="eyebrow">RUNTIME LENSES</div>
-        <button class="lens-row" data-view="graph" data-kind="run"><span class="dot violet"></span>Reasoning topology</button>
-        <button class="lens-row" data-view="graph" data-kind="claim"><span class="dot mint"></span>Claim provenance</button>
-        <button class="lens-row" data-view="graph" data-kind="file"><span class="dot amber"></span>Source projection</button>
+        <div class="eyebrow">VISUAL LABS</div>
+        <button class="lens-row" data-view="flight"><span class="dot violet"></span>Prompt flights<span id="flight-count">0</span></button>
+        <button class="lens-row" data-view="stream"><span class="dot mint"></span>Temporal stream<span id="stream-count">0</span></button>
+        <button class="lens-row" data-view="traces"><span class="dot violet"></span>Causal traces<span id="trace-count">0</span></button>
+        <button class="lens-row" data-view="graph"><span class="dot amber"></span>Runtime graph</button>
+        <button class="lens-row" data-view="cluster"><span class="dot mint"></span>Cluster history<span id="cluster-count">0</span></button>
+      </div>
+      <div class="sidebar-section developer-tools">
+        <div class="eyebrow">DEVELOPER TOOLS</div>
+        <button class="lens-row" data-view="capabilities"><span>◉</span>Capabilities</button>
+        <button class="lens-row" data-view="query"><span>⌬</span>Query lab</button>
+        <button class="lens-row" data-view="runs"><span>↳</span>Runs<span id="run-count">0</span></button>
+        <button class="lens-row" data-view="claims"><span>◇</span>Claims<span id="claim-count">0</span></button>
+        <button class="lens-row" data-view="routes"><span>⌁</span>Routes<span id="file-count">0</span></button>
+        <button class="lens-row" data-view="activity"><span>≋</span>Activity</button>
       </div>
       <div class="sidebar-footer">
         <div><span id="connection-dot" class="status-dot waiting"></span><span id="connection-label">Connecting</span></div>

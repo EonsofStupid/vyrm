@@ -14,6 +14,20 @@ fn segment(id: &str, first: &[u8], last: &[u8], minimum: u64, maximum: u64) -> S
     }
 }
 
+fn leveled_segment(
+    id: &str,
+    level: u8,
+    first: &[u8],
+    last: &[u8],
+    minimum: u64,
+    maximum: u64,
+) -> SegmentDescriptor {
+    SegmentDescriptor {
+        level,
+        ..segment(id, first, last, minimum, maximum)
+    }
+}
+
 #[test]
 fn manifest_identity_is_stable_and_segment_order_is_canonical() {
     let left = Manifest::new(
@@ -83,6 +97,35 @@ fn tampering_and_invalid_reachability_fail_closed() {
         ),
         Err(Error::InvalidManifest(_))
     ));
+}
+
+#[test]
+fn levels_above_l0_reject_overlapping_ranges() {
+    let overlap = Manifest::new(
+        1,
+        None,
+        100,
+        4,
+        5,
+        vec![
+            leveled_segment(&"aa".repeat(32), 1, b"a", b"m", 1, 2),
+            leveled_segment(&"bb".repeat(32), 1, b"m", b"z", 3, 4),
+        ],
+    );
+    assert!(matches!(overlap, Err(Error::InvalidManifest(_))));
+
+    Manifest::new(
+        1,
+        None,
+        100,
+        4,
+        5,
+        vec![
+            leveled_segment(&"aa".repeat(32), 1, b"a", b"l", 1, 2),
+            leveled_segment(&"bb".repeat(32), 1, b"m", b"z", 3, 4),
+        ],
+    )
+    .unwrap();
 }
 
 #[test]

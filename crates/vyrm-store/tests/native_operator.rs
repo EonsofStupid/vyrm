@@ -1,4 +1,8 @@
 use vyrm_core::{Claim, Predicate, Producer, Reader, Subject};
+use vyrm_kv::{
+    DatabaseOptions, MaintenancePolicy, DEFAULT_MEMTABLE_MAX_VERSIONS,
+    DEFAULT_WAL_PAYLOAD_MAX_BYTES,
+};
 use vyrm_store::{
     Effectiveness, Engine, InvocationInput, NativeEngine, Outcome, RecallOutcome, Store, Trigger,
 };
@@ -49,6 +53,30 @@ fn native_operator_evidence_matches_fjall_and_survives_reopen() {
     let claims = [claim("wp3", "active"), claim("wp4", "planned")];
     Engine::append_batch(&fjall, &claims).unwrap();
     Engine::append_batch(&native, &claims).unwrap();
+    let physical = native.physical_store_evidence().unwrap();
+    assert_eq!(
+        physical.wal_payload_max_bytes,
+        Some(DEFAULT_WAL_PAYLOAD_MAX_BYTES as u64)
+    );
+    assert_eq!(
+        physical.memtable_max_versions,
+        Some(DEFAULT_MEMTABLE_MAX_VERSIONS as u64)
+    );
+    assert_eq!(physical.automatic_flushes, Some(0));
+    assert_eq!(physical.maintenance_write_stalls, Some(0));
+    assert_eq!(physical.automatic_compactions, Some(0));
+    assert_eq!(physical.failed_compactions, Some(0));
+    assert_eq!(physical.compaction_input_bytes, Some(0));
+    assert_eq!(physical.compaction_output_bytes, Some(0));
+    assert_eq!(physical.peak_compaction_buffer_bytes, Some(0));
+    assert_eq!(physical.l0_segment_count, Some(0));
+    assert_eq!(physical.compaction_debt_segments, Some(0));
+    assert_eq!(
+        physical.l0_compaction_trigger,
+        Some(DatabaseOptions::default().compaction.l0_compaction_trigger as u64)
+    );
+    assert_eq!(physical.filter_checks, Some(0));
+    assert_eq!(physical.filter_negatives, Some(0));
 
     let reader = Reader::new("agent:clyffy").unwrap();
     let subject = Subject::new("wp3").unwrap();
@@ -99,4 +127,38 @@ fn native_operator_evidence_matches_fjall_and_survives_reopen() {
         reopened.removal_report(1_000, 9_000).unwrap(),
         fjall.removal_report(1_000, 9_000).unwrap()
     );
+}
+
+#[test]
+fn native_engine_applies_explicit_project_maintenance_bounds() {
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join("native");
+    let engine = NativeEngine::open_with_options(
+        &path,
+        DatabaseOptions {
+            maintenance: MaintenancePolicy {
+                wal_payload_max_bytes: usize::MAX,
+                memtable_max_versions: 1,
+            },
+            ..DatabaseOptions::default()
+        },
+    )
+    .unwrap();
+    Engine::append_batch(&engine, &[claim("bounded", "active")]).unwrap();
+    Engine::observe(
+        &engine,
+        &Reader::new("agent:clyffy").unwrap(),
+        &Subject::new("bounded").unwrap(),
+        &Predicate::new("status").unwrap(),
+        5_000,
+    )
+    .unwrap();
+
+    let physical = engine.physical_store_evidence().unwrap();
+    assert_eq!(physical.memtable_max_versions, Some(1));
+    assert_eq!(physical.automatic_flushes, Some(1));
+    assert_eq!(physical.maintenance_write_stalls, Some(1));
+    assert_eq!(physical.failed_maintenance_flushes, Some(0));
+    assert_eq!(physical.l0_segment_count, Some(1));
+    assert_eq!(physical.compaction_debt_segments, Some(0));
 }

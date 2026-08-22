@@ -9,7 +9,13 @@ description = "vyrm runtime experience: preflight, harness hooks, stack profiles
 [dependencies]
 vyrm-core = { path = "../vyrm-core" }
 vyrm-graph = { path = "../vyrm-graph" }
+vyrm-ql = { path = "../vyrm-ql" }
+vyrm-mx = { path = "../vyrm-mx" }
 vyrm-store = { path = "../vyrm-store" }
+vyrm-vector = { path = "../vyrm-vector" }
+vyrm-embed = { path = "../vyrm-embed" }
+vyrm-operator = { path = "../vyrm-operator" }
+vyrm-cluster = { path = "../vyrm-cluster", features = ["object-transfer"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tracing = { workspace = true }

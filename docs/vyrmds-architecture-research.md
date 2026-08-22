@@ -279,6 +279,24 @@ and authorization. `EXPLAIN CONTRACT` reports what was requested, what each
 candidate path could deliver, why paths were rejected, and what the chosen path
 will actually provide.
 
+The first optimized physical path is now implemented for event equality on the
+built-in global `cursor`. `authoritative_event_cursor_lookup` reads at most one
+result cursor position through the exact captured `ReadStamp`; the executor
+rejects a plan whose source/filter/known-cursor contract does not match that
+operator. Out-of-range lookups still validate the stamped backend state before
+returning empty. New read stamps bind an RFC 9162-style Merkle root. The compact
+frontier and complete-subtree nodes live in the existing META keyspace and join
+the same atomic commit as the runtime change. A current-head cursor lookup reads
+one change and verifies a logarithmic inclusion path. A retained prefix
+reconstructs the same proof from retained nodes, but reports replay-plus-proof
+because scoped schema history still requires linear validation. Results expose
+the actual method, change-read count, and proof-node count. Legacy logs use the
+linear fallback until their next authoritative commit atomically rebuilds the
+accumulator. All other query shapes retain
+`authoritative_log_scan`. Catalog schema history and record/relation/claim
+access paths still require additional canonical state or grounded projection
+stamps.
+
 ## Vector, embedding, GPU, and edge profile
 
 Vector work proceeds from an exact semantic oracle:
@@ -409,6 +427,11 @@ while an ungrounded projection was rejected. Memory/Fjall/native, typed/text,
 and direct graph API differentials are green. Connectome's Query Lab renders the
 same plan contract beside its rows. The reference path deliberately contains
 no ANN, embedding, network, or GPU behavior; those remain gated to M5.
+The explicit CLI `query` command and MCP `vyrm_query` tool now wrap this same
+path in durable parent/child query, parse/bind, planning, and execution spans.
+They capture the read stamp before the first trace mutation so `KNOWN HEAD` is
+observer-safe, and persist only query/parameter digests plus plan, budget, and
+result evidence. The Connectome GET lens remains read-only.
 
 ### M3 — native `vyrmKV`
 
@@ -483,9 +506,24 @@ hardware/model evidence rather than being inferred from the adapter tests. See
 
 The first protocol/simulation slice landed on 2026-08-19. `vyrm-cluster`
 provides canonical contracts and a deterministic single-term/per-shard quorum
-model covering all listed fault classes. Cross-shard writes fail closed. This
-does not yet implement elections, reconfiguration, networking, or production
-consensus and therefore does not close M7. See `vyrm-cluster-m7.md`.
+model covering all listed fault classes. Feature-gated OpenRaft storage,
+authenticated TCP transport, process isolation, physical snapshot transfer,
+credential rotation/revocation, and pre-activation immutable artifact hydration
+now provide executable one-host evidence. Artifact manifests are independently
+checked against the authenticated snapshot's exact project-scoped object
+closure rather than trusted as source assertions. The remote path now uses
+bounded authenticated chunks, fsynced exact-offset resume, idempotent receipts,
+and typed transfer observations before activation; the four-process test moves
+a real vector artifact after purge. Cross-shard writes still fail closed.
+Receiver quota/GC, concurrent-session scheduling, cluster-consensus trace
+persistence, identity-scoped transport admission, and reset-explicit node
+telemetry now have executable restart/failover/privacy evidence.
+Connectome now validates explicit control-v4 status submissions and retains
+them as audited, per-node hash chains with reset-aware deltas and alerts.
+Independent-host faults, automatic workload identity, automatic telemetry
+collection/export, retained large-closure soak, and real Multi-AZ operations
+remain open, so M7 is not closed. See
+`vyrm-cluster-m7.md`.
 
 Acceptance: deterministic simulation/model checking; partition, delay,
 duplication, reorder, crash, clock-skew, and disk-loss scenarios; linearizable
@@ -503,6 +541,40 @@ Acceptance: every visual value links to its source cursor/snapshot/manifest;
 freeze/rewind uses real persisted events; no synthetic UI state is presented as
 database truth; performance and recall regressions fail CI at explicit bounds.
 
+Status (2026-08-20): the first cross-M3–M6 tracing slice is executable. Exact
+query execution records a nested storage span with complete logical evidence
+and bounded native VyrmKV physical counter deltas. Vector projection
+publication, sealed planning/execution, and embedding inference/read-bound
+commit emit linked, privacy-bounded spans. Vector freshness advances on its
+projection-family source cursor rather than trace traffic; embedding may rebase
+over trace-only observer writes but denies any intervening data/schema change.
+Connectome proves these audited events reach search and storage lanes. Rich
+causal lifecycle analysis, control-only JSON export, and Connectome
+provider/tool-envelope coverage are now implemented. Local artifact-catalog
+publication is also authoritative: immutable exact/compact/HNSW bytes, a typed
+catalog record, and a verified object reference cross one `vyrmDS` transaction;
+restart reconstruction rejects gaps and mismatches. Project-node status now
+exposes typed transport-ingress, artifact-session, and consensus-trace health.
+The Connectome cluster lens reconstructs retained topology from validated
+observations, including bounded-window anchors, and supports freeze, rewind,
+forward playback, derived alerts, and raw status/commit/audit inspection.
+Automatic collection, cross-node catalog replication, OTLP translation, and
+the remaining pgvector production gates stay open.
+
+The portable operator-knowledge prerequisite is now implemented separately from
+live endpoint certification. `vyrm-operator` binds project/member, external
+source/relation/tenant, model space, Vyrm projection, snapshot/catalog evidence,
+optional stable revision, exact/HNSW/IVFFlat controls, results, and idempotent
+vector-outbox work. WAL LSN is explicitly supporting evidence rather than a
+query snapshot. A reference exact adapter and writer prove semantic validation
+and retry-once behavior; node spans and Connectome expose the bounded evidence.
+The opt-in live transport now implements repeatable-read snapshot/catalog/plan
+capture, revision and idempotency control tables, typed upsert/delete, and a
+digest-pinned CI endpoint differential for exact/HNSW/IVFFlat, isolation,
+freshness, retry, and reconnect. Typed payload filters, certificate-backed TLS
+endpoint proof, process restart, concurrency/failure injection, and retained
+performance evidence remain open.
+
 ## Immediate next implementation slice
 
 M2 is closed and the first M3 storage lifecycle is implemented beside—not
@@ -512,13 +584,15 @@ checkpoints, manifest CAS, segment flush, WAL rotation, and reopen at the
 manifest replay boundary are covered. The native `Engine` adapter and
 Memory/Fjall/native semantic/query differential are green. Snapshot-aware
 compaction/GC, physical lease pins, and crash/storage-full recovery matrices are
-also green. The isolated five-trial comparative baseline and strict
-equal-or-better policy are frozen in `docs/vyrmkv-benchmark.md`. Disk-resident
-segment-v3 blocks, optimized SHA-256, streaming immutable reads, self-serving
-native sequence values, and fresh steady-state probes moved every measured cell
-green while preserving correctness. The local M3 gap is closed; a nine-trial
-small-batch/standard/read-heavy/sustained matrix also passes. Next reproduce it
-under remote CI. The local mixed update/delete gate now passes 20,000 operations
+also green. The corrected comparative harness and deny-by-default policy are
+frozen in `docs/vyrmkv-benchmark.md`. It records active, clean-reopen, and
+maintained states for both engines plus physical allocated bytes. The former
+green M3 result used asymmetric maintenance and sparse apparent length; it is
+legacy evidence. Corrected semantics pass. An ordered bounded memtable walk
+makes native win clean-reopen and maintained reads, while write throughput/p95,
+steady RSS, and WAL footprint remain red. The separate
+eight-profile AI-read matrix passes its bounded gates. The local mixed
+update/delete gate passes 20,000 operations
 with 10 reopens and 8 compactions against Fjall and an independent model. The
 existing-store rehearsal copies all 18 canonical keyspaces through an
 authenticated streaming archive, verifies invisible native staging, resumes at

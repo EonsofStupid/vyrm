@@ -2,11 +2,11 @@ use crate::FilterExpression;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use vyrm_core::{
-    Error, Millis, ReadStamp, Result, RuntimeProperties, RuntimeRef, RuntimeVector, ScopeId,
-    VectorValue,
+    digest, Error, Millis, ReadStamp, Result, RuntimeProperties, RuntimeRef, RuntimeVector,
+    ScopeId, VectorValue,
 };
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ScoreMetric {
     Cosine,
@@ -161,6 +161,19 @@ impl SearchRequest {
             filter.validate()?;
         }
         Ok(())
+    }
+
+    /// Stable identity for planning, tracing, and prepared-plan validation.
+    /// Raw vector/filter content stays in the caller-owned request; durable
+    /// evidence needs only this digest and the public plan coordinates.
+    pub fn digest(&self) -> Result<String> {
+        self.validate()?;
+        let encoded = serde_json::to_vec(self).map_err(|error| Error::InvalidRuntime {
+            reason: format!("vector search request cannot be encoded: {error}"),
+        })?;
+        let mut bytes = b"vyrm-vector-search-request-v1\0".to_vec();
+        bytes.extend_from_slice(&encoded);
+        Ok(digest::sha256_hex(&bytes))
     }
 }
 

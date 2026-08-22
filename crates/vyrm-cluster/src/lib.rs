@@ -11,20 +11,28 @@
 //! production Multi-AZ capability remains denied until independent-host
 //! hardware fault and automatic workload-identity evidence pass the invariants.
 
+mod artifact_trace;
+#[cfg(feature = "object-transfer")]
+mod artifact_transfer;
 mod contract;
 #[cfg(feature = "openraft-transport")]
 mod node_runtime;
 #[cfg(feature = "openraft-adapter")]
 mod openraft_adapter;
 mod sim;
+mod telemetry;
 #[cfg(feature = "openraft-transport")]
 mod transport;
 
+pub use artifact_trace::*;
+#[cfg(feature = "object-transfer")]
+pub use artifact_transfer::*;
 pub use contract::*;
 #[cfg(feature = "openraft-transport")]
 pub use node_runtime::*;
 #[cfg(feature = "openraft-adapter")]
 pub use openraft_adapter::*;
 pub use sim::*;
+pub use telemetry::*;
 #[cfg(feature = "openraft-transport")]
 pub use transport::*;

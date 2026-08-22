@@ -11,22 +11,34 @@ use std::io::{BufRead, BufReader, Write};
 use std::net::TcpListener;
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
-use std::thread;
+use std::sync::mpsc::{self, Receiver};
+use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 use tempfile::TempDir;
 use vyrm_cluster::{
-    ClusterId, NodeId, PlacementPolicy, ReplicaPlacement, ReplicaRole, ShardId, ShardPlacement,
-    VyrmNodeCommand, VyrmNodeConfig, VyrmNodeReply, VyrmNodeRequest, VyrmNodeResult,
-    VyrmNodeStatus, VyrmRaftNode, VyrmTlsFiles, VyrmTransportBinding, ZoneId,
-    CLUSTER_CONTRACT_VERSION, VYRM_NODE_CONFIG_VERSION, VYRM_NODE_CONTROL_VERSION,
+    ArtifactTransferManifest, ArtifactTransferReceipt, ClusterId, NodeId, PlacementPolicy,
+    ReplicaPlacement, ReplicaRole, ShardId, ShardPlacement, VyrmNodeCommand, VyrmNodeConfig,
+    VyrmNodeReply, VyrmNodeRequest, VyrmNodeResult, VyrmNodeStatus, VyrmRaftNode, VyrmTlsFiles,
+    VyrmTransportBinding, VyrmTransportOperation, ZoneId, CLUSTER_CONTRACT_VERSION,
+    VYRM_NODE_CONFIG_VERSION, VYRM_NODE_CONTROL_VERSION,
 };
+use vyrm_core::{
+    ObjectReference, RuntimeChange, RuntimeCommit, RuntimeMutation, RuntimeRecordSchema,
+    RuntimeSchemaRegistry, RuntimeType, RuntimeValue, ScopeId,
+};
+use vyrm_store::{Engine, LocalObjectStore, NativeEngine};
 
 const SHARD: ShardId = ShardId(11);
+
+fn project_scope() -> ScopeId {
+    ScopeId::new("instance:process-cluster").unwrap()
+}
 
 struct ProcessNode {
     child: Child,
     input: ChildStdin,
-    output: BufReader<ChildStdout>,
+    output: Receiver<Result<VyrmNodeReply, String>>,
+    reader: Option<JoinHandle<()>>,
     next_request: u64,
 }
 
@@ -40,14 +52,29 @@ impl ProcessNode {
             .spawn()
             .unwrap();
         let input = child.stdin.take().unwrap();
-        let mut output = BufReader::new(child.stdout.take().unwrap());
-        let ready = read_reply(&mut output);
+        let mut child_output = BufReader::new(child.stdout.take().unwrap());
+        let ready = read_reply(&mut child_output);
         assert!(ready.ok, "node did not become ready: {ready:?}");
         assert!(matches!(ready.value, Some(VyrmNodeResult::Ready { .. })));
+        let (reply_sender, output) = mpsc::channel();
+        let reader = thread::spawn(move || loop {
+            let mut line = String::new();
+            let reply = match child_output.read_line(&mut line) {
+                Ok(0) => Err("node closed its supervisor output".into()),
+                Ok(_) => serde_json::from_str(&line)
+                    .map_err(|error| format!("node emitted an invalid supervisor reply: {error}")),
+                Err(error) => Err(format!("read node supervisor reply: {error}")),
+            };
+            let terminal = reply.is_err();
+            if reply_sender.send(reply).is_err() || terminal {
+                break;
+            }
+        });
         Self {
             child,
             input,
             output,
+            reader: Some(reader),
             next_request: 1,
         }
     }
@@ -72,14 +99,20 @@ impl ProcessNode {
         .unwrap();
         self.input.write_all(b"\n").unwrap();
         self.input.flush().unwrap();
-        let reply = read_reply(&mut self.output);
+        let reply = self
+            .output
+            .recv_timeout(Duration::from_secs(45))
+            .unwrap_or_else(|error| {
+                panic!("node supervisor reply timed out for {command:?}: {error}")
+            })
+            .unwrap_or_else(|error| panic!("node supervisor reply failed: {error}"));
         assert_eq!(reply.request_id.as_deref(), Some(request_id.as_str()));
         reply
     }
 
     fn status(&mut self) -> VyrmNodeStatus {
         match self.command(&VyrmNodeCommand::Status) {
-            VyrmNodeResult::Status { status } => status,
+            VyrmNodeResult::Status { status } => *status,
             other => panic!("expected status, got {other:?}"),
         }
     }
@@ -87,6 +120,7 @@ impl ProcessNode {
     fn crash(&mut self) {
         self.child.kill().unwrap();
         self.child.wait().unwrap();
+        self.join_reader();
     }
 
     fn shutdown(mut self) {
@@ -95,6 +129,13 @@ impl ProcessNode {
             VyrmNodeResult::Ack
         );
         assert!(self.child.wait().unwrap().success());
+        self.join_reader();
+    }
+
+    fn join_reader(&mut self) {
+        if let Some(reader) = self.reader.take() {
+            reader.join().expect("node supervisor reader panicked");
+        }
     }
 }
 
@@ -104,6 +145,7 @@ impl Drop for ProcessNode {
             let _ = self.child.kill();
             let _ = self.child.wait();
         }
+        self.join_reader();
     }
 }
 
@@ -151,6 +193,67 @@ fn independent_processes_recover_fail_over_snapshot_and_reject_corruption() {
     wait_applied(&mut node2, first_index);
     wait_applied(&mut node3, first_index);
 
+    let artifact_bytes = (0..(vyrm_cluster::ARTIFACT_TRANSFER_CHUNK_MAX_BYTES + 177_013))
+        .map(|index| (index % 241) as u8)
+        .collect::<Vec<_>>();
+    let mut source_receipt = None;
+    for id in 1..=3 {
+        let objects =
+            LocalObjectStore::open(fixture.data_roots[&id].join("application-objects")).unwrap();
+        let stored = objects.put(&artifact_bytes).unwrap();
+        if let Some(expected) = &source_receipt {
+            assert_eq!(expected, &stored);
+        } else {
+            source_receipt = Some(stored);
+        }
+    }
+    let stored = source_receipt.unwrap();
+    let artifact = ObjectReference::for_bytes(
+        "vector:hnsw:process-fixture@1:bytes",
+        None,
+        "application/vnd.vyrm.vector-hnsw+json",
+        &artifact_bytes,
+        stored.receipt,
+    )
+    .unwrap();
+    let mut artifact_schema = RuntimeSchemaRegistry::empty(1, "process artifact fixture");
+    artifact_schema.records.insert(
+        RuntimeType::new("artifact_fixture").unwrap(),
+        RuntimeRecordSchema::default(),
+    );
+    let artifact_commit = RuntimeCommit {
+        scope: project_scope(),
+        at: 10,
+        actor: "cluster:process-test".into(),
+        expected_cursor: 0,
+        mutations: vec![
+            RuntimeMutation::Schema {
+                registry: artifact_schema,
+            },
+            RuntimeMutation::Object {
+                object: artifact.clone(),
+            },
+        ],
+    };
+    let mut foreign_commit = artifact_commit.clone();
+    foreign_commit.scope = ScopeId::new("instance:foreign-project").unwrap();
+    let denied = node1.command_reply(&VyrmNodeCommand::RuntimeCommit {
+        request_id: "process-runtime-foreign".into(),
+        placement_epoch: 1,
+        expected_commit_index: Some(first_index),
+        commit: foreign_commit,
+    });
+    assert!(!denied.ok);
+    assert!(denied.error.unwrap().contains("configured project"));
+    let artifact_index = write_index(node1.command(&VyrmNodeCommand::RuntimeCommit {
+        request_id: "process-runtime-artifact-1".into(),
+        placement_epoch: 1,
+        expected_commit_index: Some(first_index),
+        commit: artifact_commit,
+    }));
+    wait_applied(&mut node2, artifact_index);
+    wait_applied(&mut node3, artifact_index);
+
     let rotated = node1.command(&VyrmNodeCommand::RotateCredentials {
         expected_generation: 1,
         files: fixture.rotations[&1].clone(),
@@ -177,7 +280,7 @@ fn independent_processes_recover_fail_over_snapshot_and_reject_corruption() {
     let second_index = write_index(node1.command(&VyrmNodeCommand::Probe {
         request_id: "process-probe-2".into(),
         placement_epoch: 1,
-        expected_commit_index: Some(first_index),
+        expected_commit_index: Some(artifact_index),
         payload: b"while-node-two-is-down".to_vec(),
     }));
     node2 = ProcessNode::start(&fixture.configs[&2]);
@@ -213,43 +316,138 @@ fn independent_processes_recover_fail_over_snapshot_and_reject_corruption() {
     });
     wait_applied(&mut node1, failover_index);
 
-    let (partition_index, partition_leader) = if failover_leader == 2 {
+    let partition_index = if failover_leader == 2 {
         isolate_then_elect_and_write(&mut node2, &mut node3, &mut node1)
     } else {
         isolate_then_elect_and_write(&mut node3, &mut node2, &mut node1)
     };
 
-    let snapshot_leader = match partition_leader {
-        1 => &mut node1,
-        2 => &mut node2,
-        3 => &mut node3,
-        other => panic!("unexpected partition leader {other}"),
-    };
-    assert_eq!(
-        snapshot_leader.command(&VyrmNodeCommand::TriggerSnapshot),
-        VyrmNodeResult::Ack
-    );
-    let snapshot_index = wait_for_snapshot(snapshot_leader, partition_index);
-    assert_eq!(
-        snapshot_leader.command(&VyrmNodeCommand::PurgeLog {
-            index: snapshot_index,
-        }),
-        VyrmNodeResult::Ack
-    );
-    wait_for_purge(snapshot_leader, snapshot_index);
-
     let mut node4 = ProcessNode::start(&fixture.configs[&4]);
+    let snapshot_index = {
+        let mut voters = [&mut node1, &mut node2, &mut node3];
+        snapshot_purge_and_add_learner(&mut voters, partition_index, 4)
+    };
+    let consensus_trace_tail = [&mut node1, &mut node2, &mut node3]
+        .into_iter()
+        .filter_map(|node| node.status().last_log_index)
+        .max()
+        .unwrap();
+    wait_applied(&mut node4, consensus_trace_tail);
+    wait_snapshot(&mut node4, snapshot_index);
+    let learner_objects =
+        LocalObjectStore::open(fixture.data_roots[&4].join("application-objects")).unwrap();
+    assert_eq!(learner_objects.get(&artifact).unwrap(), artifact_bytes);
+    let sessions = fixture.data_roots[&4]
+        .join("application-objects")
+        .join("transfer-sessions-v1");
+    let session_directories = fs::read_dir(&sessions)
+        .unwrap()
+        .map(|entry| entry.unwrap().path())
+        .filter(|path| path.is_dir())
+        .collect::<Vec<_>>();
+    assert!(!session_directories.is_empty());
+    let mut receipts = Vec::new();
+    for directory in session_directories {
+        let manifest: ArtifactTransferManifest =
+            serde_json::from_slice(&fs::read(directory.join("manifest.json")).unwrap()).unwrap();
+        manifest.validate().unwrap();
+        assert_eq!(manifest.plan.target.as_str(), "process-node-4");
+        assert!(manifest
+            .objects
+            .iter()
+            .any(|object| object.sha256 == artifact.sha256));
+        let receipt_path = directory.join("receipt.json");
+        if receipt_path.is_file() {
+            let receipt: ArtifactTransferReceipt =
+                serde_json::from_slice(&fs::read(receipt_path).unwrap()).unwrap();
+            receipt.validate(&manifest).unwrap();
+            receipts.push(receipt);
+        }
+    }
+    assert!(!receipts.is_empty());
+    assert!(receipts
+        .iter()
+        .all(|receipt| receipt.target.as_str() == "process-node-4"));
+    let transferred_objects = receipts
+        .iter()
+        .map(|receipt| receipt.transferred_objects)
+        .sum::<u64>();
+    let transferred_bytes = receipts
+        .iter()
+        .map(|receipt| receipt.transferred_bytes)
+        .sum::<u64>();
+    assert!(transferred_objects <= 1);
     assert_eq!(
-        snapshot_leader.command(&VyrmNodeCommand::AddLearner { node_id: 4 }),
-        VyrmNodeResult::Ack
+        transferred_bytes,
+        if transferred_objects == 1 {
+            artifact_bytes.len() as u64
+        } else {
+            0
+        }
     );
-    wait_applied(&mut node4, partition_index);
+
+    let learner_status = node4.status();
+    learner_status.validate().unwrap();
+    assert_eq!(learner_status.project_scope, project_scope());
+    assert_eq!(learner_status.cluster, fixture.cluster);
+    assert_eq!(learner_status.shard, SHARD);
+    assert_eq!(learner_status.canonical_node_id.as_str(), "process-node-4");
+    assert_eq!(
+        learner_status.telemetry.observed_at,
+        learner_status.telemetry.transport_ingress.observed_at
+    );
+    assert_eq!(
+        learner_status.telemetry.observed_at,
+        learner_status.telemetry.artifacts.observed_at
+    );
     assert!(
-        node4.status().snapshot_index.is_some(),
-        "post-purge learner must catch up from a physical snapshot"
+        learner_status.telemetry.transport_ingress.operations[&VyrmTransportOperation::Artifact]
+            .allowed
+            > 0
     );
+    assert!(learner_status.telemetry.artifacts.completed_responses > 0);
+    assert!(
+        learner_status
+            .telemetry
+            .artifacts
+            .inventory
+            .retained_receipts
+            > 0
+    );
+    assert!(!learner_status.telemetry.transport_ingress.overflowed);
+    assert!(!learner_status.telemetry.artifacts.overflowed);
+    let voter_telemetry = voter_statuses(&mut [&mut node1, &mut node2, &mut node3]);
+    assert!(voter_telemetry.iter().any(|status| status
+        .telemetry
+        .consensus_traces
+        .commit_acknowledgements
+        > 0));
+    let encoded_status = serde_json::to_vec(&learner_status).unwrap();
+    assert!(!encoded_status
+        .windows(64)
+        .any(|window| window == &artifact_bytes[..64]));
 
     node4.shutdown();
+    let learner_changes = project_changes(&fixture.data_roots[&4]);
+    let trace_events = learner_changes
+        .iter()
+        .filter_map(|change| match &change.mutation {
+            RuntimeMutation::Event { event } if event.kind.as_str() == "runtime_trace" => {
+                event.properties.get("name")
+            }
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert!(trace_events
+        .iter()
+        .any(|name| **name == RuntimeValue::String("cluster.artifact_transfer".into())));
+    assert!(trace_events
+        .iter()
+        .any(|name| **name == RuntimeValue::String("cluster.artifact_chunk".into())));
+    assert!(!serde_json::to_vec(&learner_changes)
+        .unwrap()
+        .windows(64)
+        .any(|window| window == &artifact_bytes[..64]));
     let current = fixture.data_roots[&4].join("CURRENT");
     let mut corrupt = fs::read(&current).unwrap();
     corrupt.push(0xff);
@@ -262,6 +460,21 @@ fn independent_processes_recover_fail_over_snapshot_and_reject_corruption() {
     node1.shutdown();
     node2.shutdown();
     node3.shutdown();
+    for id in 1..=3 {
+        assert_eq!(
+            project_changes(&fixture.data_roots[&id]),
+            learner_changes,
+            "voter {id} and the post-purge learner must retain identical consensus trace truth"
+        );
+    }
+}
+
+fn project_changes(root: &Path) -> Vec<RuntimeChange> {
+    let engine = NativeEngine::open(root).unwrap();
+    engine
+        .runtime_changes_since(0, usize::MAX, Some(&project_scope()))
+        .unwrap()
+        .changes
 }
 
 fn wait_for_leader(node: &mut ProcessNode, expected: u64) {
@@ -303,12 +516,12 @@ fn isolate_then_elect_and_write(
     isolated: &mut ProcessNode,
     preferred: &mut ProcessNode,
     other: &mut ProcessNode,
-) -> (u64, u64) {
+) -> u64 {
     assert_eq!(
         isolated.command(&VyrmNodeCommand::SetTransportEnabled { enabled: false }),
         VyrmNodeResult::Ack
     );
-    let (index, leader) = elect_and_write(
+    let (index, _) = elect_and_write(
         preferred,
         other,
         "process-probe-partition",
@@ -319,7 +532,7 @@ fn isolate_then_elect_and_write(
         VyrmNodeResult::Ack
     );
     wait_applied(isolated, index);
-    (index, leader)
+    index
 }
 
 fn wait_for_agreed_leader(
@@ -371,7 +584,7 @@ fn write_from_leader(
 fn wait_applied(node: &mut ProcessNode, index: u64) {
     match node.command(&VyrmNodeCommand::WaitApplied {
         index,
-        timeout_millis: 10_000,
+        timeout_millis: 30_000,
     }) {
         VyrmNodeResult::Status { status } => {
             assert!(status.last_applied_index >= Some(index));
@@ -380,43 +593,109 @@ fn wait_applied(node: &mut ProcessNode, index: u64) {
     }
 }
 
-fn wait_for_snapshot(node: &mut ProcessNode, at_least: u64) -> u64 {
+fn wait_snapshot(node: &mut ProcessNode, index: u64) {
     let deadline = Instant::now() + Duration::from_secs(10);
     loop {
-        if let Some(index) = node
-            .status()
-            .snapshot_index
-            .filter(|index| *index >= at_least)
-        {
-            return index;
+        let status = node.status();
+        if status.snapshot_index >= Some(index) {
+            return;
         }
-        assert!(Instant::now() < deadline, "snapshot was not published");
+        assert!(
+            Instant::now() < deadline,
+            "post-purge learner did not report physical snapshot activation: {status:?}"
+        );
+        thread::sleep(Duration::from_millis(25));
+    }
+}
+
+fn snapshot_purge_and_add_learner(
+    voters: &mut [&mut ProcessNode],
+    at_least: u64,
+    learner: u64,
+) -> u64 {
+    let deadline = Instant::now() + Duration::from_secs(60);
+    let mut next_trigger = Instant::now();
+    let mut last_add_reply = None;
+    loop {
+        let statuses = voter_statuses(voters);
+        if Instant::now() >= next_trigger {
+            for node_id in statuses.iter().map(|status| status.raft_node_id) {
+                let _ = command_on_voter(voters, node_id, &VyrmNodeCommand::TriggerSnapshot);
+            }
+            next_trigger = Instant::now() + Duration::from_millis(250);
+        }
+
+        if statuses
+            .iter()
+            .all(|status| status.snapshot_index >= Some(at_least))
+        {
+            let snapshot_index = statuses
+                .iter()
+                .filter_map(|status| status.snapshot_index)
+                .min()
+                .expect("all voters reported a snapshot");
+            for node_id in statuses.iter().map(|status| status.raft_node_id) {
+                let reply = command_on_voter(
+                    voters,
+                    node_id,
+                    &VyrmNodeCommand::PurgeLog {
+                        index: snapshot_index,
+                    },
+                );
+                assert!(reply.ok, "voter {node_id} failed to purge: {reply:?}");
+            }
+            let purged = voter_statuses(voters);
+            if purged
+                .iter()
+                .all(|status| status.purged_index >= Some(snapshot_index))
+            {
+                if let Some(leader) = quorum_agreed_leader(&purged) {
+                    let reply = command_on_voter(
+                        voters,
+                        leader,
+                        &VyrmNodeCommand::AddLearner { node_id: learner },
+                    );
+                    if reply.ok {
+                        assert_eq!(reply.value, Some(VyrmNodeResult::Ack));
+                        return snapshot_index;
+                    }
+                    last_add_reply = Some(reply);
+                }
+            }
+        }
+        assert!(
+            Instant::now() < deadline,
+            "voters did not snapshot, purge, and add the learner: {statuses:?}; last add reply: {last_add_reply:?}"
+        );
         thread::sleep(Duration::from_millis(50));
     }
 }
 
-fn wait_for_purge(node: &mut ProcessNode, at_least: u64) {
-    let deadline = Instant::now() + Duration::from_secs(10);
-    let mut next_trigger = Instant::now();
-    loop {
-        if node.status().purged_index >= Some(at_least) {
-            return;
-        }
-        // OpenRaft acknowledges an external purge trigger when it is queued.
-        // A leader may defer the physical purge while a replication task owns
-        // the requested log range, and no later progress notification is
-        // guaranteed after that task releases it. Reasserting the idempotent
-        // trigger makes the process-level completion contract deterministic.
-        if Instant::now() >= next_trigger {
-            assert_eq!(
-                node.command(&VyrmNodeCommand::PurgeLog { index: at_least }),
-                VyrmNodeResult::Ack
-            );
-            next_trigger = Instant::now() + Duration::from_millis(250);
-        }
-        assert!(Instant::now() < deadline, "snapshot log was not purged");
-        thread::sleep(Duration::from_millis(50));
+fn voter_statuses(voters: &mut [&mut ProcessNode]) -> Vec<VyrmNodeStatus> {
+    voters.iter_mut().map(|node| node.status()).collect()
+}
+
+fn quorum_agreed_leader(statuses: &[VyrmNodeStatus]) -> Option<u64> {
+    let mut counts = BTreeMap::new();
+    for leader in statuses.iter().filter_map(|status| status.current_leader) {
+        *counts.entry(leader).or_insert(0usize) += 1;
     }
+    counts
+        .into_iter()
+        .find_map(|(leader, count)| (count >= 2).then_some(leader))
+}
+
+fn command_on_voter(
+    voters: &mut [&mut ProcessNode],
+    node_id: u64,
+    command: &VyrmNodeCommand,
+) -> VyrmNodeReply {
+    for node in voters {
+        if node.status().raft_node_id == node_id {
+            return node.command_reply(command);
+        }
+    }
+    panic!("voter inventory did not contain node {node_id}")
 }
 
 fn write_index(result: VyrmNodeResult) -> u64 {
@@ -553,6 +832,7 @@ impl ProcessFixture {
                 trust_domain: trust_domain.into(),
                 cluster: cluster.clone(),
                 shard: SHARD,
+                project_scope: project_scope(),
                 raft_node_id: id,
                 data_root: data_root.clone(),
                 raft_listen: addresses[&id].to_string(),
@@ -560,6 +840,8 @@ impl ProcessFixture {
                 certificate_der: certificate_path.clone(),
                 private_key_der: key_path,
                 trust_root_der: trust_root.clone(),
+                transport_admission: Default::default(),
+                raft_timing: Default::default(),
             };
             let config_path = directory.path().join(format!("node-{id}.json"));
             fs::write(&config_path, serde_json::to_vec_pretty(&config).unwrap()).unwrap();

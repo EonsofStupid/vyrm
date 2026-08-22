@@ -1,8 +1,141 @@
 use crate::contract::invalid;
-use crate::{CandidatePath, HnswDescriptor, SegmentDescriptor, EXACT_SCAN_PROJECTION_ID};
+use crate::{
+    CandidatePath, HnswDescriptor, SegmentDescriptor, VectorArtifact, VectorArtifactKind,
+    EXACT_SCAN_PROJECTION_ID,
+};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
-use vyrm_core::{ProjectionId, ProjectionStamp, ProjectionState, Result};
+use vyrm_core::{
+    digest, ObjectReference, ProjectionId, ProjectionStamp, ProjectionState, Result, RuntimeRef,
+    ScopeId,
+};
+
+pub const VECTOR_ARTIFACT_CATALOG_VERSION: u16 = 1;
+pub const VECTOR_ARTIFACT_RECORD_TYPE: &str = "vector_artifact";
+
+/// One immutable, reconstructable vector projection publication.
+///
+/// The descriptor says what may be served. The object reference says exactly
+/// which verified bytes implement it. Both enter one authoritative runtime
+/// transaction, so a catalog entry can never point at a partially published
+/// file or silently change representation after restart.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct VectorArtifactCatalogEntry {
+    pub contract_version: u16,
+    pub catalog_revision: u64,
+    pub kind: VectorArtifactKind,
+    pub descriptor: VectorProjectionDescriptor,
+    pub object: ObjectReference,
+    pub published_at: u64,
+    pub entry_digest: String,
+}
+
+impl VectorArtifactCatalogEntry {
+    pub fn record_reference(descriptor: &VectorProjectionDescriptor) -> Result<RuntimeRef> {
+        RuntimeRef::new(
+            VECTOR_ARTIFACT_RECORD_TYPE,
+            format!(
+                "{}@{}",
+                descriptor.stamp().id,
+                descriptor.stamp().generation
+            ),
+        )
+    }
+
+    pub fn new(
+        catalog_revision: u64,
+        kind: VectorArtifactKind,
+        descriptor: VectorProjectionDescriptor,
+        object: ObjectReference,
+        published_at: u64,
+    ) -> Result<Self> {
+        let mut entry = Self {
+            contract_version: VECTOR_ARTIFACT_CATALOG_VERSION,
+            catalog_revision,
+            kind,
+            descriptor,
+            object,
+            published_at,
+            entry_digest: String::new(),
+        };
+        entry.validate_components()?;
+        entry.entry_digest = digest::sha256_hex(&entry.identity_bytes()?);
+        Ok(entry)
+    }
+
+    pub fn validate(&self) -> Result<()> {
+        self.validate_components()?;
+        let expected = digest::sha256_hex(&self.identity_bytes()?);
+        if self.entry_digest != expected {
+            return invalid("vector artifact catalog entry digest does not match its fields");
+        }
+        Ok(())
+    }
+
+    pub fn scope(&self) -> &ScopeId {
+        self.descriptor.scope()
+    }
+
+    pub fn decode_artifact(&self, bytes: &[u8]) -> Result<VectorArtifact> {
+        self.validate()?;
+        if bytes.len() as u64 != self.object.length
+            || digest::sha256_hex(bytes) != self.object.sha256
+        {
+            return invalid("vector artifact object bytes differ from the catalog reference");
+        }
+        let artifact = VectorArtifact::from_bytes(self.kind, bytes)?;
+        if artifact.descriptor() != self.descriptor {
+            return invalid("decoded vector artifact differs from its catalog descriptor");
+        }
+        Ok(artifact)
+    }
+
+    fn validate_components(&self) -> Result<()> {
+        if self.contract_version != VECTOR_ARTIFACT_CATALOG_VERSION || self.catalog_revision == 0 {
+            return invalid("vector artifact catalog version and revision must be valid");
+        }
+        self.descriptor.validate()?;
+        if self.descriptor.stamp().state != ProjectionState::Ready {
+            return invalid("cataloged vector artifact must be ready");
+        }
+        let kind_matches = matches!(
+            (&self.descriptor, self.kind),
+            (
+                VectorProjectionDescriptor::ExactSegment { .. },
+                VectorArtifactKind::ExactSegment | VectorArtifactKind::CompactDense
+            ) | (
+                VectorProjectionDescriptor::Hnsw { .. },
+                VectorArtifactKind::Hnsw
+            )
+        );
+        if !kind_matches {
+            return invalid("vector artifact codec kind differs from its projection descriptor");
+        }
+        self.object.validate()?;
+        if self.object.media_type != self.kind.media_type() {
+            return invalid("vector artifact object media type differs from its codec kind");
+        }
+        if self.object.subject.as_ref() != Some(&Self::record_reference(&self.descriptor)?) {
+            return invalid("vector artifact object is not attached to its catalog record");
+        }
+        Ok(())
+    }
+
+    fn identity_bytes(&self) -> Result<Vec<u8>> {
+        serde_json::to_vec(&(
+            self.contract_version,
+            self.catalog_revision,
+            self.kind,
+            &self.descriptor,
+            &self.object,
+            self.published_at,
+        ))
+        .map_err(|error| vyrm_core::Error::InvalidRuntime {
+            reason: format!("vector artifact catalog identity cannot be encoded: {error}"),
+        })
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
@@ -16,6 +149,13 @@ impl VectorProjectionDescriptor {
         match self {
             Self::ExactSegment { descriptor } => &descriptor.stamp,
             Self::Hnsw { descriptor } => &descriptor.stamp,
+        }
+    }
+
+    pub fn scope(&self) -> &vyrm_core::ScopeId {
+        match self {
+            Self::ExactSegment { descriptor } => &descriptor.scope,
+            Self::Hnsw { descriptor } => &descriptor.scope,
         }
     }
 

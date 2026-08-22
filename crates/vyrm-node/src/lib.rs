@@ -18,32 +18,59 @@
 //! model's discipline. Writes ride Buffered durability and never block the
 //! turn; recall is the only synchronous path.
 
+pub mod cluster_transfer;
+pub mod data_plane;
 pub mod hook;
 pub mod init;
 pub mod instance;
+pub mod operator_knowledge;
 pub mod policy;
 pub mod preflight;
+pub mod query;
 pub mod reasoning;
 pub mod registry;
 pub mod routing;
 pub mod stack;
 pub mod trace;
+pub mod vector_catalog;
 pub mod workflow;
 
+pub use cluster_transfer::{
+    execute_traced_artifact_transfer, record_artifact_transfer_observation,
+    DurableArtifactTransferObserver,
+};
+pub use data_plane::{
+    execute_traced_embedding, execute_traced_vector_search, TracedEmbeddingExecution,
+    TracedVectorSearch,
+};
 pub use hook::{handle, HookContext, HookEvent, HookResponse};
 pub use init::{init, InitReport, STORE_DIR};
 pub use instance::{
     InstanceBinding, InstanceManifest, InstanceMode, INSTANCE_FILE, INSTANCE_FORMAT,
 };
+pub use operator_knowledge::{
+    execute_traced_operator_search, execute_traced_operator_sync, TracedOperatorSearch,
+    TracedOperatorSync,
+};
 pub use policy::{evaluate_tool, ContractDifferential, ToolPolicy};
 pub use preflight::{preflight, Preflight};
+pub use query::{
+    execute_traced_query, query_parameters_from_json, ExecutionBudget, Parameters,
+    TracedQueryExecution,
+};
 pub use reasoning::{
     active_reasoning_run, reasoning_run, reasoning_runs, record_reasoning, REASONING_SCOPE,
 };
 pub use registry::{Harness, Registry, Verification, VERIFICATION_TTL_MS};
 pub use routing::{ensure_routing_fresh, load_routing, reset_routing, RoutingReady};
 pub use stack::{detect, package_run_event, PackageManager, PackageRunEvent, StackProfile};
-pub use trace::{install_runtime_trace_contract, record_runtime_trace, TraceIdentity};
+pub use trace::{
+    install_runtime_trace_contract, record_runtime_trace, DurableTraceSpan, TraceIdentity,
+};
+pub use vector_catalog::{
+    publish_traced_vector_artifact, reopen_vector_runtime, vector_artifact_catalog_entries,
+    VectorArtifactPublication,
+};
 pub use workflow::{
     resolve_package_command, VerificationPolicy, WorkflowAuthorization, WorkflowCatalog,
     WorkflowDecision, WorkflowDifferential, WorkflowManifest, WorkflowObservation,

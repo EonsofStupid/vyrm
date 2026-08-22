@@ -45,7 +45,7 @@ fn atomic_frames_round_trip_and_continue_after_reopen() {
 
     let mut reopened = WalWriter::open(&path).unwrap();
     assert_eq!(reopened.next_sequence(), 4);
-    reopened
+    let third = reopened
         .append(
             &WalBatch {
                 first_sequence: 4,
@@ -55,6 +55,7 @@ fn atomic_frames_round_trip_and_continue_after_reopen() {
             Durability::Authoritative,
         )
         .unwrap();
+    assert_eq!(third.offset, second.end_offset);
     assert_eq!(recover(&path).unwrap().recovered_through, 7);
 }
 
