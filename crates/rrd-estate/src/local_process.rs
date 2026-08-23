@@ -60,6 +60,36 @@ pub struct LocalDeployment {
     pub shutdown: LocalShutdown,
 }
 
+impl LocalDeployment {
+    pub fn authenticate(
+        id: CanonicalId,
+        version: impl Into<String>,
+        executable: impl AsRef<Path>,
+        arguments: Vec<LocalArgument>,
+        environment: BTreeMap<String, String>,
+        shutdown: LocalShutdown,
+    ) -> std::result::Result<Self, String> {
+        let executable = std::fs::canonicalize(executable.as_ref())
+            .map_err(|error| format!("cannot resolve deployment executable: {error}"))?;
+        if !executable.is_file() {
+            return Err("deployment executable is not a regular file".into());
+        }
+        let executable_sha256 = file_sha256(&executable)
+            .map_err(|error| format!("cannot authenticate deployment executable: {error}"))?;
+        let deployment = Self {
+            id,
+            version: version.into(),
+            executable,
+            executable_sha256,
+            arguments,
+            environment,
+            shutdown,
+        };
+        LocalDeploymentCatalog::single(deployment.clone())?;
+        Ok(deployment)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct LocalDeploymentCatalog {
@@ -68,6 +98,16 @@ pub struct LocalDeploymentCatalog {
 }
 
 impl LocalDeploymentCatalog {
+    pub fn single(deployment: LocalDeployment) -> std::result::Result<Self, String> {
+        let key = deployment.id.to_string();
+        let catalog = Self {
+            format: LOCAL_DEPLOYMENT_FORMAT,
+            deployments: BTreeMap::from([(key, deployment)]),
+        };
+        catalog.validate()?;
+        Ok(catalog)
+    }
+
     pub fn load_json(path: &Path) -> std::result::Result<Self, String> {
         let metadata = std::fs::metadata(path)
             .map_err(|error| format!("cannot inspect local deployment catalogue: {error}"))?;
