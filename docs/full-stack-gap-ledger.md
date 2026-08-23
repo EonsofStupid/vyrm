@@ -283,9 +283,17 @@ and forced fallback. Per-instance stdout/stderr logs retain startup evidence.
 The native matrix passes this complete sequence and strict clippy on Linux,
 Windows and macOS. A native-qualified generator now produces the complete
 trusted catalogue from the installed sibling RRD server without hand-authored
-paths or digests. Installer/service packaging, authorized mutation, bounded log
-retention, and the remaining deployment/upgrade/backup/restore jobs are still
-required for F3.
+paths or digests. Installer/service packaging, operator-policy provisioning,
+bounded log retention, and the remaining deployment/upgrade/backup/restore jobs
+are still required for F3.
+
+The first mutation boundary is intentionally local and specified in
+[`local-estate-authorization-v1.md`](local-estate-authorization-v1.md). Exact
+operator/key/time/estate/action policy is checked before storage opens;
+`rrd-estate-admin` then uses the existing CAS state machine and authenticated
+journal for replay-safe create and desired-state mutation. This removes
+hand-written direct database mutation from the local workflow without claiming
+F4 remote authentication or organization-wide authorization.
 
 ### F4 — establish security and governance before remote management
 

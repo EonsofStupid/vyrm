@@ -181,3 +181,27 @@ index.
   auto-updater, signing authority, or remote operator mutation surface.
 - Next gate: define and implement a local operator authorization boundary for
   estate creation and desired-state mutation before exposing either remotely.
+
+## 2026-08-23 — F3 local operator-authorized estate mutations
+
+- Commits: `0f2f306`, `bccc9ac`, `86247cc`, `1915f82`, `b3d4efb`, and
+  `4d7c253`.
+- Capability: added a strict local operator policy bound to exact identity,
+  32-byte key digest, validity window, estate and create/set-desired permission;
+  added the `rrd-estate-admin` process and frozen `EstateMutationResult` output.
+- Verification: all `rrd-contract`, `rrd-estate`, and `rrd-server` tests passed
+  locally with strict all-target clippy. GitHub Actions run
+  [`32671008705`](https://github.com/EonsofStupid/vyrm/actions/runs/32671008705)
+  passed the full workspace and the real process/admin matrix on Ubuntu,
+  Windows, and macOS. Earlier red runs exposed and drove fixes for a
+  Windows-only test warning, transient executable inspection, hard-link path
+  identity, and PID reuse between child exit and `/proc` discovery.
+- Evidence: unauthorized estate work is rejected before database creation;
+  exact create and desired-state retries report durable replay; native reopen
+  retains revision and instance state; the hash-chained journal contains only
+  `estate.create` and `estate.desired.set` under the policy-bound operator.
+- Limit: policy/key provisioning, Windows ACL-owner inspection, credential
+  rotation/revocation, remote authentication, RBAC/ABAC, and remote mutation
+  remain open. Create replay has an explicit 65,536-entry alpha scan bound.
+- Next gate: implement per-instance backup/restore jobs under the same local
+  operator boundary, including durable job state and replay-safe recovery.

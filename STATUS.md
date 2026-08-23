@@ -94,6 +94,11 @@ production distributed/Kubernetes operation, and cloud management.
   emits the validated typed launch/shutdown contract with owner-private durable
   no-overwrite publication, and passes its real-binary test on all three native
   CI operating systems. Installer/service packaging remains open.
+  A local-only operator policy now binds exact operator, key digest, validity
+  window, estate and action. `rrd-estate-admin` performs authorized create and
+  desired-state mutations with durable replay and public snapshot output;
+  unauthorized work is denied before opening storage. Remote mutation and F4
+  identity/RBAC/ABAC remain unavailable.
 
 - The bi-temporal claim kernel has immutable supersession corrections,
   canonical SHA-256 identities covering provenance and validity, and atomic

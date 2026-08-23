@@ -54,6 +54,13 @@ path or digest: `rrd-deployment-catalog --output deployments.json` resolves the
 sibling `rrd-server`, authenticates its canonical bytes, writes the complete
 typed launch/shutdown template, and refuses to overwrite an existing target.
 
+Local estate mutations now have a separate deny-by-default operator boundary.
+`rrd-estate-admin` requires a validity-windowed, exact-estate/action policy and
+the matching owner-private 32-byte key before it opens storage; create and
+desired-state retries are durable and return the frozen public mutation result.
+Remote mutation remains disabled. See
+[`docs/local-estate-authorization-v1.md`](docs/local-estate-authorization-v1.md).
+
 The system makes operational reasoning observable and enforceable without
 claiming access to a model's hidden chain-of-thought. It records goals, plans,
 attempts, tool observations, decisions, verification, outcomes, context
