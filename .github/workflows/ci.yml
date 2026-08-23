@@ -30,7 +30,7 @@ jobs:
       - name: Test persistent estate authority
         run: cargo test -p rrd-estate --locked
       - name: Test RRD process contracts
-        run: cargo test -p rrd-server --bin rrd-server --bin rrd-estate-controller --locked
+        run: cargo test -p rrd-server --bin rrd-server --bin rrd-estate-controller --bin rrd-deployment-catalog --test deployment_catalog --locked
       - name: Test real child and controller recovery
         run: cargo test -p rrd-server --test local_estate_driver --locked -- --nocapture
       - name: Deny process-boundary warnings
