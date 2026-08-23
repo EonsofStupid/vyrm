@@ -8,7 +8,9 @@ Both receive the same valid claim corpus, authoritative batch boundaries, and
 bounded sequence replays. Writes are measured in isolated writer children.
 Each backend is measured at the same three lifecycle boundaries: active,
 cleanly reopened without explicit maintenance, and explicitly maintained then
-reopened. Every current key is verified after both reopens. Footprint evidence
+reopened. Format 4 verifies the complete corpus after both reopens in
+`read-width` pages, checking exact cardinality and every append-ordinal object;
+it never substitutes a sample for correctness. Footprint evidence
 reports apparent and allocated bytes plus file-class attribution instead of
 mistaking sparse logical length for physical allocation. The parent alternates
 backend order, reports medians, and retains every raw trial.
@@ -19,7 +21,7 @@ Run the checked-in workload:
 cargo run --release --locked -p vyrm-store --example engine_benchmark -- \
   --trials 9 --operations 2048 --batch-size 64 \
   --reads 1024 --read-width 32 \
-  --output eval/results/2026-08-23-vyrmkv-standard-batch-v2.json
+  --output eval/results/2026-08-23-vyrmkv-standard-streaming-scan-v4.json
 ```
 
 The corrected 2026-08-23 x86-64 Linux rerun is one deliberately modest local
@@ -28,15 +30,15 @@ throughput; ratios below 1 favor native for latency, RSS, and footprint:
 
 | Metric | Native versus Fjall | Gate |
 |---|---:|---|
-| Authoritative write throughput | 1.191× | Pass |
-| Clean-reopen read throughput | 1.401× | Pass |
-| Authoritative write p95 | 0.898× | Pass |
-| Clean-reopen read p95 | 0.733× | Pass |
-| Maintained read throughput | 1.259× | Diagnostic |
-| Maintained read p95 | 0.805× | Diagnostic |
-| Clean-reopen recovery | 0.160× | Pass |
-| Maintained recovery | 0.226× | Diagnostic |
-| Steady probe peak RSS | 0.911× | Pass |
+| Authoritative write throughput | 1.238× | Pass |
+| Clean-reopen read throughput | 1.726× | Pass |
+| Authoritative write p95 | 0.781× | Pass |
+| Clean-reopen read p95 | 0.603× | Pass |
+| Maintained read throughput | 1.280× | Diagnostic |
+| Maintained read p95 | 0.795× | Diagnostic |
+| Clean-reopen recovery | 0.154× | Pass |
+| Maintained recovery | 0.227× | Diagnostic |
+| Steady probe peak RSS | 0.874× | Pass |
 | Clean-reopen allocated footprint | 0.915× | Pass |
 
 Correctness and every strict performance cell passed in all nine aggregated
@@ -52,15 +54,19 @@ applies to successor WALs. The high-entropy AI footprint gate verifies that
 this bounded reservation does not erase Vyrm's allocation result. Atomic batch
 v2 encodes put/delete in the high bit of the value-length word, removing four
 bytes per physical mutation. Recovery remains strict for both frozen v1 and v2
-golden vectors.
+golden vectors. Mutable-only scans now visit borrowed visible rows directly,
+and the native sequence reader deserializes each row as it arrives. Format-4
+verification consequently retains only one bounded page while still checking
+the entire corpus and reports process `VmHWM` across recovery, verification,
+and measured reads.
 
 Fjall remains a compatibility and performance oracle. The scheduled and
 manually dispatchable workflow runs with `--require-promotion`; remote and
-sustained repetitions remain retirement gates. The repository may claim only
+extended-RSS reproduction remain retirement gates. The repository may claim only
 the bounded results recorded here; it may not infer general superiority over
 Fjall, SurrealDB, Qdrant, or other databases.
 
-Evidence: [`2026-08-23-vyrmkv-standard-batch-v2.json`](../eval/results/2026-08-23-vyrmkv-standard-batch-v2.json).
+Evidence: [`2026-08-23-vyrmkv-standard-streaming-scan-v4.json`](../eval/results/2026-08-23-vyrmkv-standard-streaming-scan-v4.json).
 
 ## Scale qualification remains open
 
@@ -68,19 +74,22 @@ The scheduled five-profile matrix is intentionally stricter than the canonical
 fixture. The prior corrected format-3 run passed small-batch and standard;
 read-heavy missed only raw peak RSS at 1.015× Fjall. Exact-length boxed values
 and a one-or-many chain representation then removed one capacity word from each
-version and eight bytes from each overwhelmingly single-version key. The current
-nine-trial matrix closes the former read-heavy RSS gap at 0.975× Fjall.
-Sustained RSS improves from 1.123× to 1.066× (24,368 versus 22,864 KiB), and the
-70,000-operation extended cell improves from 1.181× to 1.114× (88,732 versus
-79,628 KiB). Batch v2 removes exactly 562,188 extended WAL-payload bytes and
+version and eight bytes from each overwhelmingly single-version key. The
+format-4 nine-trial matrix closes the read-heavy and sustained cells at 0.908×
+and 0.979× RSS respectively. Their write p95 ratios are 0.934× and 0.764×, so
+the prior tail misses do not reproduce. The 70,000-operation extended cell
+improves from the original 1.181× RSS to 1.026× (53,968 versus 52,616 KiB) after
+compact residency and streaming paged verification. Batch v2 removes exactly
+562,188 extended WAL-payload bytes and
 moves extended clean-reopen allocation from 1.004× to 0.987×. The deterministic
 footprint gap is closed. Backend-native maintained reads remain diagnostic
 because the maintenance actions differ.
 
-The current host still records strict write-p95 misses at read-heavy (1.052×)
-and sustained (1.196×), plus sustained/extended RSS misses. Extended passes all
-other strict cells. These tail samples are retained rather than inferred away
-from the favorable throughput medians.
+Extended still records a strict RSS miss at 1.026×; every other strict extended
+cell passes, including 1.300× write throughput, 0.840× write p95, 1.742× read
+throughput, 0.585× read p95, 0.222× recovery, and 0.987× allocated footprint.
+That final RSS cell is retained rather than inferred away from favorable
+latency and throughput.
 
 The new physical evidence explains the shape rather than inferring it from RSS.
 At sustained scale, 32,896 versions occupy 32,769 keys; only one chain spills.
@@ -91,14 +100,16 @@ one 1,024-record history allocation. B-tree node metadata, allocator overhead,
 fragmentation, process baseline, and page residency are explicitly excluded;
 the counter is not mislabeled as RSS.
 
-Accordingly, the canonical and eight AI profiles are green, but the scheduled
-matrix remains red at scale. Evidence:
-[`read-heavy batch-v2`](../eval/results/2026-08-23-vyrmkv-read-heavy-batch-v2.json),
-[`sustained batch-v2`](../eval/results/2026-08-23-vyrmkv-sustained-batch-v2.json),
-and [`extended batch-v2`](../eval/results/2026-08-23-vyrmkv-extended-batch-v2.json).
-Fjall compatibility retirement still requires closing the remaining B-tree/RSS
-and write-tail gaps plus repeated remote evidence; the repository does not
-average those failures away.
+Accordingly, canonical, read-heavy, sustained, and the eight AI profiles are
+green, but the scheduled matrix remains red at its largest scale. Evidence:
+[`read-heavy streaming-scan v4`](../eval/results/2026-08-23-vyrmkv-read-heavy-streaming-scan-v4.json),
+[`sustained streaming-scan v4`](../eval/results/2026-08-23-vyrmkv-sustained-streaming-scan-v4.json),
+and [`extended streaming-scan v4`](../eval/results/2026-08-23-vyrmkv-extended-streaming-scan-v4.json).
+Fjall compatibility retirement still requires closing the final extended
+B-tree/key-prefix RSS gap plus repeated remote evidence; the repository does
+not average that failure away. Compact native keyspace identifiers are the
+leading structural candidate, but they require an explicit persisted-key
+format and migration rather than a benchmark-only rewrite.
 
 ## Invalidated legacy M3/M3.5 evidence
 

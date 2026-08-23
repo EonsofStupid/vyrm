@@ -297,9 +297,7 @@ impl Engine for NativeEngine {
             memtable_value_payload_bytes: Some(memtable.value_payload_bytes as u64),
             memtable_tombstones: Some(memtable.tombstones as u64),
             memtable_spilled_chains: Some(memtable.spilled_chains as u64),
-            memtable_spilled_version_capacity: Some(
-                memtable.spilled_version_capacity as u64,
-            ),
+            memtable_spilled_version_capacity: Some(memtable.spilled_version_capacity as u64),
             memtable_version_record_bytes: Some(memtable.version_record_bytes as u64),
             memtable_owned_bytes_lower_bound: Some(memtable.owned_bytes_lower_bound as u64),
             memtable_max_versions: Some(maintenance.memtable_max_versions as u64),
@@ -417,29 +415,34 @@ impl Engine for NativeEngine {
         let inclusive_end = storage_key(keyspaces::SEQUENCE_INDEX, &key::sequence_key(last));
         let end = prefix_end(&inclusive_end)
             .ok_or_else(|| Error::Substrate("native sequence range has no upper bound".into()))?;
-        let index = database.scan(&start, Some(&end), snapshot)?;
         let expected = usize::try_from(last - from)
             .map_err(|_| Error::Substrate("native sequence range exceeds usize".into()))?;
-        if index.len() != expected {
+        let mut claims = Vec::with_capacity(expected);
+        database.scan_each(
+            &start,
+            Some(&end),
+            snapshot,
+            |_, sequence_value| -> Result<()> {
+                if let Some(encoded) = decode_native_sequence_value(sequence_value)? {
+                    claims.push(serde_json::from_slice(encoded)?);
+                    return Ok(());
+                }
+                let encoded = database
+                    .get(&storage_key(keyspaces::CLAIMS, sequence_value), snapshot)?
+                    .ok_or_else(|| {
+                        Error::Substrate(format!(
+                            "native sequence index references an absent claim in ({from}, {last}]"
+                        ))
+                    })?;
+                claims.push(serde_json::from_slice(&encoded)?);
+                Ok(())
+            },
+        )?;
+        if claims.len() != expected {
             return Err(Error::Substrate(format!(
                 "native sequence index returned {} rows for expected interval ({from}, {last}]",
-                index.len()
+                claims.len()
             )));
-        }
-        let mut claims = Vec::with_capacity(index.len());
-        for (_, sequence_value) in index {
-            if let Some(encoded) = decode_native_sequence_value(&sequence_value)? {
-                claims.push(serde_json::from_slice(encoded)?);
-                continue;
-            }
-            let encoded = database
-                .get(&storage_key(keyspaces::CLAIMS, &sequence_value), snapshot)?
-                .ok_or_else(|| {
-                    Error::Substrate(format!(
-                        "native sequence index references an absent claim in ({from}, {last}]"
-                    ))
-                })?;
-            claims.push(serde_json::from_slice(&encoded)?);
         }
         Ok(claims)
     }

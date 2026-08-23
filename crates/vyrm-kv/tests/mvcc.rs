@@ -185,6 +185,52 @@ fn wal_allocates_one_sequence_per_operation_and_memtable_preserves_snapshots() {
 }
 
 #[test]
+fn mutable_scan_visitor_is_ordered_snapshot_aware_and_fallible() {
+    let parent = tempfile::tempdir().unwrap();
+    let root = parent.path().join("native");
+    let mut database = Database::create(&root).unwrap();
+    database
+        .write_owned(
+            WriteBatch::new(vec![
+                Mutation::Put {
+                    key: b"alpha".to_vec(),
+                    value: b"old".to_vec(),
+                },
+                Mutation::Put {
+                    key: b"beta".to_vec(),
+                    value: b"two".to_vec(),
+                },
+                Mutation::Put {
+                    key: b"alpha".to_vec(),
+                    value: b"new".to_vec(),
+                },
+                Mutation::Delete {
+                    key: b"beta".to_vec(),
+                },
+            ])
+            .unwrap(),
+            Durability::Buffered,
+        )
+        .unwrap();
+
+    let mut visited = Vec::new();
+    database
+        .scan_each::<Error, _>(b"alpha", Some(b"z"), database.snapshot(), |key, value| {
+            visited.push((key.to_vec(), value.to_vec()));
+            Ok(())
+        })
+        .unwrap();
+    assert_eq!(visited, vec![(b"alpha".to_vec(), b"new".to_vec())]);
+
+    let error = database
+        .scan_each::<Error, _>(b"alpha", None, database.snapshot(), |_, _| {
+            Err(Error::InvalidBatch("visitor stopped".into()))
+        })
+        .unwrap_err();
+    assert!(matches!(error, Error::InvalidBatch(message) if message == "visitor stopped"));
+}
+
+#[test]
 fn a_bad_recovered_batch_cannot_partially_change_the_memtable() {
     let valid = fixture_batch().encode().unwrap();
     let first = RecoveredBatch {

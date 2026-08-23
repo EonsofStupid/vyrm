@@ -280,10 +280,44 @@ impl Memtable {
         end: Option<&[u8]>,
         read_sequence: u64,
     ) -> Vec<(Vec<u8>, Vec<u8>)> {
-        self.visible_from(start, end, read_sequence)
-            .into_iter()
-            .filter_map(|(key, version)| version.value.map(|value| (key, value.into_vec())))
+        let bounds = (Included(start), end.map_or(Unbounded, Excluded));
+        self.versions
+            .range::<[u8], _>(bounds)
+            .filter_map(|(key, versions)| {
+                versions
+                    .iter()
+                    .rev()
+                    .find(|version| version.sequence <= read_sequence)?
+                    .value
+                    .as_deref()
+                    .map(|value| (key.to_vec(), value.to_vec()))
+            })
             .collect()
+    }
+
+    pub(crate) fn scan_each<E, F>(
+        &self,
+        start: &[u8],
+        end: Option<&[u8]>,
+        read_sequence: u64,
+        mut visit: F,
+    ) -> std::result::Result<(), E>
+    where
+        F: FnMut(&[u8], &[u8]) -> std::result::Result<(), E>,
+    {
+        let bounds = (Included(start), end.map_or(Unbounded, Excluded));
+        for (key, versions) in self.versions.range::<[u8], _>(bounds) {
+            let Some(value) = versions
+                .iter()
+                .rev()
+                .find(|version| version.sequence <= read_sequence)
+                .and_then(|version| version.value.as_deref())
+            else {
+                continue;
+            };
+            visit(key, value)?;
+        }
+        Ok(())
     }
 
     /// Returns only visible versions inside the requested ordered interval.
@@ -338,9 +372,8 @@ impl Memtable {
             profile.key_payload_bytes = profile.key_payload_bytes.saturating_add(key.len());
             if let Some(capacity) = versions.spilled_capacity() {
                 profile.spilled_chains = profile.spilled_chains.saturating_add(1);
-                profile.spilled_version_capacity = profile
-                    .spilled_version_capacity
-                    .saturating_add(capacity);
+                profile.spilled_version_capacity =
+                    profile.spilled_version_capacity.saturating_add(capacity);
             }
             for version in versions.iter() {
                 match &version.value {
@@ -431,6 +464,9 @@ mod tests {
         };
         let encoded = serde_json::to_string(&value).unwrap();
         assert_eq!(encoded, r#"{"sequence":7,"value":[1,2,3]}"#);
-        assert_eq!(serde_json::from_str::<VersionedValue>(&encoded).unwrap(), value);
+        assert_eq!(
+            serde_json::from_str::<VersionedValue>(&encoded).unwrap(),
+            value
+        );
     }
 }

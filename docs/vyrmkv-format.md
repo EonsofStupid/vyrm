@@ -1,8 +1,9 @@
 # vyrmKV native format contract
 
 Status: M3 persistence and semantic gates pass; the corrected nine-trial local
-general performance fixture now passes every strict cell. Remote and sustained
-reproduction remain promotion gates. WAL, manifest, checkpoint, and physical
+general performance fixture now passes every strict cell. Remote reproduction
+and the separate extended RSS cell remain promotion gates. WAL, manifest,
+checkpoint, and physical
 snapshot-bundle formats are version 1. Atomic mutation writes are version 2
 with strict version-1 recovery. New immutable segments are version 3 and the
 reader retains explicit version-1/version-2 compatibility.

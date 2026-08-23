@@ -118,7 +118,11 @@ disagree, `SPEC.md` is authoritative and this document is wrong.
 > prepared batches, inline single-version chains, streaming one-pass recovery,
 > keyspace-local writes, and bounded first-WAL reservation now make the
 > corrected nine-trial local fixture pass every strict performance cell. Fjall
-> remains live as an oracle pending remote/sustained reproduction. The
+> remains live as an oracle pending remote reproduction and closure of the
+> remaining 70,000-operation RSS cell. Format-4 paged verification and a
+> borrowed fallible scan visitor now make read-heavy and sustained green while
+> checking every corpus ordinal; extended passes every strict cell except
+> 1.026× peak RSS. The
 > dedicated eight-profile AI-read matrix passes its bounded gates.
 > The sparse index holds byte ranges into canonical segment storage rather than
 > duplicate heap keys. The deterministic physical mutation gate now adds

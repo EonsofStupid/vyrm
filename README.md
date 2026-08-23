@@ -342,14 +342,17 @@ canonical local append/replay promotion is now green in a nine-trial bounded
 fixture. Compact sequence references, cached batch validation, exact-length
 values, one-or-many memtable chains, streaming one-pass WAL recovery,
 keyspace-local mutation ordering, and a bounded first-WAL extent reservation
-moved every strict cell ahead of Fjall. The current batch-v2 rerun records
-1.191× write throughput, 0.898× write p95, 1.401× clean-reopen read throughput,
-0.733× read p95, 0.160× recovery time, 0.911× peak RSS, and 0.915× allocated
-footprint.
+moved every strict cell ahead of Fjall. A borrowed memtable scan visitor now
+decodes bounded sequence pages without first materializing a second ordered
+range. Format-4 verification checks every corpus ordinal in read-width pages,
+so bounded-read RSS no longer includes an unrelated whole-database result. The
+current rerun records 1.238× write throughput, 0.781× write p95, 1.726×
+clean-reopen read throughput, 0.603× read p95, 0.154× recovery time, 0.874× peak
+RSS, and 0.915× allocated footprint.
 The dedicated eight-profile AI-read matrix passes its bounded correctness,
 throughput, p95, and clean-reopen allocation gates. See the
 [benchmark audit](docs/vyrmkv-benchmark.md) and
-[corrected raw evidence](eval/results/2026-08-23-vyrmkv-standard-batch-v2.json).
+[corrected raw evidence](eval/results/2026-08-23-vyrmkv-standard-streaming-scan-v4.json).
 A separate 20,000-operation
 physical differential now proves put/overwrite/delete behavior across reopen
 and compaction against both Fjall and an independent ordered-map oracle.
@@ -358,9 +361,9 @@ candidate selection, key-partitioned output, protected-snapshot pruning, and
 non-overlapping levels above L0. Segment-v3 validation derives authenticated
 block-local negative filters that reject point misses before block I/O without
 introducing another persisted truth. These are local fixture claims, not
-general database superiority: sustained/remote repetition, asynchronous
-immutable-memtable flush, and family-aware maintenance remain explicit gates
-before Fjall compatibility retirement.
+general database superiority: the final extended RSS cell, remote repetition,
+asynchronous immutable-memtable flush, and family-aware maintenance remain
+explicit gates before Fjall compatibility retirement.
 The canonical `PersistentEngine` now creates native stores for missing paths and
 reopens them by their authenticated `CURRENT` marker. CLI, `vyrmd`, and
 Connectome use that selector. Existing non-native directories remain on the

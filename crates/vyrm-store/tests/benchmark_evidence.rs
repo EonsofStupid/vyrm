@@ -196,11 +196,15 @@ fn checked_in_ai_read_matrix_is_structurally_valid_and_green() {
 fn corrected_standard_evidence_records_a_bounded_strict_promotion() {
     let file = concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/../../eval/results/2026-08-23-vyrmkv-standard-batch-v2.json"
+        "/../../eval/results/2026-08-23-vyrmkv-standard-streaming-scan-v4.json"
     );
     let evidence: serde_json::Value =
         serde_json::from_slice(&std::fs::read(file).unwrap()).unwrap();
-    assert_eq!(evidence["format_version"], 3);
+    assert_eq!(evidence["format_version"], 4);
+    assert!(evidence["verification_contract"]
+        .as_str()
+        .unwrap()
+        .contains("complete corpus is verified in read-width pages"));
     for backend in ["fjall", "native"] {
         assert_eq!(evidence[backend]["correctness_verified"], true);
         for state in ["active", "reopened", "maintained"] {
@@ -244,35 +248,35 @@ fn corrected_standard_evidence_records_a_bounded_strict_promotion() {
 }
 
 #[test]
-fn current_scale_evidence_is_attributed_but_still_red() {
+fn streaming_scan_scale_evidence_retains_the_one_extended_rss_failure() {
     let root = concat!(env!("CARGO_MANIFEST_DIR"), "/../../eval/results/");
-    for (name, operations, maximum_rss_ratio, rss_should_pass) in [
+    for (name, operations, maximum_rss_ratio, should_pass) in [
         (
-            "2026-08-23-vyrmkv-read-heavy-batch-v2.json",
+            "2026-08-23-vyrmkv-read-heavy-streaming-scan-v4.json",
             4_096,
             1.0,
             true,
         ),
         (
-            "2026-08-23-vyrmkv-sustained-batch-v2.json",
+            "2026-08-23-vyrmkv-sustained-streaming-scan-v4.json",
             16_384,
-            1.07,
-            false,
+            1.0,
+            true,
         ),
         (
-            "2026-08-23-vyrmkv-extended-batch-v2.json",
+            "2026-08-23-vyrmkv-extended-streaming-scan-v4.json",
             70_000,
-            1.12,
+            1.03,
             false,
         ),
     ] {
         let file = format!("{root}{name}");
         let evidence: serde_json::Value =
             serde_json::from_slice(&std::fs::read(&file).unwrap()).unwrap();
-        assert_eq!(evidence["format_version"], 3, "{file}");
+        assert_eq!(evidence["format_version"], 4, "{file}");
         assert_eq!(evidence["config"]["trials"], 9, "{file}");
         assert_eq!(evidence["config"]["operations"], operations, "{file}");
-        assert_eq!(evidence["promotion"]["passes"], false, "{file}");
+        assert_eq!(evidence["promotion"]["passes"], should_pass, "{file}");
         for backend in ["fjall", "native"] {
             assert_eq!(evidence[backend]["correctness_verified"], true, "{file}");
         }
@@ -294,8 +298,15 @@ fn current_scale_evidence_is_attributed_but_still_red() {
         let rss = evidence["ratios"]["native_to_fjall_peak_rss"]
             .as_f64()
             .unwrap();
-        assert_eq!(rss <= 1.0, rss_should_pass, "{file}");
+        assert_eq!(rss <= 1.0, should_pass, "{file}");
         assert!(rss <= maximum_rss_ratio, "{file}");
+        assert!(
+            evidence["ratios"]["native_to_fjall_write_p95"]
+                .as_f64()
+                .unwrap()
+                <= 1.0,
+            "{file}"
+        );
         let allocated = evidence["ratios"]["native_to_fjall_reopened_allocated"]
             .as_f64()
             .unwrap();

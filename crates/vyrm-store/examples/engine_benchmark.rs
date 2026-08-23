@@ -16,7 +16,7 @@ use vyrm_store::{
     measure_storage_footprint, Engine, FootprintBytes, NativeEngine, StorageFootprint, Store,
 };
 
-const FORMAT_VERSION: u16 = 3;
+const FORMAT_VERSION: u16 = 4;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct Config {
@@ -141,6 +141,7 @@ struct Evidence {
     logical_cpus: usize,
     aggregation: String,
     footprint_contract: String,
+    verification_contract: String,
     config: Config,
     fjall_trials: Vec<BackendResult>,
     native_trials: Vec<BackendResult>,
@@ -213,6 +214,8 @@ fn run() -> Result<(), String> {
         aggregation: "median of per-trial metrics; latency percentiles are medians of each isolated trial's percentile"
             .into(),
         footprint_contract: "active follows identical logical writes while the engine is open; reopened follows a clean close/open and verification without explicit maintenance and is the only cross-backend footprint promotion state; maintained follows each backend's declared native maintenance actions and is diagnostic-only"
+            .into(),
+        verification_contract: "the complete corpus is verified in read-width pages before measured reads; every page has its exact cardinality and every claim object is checked against its append ordinal; peak RSS is process VmHWM across recovery, paged verification, and measured bounded reads"
             .into(),
         config,
         fjall_trials,
@@ -651,16 +654,28 @@ fn verify(engine: &dyn Engine, config: &Config, sequence: u64) -> Result<bool, S
     if sequence != config.operations as u64 {
         return Ok(false);
     }
-    let claims = engine
-        .claims_in_range(0, sequence)
-        .map_err(|error| error.to_string())?;
-    Ok(claims.len() == config.operations
-        && claims
-            .first()
-            .is_some_and(|claim| claim.object == "payload-000000000000")
-        && claims
-            .last()
-            .is_some_and(|claim| claim.object == format!("payload-{:012}", config.operations - 1)))
+    let page_width = u64::try_from(config.read_width.max(1))
+        .map_err(|_| "verification page width exceeds u64".to_owned())?;
+    let mut from = 0u64;
+    while from < sequence {
+        let to = from.saturating_add(page_width).min(sequence);
+        let claims = engine
+            .claims_in_range(from, to)
+            .map_err(|error| error.to_string())?;
+        let expected = usize::try_from(to - from)
+            .map_err(|_| "verification page cardinality exceeds usize".to_owned())?;
+        if claims.len() != expected {
+            return Ok(false);
+        }
+        for (offset, claim) in claims.iter().enumerate() {
+            let ordinal = from + offset as u64;
+            if claim.object != format!("payload-{ordinal:012}") {
+                return Ok(false);
+            }
+        }
+        from = to;
+    }
+    Ok(true)
 }
 
 fn summarize(mut samples: Vec<Duration>) -> Latency {
@@ -850,7 +865,10 @@ fn aggregate_maintenance(values: Vec<&MaintenanceEvidence>) -> Option<Maintenanc
                 .collect(),
         ),
         memtable_tombstones: median_u64(
-            values.iter().map(|value| value.memtable_tombstones).collect(),
+            values
+                .iter()
+                .map(|value| value.memtable_tombstones)
+                .collect(),
         ),
         memtable_spilled_chains: median_u64(
             values

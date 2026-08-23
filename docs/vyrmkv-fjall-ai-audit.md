@@ -2,7 +2,7 @@
 
 Status: sparse-aware footprint correction, the canonical general fixture, and
 the eight-profile AI-read matrix pass locally. The scheduled scale matrix
-remains red on sustained/extended RSS and read-heavy/sustained write p95.
+remains red only on the 70,000-operation extended RSS cell.
 
 ## Decision
 
@@ -146,12 +146,14 @@ on every bounded range. The ordered range walk fixed reads; compact sequence
 references, prepared batches, exact-length values, one-or-many version chains,
 streaming one-pass recovery, keyspace-local writes, and bounded initial-WAL
 reservation then closed the remaining local gaps. Atomic batch v2 removes four
-framing bytes per physical mutation while retaining strict v1 recovery. The
-current canonical rerun records 1.191× write throughput, 0.898× write p95,
-1.401× read throughput, 0.733× read p95, 0.160× recovery time, 0.911× peak RSS,
+framing bytes per physical mutation while retaining strict v1 recovery. A
+borrowed fallible scan visitor and complete paged-corpus verification remove an
+unrelated whole-database result from the bounded-read RSS measurement. The
+current canonical rerun records 1.238× write throughput, 0.781× write p95,
+1.726× read throughput, 0.603× read p95, 0.154× recovery time, 0.874× peak RSS,
 and 0.915× allocated footprint. The corrected general gate remains green
-locally; scale RSS/write-tail latency and remote reproduction remain. Evidence:
-[`standard batch-v2`](../eval/results/2026-08-23-vyrmkv-standard-batch-v2.json).
+locally; extended RSS and remote reproduction remain. Evidence:
+[`standard streaming-scan v4`](../eval/results/2026-08-23-vyrmkv-standard-streaming-scan-v4.json).
 
 The high-entropy embedding/fan-out AI profile was rerun because the residency
 change alters in-memory value ownership and batch framing. It still passes at

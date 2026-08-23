@@ -1358,6 +1358,9 @@ impl Database {
         end: Option<&[u8]>,
         snapshot: Snapshot,
     ) -> Result<Vec<(Vec<u8>, Vec<u8>)>> {
+        if self.segments.is_empty() {
+            return Ok(self.memtable.scan(start, end, snapshot.sequence));
+        }
         if self.segments.len() == 1 && self.memtable.version_count() == 0 {
             return self.segments[0].scan(start, end, snapshot.sequence);
         }
@@ -1384,6 +1387,32 @@ impl Database {
             .into_iter()
             .filter_map(|(key, version)| version.value.map(|value| (key, value.into_vec())))
             .collect())
+    }
+
+    /// Visits visible rows in key order without requiring callers to retain a
+    /// second materialized copy of the result. The mutable-only path borrows
+    /// directly from the memtable; mixed immutable/mutable state retains the
+    /// canonical merge behavior used by [`Self::scan`].
+    pub fn scan_each<E, F>(
+        &self,
+        start: &[u8],
+        end: Option<&[u8]>,
+        snapshot: Snapshot,
+        mut visit: F,
+    ) -> std::result::Result<(), E>
+    where
+        E: From<Error>,
+        F: FnMut(&[u8], &[u8]) -> std::result::Result<(), E>,
+    {
+        if self.segments.is_empty() {
+            return self
+                .memtable
+                .scan_each(start, end, snapshot.sequence, visit);
+        }
+        for (key, value) in self.scan(start, end, snapshot).map_err(E::from)? {
+            visit(&key, &value)?;
+        }
+        Ok(())
     }
 
     pub fn memtable(&self) -> &Memtable {
