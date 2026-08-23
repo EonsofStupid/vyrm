@@ -194,6 +194,13 @@ pub struct EstateSnapshot {
     pub idempotency_binding_count: u32,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct EstateMutationResult {
+    pub estate: EstateSnapshot,
+    pub idempotent_replay: bool,
+}
+
 pub type Result<T> = std::result::Result<T, ContractError>;
 
 #[derive(Debug, Clone, PartialEq, Eq)]

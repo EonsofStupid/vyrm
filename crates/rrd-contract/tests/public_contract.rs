@@ -1,12 +1,12 @@
 use rrd_contract::{
     transaction_operation_sha256, BeginTransaction, CanonicalId, CapabilityDescriptor,
     CapabilityStatus, CloseSession, CommitReceipt, CommitTransaction, CorrelationId,
-    DeploymentMode, ErrorBody, ErrorCode, EstateActivityPolicySnapshot, EstateSnapshot,
-    IdempotencyBinding, Liveness, PreviewTransaction, ReadEstate, Readiness, RenewSession,
-    RequestContext, RequestEnvelope, ResourceId, ResourceKind, ResourcePath, ResponseEnvelope,
-    ResponseOutcome, ServiceCapabilities, SessionEndState, SessionLease, SessionLimits,
-    SessionTermination, TransactionMutation, TransactionPreview, TransactionState, PROTOCOL,
-    PROTOCOL_VERSION,
+    DeploymentMode, ErrorBody, ErrorCode, EstateActivityPolicySnapshot, EstateMutationResult,
+    EstateSnapshot, IdempotencyBinding, Liveness, PreviewTransaction, ReadEstate, Readiness,
+    RenewSession, RequestContext, RequestEnvelope, ResourceId, ResourceKind, ResourcePath,
+    ResponseEnvelope, ResponseOutcome, ServiceCapabilities, SessionEndState, SessionLease,
+    SessionLimits, SessionTermination, TransactionMutation, TransactionPreview, TransactionState,
+    PROTOCOL, PROTOCOL_VERSION,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -186,6 +186,19 @@ fn estate_read_contract_has_frozen_field_names_and_strict_empty_payload() {
         serde_json::from_value::<EstateSnapshot>(expected).unwrap(),
         snapshot
     );
+    let mutation = EstateMutationResult {
+        estate: snapshot,
+        idempotent_replay: true,
+    };
+    let mutation_json = serde_json::to_value(&mutation).unwrap();
+    assert_eq!(mutation_json["estate"]["id"], "estate-a");
+    assert_eq!(mutation_json["idempotent_replay"], true);
+    let mut unknown = mutation_json;
+    unknown
+        .as_object_mut()
+        .unwrap()
+        .insert("unknown".into(), serde_json::json!(true));
+    assert!(serde_json::from_value::<EstateMutationResult>(unknown).is_err());
     assert_eq!(
         serde_json::from_str::<ReadEstate>("{}").unwrap(),
         ReadEstate {}

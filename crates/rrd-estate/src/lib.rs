@@ -33,6 +33,7 @@ pub const MAX_INSTANCES: usize = 1_024;
 pub const MAX_OPERATIONS: usize = 4_096;
 pub const MAX_IDEMPOTENCY_BINDINGS: usize = 4_096;
 pub const MAX_RECEIPTS_PER_OPERATION: usize = 64;
+const MAX_CREATE_REPLAY_JOURNAL_ENTRIES: usize = 65_536;
 
 pub type Result<T> = std::result::Result<T, Error>;
 
@@ -592,6 +593,12 @@ pub struct DesiredOutcome {
     pub idempotent_replay: bool,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CreateOutcome {
+    pub document: EstateDocument,
+    pub idempotent_replay: bool,
+}
+
 #[derive(Debug, Clone)]
 pub struct LeaseRequest {
     pub context: MutationContext,
@@ -646,6 +653,11 @@ impl<'a, E: Engine + ?Sized> EstateRepository<'a, E> {
     }
 
     pub fn create(&self, context: &MutationContext) -> Result<EstateDocument> {
+        self.create_idempotent(context)
+            .map(|outcome| outcome.document)
+    }
+
+    pub fn create_idempotent(&self, context: &MutationContext) -> Result<CreateOutcome> {
         validate_context(context)?;
         let document = EstateDocument::new(self.estate_id.clone(), context.at)?;
         let replacement = encode(&document)?;
@@ -660,8 +672,45 @@ impl<'a, E: Engine + ?Sized> EstateRepository<'a, E> {
             operation_id: context.operation_id.to_string(),
         };
         match self.engine.commit_control_transition(&transition) {
-            Ok(_) => Ok(document),
+            Ok(_) => Ok(CreateOutcome {
+                document,
+                idempotent_replay: false,
+            }),
             Err(vyrm_store::Error::ControlConflict(_)) => {
+                let existing = self.load()?.ok_or_else(|| {
+                    Error::Invalid("estate create conflicted without state".into())
+                })?;
+                let mut after = 0;
+                let mut scanned = 0;
+                loop {
+                    let page = self.engine.control_journal_since(after, 1_024)?;
+                    scanned += page.len();
+                    if page.iter().any(|entry| {
+                        entry.key == self.key
+                            && entry.action == "estate.create"
+                            && entry.actor == context.actor
+                            && entry.request_id == context.request_id
+                            && entry.operation_id == context.operation_id.as_str()
+                            && entry.at == context.at
+                    }) {
+                        return Ok(CreateOutcome {
+                            document: existing,
+                            idempotent_replay: true,
+                        });
+                    }
+                    let Some(last) = page.last() else {
+                        break;
+                    };
+                    after = last.sequence;
+                    if page.len() < 1_024 {
+                        break;
+                    }
+                    if scanned >= MAX_CREATE_REPLAY_JOURNAL_ENTRIES {
+                        return Err(Error::Invalid(
+                            "estate create replay is outside the bounded journal window".into(),
+                        ));
+                    }
+                }
                 Err(Error::AlreadyExists(self.estate_id.to_string()))
             }
             Err(error) => Err(error.into()),

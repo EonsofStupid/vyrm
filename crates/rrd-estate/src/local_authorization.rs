@@ -38,6 +38,10 @@ impl LocalOperatorPolicy {
     pub fn load_json(path: &Path) -> Result<Self, String> {
         let metadata = std::fs::metadata(path)
             .map_err(|error| format!("cannot inspect local operator policy: {error}"))?;
+        if !metadata.is_file() {
+            return Err("local operator policy is not a regular file".into());
+        }
+        validate_private_metadata(&metadata, "policy")?;
         if metadata.len() > MAX_POLICY_BYTES {
             return Err("local operator policy exceeds one MiB".into());
         }
@@ -91,13 +95,7 @@ impl LocalOperatorPolicy {
         if !metadata.is_file() {
             return Err("local operator key is not a regular file".into());
         }
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::MetadataExt;
-            if metadata.mode() & 0o077 != 0 {
-                return Err("local operator key must not grant group/world permissions".into());
-            }
-        }
+        validate_private_metadata(&metadata, "key")?;
         let key = std::fs::read(key_path)
             .map_err(|error| format!("cannot read local operator key: {error}"))?;
         if key.len() != OPERATOR_KEY_BYTES {
@@ -112,6 +110,23 @@ impl LocalOperatorPolicy {
             permission,
         })
     }
+}
+
+#[cfg(unix)]
+fn validate_private_metadata(metadata: &std::fs::Metadata, kind: &str) -> Result<(), String> {
+    use std::os::unix::fs::MetadataExt;
+    if metadata.mode() & 0o077 != 0 {
+        Err(format!(
+            "local operator {kind} must not grant group/world permissions"
+        ))
+    } else {
+        Ok(())
+    }
+}
+
+#[cfg(not(unix))]
+fn validate_private_metadata(_metadata: &std::fs::Metadata, _kind: &str) -> Result<(), String> {
+    Ok(())
 }
 
 fn validate_sha256(value: &str) -> Result<(), String> {
