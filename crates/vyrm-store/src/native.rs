@@ -5,7 +5,10 @@
 //! database's physical MVCC sequence is deliberately independent of claim and
 //! runtime cursors stored in the batch.
 
-use crate::control::{ControlJournalEntry, ControlTransition, validate_control_key};
+use crate::control::{
+    ControlJournalEntry, ControlTransition, validate_control_key, verify_control_page,
+    verify_control_tail,
+};
 use crate::engine::{Engine, PhysicalStoreEvidence, validate_idempotency};
 use crate::error::{Error, Result};
 use crate::gc::{RemovalReport, Tally, build_report};
@@ -505,13 +508,11 @@ impl Engine for NativeEngine {
         if current.as_deref() != transition.expected.as_deref() {
             return Err(Error::ControlConflict(transition.key.clone()));
         }
-        let sequence = read_sequence(
+        let current_sequence = read_sequence(
             &database,
             snapshot,
             keyspaces::CONTROL_JOURNAL_SEQUENCE,
-        )?
-        .checked_add(1)
-        .ok_or(Error::SequenceOverflow)?;
+        )?;
         let previous_digest = get(
             &database,
             snapshot,
@@ -521,6 +522,26 @@ impl Engine for NativeEngine {
         .map(String::from_utf8)
         .transpose()
         .map_err(|error| Error::CorruptWatermark(error.to_string()))?;
+        let previous_entry = if current_sequence == 0 {
+            None
+        } else {
+            get(
+                &database,
+                snapshot,
+                keyspaces::META,
+                &keyspaces::control_journal_key(current_sequence),
+            )?
+            .map(|bytes| serde_json::from_slice(&bytes))
+            .transpose()?
+        };
+        verify_control_tail(
+            current_sequence,
+            previous_digest.as_deref(),
+            previous_entry.as_ref(),
+        )?;
+        let sequence = current_sequence
+            .checked_add(1)
+            .ok_or(Error::SequenceOverflow)?;
         let entry = ControlJournalEntry::committed(sequence, transition, previous_digest);
         let mut operations = Vec::with_capacity(4);
         match &transition.replacement {
@@ -570,7 +591,26 @@ impl Engine for NativeEngine {
             ));
         }
         let database = self.lock()?;
-        scan_space_from(
+        let anchor_digest = if after == 0 {
+            None
+        } else {
+            get(
+                &database,
+                database.snapshot(),
+                keyspaces::META,
+                &keyspaces::control_journal_key(after),
+            )?
+            .map(|bytes| serde_json::from_slice::<ControlJournalEntry>(&bytes))
+            .transpose()?
+            .map(|entry| {
+                if !entry.verify() || entry.sequence != after {
+                    return Err(Error::Substrate("control journal anchor is corrupt".into()));
+                }
+                Ok(entry.digest)
+            })
+            .transpose()?
+        };
+        let entries = scan_space_from(
             &database,
             database.snapshot(),
             keyspaces::META,
@@ -584,14 +624,10 @@ impl Engine for NativeEngine {
                 .is_some_and(|logical| logical.starts_with(b"server/journal/entries/"))
         })
         .take(limit)
-        .map(|(_, bytes)| {
-            let entry: ControlJournalEntry = serde_json::from_slice(&bytes)?;
-            if !entry.verify() {
-                return Err(Error::Substrate("control journal digest mismatch".into()));
-            }
-            Ok(entry)
-        })
-        .collect()
+        .map(|(_, bytes)| serde_json::from_slice(&bytes).map_err(Error::from))
+        .collect::<Result<Vec<ControlJournalEntry>>>()?;
+        verify_control_page(after, anchor_digest, &entries)?;
+        Ok(entries)
     }
 
     fn sequence(&self) -> Result<u64> {

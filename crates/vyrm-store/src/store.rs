@@ -1,6 +1,9 @@
 //! The substrate-backed claim store.
 
-use crate::control::{ControlJournalEntry, ControlTransition, validate_control_key};
+use crate::control::{
+    ControlJournalEntry, ControlTransition, validate_control_key, verify_control_page,
+    verify_control_tail,
+};
 use crate::error::{Error, Result};
 use crate::gc::{RemovalReport, Tally, build_report};
 use crate::invocation::{self, Invocation, InvocationInput};
@@ -946,16 +949,32 @@ impl Store {
         if current.as_deref() != transition.expected.as_deref() {
             return Err(Error::ControlConflict(transition.key.clone()));
         }
-        let sequence = decode_optional_sequence(
+        let current_sequence = decode_optional_sequence(
             tx.get(&self.meta, keyspaces::CONTROL_JOURNAL_SEQUENCE)?,
-        )?
-        .checked_add(1)
-        .ok_or(Error::SequenceOverflow)?;
+        )?;
         let previous_digest = tx
             .get(&self.meta, keyspaces::CONTROL_JOURNAL_LAST_DIGEST)?
             .map(|value| String::from_utf8(value.to_vec()))
             .transpose()
             .map_err(|error| Error::CorruptWatermark(error.to_string()))?;
+        let previous_entry = if current_sequence == 0 {
+            None
+        } else {
+            tx.get(
+                &self.meta,
+                keyspaces::control_journal_key(current_sequence),
+            )?
+            .map(|value| serde_json::from_slice(&value))
+            .transpose()?
+        };
+        verify_control_tail(
+            current_sequence,
+            previous_digest.as_deref(),
+            previous_entry.as_ref(),
+        )?;
+        let sequence = current_sequence
+            .checked_add(1)
+            .ok_or(Error::SequenceOverflow)?;
         let entry = ControlJournalEntry::committed(sequence, transition, previous_digest);
         match &transition.replacement {
             Some(value) => tx.insert(&self.meta, transition.key.as_bytes(), value),
@@ -991,6 +1010,21 @@ impl Store {
             ));
         }
         let snapshot = self.db.read_tx();
+        let anchor_digest = if after == 0 {
+            None
+        } else {
+            snapshot
+                .get(&self.meta, keyspaces::control_journal_key(after))?
+                .map(|value| serde_json::from_slice::<ControlJournalEntry>(&value))
+                .transpose()?
+                .map(|entry| {
+                    if !entry.verify() || entry.sequence != after {
+                        return Err(Error::Substrate("control journal anchor is corrupt".into()));
+                    }
+                    Ok(entry.digest)
+                })
+                .transpose()?
+        };
         let start = keyspaces::control_journal_key(after.saturating_add(1));
         let mut entries = Vec::new();
         for guard in snapshot.range(&self.meta, start..) {
@@ -999,11 +1033,9 @@ impl Store {
                 break;
             }
             let entry: ControlJournalEntry = serde_json::from_slice(&value)?;
-            if !entry.verify() {
-                return Err(Error::Substrate("control journal digest mismatch".into()));
-            }
             entries.push(entry);
         }
+        verify_control_page(after, anchor_digest, &entries)?;
         Ok(entries)
     }
 

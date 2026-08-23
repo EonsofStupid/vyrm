@@ -117,6 +117,47 @@ impl ControlJournalEntry {
     }
 }
 
+pub(crate) fn verify_control_tail(
+    sequence: u64,
+    advertised_digest: Option<&str>,
+    entry: Option<&ControlJournalEntry>,
+) -> Result<()> {
+    match (sequence, advertised_digest, entry) {
+        (0, None, None) => Ok(()),
+        (sequence, Some(advertised), Some(entry))
+            if entry.sequence == sequence && entry.verify() && entry.digest == advertised =>
+        {
+            Ok(())
+        }
+        _ => Err(Error::Substrate(
+            "control journal tail is missing, corrupt, or inconsistent".into(),
+        )),
+    }
+}
+
+pub(crate) fn verify_control_page(
+    after: u64,
+    anchor_digest: Option<String>,
+    entries: &[ControlJournalEntry],
+) -> Result<()> {
+    let mut previous = anchor_digest;
+    for (offset, entry) in entries.iter().enumerate() {
+        let expected_sequence = after
+            .checked_add(offset as u64 + 1)
+            .ok_or(Error::SequenceOverflow)?;
+        if entry.sequence != expected_sequence
+            || !entry.verify()
+            || entry.previous_digest != previous
+        {
+            return Err(Error::Substrate(
+                "control journal page is missing, reordered, or corrupt".into(),
+            ));
+        }
+        previous = Some(entry.digest.clone());
+    }
+    Ok(())
+}
+
 pub(crate) fn validate_control_key(key: &str) -> Result<()> {
     if !key.starts_with("server/state/")
         || key.len() > 256
@@ -127,4 +168,58 @@ pub(crate) fn validate_control_key(key: &str) -> Result<()> {
         return Err(Error::Substrate("invalid server control-state key".into()));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn entry(sequence: u64, previous_digest: Option<String>) -> ControlJournalEntry {
+        ControlJournalEntry::committed(
+            sequence,
+            &ControlTransition {
+                key: "server/state/test/session-1".into(),
+                expected: None,
+                replacement: Some(format!("state-{sequence}").into_bytes()),
+                at: sequence,
+                actor: "test".into(),
+                action: "test.transition".into(),
+                request_id: format!("request-{sequence}"),
+                operation_id: format!("operation-{sequence}"),
+            },
+            previous_digest,
+        )
+    }
+
+    #[test]
+    fn page_verification_rejects_gaps_reordering_and_tampering() {
+        let first = entry(1, None);
+        let second = entry(2, Some(first.digest.clone()));
+        let third = entry(3, Some(second.digest.clone()));
+        verify_control_page(0, None, &[first.clone(), second.clone(), third.clone()]).unwrap();
+        verify_control_page(
+            1,
+            Some(first.digest.clone()),
+            &[second.clone(), third.clone()],
+        )
+        .unwrap();
+
+        assert!(verify_control_page(0, None, &[first.clone(), third.clone()]).is_err());
+        assert!(verify_control_page(0, None, &[second.clone(), first.clone()]).is_err());
+        assert!(
+            verify_control_page(1, Some("0".repeat(64)), std::slice::from_ref(&second)).is_err()
+        );
+        let mut tampered = second;
+        tampered.action = "tampered".into();
+        assert!(verify_control_page(1, Some(first.digest), &[tampered]).is_err());
+    }
+
+    #[test]
+    fn tail_verification_rejects_a_forked_or_missing_tail() {
+        let first = entry(1, None);
+        assert!(verify_control_tail(0, None, None).is_ok());
+        assert!(verify_control_tail(1, Some(&first.digest), Some(&first)).is_ok());
+        assert!(verify_control_tail(1, Some(&"0".repeat(64)), Some(&first)).is_err());
+        assert!(verify_control_tail(1, Some(&first.digest), None).is_err());
+    }
 }

@@ -20,7 +20,10 @@
 //! compose *around* an engine rather than implementing this trait: they
 //! accelerate reads and must never be the system of record.
 
-use crate::control::{ControlJournalEntry, ControlTransition, validate_control_key};
+use crate::control::{
+    ControlJournalEntry, ControlTransition, validate_control_key, verify_control_page,
+    verify_control_tail,
+};
 use crate::error::{Error, Result};
 use crate::keyspaces::Durability;
 use crate::projection::{
@@ -749,8 +752,16 @@ impl Engine for MemoryEngine {
         {
             return Err(Error::ControlConflict(transition.key.clone()));
         }
-        let sequence = inner.control_journal.len() as u64 + 1;
+        let current_sequence = inner.control_journal.len() as u64;
         let previous = inner.control_journal.last().map(|entry| entry.digest.clone());
+        verify_control_tail(
+            current_sequence,
+            previous.as_deref(),
+            inner.control_journal.last(),
+        )?;
+        let sequence = current_sequence
+            .checked_add(1)
+            .ok_or(Error::SequenceOverflow)?;
         let entry = ControlJournalEntry::committed(sequence, transition, previous);
         match &transition.replacement {
             Some(value) => {
@@ -773,13 +784,20 @@ impl Engine for MemoryEngine {
             return Err(Error::Substrate("control journal limit must be non-zero".into()));
         }
         let inner = self.inner.lock().expect("engine mutex");
-        Ok(inner
+        let entries = inner
             .control_journal
             .iter()
             .skip(after as usize)
             .take(limit)
             .cloned()
-            .collect())
+            .collect::<Vec<_>>();
+        let anchor_digest = after
+            .checked_sub(1)
+            .and_then(|index| usize::try_from(index).ok())
+            .and_then(|index| inner.control_journal.get(index))
+            .map(|entry| entry.digest.clone());
+        verify_control_page(after, anchor_digest, &entries)?;
+        Ok(entries)
     }
 
     fn sequence(&self) -> Result<u64> {
