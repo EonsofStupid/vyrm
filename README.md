@@ -37,8 +37,13 @@ The first local-process driver is now implemented behind an operator-trusted
 catalogue: canonical absolute executable plus SHA-256, typed literal arguments
 without a shell, cleared environment, durable PID/start-time/executable
 identity, and fail-closed signaling. A real-RRD-child test proves restart replay
-and stop-without-data-deletion. Its limits and remaining controller-kill matrix
-are in [`docs/local-process-driver-v1.md`](docs/local-process-driver-v1.md).
+and stop-without-data-deletion. A black-box controller test now kills the actual
+controller after every start/stop transition, including the effect-before-record
+gap, and proves deterministic recovery. Its evidence and remaining
+cross-platform/graceful-shutdown limits are in
+[`docs/local-process-driver-v1.md`](docs/local-process-driver-v1.md). Strict
+slice evidence is appended to
+[`docs/implementation-journal.md`](docs/implementation-journal.md).
 
 The system makes operational reasoning observable and enforceable without
 claiming access to a model's hidden chain-of-thought. It records goals, plans,

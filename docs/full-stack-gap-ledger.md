@@ -257,9 +257,9 @@ Native-engine reopen tests cover lease, prepared, an external effect whose
 acknowledgement is lost, applied, observed and completed boundaries. The stable
 operation ID deduplicates the retried effect; takeover preserves prepared work,
 and newer desired generations terminally supersede unfinished stale work. This
-does **not** complete F3: the production local-process driver, actual
-process-kill qualification, deployment/upgrade/backup/restore state machines,
-and authorized mutations remain open. The read-only projection is now wired:
+does **not** complete F3: cross-platform process qualification, graceful child
+shutdown, deployment/upgrade/backup/restore state machines, packaging, and
+authorized mutations remain open. The read-only projection is now wired:
 `rrd-contract::EstateSnapshot` prevents the internal aggregate becoming the
 wire contract, RRD requires a live session plus matching estate/instance path,
 and Connectome's `/api/estate` and workbench render desired→observed generation,
@@ -274,9 +274,12 @@ PID/start-time/executable plus operation/deployment/configuration identity, and
 signals fail closed on mismatch. Current-host integration launches the real RRD
 server, reopens the controller objects at every state-machine step, proves start
 replay preserves PID, actually stops the child for a new desired generation,
-and retains its data. Actual controller-process kill injection, cross-platform
-qualification, graceful shutdown and the remaining deployment/upgrade/backup/
-restore jobs are still required for the F3 exit gate.
+and retains its data. A black-box harness now kills a separate one-step
+controller after every start/stop transition and in the external-effect-before-
+`applied` gap; replay preserves the started PID or converges after the stop
+already occurred. Cross-platform qualification, graceful managed-child
+shutdown, packaging, authorized mutation, and the remaining deployment/
+upgrade/backup/restore jobs are still required for the F3 exit gate.
 
 ### F4 — establish security and governance before remote management
 

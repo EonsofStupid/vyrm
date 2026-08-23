@@ -2,7 +2,8 @@
 
 Status: F3 alpha driver. The typed driver and current-host integration evidence
 are implemented; packaging, an operator mutation API, Windows/macOS CI, graceful
-shutdown, and actual controller-process kill injection remain open.
+shutdown, and per-instance backup/restore remain open. Actual controller-process
+kill injection is now covered on Linux.
 
 ## Trust and launch boundary
 
@@ -71,10 +72,19 @@ A second test forges the current test PID with the wrong start identity and
 proves the driver returns a permanent failure while leaving that process and
 record untouched.
 
-This validates the instance-process boundary on the current Linux host. It is
-not yet the F3 exit gate: a separate controller executable must be killed by the
-test harness at every durable transition, and equivalent Windows/macOS runs
-must qualify environment, executable discovery and process termination.
+A separate one-step `rrd-estate-controller` executable lets the black-box test
+harness kill the actual control-plane process after leased, prepared, applied,
+observed and completed transitions for both start and stop. It also holds and
+kills the controller after the real external effect but before the `applied`
+record. Start resumes with the same child PID; stop resumes after observing the
+child already gone, retains its data directory, and completes exactly once.
+These debug-only hold points are rejected in release builds.
+
+This validates crash recovery at the instance-process boundary on the current
+Linux host. It is not yet the complete F3 exit gate: equivalent Windows/macOS
+runs must qualify environment, executable discovery and process termination;
+managed children still need a bounded graceful-shutdown protocol; packaging,
+authorized mutations, and per-instance backup/restore jobs also remain open.
 
 ## Primary implementation references
 

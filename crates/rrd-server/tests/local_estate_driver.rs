@@ -2,13 +2,16 @@ use rrd_contract::CanonicalId;
 use rrd_estate::{
     DesiredInstance, DesiredPhase, DesiredTarget, DriverErrorKind, DriverRequest, EstateDriver,
     EstateRepository, LocalArgument, LocalDeployment, LocalDeploymentCatalog, LocalProcessDriver,
-    MutationContext, OperationKind, ReconcileBoundary, ReconcileOutcome, Reconciler, SetDesired,
-    LOCAL_DEPLOYMENT_FORMAT,
+    MutationContext, OperationKind, OperationState, ReconcileBoundary, ReconcileOutcome,
+    Reconciler, SetDesired, LOCAL_DEPLOYMENT_FORMAT,
 };
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
 use std::sync::OnceLock;
+use std::thread;
+use std::time::{Duration, Instant};
 use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
 use vyrm_store::PersistentEngine;
 
@@ -110,6 +113,71 @@ fn process_exists(pid: u32) -> bool {
         ProcessRefreshKind::nothing().without_tasks(),
     );
     system.process(Pid::from_u32(pid)).is_some()
+}
+
+fn run_controller_and_kill(
+    database: &Path,
+    state_root: &Path,
+    catalog_path: &Path,
+    marker: &Path,
+    at: u64,
+    after_effect: bool,
+) {
+    let _ = std::fs::remove_file(marker);
+    let _ = std::fs::remove_file(marker.with_extension("new"));
+    let hold_variable = if after_effect {
+        "RRD_ESTATE_TEST_HOLD_AFTER_EFFECT_FILE"
+    } else {
+        "RRD_ESTATE_TEST_HOLD_AFTER_STEP_FILE"
+    };
+    let mut child = Command::new(env!("CARGO_BIN_EXE_rrd-estate-controller"))
+        .args([
+            "--db",
+            database.to_str().unwrap(),
+            "--state-root",
+            state_root.to_str().unwrap(),
+            "--catalog",
+            catalog_path.to_str().unwrap(),
+            "--estate",
+            "estate-a",
+            "--worker",
+            "worker-one",
+            "--lease-ms",
+            "30000",
+            "--at",
+            &at.to_string(),
+        ])
+        .env(hold_variable, marker)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let deadline = Instant::now() + Duration::from_secs(90);
+    while !marker.is_file() {
+        if let Some(status) = child.try_wait().unwrap() {
+            let mut error = String::new();
+            std::io::Read::read_to_string(child.stderr.as_mut().unwrap(), &mut error).unwrap();
+            panic!("estate controller exited before hold marker ({status}): {error}");
+        }
+        assert!(
+            Instant::now() < deadline,
+            "estate controller did not reach hold boundary at {at}"
+        );
+        thread::sleep(Duration::from_millis(10));
+    }
+    child.kill().unwrap();
+    child.wait().unwrap();
+}
+
+fn operation_state(database: &Path, operation: &str) -> (OperationState, u64) {
+    let engine = PersistentEngine::open(database).unwrap();
+    let repository = EstateRepository::new(&engine, id("estate-a"));
+    let document = repository.load().unwrap().unwrap();
+    (
+        document.operation(&id(operation)).unwrap().state,
+        document.revision,
+    )
 }
 
 struct ProcessCleanup {
@@ -291,4 +359,112 @@ fn local_driver_refuses_to_signal_a_reused_or_forged_pid_identity() {
     assert!(error.message.contains("refusing to signal"));
     assert!(process_exists(current_pid));
     assert!(record_path.exists());
+}
+
+#[test]
+fn controller_process_kill_matrix_converges_across_start_and_stop_effect_gaps() {
+    let temporary = tempfile::tempdir().unwrap();
+    let database = temporary.path().join("estate-authority");
+    let state_root = temporary.path().join("local-processes");
+    std::fs::create_dir(&state_root).unwrap();
+    let state_root = std::fs::canonicalize(state_root).unwrap();
+    let catalog_path = temporary.path().join("deployments.json");
+    std::fs::write(&catalog_path, serde_json::to_vec(&catalog()).unwrap()).unwrap();
+    let marker = temporary.path().join("controller-held");
+    let _cleanup = ProcessCleanup {
+        state_root: state_root.clone(),
+    };
+    {
+        let engine = PersistentEngine::open(&database).unwrap();
+        let repository = EstateRepository::new(&engine, id("estate-a"));
+        repository.create(&context(10, "create-estate")).unwrap();
+        repository
+            .set_desired(&SetDesired {
+                context: context(20, "start-project-a"),
+                instance_id: id("project-a"),
+                idempotency_key: "start-project-a".into(),
+                target: target(DesiredPhase::Running),
+            })
+            .unwrap();
+    }
+
+    run_controller_and_kill(&database, &state_root, &catalog_path, &marker, 30, false);
+    assert_eq!(
+        operation_state(&database, "start-project-a"),
+        (OperationState::Leased, 3)
+    );
+    run_controller_and_kill(&database, &state_root, &catalog_path, &marker, 40, false);
+    assert_eq!(
+        operation_state(&database, "start-project-a"),
+        (OperationState::Prepared, 4)
+    );
+    run_controller_and_kill(&database, &state_root, &catalog_path, &marker, 50, true);
+    assert_eq!(
+        operation_state(&database, "start-project-a"),
+        (OperationState::Prepared, 4)
+    );
+    let started_pid = process_pid(&state_root).expect("effect gap retained child identity");
+    assert!(process_exists(started_pid));
+    run_controller_and_kill(&database, &state_root, &catalog_path, &marker, 60, false);
+    assert_eq!(
+        operation_state(&database, "start-project-a"),
+        (OperationState::Applied, 5)
+    );
+    assert_eq!(process_pid(&state_root), Some(started_pid));
+    run_controller_and_kill(&database, &state_root, &catalog_path, &marker, 70, false);
+    assert_eq!(
+        operation_state(&database, "start-project-a"),
+        (OperationState::Applied, 6)
+    );
+    run_controller_and_kill(&database, &state_root, &catalog_path, &marker, 80, false);
+    assert_eq!(
+        operation_state(&database, "start-project-a"),
+        (OperationState::Succeeded, 7)
+    );
+
+    {
+        let engine = PersistentEngine::open(&database).unwrap();
+        let repository = EstateRepository::new(&engine, id("estate-a"));
+        repository
+            .set_desired(&SetDesired {
+                context: context(90, "stop-project-a"),
+                instance_id: id("project-a"),
+                idempotency_key: "stop-project-a".into(),
+                target: target(DesiredPhase::Stopped),
+            })
+            .unwrap();
+    }
+    run_controller_and_kill(&database, &state_root, &catalog_path, &marker, 100, false);
+    assert_eq!(
+        operation_state(&database, "stop-project-a"),
+        (OperationState::Leased, 9)
+    );
+    run_controller_and_kill(&database, &state_root, &catalog_path, &marker, 110, false);
+    assert_eq!(
+        operation_state(&database, "stop-project-a"),
+        (OperationState::Prepared, 10)
+    );
+    run_controller_and_kill(&database, &state_root, &catalog_path, &marker, 120, true);
+    assert_eq!(
+        operation_state(&database, "stop-project-a"),
+        (OperationState::Prepared, 10)
+    );
+    assert!(!process_exists(started_pid));
+    assert_eq!(process_pid(&state_root), None);
+    assert!(state_root.join("instances/project-a/rrd-data").is_dir());
+    run_controller_and_kill(&database, &state_root, &catalog_path, &marker, 130, false);
+    assert_eq!(
+        operation_state(&database, "stop-project-a"),
+        (OperationState::Applied, 11)
+    );
+    run_controller_and_kill(&database, &state_root, &catalog_path, &marker, 140, false);
+    assert_eq!(
+        operation_state(&database, "stop-project-a"),
+        (OperationState::Applied, 12)
+    );
+    run_controller_and_kill(&database, &state_root, &catalog_path, &marker, 150, false);
+    assert_eq!(
+        operation_state(&database, "stop-project-a"),
+        (OperationState::Succeeded, 13)
+    );
 }

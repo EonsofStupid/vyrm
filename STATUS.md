@@ -66,8 +66,8 @@ production distributed/Kubernetes operation, and cloud management.
   applied, observed and completed boundaries; external effects are deduplicated
   by the stable operation ID, expired-worker takeover preserves prepared work,
   and new desired generations supersede stale unfinished operations. The
-  production driver packaging, actual controller process-kill qualification,
-  backup/restore jobs and authorized mutations remain open. The stable public
+  production driver packaging, backup/restore jobs and authorized mutations
+  remain open. The stable public
   `EstateSnapshot` is now available through a session-authenticated RRD read
   endpoint and Connectome's read-only `/api/estate`/workbench projection.
   Connectome shows desired→observed generations, activity and operation state;
@@ -79,8 +79,11 @@ production distributed/Kubernetes operation, and cloud management.
   `rrd-server` child survives controller-object/engine reopen and same-operation
   replay without a PID change, then is actually stopped by a new desired
   generation without deleting its data directory. Forged PID identity is
-  denied. Operator mutation/packaging, graceful shutdown, actual controller
-  process-kill injection and Windows/macOS qualification keep F3 open.
+  denied. A separate one-step controller is now killed by a black-box harness
+  after every start and stop boundary, including after the real effect but
+  before `applied`; retries preserve the start PID or converge from an already
+  completed stop. Operator mutation/packaging, graceful managed-child shutdown,
+  per-instance backup/restore and Windows/macOS qualification keep F3 open.
 
 - The bi-temporal claim kernel has immutable supersession corrections,
   canonical SHA-256 identities covering provenance and validity, and atomic
