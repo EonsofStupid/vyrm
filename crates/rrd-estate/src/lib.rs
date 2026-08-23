@@ -4,9 +4,14 @@
 //! reconciliation boundaries. Connectome is a projection of these records,
 //! never their source of truth.
 
+mod local_authorization;
 mod local_process;
 mod reconcile;
 
+pub use local_authorization::{
+    LocalEstatePermission, LocalOperatorAuthorization, LocalOperatorPolicy,
+    LOCAL_OPERATOR_POLICY_FORMAT,
+};
 pub use local_process::{
     LocalArgument, LocalDeployment, LocalDeploymentCatalog, LocalProcessDriver, LocalShutdown,
     LOCAL_DEPLOYMENT_FORMAT,
