@@ -14,6 +14,7 @@ const OPERATOR_KEY_BYTES: usize = 32;
 pub enum LocalEstatePermission {
     Create,
     SetDesired,
+    ScheduleBackup,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

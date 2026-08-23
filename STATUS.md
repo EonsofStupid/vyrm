@@ -66,7 +66,7 @@ production distributed/Kubernetes operation, and cloud management.
   applied, observed and completed boundaries; external effects are deduplicated
   by the stable operation ID, expired-worker takeover preserves prepared work,
   and new desired generations supersede stale unfinished operations. The
-  production driver packaging, backup/restore jobs and authorized mutations
+  restore jobs, deployment/upgrade completeness, and production packaging
   remain open. The stable public
   `EstateSnapshot` is now available through a session-authenticated RRD read
   endpoint and Connectome's read-only `/api/estate`/workbench projection.
@@ -87,7 +87,7 @@ production distributed/Kubernetes operation, and cloud management.
   fallback, and retain per-instance startup logs. The native process matrix
   passes the full authority, process-contract, real child/controller recovery,
   and strict-clippy sequence on Linux, Windows, and macOS. Operator mutation/
-  packaging, per-instance backup/restore, and bounded log retention keep F3
+  packaging, per-instance restore/retention, and bounded log retention keep F3
   open. The storage-format composition defect exposed by the first matrix run
   is corrected, and the subsequent repository-wide CI run is green.
   `rrd-deployment-catalog` now resolves and hashes the installed sibling server,
@@ -96,9 +96,15 @@ production distributed/Kubernetes operation, and cloud management.
   CI operating systems. Installer/service packaging remains open.
   A local-only operator policy now binds exact operator, key digest, validity
   window, estate and action. `rrd-estate-admin` performs authorized create and
-  desired-state mutations with durable replay and public snapshot output;
+  desired-state mutations and quiesced backup schedules with durable replay and
+  public snapshot output;
   unauthorized work is denied before opening storage. Remote mutation and F4
   identity/RBAC/ABAC remain unavailable.
+  Backup execution is a separate one-step process with fenced durable job
+  boundaries and a fixed canonical state root. A black-box kill test proves a
+  retained archive is replayed into one authenticated catalogue entry when the
+  controller dies before recording completion. Restore-to-absent-instance and
+  retention pruning remain open.
 
 - The bi-temporal claim kernel has immutable supersession corrections,
   canonical SHA-256 identities covering provenance and validity, and atomic

@@ -257,8 +257,8 @@ Native-engine reopen tests cover lease, prepared, an external effect whose
 acknowledgement is lost, applied, observed and completed boundaries. The stable
 operation ID deduplicates the retried effect; takeover preserves prepared work,
 and newer desired generations terminally supersede unfinished stale work. This
-does **not** complete F3: deployment/upgrade/backup/restore state machines,
-packaging, authorized mutations, and bounded process-log retention remain open.
+does **not** complete F3: deployment/upgrade/restore state machines, packaging,
+retention policy, and bounded process-log retention remain open.
 The read-only projection is now wired:
 `rrd-contract::EstateSnapshot` prevents the internal aggregate becoming the
 wire contract, RRD requires a live session plus matching estate/instance path,
@@ -284,16 +284,22 @@ The native matrix passes this complete sequence and strict clippy on Linux,
 Windows and macOS. A native-qualified generator now produces the complete
 trusted catalogue from the installed sibling RRD server without hand-authored
 paths or digests. Installer/service packaging, operator-policy provisioning,
-bounded log retention, and the remaining deployment/upgrade/backup/restore jobs
-are still required for F3.
+bounded log retention, and the remaining deployment/upgrade/restore jobs are
+still required for F3.
 
 The first mutation boundary is intentionally local and specified in
 [`local-estate-authorization-v1.md`](local-estate-authorization-v1.md). Exact
 operator/key/time/estate/action policy is checked before storage opens;
 `rrd-estate-admin` then uses the existing CAS state machine and authenticated
-journal for replay-safe create and desired-state mutation. This removes
-hand-written direct database mutation from the local workflow without claiming
-F4 remote authentication or organization-wide authorization.
+journal for replay-safe create, desired-state mutation, and quiesced backup
+scheduling. Durable per-instance backup jobs have fenced leases and prepared,
+completed, and failed receipts. The one-step `rrd-backup-controller` fixes
+source and catalogue paths under one canonical state root, denies a retained
+process record before mutation, authenticates the F1 catalogue before and after
+creation, and converges across a process kill after the archive effect but
+before its completion receipt. This removes hand-written direct database
+mutation from the local workflow without claiming restore, retention, F4 remote
+authentication, or organization-wide authorization.
 
 ### F4 — establish security and governance before remote management
 

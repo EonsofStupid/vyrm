@@ -46,6 +46,14 @@ fn authorization_is_key_estate_action_and_time_bound() {
     assert!(policy
         .authorize_key_file(
             &key_path,
+            CanonicalId::new("estate-a").unwrap(),
+            LocalEstatePermission::ScheduleBackup,
+            50,
+        )
+        .is_err());
+    assert!(policy
+        .authorize_key_file(
+            &key_path,
             CanonicalId::new("estate-b").unwrap(),
             LocalEstatePermission::Create,
             50,

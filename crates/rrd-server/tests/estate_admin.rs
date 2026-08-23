@@ -1,6 +1,8 @@
 use rrd_contract::CanonicalId;
 use rrd_estate::{
-    EstateRepository, LocalEstatePermission, LocalOperatorPolicy, LOCAL_OPERATOR_POLICY_FORMAT,
+    EstateRepository, LeaseRequest, LocalEstatePermission, LocalOperatorPolicy, MutationContext,
+    ObservationRequest, ObservedPhase, ReceiptBoundary, ReceiptRequest,
+    LOCAL_OPERATOR_POLICY_FORMAT,
 };
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
@@ -56,6 +58,7 @@ fn authorized_admin_mutations_replay_reopen_and_journal_exact_identity() {
             "estate-a".into(),
             BTreeSet::from([
                 LocalEstatePermission::Create,
+                LocalEstatePermission::ScheduleBackup,
                 LocalEstatePermission::SetDesired,
             ]),
         )]),
@@ -124,7 +127,7 @@ fn authorized_admin_mutations_replay_reopen_and_journal_exact_identity() {
         "--idempotency",
         "start-project",
         "--phase",
-        "running",
+        "stopped",
         "--deployment",
         "rrd-server",
         "--version",
@@ -137,12 +140,96 @@ fn authorized_admin_mutations_replay_reopen_and_journal_exact_identity() {
 
     let engine = PersistentEngine::open(&database).unwrap();
     let repository = EstateRepository::new(&engine, CanonicalId::new("estate-a").unwrap());
+    let transition_context = |at, request: &str| MutationContext {
+        at,
+        actor: "estate-worker".into(),
+        request_id: request.into(),
+        operation_id: CanonicalId::new("start-project").unwrap(),
+    };
+    repository
+        .acquire_lease(&LeaseRequest {
+            context: transition_context(40, "lease-stop"),
+            worker: CanonicalId::new("estate-worker").unwrap(),
+            lease_ms: 1_000,
+        })
+        .unwrap();
+    for (at, request, boundary, evidence) in [
+        (50, "prepare-stop", ReceiptBoundary::Prepared, "b"),
+        (60, "apply-stop", ReceiptBoundary::Applied, "c"),
+    ] {
+        repository
+            .record_receipt(&ReceiptRequest {
+                context: transition_context(at, request),
+                worker: CanonicalId::new("estate-worker").unwrap(),
+                lease_epoch: 1,
+                boundary,
+                evidence_sha256: evidence.repeat(64),
+                error: None,
+            })
+            .unwrap();
+    }
+    repository
+        .record_observation(&ObservationRequest {
+            context: transition_context(70, "observe-stop"),
+            worker: CanonicalId::new("estate-worker").unwrap(),
+            lease_epoch: 1,
+            phase: ObservedPhase::Stopped,
+            version: None,
+            process_id: None,
+            evidence_sha256: "d".repeat(64),
+            error: None,
+        })
+        .unwrap();
+    repository
+        .record_receipt(&ReceiptRequest {
+            context: transition_context(80, "complete-stop"),
+            worker: CanonicalId::new("estate-worker").unwrap(),
+            lease_epoch: 1,
+            boundary: ReceiptBoundary::Completed,
+            evidence_sha256: "e".repeat(64),
+            error: None,
+        })
+        .unwrap();
+    drop(engine);
+
+    let backup = [
+        "schedule-backup",
+        "--db",
+        database.to_str().unwrap(),
+        "--policy",
+        policy_path.to_str().unwrap(),
+        "--key",
+        key_path.to_str().unwrap(),
+        "--estate",
+        "estate-a",
+        "--at",
+        "90",
+        "--request",
+        "backup-request",
+        "--operation",
+        "backup-daily",
+        "--instance",
+        "project-a",
+        "--idempotency",
+        "backup-daily",
+        "--label",
+        "daily.0001",
+    ];
+    let accepted = value(&run(&backup));
+    assert_eq!(accepted["idempotent_replay"], false);
+    assert_eq!(accepted["job"]["state"], "pending");
+    assert_eq!(value(&run(&backup))["idempotent_replay"], true);
+
+    let engine = PersistentEngine::open(&database).unwrap();
+    let repository = EstateRepository::new(&engine, CanonicalId::new("estate-a").unwrap());
     let document = repository.load().unwrap().unwrap();
-    assert_eq!(document.revision, 2);
+    assert_eq!(document.revision, 8);
     assert_eq!(document.instances.len(), 1);
-    let journal = engine.control_journal_since(0, 10).unwrap();
-    assert_eq!(journal.len(), 2);
-    assert!(journal.iter().all(|entry| entry.actor == "operator-one"));
+    assert_eq!(document.backup_jobs.len(), 1);
+    let journal = engine.control_journal_since(0, 16).unwrap();
+    assert_eq!(journal.len(), 8);
     assert_eq!(journal[0].action, "estate.create");
     assert_eq!(journal[1].action, "estate.desired.set");
+    assert_eq!(journal[7].action, "estate.backup.schedule");
+    assert_eq!(journal[7].actor, "operator-one");
 }

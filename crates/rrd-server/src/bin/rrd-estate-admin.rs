@@ -1,7 +1,7 @@
-use rrd_contract::{CanonicalId, EstateMutationResult};
+use rrd_contract::{CanonicalId, EstateBackupMutationResult, EstateMutationResult};
 use rrd_estate::{
-    public_snapshot, DesiredPhase, DesiredTarget, EstateRepository, LocalEstatePermission,
-    LocalOperatorPolicy, MutationContext, SetDesired,
+    public_backup_job, public_snapshot, DesiredPhase, DesiredTarget, EstateRepository,
+    LocalEstatePermission, LocalOperatorPolicy, MutationContext, ScheduleBackup, SetDesired,
 };
 use std::path::PathBuf;
 use vyrm_store::PersistentEngine;
@@ -15,6 +15,11 @@ enum Action {
         deployment: CanonicalId,
         version: String,
         configuration_sha256: String,
+    },
+    ScheduleBackup {
+        instance: CanonicalId,
+        idempotency_key: String,
+        label: String,
     },
 }
 
@@ -41,6 +46,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let permission = match &args.action {
         Action::Create => LocalEstatePermission::Create,
         Action::SetDesired { .. } => LocalEstatePermission::SetDesired,
+        Action::ScheduleBackup { .. } => LocalEstatePermission::ScheduleBackup,
     };
     let policy = LocalOperatorPolicy::load_json(&args.policy)?;
     let authorization =
@@ -56,10 +62,10 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let result = match args.action {
         Action::Create => {
             let outcome = repository.create_idempotent(&context)?;
-            EstateMutationResult {
+            serde_json::to_value(EstateMutationResult {
                 estate: public_snapshot(&outcome.document),
                 idempotent_replay: outcome.idempotent_replay,
-            }
+            })?
         }
         Action::SetDesired {
             instance,
@@ -80,10 +86,27 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     configuration_sha256,
                 },
             })?;
-            EstateMutationResult {
+            serde_json::to_value(EstateMutationResult {
                 estate: public_snapshot(&outcome.document),
                 idempotent_replay: outcome.idempotent_replay,
-            }
+            })?
+        }
+        Action::ScheduleBackup {
+            instance,
+            idempotency_key,
+            label,
+        } => {
+            let outcome = repository.schedule_backup(&ScheduleBackup {
+                context,
+                instance_id: instance,
+                idempotency_key,
+                label,
+            })?;
+            serde_json::to_value(EstateBackupMutationResult {
+                estate: public_snapshot(&outcome.document),
+                job: public_backup_job(&outcome.job),
+                idempotent_replay: outcome.idempotent_replay,
+            })?
         }
     };
     println!("{}", serde_json::to_string(&result)?);
@@ -105,6 +128,7 @@ fn parse_args(mut arguments: impl Iterator<Item = String>) -> Result<Args, Strin
     let mut deployment = None;
     let mut version = None;
     let mut configuration_sha256 = None;
+    let mut label = None;
     while let Some(argument) = arguments.next() {
         let value = required(&mut arguments, &argument)?;
         match argument.as_str() {
@@ -121,6 +145,7 @@ fn parse_args(mut arguments: impl Iterator<Item = String>) -> Result<Args, Strin
             "--deployment" => deployment = Some(canonical(value, "--deployment")?),
             "--version" => version = Some(value),
             "--configuration-sha256" => configuration_sha256 = Some(value),
+            "--label" => label = Some(value),
             _ => return Err(format!("unknown option {argument:?}\n{}", usage())),
         }
     }
@@ -132,20 +157,40 @@ fn parse_args(mut arguments: impl Iterator<Item = String>) -> Result<Args, Strin
                 || deployment.is_some()
                 || version.is_some()
                 || configuration_sha256.is_some()
+                || label.is_some()
             {
                 return Err("create does not accept desired-state options".into());
             }
             Action::Create
         }
-        "set-desired" => Action::SetDesired {
-            instance: instance.ok_or("--instance is required")?,
-            idempotency_key: idempotency_key.ok_or("--idempotency is required")?,
-            phase: phase.ok_or("--phase is required")?,
-            deployment: deployment.ok_or("--deployment is required")?,
-            version: version.ok_or("--version is required")?,
-            configuration_sha256: configuration_sha256
-                .ok_or("--configuration-sha256 is required")?,
-        },
+        "set-desired" => {
+            if label.is_some() {
+                return Err("set-desired does not accept --label".into());
+            }
+            Action::SetDesired {
+                instance: instance.ok_or("--instance is required")?,
+                idempotency_key: idempotency_key.ok_or("--idempotency is required")?,
+                phase: phase.ok_or("--phase is required")?,
+                deployment: deployment.ok_or("--deployment is required")?,
+                version: version.ok_or("--version is required")?,
+                configuration_sha256: configuration_sha256
+                    .ok_or("--configuration-sha256 is required")?,
+            }
+        }
+        "schedule-backup" => {
+            if phase.is_some()
+                || deployment.is_some()
+                || version.is_some()
+                || configuration_sha256.is_some()
+            {
+                return Err("schedule-backup does not accept desired-state options".into());
+            }
+            Action::ScheduleBackup {
+                instance: instance.ok_or("--instance is required")?,
+                idempotency_key: idempotency_key.ok_or("--idempotency is required")?,
+                label: label.ok_or("--label is required")?,
+            }
+        }
         _ => return Err(usage().into()),
     };
     Ok(Args {
@@ -180,5 +225,5 @@ fn parse_phase(value: &str) -> Result<DesiredPhase, String> {
 }
 
 fn usage() -> &'static str {
-    "usage: rrd-estate-admin <create|set-desired> --db PATH --policy PATH --key PATH --estate ID --at UNIX_MS --request ID --operation ID [--instance ID --idempotency KEY --phase running|stopped|absent --deployment ID --version VERSION --configuration-sha256 SHA256]"
+    "usage: rrd-estate-admin <create|set-desired|schedule-backup> --db PATH --policy PATH --key PATH --estate ID --at UNIX_MS --request ID --operation ID [--instance ID --idempotency KEY] [--phase running|stopped|absent --deployment ID --version VERSION --configuration-sha256 SHA256] [--label LABEL]"
 }
