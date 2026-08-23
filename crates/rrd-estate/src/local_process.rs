@@ -338,7 +338,9 @@ impl LocalProcessDriver {
             .exe()
             .and_then(|path| std::fs::canonicalize(path).ok());
         if process.start_time() != record.process_start_time_unix_s
-            || executable.as_ref() != Some(&record.executable)
+            || executable
+                .as_deref()
+                .is_none_or(|path| !same_executable_file(path, &record.executable))
         {
             return Ok(ProcessIdentity::Foreign);
         }
@@ -429,12 +431,16 @@ impl LocalProcessDriver {
             }
             thread::sleep(Duration::from_millis(10));
         };
-        if executable != deployment.executable {
+        if !same_executable_file(&executable, &deployment.executable) {
             let _ = child.kill();
             let _ = child.wait();
             return Err(permanent(
                 request,
-                "spawned process executable does not match the trusted catalogue",
+                format!(
+                    "spawned process executable does not match the trusted catalogue: expected {}, observed {}",
+                    deployment.executable.display(),
+                    executable.display()
+                ),
             ));
         }
         let stability_deadline = Instant::now() + PROCESS_START_STABILITY;
@@ -912,7 +918,7 @@ fn wait_for_owned_exit(
                     .exe()
                     .and_then(|path| std::fs::canonicalize(path).ok())
                 {
-                    Some(executable) if executable != record.executable => {
+                    Some(executable) if !same_executable_file(&executable, &record.executable) => {
                         return Err(permanent(
                             request,
                             "refusing fallback kill after managed PID executable identity changed",
@@ -950,7 +956,9 @@ fn kill_owned_process(
         .exe()
         .and_then(|path| std::fs::canonicalize(path).ok());
     if process.start_time() != record.process_start_time_unix_s
-        || executable.as_ref() != Some(&record.executable)
+        || executable
+            .as_deref()
+            .is_none_or(|path| !same_executable_file(path, &record.executable))
     {
         return Err(permanent(
             request,
@@ -964,6 +972,31 @@ fn kill_owned_process(
         return Err(retryable(request, "process did not exit after kill"));
     }
     Ok(())
+}
+
+fn same_executable_file(observed: &Path, expected: &Path) -> bool {
+    if observed == expected {
+        return true;
+    }
+    same_platform_file(observed, expected)
+}
+
+#[cfg(unix)]
+fn same_platform_file(observed: &Path, expected: &Path) -> bool {
+    use std::os::unix::fs::MetadataExt;
+
+    let Ok(observed) = std::fs::metadata(observed) else {
+        return false;
+    };
+    let Ok(expected) = std::fs::metadata(expected) else {
+        return false;
+    };
+    observed.dev() == expected.dev() && observed.ino() == expected.ino()
+}
+
+#[cfg(not(unix))]
+fn same_platform_file(_observed: &Path, _expected: &Path) -> bool {
+    false
 }
 
 fn write_record(path: &Path, record: &ProcessRecord) -> std::io::Result<()> {
@@ -1028,4 +1061,24 @@ fn retryable(request: &DriverRequest, message: impl Into<String>) -> DriverError
                 .expect("local error fields serialize"),
         ),
     )
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::same_executable_file;
+
+    #[test]
+    fn executable_identity_accepts_hard_links_but_not_copies() {
+        let temporary = tempfile::tempdir().unwrap();
+        let expected = temporary.path().join("expected");
+        let hard_link = temporary.path().join("hard-link");
+        let copy = temporary.path().join("copy");
+        std::fs::write(&expected, b"authenticated executable image").unwrap();
+        std::fs::hard_link(&expected, &hard_link).unwrap();
+        std::fs::copy(&expected, &copy).unwrap();
+
+        assert!(same_executable_file(&expected, &expected));
+        assert!(same_executable_file(&hard_link, &expected));
+        assert!(!same_executable_file(&copy, &expected));
+    }
 }
