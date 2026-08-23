@@ -2,10 +2,10 @@
 
 Status: M3 persistence and semantic gates pass; the corrected nine-trial local
 general performance fixture now passes every strict cell. Remote and sustained
-reproduction remain promotion gates. WAL, atomic-batch, manifest,
-checkpoint, and physical snapshot-bundle formats are version 1; new immutable
-segments are version 3 and the reader retains explicit version-1/version-2
-compatibility.
+reproduction remain promotion gates. WAL, manifest, checkpoint, and physical
+snapshot-bundle formats are version 1. Atomic mutation writes are version 2
+with strict version-1 recovery. New immutable segments are version 3 and the
+reader retains explicit version-1/version-2 compatibility.
 The format is pre-release. Any format change before alpha must increment its
 explicit version and update the checked-in vectors; readers never guess.
 
@@ -68,15 +68,22 @@ Batch frame header (32 bytes):
 The outer WAL treats the payload as bytes so recovery does not need higher-level
 schema code.
 
-## Atomic mutation batch v1
+## Atomic mutation batch v2
 
-The payload begins with `VYRBAT01`, a `u16` version, zero `u16` flags, and a
-`u32` operation count. Each operation contains a one-byte kind, three zero flag
-bytes, `u32` key/value lengths, then key and value bytes. Put is kind 1; delete
-is kind 2 and must carry a zero value length. Empty batches/keys, unknown flags
-or kinds, trailing bytes, and lengths outside the declared limits fail closed.
-One MVCC sequence is allocated per operation while the whole batch remains one
-atomic WAL frame.
+The current payload begins with `VYRBAT02`, a `u16` version, zero `u16` flags,
+and a `u32` operation count. Each operation contains a `u32` key length and a
+`u32` tagged value length, then key/value bytes. Bit 31 of the tagged length
+marks delete and requires all length bits to be zero; a clear bit denotes put,
+including an empty value. This removes the v1 kind byte and three reserved
+bytes without weakening validation. Empty batches/keys, mismatched
+magic/version pairs, non-zero batch flags, delete-with-length, trailing bytes,
+and lengths outside the declared limits fail closed. One MVCC sequence is
+allocated per operation while the whole batch remains one atomic WAL frame.
+
+The reader also accepts frozen v1 payloads beginning with `VYRBAT01`. V1 keeps
+its one-byte kind, three zero operation-flag bytes, and `u32` key/value lengths.
+New writes are always canonical v2; a recovered v1 batch is re-encoded as v2 if
+written again.
 
 After a memtable flush, the successor WAL starts at the manifest's declared
 `wal_start_sequence`; recovery takes that boundary explicitly, so an empty
@@ -259,6 +266,7 @@ reachable through historical manifests/checkpoints until GC proves otherwise.
 
 - [`wal-v1.hex`](../crates/vyrm-kv/fixtures/wal-v1.hex)
 - [`batch-v1.hex`](../crates/vyrm-kv/fixtures/batch-v1.hex)
+- [`batch-v2.hex`](../crates/vyrm-kv/fixtures/batch-v2.hex)
 - [`manifest-v1.json`](../crates/vyrm-kv/fixtures/manifest-v1.json)
 - [`snapshot-bundle-v1.hex`](../crates/vyrm-kv/fixtures/snapshot-bundle-v1.hex)
 

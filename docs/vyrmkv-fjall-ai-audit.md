@@ -2,7 +2,7 @@
 
 Status: sparse-aware footprint correction, the canonical general fixture, and
 the eight-profile AI-read matrix pass locally. The scheduled scale matrix
-remains red on steady RSS and the extended clean-reopen WAL-footprint cell.
+remains red on sustained/extended RSS and read-heavy/sustained write p95.
 
 ## Decision
 
@@ -145,18 +145,19 @@ The corrected general harness initially exposed a full recovered-memtable clone
 on every bounded range. The ordered range walk fixed reads; compact sequence
 references, prepared batches, exact-length values, one-or-many version chains,
 streaming one-pass recovery, keyspace-local writes, and bounded initial-WAL
-reservation then closed the remaining local gaps. The 2026-08-23 canonical
-rerun records 1.267× write throughput, 0.758× write p95, 1.390× read throughput,
-0.694× read p95, 0.155×
-recovery time, 0.915× peak RSS, and 0.915× allocated footprint. The corrected
-general gate remains green locally; sustained RSS, the extended WAL footprint,
-and remote reproduction remain. Evidence:
-[`standard compact-residency`](../eval/results/2026-08-23-vyrmkv-standard-compact-residency.json).
+reservation then closed the remaining local gaps. Atomic batch v2 removes four
+framing bytes per physical mutation while retaining strict v1 recovery. The
+current canonical rerun records 1.191× write throughput, 0.898× write p95,
+1.401× read throughput, 0.733× read p95, 0.160× recovery time, 0.911× peak RSS,
+and 0.915× allocated footprint. The corrected general gate remains green
+locally; scale RSS/write-tail latency and remote reproduction remain. Evidence:
+[`standard batch-v2`](../eval/results/2026-08-23-vyrmkv-standard-batch-v2.json).
 
 The high-entropy embedding/fan-out AI profile was rerun because the residency
-change alters in-memory value ownership. It still passes at 1.769× read
-throughput, 0.514× p95 latency, and 0.976× clean-reopen allocated footprint.
-Evidence: [`embedding compact-residency`](../eval/results/2026-08-23-vyrmkv-ai-embedding-compact-residency.json).
+change alters in-memory value ownership and batch framing. It still passes at
+1.739× read throughput, 0.570× p95 latency, and 0.963× clean-reopen allocated
+footprint. Evidence:
+[`embedding batch-v2`](../eval/results/2026-08-23-vyrmkv-ai-embedding-batch-v2.json).
 
 ## Ordered implementation gates
 

@@ -1,10 +1,14 @@
 use crate::{Error, Result, WAL_MAX_PAYLOAD_BYTES};
 use serde::{Deserialize, Deserializer, Serialize};
 
-pub const BATCH_FORMAT_VERSION: u16 = 1;
-const BATCH_MAGIC: &[u8; 8] = b"VYRBAT01";
+pub const BATCH_FORMAT_VERSION: u16 = 2;
+const BATCH_V1_MAGIC: &[u8; 8] = b"VYRBAT01";
+const BATCH_V2_MAGIC: &[u8; 8] = b"VYRBAT02";
 const BATCH_HEADER_BYTES: usize = 16;
-const OP_HEADER_BYTES: usize = 12;
+const V1_OP_HEADER_BYTES: usize = 12;
+const V2_OP_HEADER_BYTES: usize = 8;
+const V2_DELETE_MASK: u32 = 1 << 31;
+const V2_VALUE_LEN_MASK: u32 = !V2_DELETE_MASK;
 const MAX_OPERATIONS: usize = 1_000_000;
 const MAX_KEY_BYTES: usize = 1024 * 1024;
 const MAX_VALUE_BYTES: usize = 8 * 1024 * 1024;
@@ -72,27 +76,26 @@ impl WriteBatch {
         let count = u32::try_from(self.operations.len())
             .map_err(|_| Error::InvalidBatch("operation count exceeds u32".into()))?;
         let mut output = Vec::with_capacity(self.encoded_len);
-        output.extend_from_slice(BATCH_MAGIC);
+        output.extend_from_slice(BATCH_V2_MAGIC);
         output.extend_from_slice(&BATCH_FORMAT_VERSION.to_be_bytes());
         output.extend_from_slice(&0u16.to_be_bytes());
         output.extend_from_slice(&count.to_be_bytes());
         for operation in &self.operations {
-            let (kind, key, value): (u8, &[u8], &[u8]) = match operation {
-                Mutation::Put { key, value } => (1, key, value),
-                Mutation::Delete { key } => (2, key, &[]),
+            let (key, value, tagged_value_len): (&[u8], &[u8], u32) = match operation {
+                Mutation::Put { key, value } => (
+                    key,
+                    value,
+                    u32::try_from(value.len())
+                        .map_err(|_| Error::InvalidBatch("value length exceeds u32".into()))?,
+                ),
+                Mutation::Delete { key } => (key, &[], V2_DELETE_MASK),
             };
-            output.push(kind);
-            output.extend_from_slice(&[0, 0, 0]);
             output.extend_from_slice(
                 &u32::try_from(key.len())
                     .map_err(|_| Error::InvalidBatch("key length exceeds u32".into()))?
                     .to_be_bytes(),
             );
-            output.extend_from_slice(
-                &u32::try_from(value.len())
-                    .map_err(|_| Error::InvalidBatch("value length exceeds u32".into()))?
-                    .to_be_bytes(),
-            );
+            output.extend_from_slice(&tagged_value_len.to_be_bytes());
             output.extend_from_slice(key);
             output.extend_from_slice(value);
         }
@@ -109,16 +112,18 @@ impl WriteBatch {
                 "encoded batch exceeds {WAL_MAX_PAYLOAD_BYTES} bytes"
             ));
         }
-        if &bytes[0..8] != BATCH_MAGIC {
-            return invalid("batch magic does not match");
-        }
         let version = u16::from_be_bytes(bytes[8..10].try_into().expect("fixed version field"));
-        if version != BATCH_FORMAT_VERSION {
+        if version != 1 && version != BATCH_FORMAT_VERSION {
             return Err(Error::UnsupportedVersion {
                 object: "write batch",
                 version,
             });
         }
+        let operation_header_bytes = match (&bytes[0..8], version) {
+            (magic, 1) if magic == BATCH_V1_MAGIC => V1_OP_HEADER_BYTES,
+            (magic, BATCH_FORMAT_VERSION) if magic == BATCH_V2_MAGIC => V2_OP_HEADER_BYTES,
+            _ => return invalid("batch magic/version pair does not match"),
+        };
         if bytes[10..12] != [0, 0] {
             return invalid("unknown batch flags");
         }
@@ -131,19 +136,35 @@ impl WriteBatch {
         let mut operations = Vec::with_capacity(count);
         for _ in 0..count {
             let header_end = cursor
-                .checked_add(OP_HEADER_BYTES)
+                .checked_add(operation_header_bytes)
                 .ok_or_else(|| Error::InvalidBatch("operation header length overflow".into()))?;
             let header = bytes
                 .get(cursor..header_end)
                 .ok_or_else(|| Error::InvalidBatch("incomplete operation header".into()))?;
-            let kind = header[0];
-            if header[1..4] != [0, 0, 0] {
-                return invalid("unknown operation flags");
-            }
-            let key_len =
-                u32::from_be_bytes(header[4..8].try_into().expect("fixed key length")) as usize;
-            let value_len =
-                u32::from_be_bytes(header[8..12].try_into().expect("fixed value length")) as usize;
+            let (kind, key_len, value_len) = if version == 1 {
+                if header[1..4] != [0, 0, 0] {
+                    return invalid("unknown operation flags");
+                }
+                (
+                    header[0],
+                    u32::from_be_bytes(header[4..8].try_into().expect("fixed key length")) as usize,
+                    u32::from_be_bytes(header[8..12].try_into().expect("fixed value length"))
+                        as usize,
+                )
+            } else {
+                let tagged_value_len =
+                    u32::from_be_bytes(header[4..8].try_into().expect("fixed tagged value length"));
+                let delete = tagged_value_len & V2_DELETE_MASK != 0;
+                let value_len = (tagged_value_len & V2_VALUE_LEN_MASK) as usize;
+                if delete && value_len != 0 {
+                    return invalid("delete operation carries a value length");
+                }
+                (
+                    if delete { 2 } else { 1 },
+                    u32::from_be_bytes(header[0..4].try_into().expect("fixed key length")) as usize,
+                    value_len,
+                )
+            };
             if key_len == 0 || key_len > MAX_KEY_BYTES || value_len > MAX_VALUE_BYTES {
                 return invalid("operation key/value length exceeds its contract");
             }
@@ -172,10 +193,7 @@ impl WriteBatch {
                 bytes.len() - cursor
             ));
         }
-        Ok(Self {
-            operations,
-            encoded_len: bytes.len(),
-        })
+        Self::new(operations)
     }
 }
 
@@ -208,7 +226,7 @@ fn validate_operations(operations: &[Mutation]) -> Result<usize> {
             Mutation::Delete { .. } => 0,
         };
         encoded_len = encoded_len
-            .checked_add(OP_HEADER_BYTES)
+            .checked_add(V2_OP_HEADER_BYTES)
             .and_then(|length| length.checked_add(operation.key().len()))
             .and_then(|length| length.checked_add(value_len))
             .ok_or_else(|| Error::InvalidBatch("encoded batch length overflow".into()))?;

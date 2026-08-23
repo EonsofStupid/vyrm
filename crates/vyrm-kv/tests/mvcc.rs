@@ -1,5 +1,6 @@
 use vyrm_kv::{
-    recover, Database, Durability, Error, Memtable, Mutation, RecoveredBatch, WalWriter, WriteBatch,
+    recover, Database, Durability, Error, Memtable, Mutation, RecoveredBatch, WalBatch, WalWriter,
+    WriteBatch,
 };
 
 fn fixture_batch() -> WriteBatch {
@@ -19,11 +20,26 @@ fn fixture_batch() -> WriteBatch {
     .unwrap()
 }
 
+fn batch_fixture(name: &str) -> Vec<u8> {
+    let path = format!("{}/fixtures/{name}", env!("CARGO_MANIFEST_DIR"));
+    let hex = std::fs::read_to_string(path).unwrap();
+    let (pairs, remainder) = hex.trim().as_bytes().as_chunks::<2>();
+    assert!(remainder.is_empty());
+    pairs
+        .iter()
+        .map(|pair| u8::from_str_radix(std::str::from_utf8(pair).unwrap(), 16).unwrap())
+        .collect()
+}
+
 #[test]
 fn batch_codec_is_canonical_strict_and_frozen() {
     let batch = fixture_batch();
     let encoded = batch.encode().unwrap();
     assert_eq!(WriteBatch::decode(&encoded).unwrap(), batch);
+    assert_eq!(
+        WriteBatch::decode(&batch_fixture("batch-v1.hex")).unwrap(),
+        batch
+    );
 
     for end in 0..encoded.len() {
         assert!(WriteBatch::decode(&encoded[..end]).is_err());
@@ -35,11 +51,39 @@ fn batch_codec_is_canonical_strict_and_frozen() {
         Err(Error::InvalidBatch(_))
     ));
 
+    let mut unknown_version = encoded.clone();
+    unknown_version[8..10].copy_from_slice(&3u16.to_be_bytes());
+    assert!(matches!(
+        WriteBatch::decode(&unknown_version),
+        Err(Error::UnsupportedVersion {
+            object: "write batch",
+            version: 3
+        })
+    ));
+
+    let mut mismatched_magic = encoded.clone();
+    mismatched_magic[..8].copy_from_slice(b"VYRBAT01");
+    assert!(matches!(
+        WriteBatch::decode(&mismatched_magic),
+        Err(Error::InvalidBatch(_))
+    ));
+
+    let delete = WriteBatch::new(vec![Mutation::Delete {
+        key: b"alpha".to_vec(),
+    }])
+    .unwrap();
+    let mut delete_with_length = delete.encode().unwrap();
+    delete_with_length[20..24].copy_from_slice(&0x8000_0001u32.to_be_bytes());
+    assert!(matches!(
+        WriteBatch::decode(&delete_with_length),
+        Err(Error::InvalidBatch(_))
+    ));
+
     let actual = encoded
         .iter()
         .map(|byte| format!("{byte:02x}"))
         .collect::<String>();
-    let fixture = concat!(env!("CARGO_MANIFEST_DIR"), "/fixtures/batch-v1.hex");
+    let fixture = concat!(env!("CARGO_MANIFEST_DIR"), "/fixtures/batch-v2.hex");
     if std::env::var_os("VYRM_UPDATE_GOLDENS").is_some() {
         std::fs::create_dir_all(format!("{}/fixtures", env!("CARGO_MANIFEST_DIR"))).unwrap();
         std::fs::write(fixture, format!("{actual}\n")).unwrap();
@@ -48,6 +92,32 @@ fn batch_codec_is_canonical_strict_and_frozen() {
         format!("{actual}\n"),
         std::fs::read_to_string(fixture).unwrap()
     );
+}
+
+#[test]
+fn a_v1_batch_replays_through_the_wal_recovery_path() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("active.wal");
+    let payload = batch_fixture("batch-v1.hex");
+    let mut writer = WalWriter::create(&path).unwrap();
+    writer
+        .append(
+            &WalBatch {
+                first_sequence: 1,
+                last_sequence: 3,
+                payload: &payload,
+            },
+            Durability::Authoritative,
+        )
+        .unwrap();
+    drop(writer);
+
+    let recovery = recover(&path).unwrap();
+    let table = Memtable::recover(&recovery.batches).unwrap();
+    assert_eq!(table.maximum_sequence(), 3);
+    assert_eq!(table.get(b"alpha", 1), Some(b"one".as_slice()));
+    assert_eq!(table.get(b"alpha", 3), None);
+    assert_eq!(table.get(b"beta", 3), Some(b"two".as_slice()));
 }
 
 #[test]

@@ -342,14 +342,14 @@ canonical local append/replay promotion is now green in a nine-trial bounded
 fixture. Compact sequence references, cached batch validation, exact-length
 values, one-or-many memtable chains, streaming one-pass WAL recovery,
 keyspace-local mutation ordering, and a bounded first-WAL extent reservation
-moved every strict cell ahead of Fjall: 1.267× write throughput, 0.758× write
-p95, 1.390×
-clean-reopen read throughput, 0.694× read p95, 0.155× recovery time, 0.915×
-peak RSS, and 0.915× allocated footprint.
+moved every strict cell ahead of Fjall. The current batch-v2 rerun records
+1.191× write throughput, 0.898× write p95, 1.401× clean-reopen read throughput,
+0.733× read p95, 0.160× recovery time, 0.911× peak RSS, and 0.915× allocated
+footprint.
 The dedicated eight-profile AI-read matrix passes its bounded correctness,
 throughput, p95, and clean-reopen allocation gates. See the
 [benchmark audit](docs/vyrmkv-benchmark.md) and
-[corrected raw evidence](eval/results/2026-08-23-vyrmkv-standard-compact-residency.json).
+[corrected raw evidence](eval/results/2026-08-23-vyrmkv-standard-batch-v2.json).
 A separate 20,000-operation
 physical differential now proves put/overwrite/delete behavior across reopen
 and compaction against both Fjall and an independent ordered-map oracle.

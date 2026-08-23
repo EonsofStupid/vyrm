@@ -302,9 +302,11 @@ not roadmap language.
 - M3 native storage persistence and semantic gates pass in the standalone
   `vyrm-kv` crate. The corrected nine-trial local general performance fixture
   now passes every strict cell; remote and sustained reproduction remain. WAL v1
-  now has frozen CRC32C file/frame formats, atomic batch sequence ranges,
-  explicit buffered/authoritative acknowledgments, idempotent recovery, and an
-  explicit torn-tail-only repair path; complete corruption fails closed.
+  now has frozen CRC32C file/frame formats; atomic batch v2 compacts operation
+  framing while the recovery reader retains the frozen v1 vector. Batches reserve
+  atomic sequence ranges and expose explicit buffered/authoritative
+  acknowledgments. Recovery is idempotent, repairs only a torn tail when asked,
+  and fails closed on complete corruption.
   Immutable manifest v1 types canonicalize segment reachability and bind it to
   a SHA-256 identity. Checked-in byte/JSON vectors and torn/corrupt/version
   tests protect this boundary. The native mutation codec allocates one MVCC
@@ -347,17 +349,18 @@ not roadmap language.
   physical allocation. Exact semantics pass. Compact sequence references,
   cached batch validation, exact-length values, one-or-many memtable chains,
   streaming one-pass WAL recovery, keyspace-local writes, and bounded first-WAL
-  reservation now record 1.267× write throughput, 0.758× write p95, 1.390×
-  clean-reopen read throughput, 0.694× read p95, 0.155× recovery time, 0.915×
+  reservation now record 1.191× write throughput, 0.898× write p95, 1.401×
+  clean-reopen read throughput, 0.733× read p95, 0.160× recovery time, 0.911×
   peak RSS, and 0.915× allocated footprint. The separate eight-profile AI-read
   matrix passes its bounded correctness, throughput, p95, and clean-reopen
   allocation gates.
   These remain workload-scoped results—not a universal database claim.
-  The exact scheduled scale matrix remains red: the prior read-heavy cell
-  records 1.015× raw peak RSS; compact residency improves sustained from
-  1.123× to 1.063× and the 70,000-operation profile from 1.181× to 1.114× RSS.
-  The extended profile remains 1.004× allocated footprint. All other strict
-  cells in those profiles pass;
+  The exact scheduled scale matrix remains red. Compact residency closes the
+  former read-heavy RSS gap (0.975×) and improves sustained from 1.123× to
+  1.066× and the 70,000-operation profile from 1.181× to 1.114× RSS. Batch v2
+  moves extended allocation from 1.004× to 0.987×. The current read-heavy and
+  sustained samples also miss write p95 at 1.052× and 1.196× respectively;
+  extended misses only RSS. These cells are not averaged away;
   backend-native maintained reads remain diagnostic.
   Native now also persists access/removal evidence and the invocation/
   effectiveness ledger with Fjall-equality and reopen tests, closing the
