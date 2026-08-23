@@ -244,6 +244,18 @@ transaction atomicity, cancellation, idempotency and version negotiation.
 restart must converge to the same desired state without duplicate destructive
 work or loss of operation history.
 
+**Implementation progress 2026-08-23:** the first persistent authority slice is
+landed in `rrd-estate` and frozen in
+[`estate-control-v1.md`](estate-control-v1.md). A bounded per-estate aggregate
+uses Vyrm control-state CAS plus its authenticated journal to advance monotonic
+desired generations, observed evidence, idempotency bindings, operation state,
+fenced lease epochs, append-only receipts, heartbeat/runtime evidence and
+derived activity. Memory/native tests prove key rebinding denial, stale-worker
+fencing, lease-epoch recovery and reopen/hash-chain survival. This does **not**
+complete F3: the typed local process driver, kill-at-every-boundary matrix,
+deployment/upgrade/backup/restore state machines, Connectome read projection
+and authorized mutations remain open.
+
 ### F4 — establish security and governance before remote management
 
 **Deliverables**

@@ -23,6 +23,14 @@ transport-neutral, versioned public vocabulary with frozen JSON rather than an
 internal Rust API being mislabeled as an SDK. Its scope and limitations are in
 [`docs/rrd-public-contract.md`](docs/rrd-public-contract.md).
 
+F3 now has its first authority artifact in
+[`rrd-estate`](crates/rrd-estate): a bounded, versioned estate document whose
+desired state, observations, operation leases, idempotency bindings, receipts,
+and activity evidence advance through the authenticated Vyrm control journal.
+The state contract is documented in
+[`docs/estate-control-v1.md`](docs/estate-control-v1.md). Deployment drivers and
+the Connectome projection remain subsequent F3 slices.
+
 The system makes operational reasoning observable and enforceable without
 claiming access to a model's hidden chain-of-thought. It records goals, plans,
 attempts, tool observations, decisions, verification, outcomes, context
@@ -311,6 +319,7 @@ measurement contract.
 | Crate | Responsibility |
 |---|---|
 | `rrd-contract` | Stable versioned resource/envelope, lifecycle, health, capability, error, and canonical transaction-digest wire contracts |
+| `rrd-estate` | Persistent estate desired/observed authority, fenced operation leases, idempotency bindings, receipts, and activity classification |
 | `rrd-server` | Async loopback RRD process, persistent transport leases, prepared claim commits, bounded HTTP, and restart-idempotent lifecycle coordination |
 | `vyrm-core` | Claim, reasoning, typed runtime graph, durable trace, traversal, and differential contracts; serde-only boundary |
 | `vyrm-store` | `vyrmDS` coordination plus native `vyrmKV`, transitional Fjall, and memory adapters; unified atomic commits, content-addressed objects, outbox/audit, sequences, projections |

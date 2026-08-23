@@ -55,6 +55,16 @@ production distributed/Kubernetes operation, and cloud management.
   bind denial. Cancellation, generalized read-your-writes and administration,
   result/time bounds, metrics, and released-version client qualification keep
   F2 open; these transport leases are not F4 user authentication.
+- F3 has started at its persistent authority boundary. `rrd-estate` stores one
+  explicitly bounded, versioned aggregate per estate through control-state CAS
+  and the authenticated journal. Desired generations, observed evidence,
+  operation state, fenced lease epochs, idempotency bindings, append-only
+  receipts, heartbeats and meaningful-runtime evidence survive native-engine
+  reopen. Activity is derived as unknown/active/idle/stale/neglected from
+  explicit thresholds. The local process driver, transition-boundary kill
+  matrix, backup/restore jobs, Connectome projection and authorized mutations
+  remain open; the existing UI `EstateView` is still only a synthetic read
+  model.
 
 - The bi-temporal claim kernel has immutable supersession corrections,
   canonical SHA-256 identities covering provenance and validity, and atomic
