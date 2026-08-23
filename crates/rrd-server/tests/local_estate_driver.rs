@@ -1,9 +1,9 @@
 use rrd_contract::CanonicalId;
 use rrd_estate::{
     DesiredInstance, DesiredPhase, DesiredTarget, DriverErrorKind, DriverRequest, EstateDriver,
-    EstateRepository, LocalArgument, LocalDeployment, LocalDeploymentCatalog, LocalProcessDriver,
-    LocalShutdown, MutationContext, OperationKind, OperationState, ReconcileBoundary,
-    ReconcileOutcome, Reconciler, SetDesired, LOCAL_DEPLOYMENT_FORMAT,
+    EstateRepository, LOCAL_DEPLOYMENT_FORMAT, LocalArgument, LocalDeployment,
+    LocalDeploymentCatalog, LocalProcessDriver, LocalShutdown, MutationContext, OperationKind,
+    OperationState, ReconcileBoundary, ReconcileOutcome, Reconciler, SetDesired,
 };
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
@@ -100,10 +100,13 @@ fn step(database: &Path, state_root: &Path, at: u64) -> ReconcileOutcome {
 
 fn assert_boundary(outcome: ReconcileOutcome, expected: ReconcileBoundary) {
     let observed = format!("{outcome:?}");
-    assert!(matches!(
-        outcome,
-        ReconcileOutcome::Advanced { boundary, .. } if boundary == expected
-    ), "expected {expected:?}, observed {observed}");
+    assert!(
+        matches!(
+            outcome,
+            ReconcileOutcome::Advanced { boundary, .. } if boundary == expected
+        ),
+        "expected {expected:?}, observed {observed}"
+    );
 }
 
 fn process_pid(state_root: &Path) -> Option<u32> {
@@ -147,51 +150,65 @@ fn run_controller_and_kill(
     after_effect: bool,
 ) {
     let marker = marker.with_extension(format!("{at}.held"));
-    let _ = std::fs::remove_file(&marker);
-    let _ = std::fs::remove_file(marker.with_extension("new"));
     let hold_variable = if after_effect {
         "RRD_ESTATE_TEST_HOLD_AFTER_EFFECT_FILE"
     } else {
         "RRD_ESTATE_TEST_HOLD_AFTER_STEP_FILE"
     };
-    let mut child = Command::new(env!("CARGO_BIN_EXE_rrd-estate-controller"))
-        .args([
-            "--db",
-            database.to_str().unwrap(),
-            "--state-root",
-            state_root.to_str().unwrap(),
-            "--catalog",
-            catalog_path.to_str().unwrap(),
-            "--estate",
-            "estate-a",
-            "--worker",
-            "worker-one",
-            "--lease-ms",
-            "30000",
-            "--at",
-            &at.to_string(),
-        ])
-        .env(hold_variable, &marker)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::piped())
-        .spawn()
-        .unwrap();
     let deadline = Instant::now() + Duration::from_secs(90);
-    while !marker.is_file() {
-        if let Some(status) = child.try_wait().unwrap() {
-            let mut error = String::new();
-            std::io::Read::read_to_string(child.stderr.as_mut().unwrap(), &mut error).unwrap();
-            panic!("estate controller exited before hold marker at {at} ({status}): {error}");
+    'retry: loop {
+        let _ = std::fs::remove_file(&marker);
+        let _ = std::fs::remove_file(marker.with_extension("new"));
+        let mut child = Command::new(env!("CARGO_BIN_EXE_rrd-estate-controller"))
+            .args([
+                "--db",
+                database.to_str().unwrap(),
+                "--state-root",
+                state_root.to_str().unwrap(),
+                "--catalog",
+                catalog_path.to_str().unwrap(),
+                "--estate",
+                "estate-a",
+                "--worker",
+                "worker-one",
+                "--lease-ms",
+                "30000",
+                "--at",
+                &at.to_string(),
+            ])
+            .env(hold_variable, &marker)
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        while !marker.is_file() {
+            if let Some(status) = child.try_wait().unwrap() {
+                let mut output = String::new();
+                let mut error = String::new();
+                std::io::Read::read_to_string(child.stdout.as_mut().unwrap(), &mut output).unwrap();
+                std::io::Read::read_to_string(child.stderr.as_mut().unwrap(), &mut error).unwrap();
+                let deferred = status.success()
+                    && serde_json::from_str::<ReconcileOutcome>(output.trim())
+                        .is_ok_and(|outcome| matches!(outcome, ReconcileOutcome::Deferred { .. }));
+                if deferred && Instant::now() < deadline {
+                    thread::sleep(Duration::from_millis(10));
+                    continue 'retry;
+                }
+                panic!(
+                    "estate controller exited before hold marker at {at} ({status}); stdout={output:?}; stderr={error:?}"
+                );
+            }
+            assert!(
+                Instant::now() < deadline,
+                "estate controller did not reach hold boundary at {at}"
+            );
+            thread::sleep(Duration::from_millis(10));
         }
-        assert!(
-            Instant::now() < deadline,
-            "estate controller did not reach hold boundary at {at}"
-        );
-        thread::sleep(Duration::from_millis(10));
+        child.kill().unwrap();
+        child.wait().unwrap();
+        return;
     }
-    child.kill().unwrap();
-    child.wait().unwrap();
 }
 
 fn operation_state(database: &Path, operation: &str) -> (OperationState, u64) {
