@@ -158,3 +158,26 @@ index.
   production deployment, operator authorization, or an F3 backup job.
 - Next gate: operable deployment packaging, followed by explicitly authorized
   estate mutations and per-instance backup/restore.
+
+## 2026-08-23 — F3 trusted deployment-catalogue generator
+
+- Commits: `98ba3af` (`feat(rrd): generate trusted deployment catalogues`) and
+  `e8979ff` (`ci(rrd): qualify catalogue generation natively`).
+- Capability: added a validated constructor that canonicalizes and hashes a
+  deployment executable and a local `rrd-deployment-catalog` binary that emits
+  the complete typed RRD launch and shutdown policy from its installed sibling.
+  The output is owner-private, synced, create-new, and never overwrites an
+  existing catalogue.
+- Verification: all `rrd-estate` and `rrd-server` tests passed locally; strict
+  all-target clippy passed. GitHub Actions run
+  [`32668383982`](https://github.com/EonsofStupid/vyrm/actions/runs/32668383982)
+  passed the real generator, authority, server process, child/controller crash,
+  and strict-clippy matrix on Ubuntu, Windows, and macOS.
+- Evidence: the black-box generator test uses the actual built sibling
+  `rrd-server`, reloads and validates its emitted catalogue, checks executable,
+  version, typed instance argument and bounded shutdown policy, then proves a
+  second invocation is denied without corrupting the first file.
+- Limit: this is catalogue packaging, not an MSI/pkg/deb, service manager,
+  auto-updater, signing authority, or remote operator mutation surface.
+- Next gate: define and implement a local operator authorization boundary for
+  estate creation and desired-state mutation before exposing either remotely.

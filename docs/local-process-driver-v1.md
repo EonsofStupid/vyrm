@@ -26,6 +26,15 @@ only the host `SystemRoot` after clearing the environment because Winsock cannot
 initialize its installed providers without that platform location; catalogue
 variables remain the only other inherited launch state.
 
+`rrd-deployment-catalog --output PATH` resolves the installed sibling
+`rrd-server` by default, canonicalizes and hashes the executable, and emits the
+validated RRD argument and graceful-shutdown template. `--server` and
+`--version` are explicit overrides for staged upgrades. Publication uses a
+synced owner-private staging inode and an atomic create-new hard link, so an
+existing target is never replaced and an interrupted partial file is never the
+catalogue. This is an operable catalogue surface, not yet an OS installer or
+service manager.
+
 Instance-relative paths reject absolute paths, parents, roots and platform
 prefixes. Every instance receives a dedicated directory beneath the configured
 absolute state root. The initial `delete` behavior stops the verified process
@@ -105,8 +114,8 @@ dependency boundaries, and offline-edge binary budgets.
 
 This qualifies the current local process and controller crash boundary across
 the three native desktop/server OS families. It is not the complete F3 product:
-packaging, authorized mutations, per-instance backup/restore, and a bounded
-rotation/retention policy for the diagnostic logs remain open.
+installer/service packaging, authorized mutations, per-instance backup/restore,
+and a bounded rotation/retention policy for the diagnostic logs remain open.
 
 ## Primary implementation references
 

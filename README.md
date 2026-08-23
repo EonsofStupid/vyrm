@@ -49,6 +49,11 @@ limits are in
 slice evidence is appended to
 [`docs/implementation-journal.md`](docs/implementation-journal.md).
 
+Installed layouts can generate that trusted catalogue without hand-authoring a
+path or digest: `rrd-deployment-catalog --output deployments.json` resolves the
+sibling `rrd-server`, authenticates its canonical bytes, writes the complete
+typed launch/shutdown template, and refuses to overwrite an existing target.
+
 The system makes operational reasoning observable and enforceable without
 claiming access to a model's hidden chain-of-thought. It records goals, plans,
 attempts, tool observations, decisions, verification, outcomes, context

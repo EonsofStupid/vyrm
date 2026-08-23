@@ -281,8 +281,11 @@ already occurred. Managed RRD children drain through paired durable request and
 completion files with a bounded timeout, PID/start/executable reauthentication,
 and forced fallback. Per-instance stdout/stderr logs retain startup evidence.
 The native matrix passes this complete sequence and strict clippy on Linux,
-Windows and macOS. Packaging, authorized mutation, bounded log retention, and
-the remaining deployment/upgrade/backup/restore jobs are still required for F3.
+Windows and macOS. A native-qualified generator now produces the complete
+trusted catalogue from the installed sibling RRD server without hand-authored
+paths or digests. Installer/service packaging, authorized mutation, bounded log
+retention, and the remaining deployment/upgrade/backup/restore jobs are still
+required for F3.
 
 ### F4 — establish security and governance before remote management
 

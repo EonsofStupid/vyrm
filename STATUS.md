@@ -90,6 +90,10 @@ production distributed/Kubernetes operation, and cloud management.
   packaging, per-instance backup/restore, and bounded log retention keep F3
   open. The storage-format composition defect exposed by the first matrix run
   is corrected, and the subsequent repository-wide CI run is green.
+  `rrd-deployment-catalog` now resolves and hashes the installed sibling server,
+  emits the validated typed launch/shutdown contract with owner-private durable
+  no-overwrite publication, and passes its real-binary test on all three native
+  CI operating systems. Installer/service packaging remains open.
 
 - The bi-temporal claim kernel has immutable supersession corrections,
   canonical SHA-256 identities covering provenance and validity, and atomic
