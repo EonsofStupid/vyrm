@@ -6,6 +6,7 @@
 //! coordinates needed before those outward surfaces are implemented.
 
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
@@ -465,6 +466,44 @@ pub struct SessionLease {
     pub limits: SessionLimits,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RenewSession {}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CloseSession {}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AbortTransaction {}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SessionEndState {
+    Closed,
+    Expired,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SessionTermination {
+    pub session_id: CorrelationId,
+    pub state: SessionEndState,
+    pub ended_at_unix_ms: u64,
+    pub affected_open_transactions: u16,
+    pub idempotent_replay: bool,
+}
+
+impl SessionTermination {
+    pub fn validate(&self) -> Result<()> {
+        if self.ended_at_unix_ms == 0 {
+            return invalid("session termination time must be greater than zero");
+        }
+        Ok(())
+    }
+}
+
 impl SessionLease {
     pub fn validate(&self) -> Result<()> {
         self.limits.validate()?;
@@ -591,6 +630,64 @@ impl CommitTransaction {
         }
         Ok(())
     }
+
+    pub fn computed_operation_sha256(&self) -> String {
+        transaction_operation_sha256(&self.mutations)
+    }
+}
+
+/// SHA-256 over the stable typed JSON representation of the ordered mutation
+/// list. Clients must use this function's cross-language equivalent rather
+/// than hashing arbitrary input-object key order.
+pub fn transaction_operation_sha256(mutations: &[TransactionMutation]) -> String {
+    let bytes = serde_json::to_vec(mutations).expect("public transaction mutations serialize");
+    let digest = Sha256::digest(bytes);
+    let mut output = String::with_capacity(64);
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    for byte in digest {
+        output.push(HEX[usize::from(byte >> 4)] as char);
+        output.push(HEX[usize::from(byte & 0x0f)] as char);
+    }
+    output
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PreviewTransaction {
+    pub mutations: Vec<TransactionMutation>,
+}
+
+impl PreviewTransaction {
+    pub fn validate(&self) -> Result<()> {
+        if self.mutations.is_empty() || self.mutations.len() > MAX_TRANSACTION_CLAIMS {
+            return invalid(format!(
+                "transaction mutation count must be in 1..={MAX_TRANSACTION_CLAIMS}"
+            ));
+        }
+        for mutation in &self.mutations {
+            mutation.validate()?;
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TransactionPreview {
+    pub transaction_id: CorrelationId,
+    pub read_cursor: u64,
+    pub operation_sha256: String,
+    pub mutations: Vec<TransactionMutation>,
+}
+
+impl TransactionPreview {
+    pub fn validate(&self) -> Result<()> {
+        validate_sha256(&self.operation_sha256, "operation_sha256")?;
+        PreviewTransaction {
+            mutations: self.mutations.clone(),
+        }
+        .validate()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -612,6 +709,39 @@ impl CommitReceipt {
             || self.mutation_count != self.last_claim_sequence - self.first_claim_sequence + 1
         {
             return invalid("commit receipt sequence interval is inconsistent");
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Liveness {
+    pub observed_at_unix_ms: u64,
+}
+
+impl Liveness {
+    pub fn validate(&self) -> Result<()> {
+        if self.observed_at_unix_ms == 0 {
+            return invalid("liveness observation time must be greater than zero");
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Readiness {
+    pub observed_at_unix_ms: u64,
+    pub claim_sequence: u64,
+    pub runtime_cursor: u64,
+    pub backend: CanonicalId,
+}
+
+impl Readiness {
+    pub fn validate(&self) -> Result<()> {
+        if self.observed_at_unix_ms == 0 {
+            return invalid("readiness observation time must be greater than zero");
         }
         Ok(())
     }

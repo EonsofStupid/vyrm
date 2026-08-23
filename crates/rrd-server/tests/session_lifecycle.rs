@@ -1,11 +1,14 @@
 use rrd_contract::{
-    BeginTransaction, CanonicalId, CommitTransaction, CorrelationId, CreateSession, SessionLimits,
-    TransactionMutation, TransactionState,
+    AbortTransaction, BeginTransaction, CanonicalId, CloseSession, CommitTransaction,
+    CorrelationId, CreateSession, RenewSession, SessionLimits, TransactionMutation,
+    TransactionState,
 };
 use rrd_server::{RrdService, ServiceError};
 use serde_json::Value;
 use vyrm_core::{digest, Claim, Predicate, Producer, Subject};
-use vyrm_store::{Engine, MemoryEngine, NativeEngine};
+use vyrm_store::{ControlTransition, Engine, MemoryEngine, NativeEngine};
+
+const TOKEN_KEY: [u8; 32] = [7; 32];
 
 fn id(value: &str) -> CorrelationId {
     CorrelationId::new(value).unwrap()
@@ -69,12 +72,27 @@ fn equivalent_claim(session_id: &CorrelationId, object: &str) -> Claim {
     claim
 }
 
+fn acceptance_key(session_id: &CorrelationId, idempotency_key: &CorrelationId) -> String {
+    format!(
+        "rrd:{}",
+        digest::sha256_hex(
+            format!(
+                "test-instance\0{}\0{}",
+                session_id.as_str(),
+                idempotency_key.as_str()
+            )
+            .as_bytes()
+        )
+    )
+}
+
 #[test]
 fn journal_redacts_tokens_and_records_expiry_once() {
-    let service = RrdService::new(MemoryEngine::new(), instance());
+    let service = RrdService::new(MemoryEngine::new(), instance(), TOKEN_KEY);
     let lease = service
         .create_session(
             &session_request(1_000, 2),
+            &id("create-key"),
             1_000,
             "request-create",
             "operation-create",
@@ -85,6 +103,7 @@ fn journal_redacts_tokens_and_records_expiry_once() {
             &lease.session_id,
             &lease.token,
             &begin_request(),
+            &id("begin-key"),
             1_500,
             "request-begin",
             "operation-begin",
@@ -97,6 +116,7 @@ fn journal_redacts_tokens_and_records_expiry_once() {
             &lease.session_id,
             &wrong_token,
             &begin_request(),
+            &id("wrong-token-key"),
             1_600,
             "request-wrong-token",
             "operation-wrong-token",
@@ -113,6 +133,7 @@ fn journal_redacts_tokens_and_records_expiry_once() {
             &lease.session_id,
             &lease.token,
             &begin_request(),
+            &id("expire-key"),
             2_500,
             "request-expire",
             "operation-expire",
@@ -124,6 +145,7 @@ fn journal_redacts_tokens_and_records_expiry_once() {
             &lease.session_id,
             &lease.token,
             &begin_request(),
+            &id("expire-retry-key"),
             2_600,
             "request-expire-retry",
             "operation-expire-retry",
@@ -153,17 +175,18 @@ fn journal_redacts_tokens_and_records_expiry_once() {
     let state: Value = serde_json::from_slice(journal[2].replacement.as_ref().unwrap()).unwrap();
     assert_eq!(state["status"], "expired");
     assert_eq!(
-        state["transactions"][transaction.transaction_id.as_str()]["state"],
+        state["transactions"][transaction.transaction_id.as_str()]["lease"]["state"],
         "expired"
     );
 }
 
 #[test]
 fn quota_transaction_expiry_and_abort_are_authoritative_transitions() {
-    let service = RrdService::new(MemoryEngine::new(), instance());
+    let service = RrdService::new(MemoryEngine::new(), instance(), TOKEN_KEY);
     let lease = service
         .create_session(
             &session_request(5_000, 1),
+            &id("create-key"),
             1_000,
             "request-create",
             "operation-create",
@@ -174,6 +197,7 @@ fn quota_transaction_expiry_and_abort_are_authoritative_transitions() {
             &lease.session_id,
             &lease.token,
             &begin_request(),
+            &id("begin-key"),
             1_100,
             "request-begin",
             "operation-begin",
@@ -184,6 +208,7 @@ fn quota_transaction_expiry_and_abort_are_authoritative_transitions() {
             &lease.session_id,
             &lease.token,
             &begin_request(),
+            &id("quota-key"),
             1_200,
             "request-quota",
             "operation-quota",
@@ -199,6 +224,8 @@ fn quota_transaction_expiry_and_abort_are_authoritative_transitions() {
             &lease.session_id,
             &lease.token,
             &transaction.transaction_id,
+            &AbortTransaction {},
+            &id("expire-abort-key"),
             2_100,
             "request-expire",
             "operation-expire",
@@ -213,6 +240,7 @@ fn quota_transaction_expiry_and_abort_are_authoritative_transitions() {
             &lease.session_id,
             &lease.token,
             &begin_request(),
+            &id("begin-key-2"),
             2_200,
             "request-begin-2",
             "operation-begin-2",
@@ -223,6 +251,8 @@ fn quota_transaction_expiry_and_abort_are_authoritative_transitions() {
             &lease.session_id,
             &lease.token,
             &second.transaction_id,
+            &AbortTransaction {},
+            &id("abort-key"),
             2_300,
             "request-abort",
             "operation-abort",
@@ -234,6 +264,8 @@ fn quota_transaction_expiry_and_abort_are_authoritative_transitions() {
             &lease.session_id,
             &lease.token,
             &second.transaction_id,
+            &AbortTransaction {},
+            &id("abort-key"),
             2_400,
             "request-abort-replay",
             "operation-abort-replay",
@@ -241,8 +273,7 @@ fn quota_transaction_expiry_and_abort_are_authoritative_transitions() {
         .unwrap();
     assert_eq!(replay.state, TransactionState::Aborted);
     let journal = service.engine().control_journal_since(0, 10).unwrap();
-    assert_eq!(journal[journal.len() - 2].action, "transaction.aborted");
-    assert_eq!(journal.last().unwrap().action, "transaction.abort_replayed");
+    assert_eq!(journal.last().unwrap().action, "transaction.aborted");
 }
 
 #[test]
@@ -250,10 +281,11 @@ fn commit_reopens_replays_and_does_not_duplicate_claims() {
     let root = tempfile::tempdir().unwrap();
     let path = root.path().join("native");
     let engine = NativeEngine::open(&path).unwrap();
-    let service = RrdService::new(engine, instance());
+    let service = RrdService::new(engine, instance(), TOKEN_KEY);
     let lease = service
         .create_session(
             &session_request(5_000, 2),
+            &id("create-key"),
             1_000,
             "request-create",
             "operation-create",
@@ -264,6 +296,7 @@ fn commit_reopens_replays_and_does_not_duplicate_claims() {
             &lease.session_id,
             &lease.token,
             &begin_request(),
+            &id("begin-key"),
             1_100,
             "request-begin",
             "operation-begin",
@@ -272,7 +305,7 @@ fn commit_reopens_replays_and_does_not_duplicate_claims() {
     drop(service);
 
     let request = commit_request("durable");
-    let service = RrdService::new(NativeEngine::open(&path).unwrap(), instance());
+    let service = RrdService::new(NativeEngine::open(&path).unwrap(), instance(), TOKEN_KEY);
     let first = service
         .commit_transaction(
             &lease.session_id,
@@ -289,7 +322,7 @@ fn commit_reopens_replays_and_does_not_duplicate_claims() {
     assert_eq!(service.engine().sequence().unwrap(), 1);
     drop(service);
 
-    let service = RrdService::new(NativeEngine::open(&path).unwrap(), instance());
+    let service = RrdService::new(NativeEngine::open(&path).unwrap(), instance(), TOKEN_KEY);
     let replay = service
         .commit_transaction(
             &lease.session_id,
@@ -304,6 +337,20 @@ fn commit_reopens_replays_and_does_not_duplicate_claims() {
         .unwrap();
     assert!(replay.idempotent_replay);
     assert_eq!(service.engine().sequence().unwrap(), 1);
+    assert!(matches!(
+        service.commit_transaction(
+            &lease.session_id,
+            &lease.token,
+            &transaction.transaction_id,
+            &id("different-commit-key"),
+            &request,
+            1_350,
+            "request-collision",
+            "operation-collision",
+        ),
+        Err(ServiceError::IdempotencyConflict)
+    ));
+    assert_eq!(service.engine().sequence().unwrap(), 1);
     let actions = service
         .engine()
         .control_journal_since(0, 10)
@@ -316,18 +363,19 @@ fn commit_reopens_replays_and_does_not_duplicate_claims() {
         [
             "session.created",
             "transaction.began",
+            "transaction.commit_prepared",
             "transaction.committed",
-            "transaction.replayed"
         ]
     );
 }
 
 #[test]
 fn retry_closes_the_journal_gap_after_a_crash_window() {
-    let service = RrdService::new(MemoryEngine::new(), instance());
+    let service = RrdService::new(MemoryEngine::new(), instance(), TOKEN_KEY);
     let lease = service
         .create_session(
             &session_request(5_000, 2),
+            &id("create-key"),
             1_000,
             "request-create",
             "operation-create",
@@ -338,17 +386,46 @@ fn retry_closes_the_journal_gap_after_a_crash_window() {
             &lease.session_id,
             &lease.token,
             &begin_request(),
+            &id("begin-key"),
             1_100,
             "request-begin",
             "operation-begin",
         )
         .unwrap();
     let request = commit_request("crash-window");
+    let session_key = format!(
+        "server/state/test-instance/session/{}",
+        lease.session_id.as_str()
+    );
+    let before = service
+        .engine()
+        .control_record(&session_key)
+        .unwrap()
+        .unwrap();
+    let mut prepared: Value = serde_json::from_slice(&before).unwrap();
+    prepared["transactions"][transaction.transaction_id.as_str()]["commit_intent"] = serde_json::json!({
+        "idempotency_key": "crash-key",
+        "operation_sha256": request.operation_sha256.clone(),
+    });
+    service
+        .engine()
+        .commit_control_transition(&ControlTransition {
+            key: session_key,
+            expected: Some(before),
+            replacement: Some(serde_json::to_vec(&prepared).unwrap()),
+            at: 1_150,
+            actor: "rrd-server".into(),
+            action: "transaction.commit_prepared".into(),
+            request_id: "request-prepare".into(),
+            operation_id: "operation-prepare".into(),
+        })
+        .unwrap();
 
+    let crash_key = id("crash-key");
     let accepted = service
         .engine()
         .append_batch_idempotent(
-            "crash-key",
+            &acceptance_key(&lease.session_id, &crash_key),
             &request.operation_sha256,
             &[equivalent_claim(&lease.session_id, "crash-window")],
         )
@@ -356,7 +433,7 @@ fn retry_closes_the_journal_gap_after_a_crash_window() {
     assert!(!accepted.idempotent_replay);
     assert_eq!(
         service.engine().control_journal_since(0, 10).unwrap().len(),
-        2
+        3
     );
 
     let recovered = service
@@ -364,15 +441,27 @@ fn retry_closes_the_journal_gap_after_a_crash_window() {
             &lease.session_id,
             &lease.token,
             &transaction.transaction_id,
-            &id("crash-key"),
+            &crash_key,
             &request,
-            1_200,
+            7_000,
             "request-recover",
             "operation-recover",
         )
         .unwrap();
     assert!(recovered.idempotent_replay);
     assert_eq!(service.engine().sequence().unwrap(), 1);
+    let state: Value = serde_json::from_slice(
+        &service
+            .engine()
+            .control_record(&format!(
+                "server/state/test-instance/session/{}",
+                lease.session_id.as_str()
+            ))
+            .unwrap()
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(state["status"], "expired");
     assert_eq!(
         service
             .engine()
@@ -387,10 +476,11 @@ fn retry_closes_the_journal_gap_after_a_crash_window() {
 
 #[test]
 fn an_operation_digest_mismatch_never_mutates_data_or_journal() {
-    let service = RrdService::new(MemoryEngine::new(), instance());
+    let service = RrdService::new(MemoryEngine::new(), instance(), TOKEN_KEY);
     let lease = service
         .create_session(
             &session_request(5_000, 2),
+            &id("create-key"),
             1_000,
             "request-create",
             "operation-create",
@@ -401,6 +491,7 @@ fn an_operation_digest_mismatch_never_mutates_data_or_journal() {
             &lease.session_id,
             &lease.token,
             &begin_request(),
+            &id("begin-key"),
             1_100,
             "request-begin",
             "operation-begin",
@@ -426,4 +517,207 @@ fn an_operation_digest_mismatch_never_mutates_data_or_journal() {
         service.engine().control_journal_since(0, 10).unwrap().len(),
         2
     );
+}
+
+#[test]
+fn create_and_begin_replay_exact_responses_and_reject_collisions() {
+    let service = RrdService::new(MemoryEngine::new(), instance(), TOKEN_KEY);
+    let request = session_request(5_000, 2);
+    let create_key = id("create-key");
+    let first = service
+        .create_session(
+            &request,
+            &create_key,
+            1_000,
+            "request-create",
+            "operation-create",
+        )
+        .unwrap();
+    let replay = service
+        .create_session(
+            &request,
+            &create_key,
+            2_000,
+            "request-create-replay",
+            "operation-create-replay",
+        )
+        .unwrap();
+    assert_eq!(replay, first);
+    assert_eq!(
+        service.engine().control_journal_since(0, 10).unwrap().len(),
+        1
+    );
+    assert!(matches!(
+        service.create_session(
+            &session_request(4_000, 2),
+            &create_key,
+            2_000,
+            "request-create-collision",
+            "operation-create-collision",
+        ),
+        Err(ServiceError::IdempotencyConflict)
+    ));
+
+    let begin_key = id("begin-key");
+    let transaction = service
+        .begin_transaction(
+            &first.session_id,
+            &first.token,
+            &begin_request(),
+            &begin_key,
+            2_100,
+            "request-begin",
+            "operation-begin",
+        )
+        .unwrap();
+    let transaction_replay = service
+        .begin_transaction(
+            &first.session_id,
+            &first.token,
+            &begin_request(),
+            &begin_key,
+            2_200,
+            "request-begin-replay",
+            "operation-begin-replay",
+        )
+        .unwrap();
+    assert_eq!(transaction_replay, transaction);
+    let mut collision = begin_request();
+    collision.timeout_ms = 2_000;
+    assert!(matches!(
+        service.begin_transaction(
+            &first.session_id,
+            &first.token,
+            &collision,
+            &begin_key,
+            2_300,
+            "request-begin-collision",
+            "operation-begin-collision",
+        ),
+        Err(ServiceError::IdempotencyConflict)
+    ));
+    assert_eq!(
+        service.engine().control_journal_since(0, 10).unwrap().len(),
+        2
+    );
+}
+
+#[test]
+fn renewal_rotates_without_persisting_tokens_and_close_is_idempotent() {
+    let service = RrdService::new(MemoryEngine::new(), instance(), TOKEN_KEY);
+    let lease = service
+        .create_session(
+            &session_request(5_000, 2),
+            &id("create-key"),
+            1_000,
+            "request-create",
+            "operation-create",
+        )
+        .unwrap();
+    let renewal_key = id("renew-key");
+    let renewed = service
+        .renew_session(
+            &lease.session_id,
+            &lease.token,
+            &RenewSession {},
+            &renewal_key,
+            1_100,
+            "request-renew",
+            "operation-renew",
+        )
+        .unwrap();
+    assert_ne!(renewed.token, lease.token);
+    let replay = service
+        .renew_session(
+            &lease.session_id,
+            &lease.token,
+            &RenewSession {},
+            &renewal_key,
+            1_200,
+            "request-renew-replay",
+            "operation-renew-replay",
+        )
+        .unwrap();
+    assert_eq!(replay, renewed);
+    assert!(matches!(
+        service.begin_transaction(
+            &lease.session_id,
+            &lease.token,
+            &begin_request(),
+            &id("old-token-begin"),
+            1_300,
+            "request-old-token",
+            "operation-old-token",
+        ),
+        Err(ServiceError::Unauthenticated)
+    ));
+    let transaction = service
+        .begin_transaction(
+            &lease.session_id,
+            &renewed.token,
+            &begin_request(),
+            &id("new-token-begin"),
+            1_300,
+            "request-new-token",
+            "operation-new-token",
+        )
+        .unwrap();
+    let closed = service
+        .close_session(
+            &lease.session_id,
+            &renewed.token,
+            &CloseSession {},
+            &id("close-key"),
+            1_400,
+            "request-close",
+            "operation-close",
+        )
+        .unwrap();
+    assert_eq!(closed.affected_open_transactions, 1);
+    assert!(!closed.idempotent_replay);
+    let close_replay = service
+        .close_session(
+            &lease.session_id,
+            &renewed.token,
+            &CloseSession {},
+            &id("close-key"),
+            1_500,
+            "request-close-replay",
+            "operation-close-replay",
+        )
+        .unwrap();
+    assert!(close_replay.idempotent_replay);
+    assert_eq!(close_replay.ended_at_unix_ms, closed.ended_at_unix_ms);
+    assert!(matches!(
+        service.abort_transaction(
+            &lease.session_id,
+            &renewed.token,
+            &transaction.transaction_id,
+            &AbortTransaction {},
+            &id("abort-after-close"),
+            1_600,
+            "request-abort-after-close",
+            "operation-abort-after-close",
+        ),
+        Err(ServiceError::SessionExpired)
+    ));
+
+    let journal = service.engine().control_journal_since(0, 10).unwrap();
+    assert_eq!(
+        journal
+            .iter()
+            .map(|entry| entry.action.as_str())
+            .collect::<Vec<_>>(),
+        [
+            "session.created",
+            "session.renewed",
+            "transaction.began",
+            "session.closed"
+        ]
+    );
+    for entry in journal {
+        let replacement = String::from_utf8_lossy(entry.replacement.as_ref().unwrap());
+        assert!(!replacement.contains(lease.token.as_str()));
+        assert!(!replacement.contains(renewed.token.as_str()));
+    }
 }

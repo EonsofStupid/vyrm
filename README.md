@@ -310,6 +310,8 @@ measurement contract.
 
 | Crate | Responsibility |
 |---|---|
+| `rrd-contract` | Stable versioned resource/envelope, lifecycle, health, capability, error, and canonical transaction-digest wire contracts |
+| `rrd-server` | Async loopback RRD process, persistent transport leases, prepared claim commits, bounded HTTP, and restart-idempotent lifecycle coordination |
 | `vyrm-core` | Claim, reasoning, typed runtime graph, durable trace, traversal, and differential contracts; serde-only boundary |
 | `vyrm-store` | `vyrmDS` coordination plus native `vyrmKV`, transitional Fjall, and memory adapters; unified atomic commits, content-addressed objects, outbox/audit, sequences, projections |
 | `vyrm-operator` | External operator-knowledge contracts, exact reference adapter, optional live pgvector transport, SQL planning, and idempotent upsert/delete synchronization |
@@ -319,6 +321,22 @@ measurement contract.
 | `vyrmd` | stdio MCP surface for hookless runtimes |
 | `vyrm-eval` | Paired frontier-runtime evaluation evidence |
 | `connectome-ui` | Prompt-flight recorder and runtime workbench |
+
+The local RRD alpha is a separate process boundary from `vyrmd`:
+
+```bash
+cargo run -p rrd-server -- \
+  --db .vyrm/rrd \
+  --instance local-project \
+  --bind 127.0.0.1:9477
+```
+
+It refuses non-loopback binding until F4 security exists. `GET
+/v1/capabilities` reports the exact shipped/limited surface; session bearer
+values are derived from an owner-private OS-random key and only their hashes
+enter the lifecycle journal. See
+[`docs/rrd-server-v1.md`](docs/rrd-server-v1.md) for the wire and recovery
+contract.
 
 For JS/TanStack workflows, successful and failed tool runs are journaled under
 canonical, manager-specific subjects—`package:bun:*`, `package:pnpm:*`,

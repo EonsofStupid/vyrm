@@ -42,12 +42,19 @@ production distributed/Kubernetes operation, and cloud management.
   claim; key/digest collisions fail closed. Engine control state now combines
   compare-and-swap materialization with a monotonic, SHA-256-chained,
   replayable journal in one storage transaction. The persistent RRD
-  coordinator journals session and transaction creation, expiry, commit,
-  replay, and abort, renews bounded idle leases, expires child transactions,
-  and stores only token hashes. Restart and interrupted
-  post-claim/pre-terminal-event recovery are tested. The loopback HTTP process,
-  deadlines/cancellation, preview, and black-box socket matrix are not yet
-  landed; these transport leases are not F4 user authentication.
+  coordinator journals session create/renew/close/expiry and transaction
+  begin/prepare/commit/abort/expiry, renews bounded idle leases, expires child
+  transactions, and stores only token hashes. Prepared commit intent prevents
+  a changed retry key from duplicating data across either crash window.
+  `rrd-server` now ships an async Axum/Tokio loopback process with health,
+  readiness, capability, claim-preview/commit, bounded versioned envelopes,
+  canonical digest vectors, JSON tracing, stable private token-key files, and
+  graceful shutdown. Real-socket tests cover restart, rotation, expiry, quota,
+  malformed/oversized requests, deadline precheck, abort/close,
+  disconnect/retry, concurrent convergence, collision, and real-binary remote
+  bind denial. Cancellation, generalized read-your-writes and administration,
+  result/time bounds, metrics, and released-version client qualification keep
+  F2 open; these transport leases are not F4 user authentication.
 
 - The bi-temporal claim kernel has immutable supersession corrections,
   canonical SHA-256 identities covering provenance and validity, and atomic

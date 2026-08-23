@@ -12,6 +12,13 @@ vyrm-core = { path = "../vyrm-core" }
 vyrm-store = { path = "../vyrm-store" }
 serde = { workspace = true }
 serde_json = { workspace = true }
+hmac = "0.13"
+sha2 = "0.11"
+getrandom = "0.3"
+axum = "0.8.9"
+tokio = { version = "1", features = ["macros", "net", "rt-multi-thread", "signal", "sync"] }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
 
 [dev-dependencies]
 tempfile = "3"

@@ -1,8 +1,10 @@
 use rrd_contract::{
-    BeginTransaction, CanonicalId, CapabilityDescriptor, CapabilityStatus, CommitReceipt,
-    CommitTransaction, CorrelationId, DeploymentMode, ErrorBody, ErrorCode, IdempotencyBinding,
-    RequestContext, RequestEnvelope, ResourceId, ResourceKind, ResourcePath, ResponseEnvelope,
-    ResponseOutcome, ServiceCapabilities, SessionLease, SessionLimits, TransactionMutation,
+    transaction_operation_sha256, BeginTransaction, CanonicalId, CapabilityDescriptor,
+    CapabilityStatus, CloseSession, CommitReceipt, CommitTransaction, CorrelationId,
+    DeploymentMode, ErrorBody, ErrorCode, IdempotencyBinding, Liveness, PreviewTransaction,
+    Readiness, RenewSession, RequestContext, RequestEnvelope, ResourceId, ResourceKind,
+    ResourcePath, ResponseEnvelope, ResponseOutcome, ServiceCapabilities, SessionEndState,
+    SessionLease, SessionLimits, SessionTermination, TransactionMutation, TransactionPreview,
     TransactionState, PROTOCOL, PROTOCOL_VERSION,
 };
 use serde::{Deserialize, Serialize};
@@ -237,4 +239,72 @@ fn session_and_claim_transaction_contracts_are_bounded() {
     let TransactionMutation::AssertClaim { confidence, .. } = &mut invalid_commit.mutations[0];
     *confidence = Some(f32::NAN);
     assert!(invalid_commit.validate().is_err());
+}
+
+#[test]
+fn lifecycle_health_and_preview_payloads_are_bounded_and_strict() {
+    let mutation = TransactionMutation::AssertClaim {
+        subject: CanonicalId::new("task-1").unwrap(),
+        predicate: CanonicalId::new("status").unwrap(),
+        object: "verified".into(),
+        valid_from: 100,
+        tx_time: 101,
+        producer: CanonicalId::new("agent-test").unwrap(),
+        confidence: None,
+    };
+    let preview = PreviewTransaction {
+        mutations: vec![mutation.clone()],
+    };
+    preview.validate().unwrap();
+    TransactionPreview {
+        transaction_id: CorrelationId::new("transaction-1").unwrap(),
+        read_cursor: 7,
+        operation_sha256: "3c94150b4ea4f9dcb27d3b602e9f190debe656533c047b99e11367bc6a28017f".into(),
+        mutations: preview.mutations,
+    }
+    .validate()
+    .unwrap();
+    SessionTermination {
+        session_id: CorrelationId::new("session-1").unwrap(),
+        state: SessionEndState::Closed,
+        ended_at_unix_ms: 1,
+        affected_open_transactions: 2,
+        idempotent_replay: false,
+    }
+    .validate()
+    .unwrap();
+    Liveness {
+        observed_at_unix_ms: 1,
+    }
+    .validate()
+    .unwrap();
+    Readiness {
+        observed_at_unix_ms: 1,
+        claim_sequence: 2,
+        runtime_cursor: 3,
+        backend: CanonicalId::new("vyrmkv-native").unwrap(),
+    }
+    .validate()
+    .unwrap();
+
+    assert!(serde_json::from_str::<RenewSession>(r#"{"unknown":true}"#).is_err());
+    assert!(serde_json::from_str::<CloseSession>(r#"{"unknown":true}"#).is_err());
+    assert!(
+        serde_json::from_str::<PreviewTransaction>(r#"{"mutations":[],"unknown":true}"#).is_err()
+    );
+}
+
+#[test]
+fn transaction_digest_has_a_cross_language_golden_vector() {
+    let first: Vec<TransactionMutation> = serde_json::from_str(
+        r#"[{"mutation":"assert_claim","subject":"task-1","predicate":"status","object":"verified","valid_from":100,"tx_time":101,"producer":"agent-test"}]"#,
+    )
+    .unwrap();
+    let reordered: Vec<TransactionMutation> = serde_json::from_str(
+        r#"[{"producer":"agent-test","tx_time":101,"valid_from":100,"object":"verified","predicate":"status","subject":"task-1","mutation":"assert_claim"}]"#,
+    )
+    .unwrap();
+    let expected = "d85547ca333304b54db4bc0249b6e11f83cf975fdc7cfebcf551ec6564bb71f8";
+    assert_eq!(transaction_operation_sha256(&first), expected);
+    assert_eq!(transaction_operation_sha256(&reordered), expected);
 }

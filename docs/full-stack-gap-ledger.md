@@ -177,10 +177,10 @@ canonical reads and audit roots.
 ### F2 — build the real RRD server and session/transaction boundary
 
 **Status:** dependency contract frozen in
-[`rrd-server-v1.md`](rrd-server-v1.md); persistent coordinator implemented;
-loopback HTTP process remains open. The contract keeps `vyrmd` as an MCP
-adapter, requires public payload types before handlers, denies non-loopback
-exposure before F4, and makes accepted-request idempotency durable rather than
+[`rrd-server-v1.md`](rrd-server-v1.md); persistent coordinator and async
+loopback HTTP alpha implemented. The contract keeps `vyrmd` as an MCP adapter,
+requires public payload types before handlers, denies non-loopback exposure
+before F4, and makes accepted-request idempotency durable rather than
 process-local.
 
 **Implementation progress 2026-08-23:** `rrd-contract` now owns bounded session
@@ -194,13 +194,23 @@ restart without advancing sequence.
 
 The Engine control plane now atomically materializes compare-and-swap state and
 appends a monotonically sequenced, SHA-256-chained, replayable journal entry.
-The RRD coordinator uses it for persistent session creation/expiry, transaction
-begin/commit/replay/abort/expiry, quota enforcement, and bounded idle/absolute
-leases. Only token hashes reach storage. Native restart and the interrupted
-post-claim/pre-terminal-event recovery window are tested without duplicate
-claims. This does not yet constitute F4 user authentication or comprehensive
-API audit. The real loopback HTTP process, deadlines/cancellation, preview, and
-socket-level qualification remain the next F2 sub-slice.
+The RRD coordinator uses it for persistent session create/renew/close/expiry,
+transaction begin/prepare/commit/abort/expiry, quota enforcement, and bounded
+idle/absolute leases. Only token hashes reach storage. A prepared commit binds
+the only permitted key/digest before claim acceptance, so restart, lease
+expiry, collision, and post-claim/pre-terminal recovery cannot duplicate a
+claim.
+
+`rrd-server` is now an Axum/Tokio process with versioned envelopes, liveness,
+readiness, capability negotiation, one-MiB body denial, canonical typed
+operation digests, claim preview/commit, JSON tracing, graceful shutdown, and
+fail-closed loopback binding. Its real-socket tests cover rotation, expiry,
+quota, abort/close, malformed input, deadline precheck, disconnect/retry,
+concurrent commit convergence, restart replay, secret-file permissions, and
+binary remote-bind denial. These transport leases still do not constitute F4
+user authentication or comprehensive audit. Cancellation, generalized
+read-your-writes, CRUD/schema/vector/snapshot administration, result/time
+bounds, metrics, and released-version client qualification keep F2 open.
 
 **Deliverables**
 
