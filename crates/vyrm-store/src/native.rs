@@ -1082,8 +1082,20 @@ impl NativeRuntimeCommitPlan {
         &self.outcome
     }
 
-    pub fn into_parts(self) -> (RuntimeCommitOutcome, Vec<Mutation>) {
+    fn into_parts(self) -> (RuntimeCommitOutcome, Vec<Mutation>) {
         (self.outcome, self.operations)
+    }
+
+    /// Lowers the staged canonical mutations to the authenticated key format
+    /// of `database` before an external coordinator combines them with its own
+    /// metadata in one write batch.
+    pub fn into_parts_for(
+        self,
+        database: &Database,
+    ) -> Result<(RuntimeCommitOutcome, Vec<Mutation>)> {
+        let mut operations = self.operations;
+        transcode_operations(database, &mut operations)?;
+        Ok((self.outcome, operations))
     }
 }
 
@@ -2053,15 +2065,7 @@ fn write(
     mut operations: Vec<Mutation>,
     durability: Durability,
 ) -> Result<()> {
-    let codec = database_codec(database)?;
-    if codec == keyspaces::NativeKeyCodec::TextV1 {
-        for operation in &mut operations {
-            let key = match operation {
-                Mutation::Put { key, .. } | Mutation::Delete { key } => key,
-            };
-            *key = transcode_staged_key(codec, std::mem::take(key))?;
-        }
-    }
+    transcode_operations(database, &mut operations)?;
     database.write_owned(
         WriteBatch::new(operations)?,
         match durability {
@@ -2069,6 +2073,20 @@ fn write(
             Durability::Buffered => vyrm_kv::Durability::Buffered,
         },
     )?;
+    Ok(())
+}
+
+fn transcode_operations(database: &Database, operations: &mut [Mutation]) -> Result<()> {
+    let codec = database_codec(database)?;
+    if codec == keyspaces::NativeKeyCodec::TagV2 {
+        return Ok(());
+    }
+    for operation in operations {
+        let key = match operation {
+            Mutation::Put { key, .. } | Mutation::Delete { key } => key,
+        };
+        *key = transcode_staged_key(codec, std::mem::take(key))?;
+    }
     Ok(())
 }
 

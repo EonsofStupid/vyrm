@@ -1535,7 +1535,14 @@ fn apply_command(
                     }
                     Ok(None) => match prepare_native_runtime_commit(database, commit) {
                         Ok(plan) => {
-                            let (outcome, runtime_operations) = plan.into_parts();
+                            let (outcome, runtime_operations) =
+                                plan.into_parts_for(database).map_err(|error| {
+                                    storage_error(
+                                        ErrorSubject::Apply(log_id),
+                                        ErrorVerb::Write,
+                                        error.to_string(),
+                                    )
+                                })?;
                             state.runtime_commit_count =
                                 state.runtime_commit_count.checked_add(1).ok_or_else(|| {
                                     storage_error(

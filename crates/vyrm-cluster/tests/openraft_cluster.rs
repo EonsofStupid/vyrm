@@ -464,7 +464,7 @@ fn real_consensus_replicates_canonical_runtime_truth_to_every_voter() {
 
         for id in [1, 2, 3, 4] {
             let engine = NativeEngine::open(cluster.directory(id)).unwrap();
-            assert_eq!(engine.runtime_cursor().unwrap(), 1);
+            assert_eq!(engine.runtime_cursor().unwrap(), 1, "node {id}");
             assert!(engine
                 .runtime_commit_outcome(&commit.digest())
                 .unwrap()
