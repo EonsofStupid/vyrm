@@ -1,12 +1,13 @@
 use rrd_contract::{
-    transaction_operation_sha256, BeginTransaction, CanonicalId, CapabilityDescriptor,
-    CapabilityStatus, CloseSession, CommitReceipt, CommitTransaction, CorrelationId,
-    DeploymentMode, ErrorBody, ErrorCode, EstateActivityPolicySnapshot, EstateMutationResult,
-    EstateSnapshot, IdempotencyBinding, Liveness, PreviewTransaction, ReadEstate, Readiness,
-    RenewSession, RequestContext, RequestEnvelope, ResourceId, ResourceKind, ResourcePath,
-    ResponseEnvelope, ResponseOutcome, ServiceCapabilities, SessionEndState, SessionLease,
-    SessionLimits, SessionTermination, TransactionMutation, TransactionPreview, TransactionState,
-    PROTOCOL, PROTOCOL_VERSION,
+    BeginTransaction, CanonicalId, CapabilityDescriptor, CapabilityStatus, CloseSession,
+    CommitReceipt, CommitTransaction, CorrelationId, DeploymentMode, ErrorBody, ErrorCode,
+    EstateActivityPolicySnapshot, EstateBackupJobSnapshot, EstateBackupJobState,
+    EstateBackupJobsSnapshot, EstateMutationResult, EstateSnapshot, IdempotencyBinding, Liveness,
+    PROTOCOL, PROTOCOL_VERSION, PreviewTransaction, ReadEstate, Readiness, RenewSession,
+    RequestContext, RequestEnvelope, ResourceId, ResourceKind, ResourcePath, ResponseEnvelope,
+    ResponseOutcome, ServiceCapabilities, SessionEndState, SessionLease, SessionLimits,
+    SessionTermination, TransactionMutation, TransactionPreview, TransactionState,
+    transaction_operation_sha256,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -204,6 +205,54 @@ fn estate_read_contract_has_frozen_field_names_and_strict_empty_payload() {
         ReadEstate {}
     );
     assert!(serde_json::from_str::<ReadEstate>(r#"{"unknown":true}"#).is_err());
+}
+
+#[test]
+fn estate_backup_jobs_are_a_separate_strict_public_resource() {
+    let snapshot = EstateBackupJobsSnapshot {
+        estate_id: CanonicalId::new("estate-a").unwrap(),
+        estate_revision: 8,
+        jobs: vec![EstateBackupJobSnapshot {
+            id: CanonicalId::new("backup-daily").unwrap(),
+            instance_id: CanonicalId::new("instance-a").unwrap(),
+            source_generation: 1,
+            label: "daily.0001".into(),
+            request_sha256: "a".repeat(64),
+            state: EstateBackupJobState::Pending,
+            attempts: 0,
+            created_at_unix_ms: 80,
+            updated_at_unix_ms: 80,
+            lease: None,
+            receipts: Vec::new(),
+            backup_id: None,
+            archive_sha256: None,
+            catalogue_sha256: None,
+            error: None,
+        }],
+    };
+    let expected = serde_json::json!({
+        "estate_id": "estate-a",
+        "estate_revision": 8,
+        "jobs": [{
+            "id": "backup-daily",
+            "instance_id": "instance-a",
+            "source_generation": 1,
+            "label": "daily.0001",
+            "request_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "state": "pending",
+            "attempts": 0,
+            "created_at_unix_ms": 80,
+            "updated_at_unix_ms": 80
+        }]
+    });
+    assert_eq!(serde_json::to_value(&snapshot).unwrap(), expected);
+    assert_eq!(
+        serde_json::from_value::<EstateBackupJobsSnapshot>(expected.clone()).unwrap(),
+        snapshot
+    );
+    let mut unknown = expected;
+    unknown["jobs"][0]["unknown"] = serde_json::json!(true);
+    assert!(serde_json::from_value::<EstateBackupJobsSnapshot>(unknown).is_err());
 }
 
 #[test]

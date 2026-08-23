@@ -201,6 +201,75 @@ pub struct EstateMutationResult {
     pub idempotent_replay: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EstateBackupJobState {
+    Pending,
+    Leased,
+    Prepared,
+    Succeeded,
+    Failed,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EstateBackupReceiptBoundary {
+    Prepared,
+    Completed,
+    Failed,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct EstateBackupReceiptSnapshot {
+    pub boundary: EstateBackupReceiptBoundary,
+    pub lease_epoch: u64,
+    pub at_unix_ms: u64,
+    pub evidence_sha256: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct EstateBackupJobSnapshot {
+    pub id: CanonicalId,
+    pub instance_id: CanonicalId,
+    pub source_generation: u64,
+    pub label: String,
+    pub request_sha256: String,
+    pub state: EstateBackupJobState,
+    pub attempts: u32,
+    pub created_at_unix_ms: u64,
+    pub updated_at_unix_ms: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lease: Option<EstateLeaseSnapshot>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub receipts: Vec<EstateBackupReceiptSnapshot>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub backup_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub archive_sha256: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub catalogue_sha256: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct EstateBackupJobsSnapshot {
+    pub estate_id: CanonicalId,
+    pub estate_revision: u64,
+    pub jobs: Vec<EstateBackupJobSnapshot>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct EstateBackupMutationResult {
+    pub estate: EstateSnapshot,
+    pub job: EstateBackupJobSnapshot,
+    pub idempotent_replay: bool,
+}
+
 pub type Result<T> = std::result::Result<T, ContractError>;
 
 #[derive(Debug, Clone, PartialEq, Eq)]

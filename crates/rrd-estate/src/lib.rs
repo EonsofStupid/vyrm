@@ -4,17 +4,23 @@
 //! reconciliation boundaries. Connectome is a projection of these records,
 //! never their source of truth.
 
+mod backup_job;
 mod local_authorization;
 mod local_process;
 mod reconcile;
 
+pub use backup_job::{
+    BackupIdempotencyBinding, BackupJobReceipt, BackupJobState, BackupReceiptBoundary,
+    BackupScheduleOutcome, EstateBackupJob, MAX_BACKUP_IDEMPOTENCY_BINDINGS, MAX_BACKUP_JOBS,
+    MAX_BACKUP_RECEIPTS_PER_JOB, ScheduleBackup, public_backup_job, public_backup_jobs,
+};
 pub use local_authorization::{
-    LocalEstatePermission, LocalOperatorAuthorization, LocalOperatorPolicy,
-    LOCAL_OPERATOR_POLICY_FORMAT,
+    LOCAL_OPERATOR_POLICY_FORMAT, LocalEstatePermission, LocalOperatorAuthorization,
+    LocalOperatorPolicy,
 };
 pub use local_process::{
-    LocalArgument, LocalDeployment, LocalDeploymentCatalog, LocalProcessDriver, LocalShutdown,
-    LOCAL_DEPLOYMENT_FORMAT,
+    LOCAL_DEPLOYMENT_FORMAT, LocalArgument, LocalDeployment, LocalDeploymentCatalog,
+    LocalProcessDriver, LocalShutdown,
 };
 pub use reconcile::{
     DriverEffect, DriverError, DriverErrorKind, DriverObservation, DriverRequest, EstateDriver,
@@ -299,6 +305,10 @@ pub struct EstateDocument {
     pub instances: BTreeMap<String, ManagedInstance>,
     pub operations: BTreeMap<String, EstateOperation>,
     pub idempotency: BTreeMap<String, IdempotencyBinding>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub backup_jobs: BTreeMap<String, EstateBackupJob>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub backup_idempotency: BTreeMap<String, BackupIdempotencyBinding>,
 }
 
 impl EstateDocument {
@@ -314,6 +324,8 @@ impl EstateDocument {
             instances: BTreeMap::new(),
             operations: BTreeMap::new(),
             idempotency: BTreeMap::new(),
+            backup_jobs: backup_job::empty_backup_jobs(),
+            backup_idempotency: backup_job::empty_backup_idempotency(),
         })
     }
 
@@ -416,6 +428,7 @@ impl EstateDocument {
                 )));
             }
         }
+        backup_job::validate_backup_state(self)?;
         Ok(())
     }
 
