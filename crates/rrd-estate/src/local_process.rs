@@ -18,7 +18,10 @@ use vyrm_core::digest;
 pub const LOCAL_DEPLOYMENT_FORMAT: u16 = 1;
 const PROCESS_RECORD_FORMAT: u16 = 1;
 const PROCESS_DISCOVERY_TIMEOUT: Duration = Duration::from_secs(3);
+const PROCESS_START_STABILITY: Duration = Duration::from_millis(250);
 const PROCESS_STOP_TIMEOUT: Duration = Duration::from_secs(5);
+const PROCESS_STDOUT_LOG: &str = "RRD.PROCESS.STDOUT.LOG";
+const PROCESS_STDERR_LOG: &str = "RRD.PROCESS.STDERR.LOG";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "source", content = "value")]
@@ -328,6 +331,20 @@ impl LocalProcessDriver {
             .iter()
             .map(|argument| resolve_argument(argument, request, &instance_root))
             .collect::<std::result::Result<Vec<_>, _>>()?;
+        let stdout =
+            open_process_log(&instance_root.join(PROCESS_STDOUT_LOG)).map_err(|error| {
+                retryable(
+                    request,
+                    format!("cannot open managed process stdout log: {error}"),
+                )
+            })?;
+        let stderr_path = instance_root.join(PROCESS_STDERR_LOG);
+        let stderr = open_process_log(&stderr_path).map_err(|error| {
+            retryable(
+                request,
+                format!("cannot open managed process stderr log: {error}"),
+            )
+        })?;
         let mut command = Command::new(&deployment.executable);
         command
             .args(&arguments)
@@ -335,15 +352,23 @@ impl LocalProcessDriver {
             .env_clear()
             .envs(&deployment.environment)
             .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null());
+            .stdout(Stdio::from(stdout))
+            .stderr(Stdio::from(stderr));
         let mut child = command
             .spawn()
             .map_err(|error| retryable(request, format!("cannot spawn instance: {error}")))?;
         let pid = child.id();
 
-        let deadline = Instant::now() + PROCESS_DISCOVERY_TIMEOUT;
+        let discovery_deadline = Instant::now() + PROCESS_DISCOVERY_TIMEOUT;
         let (process_start_time_unix_s, executable) = loop {
+            if let Some(status) = child.try_wait().map_err(|error| {
+                retryable(request, format!("cannot inspect spawned process: {error}"))
+            })? {
+                return Err(retryable(
+                    request,
+                    spawned_exit_message(status, &stderr_path),
+                ));
+            }
             let system = system_for(pid);
             if let Some(process) = system.process(Pid::from_u32(pid)) {
                 if let Some(executable) = process
@@ -353,7 +378,7 @@ impl LocalProcessDriver {
                     break (process.start_time(), executable);
                 }
             }
-            if Instant::now() >= deadline {
+            if Instant::now() >= discovery_deadline {
                 let _ = child.kill();
                 let _ = child.wait();
                 return Err(retryable(
@@ -370,6 +395,21 @@ impl LocalProcessDriver {
                 request,
                 "spawned process executable does not match the trusted catalogue",
             ));
+        }
+        let stability_deadline = Instant::now() + PROCESS_START_STABILITY;
+        loop {
+            if let Some(status) = child.try_wait().map_err(|error| {
+                retryable(request, format!("cannot inspect spawned process: {error}"))
+            })? {
+                return Err(retryable(
+                    request,
+                    spawned_exit_message(status, &stderr_path),
+                ));
+            }
+            if Instant::now() >= stability_deadline {
+                break;
+            }
+            thread::sleep(Duration::from_millis(10));
         }
         let record = ProcessRecord {
             format: PROCESS_RECORD_FORMAT,
@@ -689,6 +729,29 @@ fn file_sha256(path: &Path) -> std::io::Result<String> {
         encoded.push(HEX[usize::from(byte & 0x0f)] as char);
     }
     Ok(encoded)
+}
+
+fn open_process_log(path: &Path) -> std::io::Result<File> {
+    let mut options = OpenOptions::new();
+    options.write(true).create(true).append(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    options.open(path)
+}
+
+fn spawned_exit_message(status: std::process::ExitStatus, stderr_path: &Path) -> String {
+    let stderr = std::fs::read(stderr_path)
+        .ok()
+        .map(|bytes| {
+            let start = bytes.len().saturating_sub(4_096);
+            String::from_utf8_lossy(&bytes[start..]).trim().to_owned()
+        })
+        .filter(|stderr| !stderr.is_empty())
+        .unwrap_or_else(|| "managed process emitted no stderr".into());
+    format!("spawned process exited during startup ({status}): {stderr}")
 }
 
 fn system_for(pid: u32) -> System {

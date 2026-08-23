@@ -132,7 +132,8 @@ fn run_controller_and_kill(
     at: u64,
     after_effect: bool,
 ) {
-    let _ = std::fs::remove_file(marker);
+    let marker = marker.with_extension(format!("{at}.held"));
+    let _ = std::fs::remove_file(&marker);
     let _ = std::fs::remove_file(marker.with_extension("new"));
     let hold_variable = if after_effect {
         "RRD_ESTATE_TEST_HOLD_AFTER_EFFECT_FILE"
@@ -156,7 +157,7 @@ fn run_controller_and_kill(
             "--at",
             &at.to_string(),
         ])
-        .env(hold_variable, marker)
+        .env(hold_variable, &marker)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::piped())
@@ -167,7 +168,7 @@ fn run_controller_and_kill(
         if let Some(status) = child.try_wait().unwrap() {
             let mut error = String::new();
             std::io::Read::read_to_string(child.stderr.as_mut().unwrap(), &mut error).unwrap();
-            panic!("estate controller exited before hold marker ({status}): {error}");
+            panic!("estate controller exited before hold marker at {at} ({status}): {error}");
         }
         assert!(
             Instant::now() < deadline,
@@ -264,6 +265,14 @@ fn real_rrd_child_survives_controller_reopen_and_stops_without_data_deletion() {
     let mut replay_driver = replay_driver;
     rrd_estate::EstateDriver::apply(&mut replay_driver, &request).unwrap();
     assert_eq!(process_pid(&state_root), Some(started_pid));
+    let instance_root = state_root.join("instances/project-a");
+    assert!(instance_root.join("RRD.PROCESS.STDOUT.LOG").is_file());
+    assert!(
+        std::fs::read_to_string(instance_root.join("RRD.PROCESS.STDERR.LOG"))
+            .unwrap()
+            .contains("rrd-server: http://127.0.0.1:"),
+        "the per-instance diagnostic log must retain the server startup boundary"
+    );
 
     assert_boundary(
         step(&database, &state_root, 60),
