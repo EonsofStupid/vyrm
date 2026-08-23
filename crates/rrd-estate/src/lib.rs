@@ -4,6 +4,13 @@
 //! reconciliation boundaries. Connectome is a projection of these records,
 //! never their source of truth.
 
+mod reconcile;
+
+pub use reconcile::{
+    DriverEffect, DriverError, DriverErrorKind, DriverObservation, DriverRequest, EstateDriver,
+    ReconcileBoundary, ReconcileOutcome, Reconciler,
+};
+
 use rrd_contract::CanonicalId;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -100,11 +107,12 @@ pub enum OperationState {
     Applied,
     Succeeded,
     Failed,
+    Superseded,
 }
 
 impl OperationState {
     pub fn is_terminal(self) -> bool {
-        matches!(self, Self::Succeeded | Self::Failed)
+        matches!(self, Self::Succeeded | Self::Failed | Self::Superseded)
     }
 }
 
@@ -612,6 +620,16 @@ impl<'a, E: Engine + ?Sized> EstateRepository<'a, E> {
         document
             .instances
             .insert(request.instance_id.to_string(), managed);
+        for previous_operation in document.operations.values_mut().filter(|operation| {
+            operation.instance_id == request.instance_id && !operation.state.is_terminal()
+        }) {
+            previous_operation.state = OperationState::Superseded;
+            previous_operation.updated_at = request.context.at;
+            previous_operation.error = Some(format!(
+                "superseded by desired generation {generation} operation {}",
+                request.context.operation_id
+            ));
+        }
         let operation = EstateOperation {
             id: request.context.operation_id.clone(),
             instance_id: request.instance_id.clone(),
@@ -686,7 +704,9 @@ impl<'a, E: Engine + ?Sized> EstateRepository<'a, E> {
                 .attempts
                 .checked_add(1)
                 .ok_or_else(|| Error::Invalid("operation attempts overflow".into()))?;
-            operation.state = OperationState::Leased;
+            if operation.state == OperationState::Pending {
+                operation.state = OperationState::Leased;
+            }
             operation.updated_at = request.context.at;
             operation.lease = Some(OperationLease {
                 owner: request.worker.clone(),
@@ -926,7 +946,7 @@ fn validate_lease(
         .lease
         .as_ref()
         .ok_or_else(|| Error::StaleLease(operation.id.to_string()))?;
-    if lease.owner != *worker || lease.epoch != epoch || lease.expires_at < at {
+    if lease.owner != *worker || lease.epoch != epoch || lease.expires_at <= at {
         return Err(Error::StaleLease(operation.id.to_string()));
     }
     Ok(())

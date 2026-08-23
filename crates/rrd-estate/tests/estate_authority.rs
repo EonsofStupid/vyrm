@@ -119,7 +119,7 @@ fn expired_workers_are_fenced_and_recovery_uses_a_new_epoch() {
         })
         .unwrap();
     let operation = recovered.operation(&id("deploy-project-a")).unwrap();
-    assert_eq!(operation.state, OperationState::Leased);
+    assert_eq!(operation.state, OperationState::Prepared);
     assert_eq!(operation.lease.as_ref().unwrap().epoch, 2);
 
     assert!(matches!(
@@ -134,18 +134,18 @@ fn expired_workers_are_fenced_and_recovery_uses_a_new_epoch() {
         Err(Error::StaleLease(_))
     ));
 
-    let prepared_again = repository
+    let applied_after_takeover = repository
         .record_receipt(&ReceiptRequest {
-            context: context(1_050, "prepared-two", "deploy-project-a"),
+            context: context(1_050, "applied-two", "deploy-project-a"),
             worker: id("worker-two"),
             lease_epoch: 2,
-            boundary: ReceiptBoundary::Prepared,
+            boundary: ReceiptBoundary::Applied,
             evidence_sha256: "d".repeat(64),
             error: None,
         })
         .unwrap();
     assert_eq!(
-        prepared_again
+        applied_after_takeover
             .operation(&id("deploy-project-a"))
             .unwrap()
             .receipts
@@ -155,21 +155,11 @@ fn expired_workers_are_fenced_and_recovery_uses_a_new_epoch() {
 
     repository
         .record_receipt(&ReceiptRequest {
-            context: context(1_060, "applied-two", "deploy-project-a"),
-            worker: id("worker-two"),
-            lease_epoch: 2,
-            boundary: ReceiptBoundary::Applied,
-            evidence_sha256: "e".repeat(64),
-            error: None,
-        })
-        .unwrap();
-    repository
-        .record_receipt(&ReceiptRequest {
             context: context(1_070, "completed-two", "deploy-project-a"),
             worker: id("worker-two"),
             lease_epoch: 2,
             boundary: ReceiptBoundary::Completed,
-            evidence_sha256: "f".repeat(64),
+            evidence_sha256: "e".repeat(64),
             error: None,
         })
         .unwrap();
@@ -179,7 +169,7 @@ fn expired_workers_are_fenced_and_recovery_uses_a_new_epoch() {
             worker: id("worker-two"),
             lease_epoch: 2,
             boundary: ReceiptBoundary::Completed,
-            evidence_sha256: "f".repeat(64),
+            evidence_sha256: "e".repeat(64),
             error: None,
         })
         .unwrap();
@@ -187,7 +177,7 @@ fn expired_workers_are_fenced_and_recovery_uses_a_new_epoch() {
         .operation(&id("deploy-project-a"))
         .unwrap();
     assert_eq!(operation.state, OperationState::Succeeded);
-    assert_eq!(operation.receipts.len(), 4);
+    assert_eq!(operation.receipts.len(), 3);
 }
 
 #[test]

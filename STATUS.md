@@ -61,10 +61,14 @@ production distributed/Kubernetes operation, and cloud management.
   operation state, fenced lease epochs, idempotency bindings, append-only
   receipts, heartbeats and meaningful-runtime evidence survive native-engine
   reopen. Activity is derived as unknown/active/idle/stale/neglected from
-  explicit thresholds. The local process driver, transition-boundary kill
-  matrix, backup/restore jobs, Connectome projection and authorized mutations
-  remain open; the existing UI `EstateView` is still only a synthetic read
-  model.
+  explicit thresholds. The typed reconciler advances at most one durable
+  boundary per call. Reopen tests cover lease, prepared, lost-effect-acknowledgment,
+  applied, observed and completed boundaries; external effects are deduplicated
+  by the stable operation ID, expired-worker takeover preserves prepared work,
+  and new desired generations supersede stale unfinished operations. The
+  production local-process driver, actual process-kill qualification,
+  backup/restore jobs, Connectome projection and authorized mutations remain
+  open; the existing UI `EstateView` is still only a synthetic read model.
 
 - The bi-temporal claim kernel has immutable supersession corrections,
   canonical SHA-256 identities covering provenance and validity, and atomic

@@ -251,10 +251,15 @@ uses Vyrm control-state CAS plus its authenticated journal to advance monotonic
 desired generations, observed evidence, idempotency bindings, operation state,
 fenced lease epochs, append-only receipts, heartbeat/runtime evidence and
 derived activity. Memory/native tests prove key rebinding denial, stale-worker
-fencing, lease-epoch recovery and reopen/hash-chain survival. This does **not**
-complete F3: the typed local process driver, kill-at-every-boundary matrix,
-deployment/upgrade/backup/restore state machines, Connectome read projection
-and authorized mutations remain open.
+fencing, lease-epoch recovery and reopen/hash-chain survival. The next slice
+adds a typed reconciler that advances only one durable boundary per call.
+Native-engine reopen tests cover lease, prepared, an external effect whose
+acknowledgement is lost, applied, observed and completed boundaries. The stable
+operation ID deduplicates the retried effect; takeover preserves prepared work,
+and newer desired generations terminally supersede unfinished stale work. This
+does **not** complete F3: the production local-process driver, actual
+process-kill qualification, deployment/upgrade/backup/restore state machines,
+Connectome read projection and authorized mutations remain open.
 
 ### F4 — establish security and governance before remote management
 

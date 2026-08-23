@@ -28,6 +28,8 @@ future persisted-format migration, not an implicit layout change.
    driver actually observed and cannot advance beyond the desired generation.
 4. Every desired mutation binds an idempotency key to one canonical request
    digest and operation ID. Reusing the key for different work is denied.
+   A newer desired generation terminally marks older unfinished operations as
+   `superseded`; a stale target is never applied after a newer one.
 5. A reconciliation operation advances through pending, leased, prepared,
    applied, and a terminal state. A prepared record is durable before an
    external driver is invoked. Driver calls carry the stable operation ID.
@@ -55,8 +57,15 @@ evidence timestamp, evaluation timestamp, and threshold policy.
 
 ## Recovery boundary
 
-The next slice adds the local process driver. It must write `prepared`, invoke a
-typed driver method with the operation ID (never shell-string execution), then
-write an `applied` receipt. Replaying a prepared or applied operation after a
-kill must converge via the same operation ID. Tests will kill/reopen at every
-boundary and prove that no destructive effect is duplicated.
+The reconciler advances at most one durable boundary per call. It writes
+`prepared`, invokes a typed driver method with the operation ID (never
+shell-string execution), then writes an `applied` receipt. Replaying a prepared
+operation invokes the driver with the same stable ID. A driver fixture that
+persists its own receipts proves convergence when an effect commits but its
+first acknowledgement is lost. The native engine is dropped and reopened
+between lease, prepared, retry, applied, observed and completed steps.
+
+This is state-machine recovery evidence, not yet production process-driver
+qualification. The next driver slice must bind trusted executable paths and
+argument vectors without a shell, preserve per-instance process identity across
+controller restart, and run actual process-kill tests at the same boundaries.
