@@ -88,9 +88,8 @@ production distributed/Kubernetes operation, and cloud management.
   passes the full authority, process-contract, real child/controller recovery,
   and strict-clippy sequence on Linux, Windows, and macOS. Operator mutation/
   packaging, per-instance backup/restore, and bounded log retention keep F3
-  open. The aggregate workspace job is still red on the separate OpenRaft
-  `real_consensus_replicates_canonical_runtime_truth_to_every_voter` test; that
-  is not counted as process-driver qualification evidence.
+  open. The storage-format composition defect exposed by the first matrix run
+  is corrected, and the subsequent repository-wide CI run is green.
 
 - The bi-temporal claim kernel has immutable supersession corrections,
   canonical SHA-256 identities covering provenance and validity, and atomic

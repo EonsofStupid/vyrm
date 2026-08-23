@@ -132,3 +132,29 @@ index.
 - Next gate: make the deployment catalogue/install surface operable without
   hand-authored executable paths, then expose explicitly authorized estate
   mutations before backup/restore jobs.
+
+## 2026-08-23 — correction: atomic runtime-plan format lowering
+
+- Corrects: the repository-wide red limit recorded in “F3 graceful shutdown
+  and native process qualification” above.
+- Commit: `130b8c5` (`fix(cluster): lower atomic runtime plans to storage format`).
+- Capability: an external coordinator can now combine a prepared native
+  runtime transaction with its own metadata in one VyrmKV batch only after the
+  plan lowers canonical staged keys to the target database's authenticated
+  application format. The raw staged-parts method is no longer public.
+- Verification:
+  `CARGO_BUILD_JOBS=1 CARGO_INCREMENTAL=0 cargo test -p vyrm-store -p vyrm-cluster --all-features --locked`
+  passed; strict all-target/all-feature clippy passed. GitHub Actions run
+  [`32667681611`](https://github.com/EonsofStupid/vyrm/actions/runs/32667681611)
+  is green across the full workspace verification job and the Ubuntu, Windows,
+  and macOS estate-process matrix.
+- Evidence: the four-node real OpenRaft test commits canonical runtime truth,
+  waits for every voter, snapshots, purges the source log, hydrates a new
+  learner, shuts down, and reopens every node through `NativeEngine`. All four
+  retain runtime cursor `1` and the exact commit outcome. Before the correction,
+  Raft metadata survived but runtime keys were written in staged tag form under
+  a legacy-format manifest, so reopen correctly exposed cursor `0`.
+- Limit: this closes a format-composition defect; it does not add a distributed
+  production deployment, operator authorization, or an F3 backup job.
+- Next gate: operable deployment packaging, followed by explicitly authorized
+  estate mutations and per-instance backup/restore.

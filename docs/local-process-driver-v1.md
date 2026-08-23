@@ -97,12 +97,11 @@ child already gone, retains its data directory, and completes exactly once.
 These debug-only hold points are rejected in release builds.
 
 GitHub Actions run
-[`32666043965`](https://github.com/EonsofStupid/vyrm/actions/runs/32666043965)
+[`32667681611`](https://github.com/EonsofStupid/vyrm/actions/runs/32667681611)
 passes the persistent authority, RRD process contracts, real child/controller
-recovery, and strict-clippy steps on Ubuntu, Windows, and macOS. The same run's
-aggregate workspace job is red on the separate OpenRaft
-`real_consensus_replicates_canonical_runtime_truth_to_every_voter` test, so it
-is not represented as a fully green repository run.
+recovery, and strict-clippy steps on Ubuntu, Windows, and macOS. Its aggregate
+job also passes all workspace tests and clippy, controlled evaluation evidence,
+dependency boundaries, and offline-edge binary budgets.
 
 This qualifies the current local process and controller crash boundary across
 the three native desktop/server OS families. It is not the complete F3 product:
