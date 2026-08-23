@@ -230,3 +230,31 @@ index.
   retention pruning. Cross-platform process-level qualification is still open.
 - Next gate: ship the one-step local backup controller and authorized schedule
   command, then run the real-process crash/reopen matrix.
+
+## 2026-08-23 — F3 authorized backup operation and process recovery
+
+- Commit: `732587a` (`feat(rrd): operate authorized estate backups`).
+- Capability: added the explicit `schedule_backup` local policy grant and
+  `rrd-estate-admin schedule-backup`; accepted work returns the strict
+  `EstateBackupMutationResult`. Added the one-step `rrd-backup-controller`,
+  which carries no operator credential and advances only the durable backup job
+  selected by the estate authority.
+- Verification:
+  `cargo test -p rrd-estate -p rrd-server --all-features --locked` passed,
+  including every RRD socket, session, process, admin, estate and backup test;
+  strict all-target/all-feature clippy passed for both crates; `git diff
+  --check` passed.
+- Evidence: the black-box process test kills the backup controller after its
+  lease, after prepare, and after the authenticated archive/catalogue effect but
+  before the completion receipt. Native reopen retains the prepared job; replay
+  records one succeeded result while catalogue revision and entry count remain
+  exactly one. The admin black-box test separately proves authorization,
+  schedule replay, native reopen, and the exact operator journal actor.
+- CI: the native estate-process matrix now includes the backup-controller
+  binary and its real-process crash test. The pushed run is pending at this
+  journal boundary; no cross-platform claim is made until it is green.
+- Limit: backup scheduling and creation are now operable, but restore to an
+  absent instance root, restore-job recovery, retention/pruning, remote
+  administration, and service/installer packaging remain open.
+- Next gate: freeze the restore-to-absent-instance contract and implement its
+  verified, replay-safe state machine before retention work.
