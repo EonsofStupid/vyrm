@@ -31,6 +31,18 @@ pub enum LocalArgument {
     ConfigurationSha256,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case", tag = "strategy")]
+pub enum LocalShutdown {
+    #[default]
+    Immediate,
+    RequestFile {
+        request: PathBuf,
+        complete: PathBuf,
+        timeout_ms: u64,
+    },
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct LocalDeployment {
@@ -41,6 +53,8 @@ pub struct LocalDeployment {
     pub arguments: Vec<LocalArgument>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub environment: BTreeMap<String, String>,
+    #[serde(default)]
+    pub shutdown: LocalShutdown,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -128,6 +142,20 @@ impl LocalDeploymentCatalog {
                     return Err(format!("deployment {key} environment is invalid"));
                 }
             }
+            if let LocalShutdown::RequestFile {
+                request,
+                complete,
+                timeout_ms,
+            } = &deployment.shutdown
+            {
+                validate_control_filename(request)?;
+                validate_control_filename(complete)?;
+                if request == complete || !(100..=30_000).contains(timeout_ms) {
+                    return Err(format!(
+                        "deployment {key} graceful shutdown contract is invalid"
+                    ));
+                }
+            }
         }
         Ok(())
     }
@@ -146,6 +174,8 @@ struct ProcessRecord {
     executable_sha256: String,
     pid: u32,
     process_start_time_unix_s: u64,
+    #[serde(default)]
+    shutdown: LocalShutdown,
 }
 
 pub struct LocalProcessDriver {
@@ -287,6 +317,12 @@ impl LocalProcessDriver {
                 format!("cannot create instance directory: {error}"),
             )
         })?;
+        prepare_shutdown_artifacts(&instance_root, &deployment.shutdown).map_err(|error| {
+            retryable(
+                request,
+                format!("cannot prepare graceful shutdown artifacts: {error}"),
+            )
+        })?;
         let arguments = deployment
             .arguments
             .iter()
@@ -346,6 +382,7 @@ impl LocalProcessDriver {
             executable_sha256: deployment.executable_sha256.clone(),
             pid,
             process_start_time_unix_s,
+            shutdown: deployment.shutdown.clone(),
         };
         if let Err(error) = write_record(&self.process_record_path(&request.instance_id), &record) {
             let _ = child.kill();
@@ -373,36 +410,40 @@ impl LocalProcessDriver {
                 ));
             }
             ProcessIdentity::Owned => {
-                let system = system_for(record.pid);
-                let process = system
-                    .process(Pid::from_u32(record.pid))
-                    .ok_or_else(|| retryable(request, "owned process disappeared before signal"))?;
-                if !process.kill() {
-                    return Err(retryable(request, "operating system rejected process kill"));
-                }
-                let deadline = Instant::now() + PROCESS_STOP_TIMEOUT;
-                loop {
-                    let system = system_for(record.pid);
-                    match system.process(Pid::from_u32(record.pid)) {
-                        None => break,
-                        Some(process)
-                            if matches!(
-                                process.status(),
-                                ProcessStatus::Zombie | ProcessStatus::Dead
-                            ) =>
-                        {
-                            let _ = process.wait();
-                            break;
+                if let LocalShutdown::RequestFile {
+                    request: request_path,
+                    complete,
+                    timeout_ms,
+                } = &record.shutdown
+                {
+                    let instance_root = self
+                        .state_root
+                        .join("instances")
+                        .join(request.instance_id.as_str());
+                    write_shutdown_request(&instance_root.join(request_path), request, record)
+                        .map_err(|error| {
+                            retryable(
+                                request,
+                                format!("cannot persist graceful shutdown request: {error}"),
+                            )
+                        })?;
+                    if wait_for_owned_exit(record, Duration::from_millis(*timeout_ms), request)? {
+                        if !instance_root.join(complete).is_file() {
+                            return Err(permanent(
+                                request,
+                                "managed process exited without graceful shutdown confirmation",
+                            ));
                         }
-                        Some(_) => {}
+                        return self.remove_record(request);
                     }
-                    if Instant::now() >= deadline {
-                        return Err(retryable(request, "process did not exit after kill"));
-                    }
-                    thread::sleep(Duration::from_millis(10));
                 }
+                kill_owned_process(record, request)?;
             }
         }
+        self.remove_record(request)
+    }
+
+    fn remove_record(&self, request: &DriverRequest) -> std::result::Result<(), DriverError> {
         let path = self.process_record_path(&request.instance_id);
         match std::fs::remove_file(&path) {
             Ok(()) => sync_parent(&path).map_err(|error| {
@@ -610,6 +651,14 @@ fn validate_relative_path(path: &Path) -> std::result::Result<(), String> {
     Ok(())
 }
 
+fn validate_control_filename(path: &Path) -> std::result::Result<(), String> {
+    let mut components = path.components();
+    if !matches!(components.next(), Some(Component::Normal(_))) || components.next().is_some() {
+        return Err("graceful shutdown paths must be direct instance filenames".into());
+    }
+    Ok(())
+}
+
 fn validate_sha256(value: &str) -> std::result::Result<(), String> {
     if value.len() != 64
         || !value
@@ -652,6 +701,126 @@ fn system_for(pid: u32) -> System {
             .with_exe(UpdateKind::Always),
     );
     system
+}
+
+fn prepare_shutdown_artifacts(
+    instance_root: &Path,
+    shutdown: &LocalShutdown,
+) -> std::io::Result<()> {
+    let LocalShutdown::RequestFile {
+        request, complete, ..
+    } = shutdown
+    else {
+        return Ok(());
+    };
+    for relative in [request, complete] {
+        let path = instance_root.join(relative);
+        match std::fs::remove_file(&path) {
+            Ok(()) => sync_parent(&path)?,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(())
+}
+
+fn write_shutdown_request(
+    path: &Path,
+    request: &DriverRequest,
+    record: &ProcessRecord,
+) -> std::io::Result<()> {
+    let bytes = serde_json::to_vec(&serde_json::json!({
+        "format": 1,
+        "instance_id": request.instance_id,
+        "operation_id": request.operation_id,
+        "pid": record.pid,
+        "process_start_time_unix_s": record.process_start_time_unix_s,
+    }))
+    .map_err(std::io::Error::other)?;
+    let mut options = OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    match options.open(path) {
+        Ok(mut file) => {
+            file.write_all(&bytes)?;
+            file.sync_all()?;
+            sync_parent(path)
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => Ok(()),
+        Err(error) => Err(error),
+    }
+}
+
+fn wait_for_owned_exit(
+    record: &ProcessRecord,
+    timeout: Duration,
+    request: &DriverRequest,
+) -> std::result::Result<bool, DriverError> {
+    let deadline = Instant::now() + timeout;
+    loop {
+        let system = system_for(record.pid);
+        match system.process(Pid::from_u32(record.pid)) {
+            None => return Ok(true),
+            Some(process)
+                if matches!(
+                    process.status(),
+                    ProcessStatus::Zombie | ProcessStatus::Dead
+                ) =>
+            {
+                let _ = process.wait();
+                return Ok(true);
+            }
+            Some(process) => {
+                let executable = process
+                    .exe()
+                    .and_then(|path| std::fs::canonicalize(path).ok());
+                if process.start_time() != record.process_start_time_unix_s
+                    || executable.as_ref() != Some(&record.executable)
+                {
+                    return Err(permanent(
+                        request,
+                        "refusing fallback kill after managed PID identity changed",
+                    ));
+                }
+            }
+        }
+        if Instant::now() >= deadline {
+            return Ok(false);
+        }
+        thread::sleep(Duration::from_millis(10));
+    }
+}
+
+fn kill_owned_process(
+    record: &ProcessRecord,
+    request: &DriverRequest,
+) -> std::result::Result<(), DriverError> {
+    let system = system_for(record.pid);
+    let Some(process) = system.process(Pid::from_u32(record.pid)) else {
+        return Ok(());
+    };
+    let executable = process
+        .exe()
+        .and_then(|path| std::fs::canonicalize(path).ok());
+    if process.start_time() != record.process_start_time_unix_s
+        || executable.as_ref() != Some(&record.executable)
+    {
+        return Err(permanent(
+            request,
+            "refusing to kill a PID whose executable/start identity changed",
+        ));
+    }
+    if !process.kill() {
+        return Err(retryable(request, "operating system rejected process kill"));
+    }
+    if !wait_for_owned_exit(record, PROCESS_STOP_TIMEOUT, request)? {
+        return Err(retryable(request, "process did not exit after kill"));
+    }
+    Ok(())
 }
 
 fn write_record(path: &Path, record: &ProcessRecord) -> std::io::Result<()> {

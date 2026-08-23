@@ -2,8 +2,8 @@ use rrd_contract::CanonicalId;
 use rrd_estate::{
     DesiredInstance, DesiredPhase, DesiredTarget, DriverErrorKind, DriverRequest, EstateDriver,
     EstateRepository, LocalArgument, LocalDeployment, LocalDeploymentCatalog, LocalProcessDriver,
-    MutationContext, OperationKind, OperationState, ReconcileBoundary, ReconcileOutcome,
-    Reconciler, SetDesired, LOCAL_DEPLOYMENT_FORMAT,
+    LocalShutdown, MutationContext, OperationKind, OperationState, ReconcileBoundary,
+    ReconcileOutcome, Reconciler, SetDesired, LOCAL_DEPLOYMENT_FORMAT,
 };
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
@@ -72,8 +72,17 @@ fn catalog() -> LocalDeploymentCatalog {
                             LocalArgument::Literal("127.0.0.1:0".into()),
                             LocalArgument::Literal("--token-key-file".into()),
                             LocalArgument::InstancePath(PathBuf::from("RRD.SERVER.SECRET")),
+                            LocalArgument::Literal("--shutdown-request-file".into()),
+                            LocalArgument::InstancePath(PathBuf::from("SHUTDOWN.REQUEST")),
+                            LocalArgument::Literal("--shutdown-complete-file".into()),
+                            LocalArgument::InstancePath(PathBuf::from("SHUTDOWN.COMPLETE")),
                         ],
                         environment: BTreeMap::new(),
+                        shutdown: LocalShutdown::RequestFile {
+                            request: PathBuf::from("SHUTDOWN.REQUEST"),
+                            complete: PathBuf::from("SHUTDOWN.COMPLETE"),
+                            timeout_ms: 5_000,
+                        },
                     },
                 )]),
             }
@@ -289,6 +298,12 @@ fn real_rrd_child_survives_controller_reopen_and_stops_without_data_deletion() {
         ReconcileBoundary::Applied,
     );
     assert!(!process_exists(started_pid));
+    assert!(
+        state_root
+            .join("instances/project-a/SHUTDOWN.COMPLETE")
+            .is_file(),
+        "managed RRD child must confirm graceful shutdown"
+    );
     assert!(state_root.join("instances/project-a/rrd-data").is_dir());
     assert_boundary(
         step(&database, &state_root, 120),
@@ -359,6 +374,71 @@ fn local_driver_refuses_to_signal_a_reused_or_forged_pid_identity() {
     assert!(error.message.contains("refusing to signal"));
     assert!(process_exists(current_pid));
     assert!(record_path.exists());
+}
+
+#[test]
+fn graceful_timeout_reauthenticates_then_uses_the_bounded_kill_fallback() {
+    let temporary = tempfile::tempdir().unwrap();
+    let state_root = temporary.path().join("local-processes");
+    std::fs::create_dir(&state_root).unwrap();
+    let state_root = std::fs::canonicalize(state_root).unwrap();
+    let _cleanup = ProcessCleanup {
+        state_root: state_root.clone(),
+    };
+    let mut fallback_catalog = catalog();
+    let deployment = fallback_catalog.deployments.get_mut("rrd-server").unwrap();
+    deployment.shutdown = LocalShutdown::RequestFile {
+        request: PathBuf::from("SHUTDOWN.REQUEST"),
+        complete: PathBuf::from("SHUTDOWN.COMPLETE"),
+        timeout_ms: 100,
+    };
+    let watched_request = deployment
+        .arguments
+        .iter_mut()
+        .find(|argument| {
+            matches!(
+                argument,
+                LocalArgument::InstancePath(path) if path == Path::new("SHUTDOWN.REQUEST")
+            )
+        })
+        .unwrap();
+    *watched_request = LocalArgument::InstancePath(PathBuf::from("IGNORED.REQUEST"));
+    let mut driver = LocalProcessDriver::new(&state_root, fallback_catalog).unwrap();
+    let start = DriverRequest {
+        estate_id: id("estate-a"),
+        instance_id: id("project-a"),
+        operation_id: id("start-fallback"),
+        kind: OperationKind::Provision,
+        desired: DesiredInstance {
+            generation: 1,
+            phase: DesiredPhase::Running,
+            deployment_ref: id("rrd-server"),
+            version: "0.1.0".into(),
+            configuration_sha256: "a".repeat(64),
+            updated_at: 10,
+        },
+    };
+    driver.apply(&start).unwrap();
+    let started_pid = process_pid(&state_root).unwrap();
+    assert!(process_exists(started_pid));
+
+    let mut stop = start;
+    stop.operation_id = id("stop-fallback");
+    stop.kind = OperationKind::Stop;
+    stop.desired.generation = 2;
+    stop.desired.phase = DesiredPhase::Stopped;
+    stop.desired.updated_at = 20;
+    driver.apply(&stop).unwrap();
+
+    assert!(!process_exists(started_pid));
+    assert_eq!(process_pid(&state_root), None);
+    assert!(
+        !state_root
+            .join("instances/project-a/SHUTDOWN.COMPLETE")
+            .exists(),
+        "a forced fallback must not fabricate graceful completion"
+    );
+    assert!(state_root.join("instances/project-a/rrd-data").is_dir());
 }
 
 #[test]
@@ -451,6 +531,12 @@ fn controller_process_kill_matrix_converges_across_start_and_stop_effect_gaps() 
     );
     assert!(!process_exists(started_pid));
     assert_eq!(process_pid(&state_root), None);
+    assert!(
+        state_root
+            .join("instances/project-a/SHUTDOWN.COMPLETE")
+            .is_file(),
+        "effect-gap stop must complete through the graceful protocol"
+    );
     assert!(state_root.join("instances/project-a/rrd-data").is_dir());
     run_controller_and_kill(&database, &state_root, &catalog_path, &marker, 130, false);
     assert_eq!(

@@ -8,7 +8,7 @@ mod local_process;
 mod reconcile;
 
 pub use local_process::{
-    LocalArgument, LocalDeployment, LocalDeploymentCatalog, LocalProcessDriver,
+    LocalArgument, LocalDeployment, LocalDeploymentCatalog, LocalProcessDriver, LocalShutdown,
     LOCAL_DEPLOYMENT_FORMAT,
 };
 pub use reconcile::{
