@@ -418,6 +418,26 @@ impl LocalProcessDriver {
                     .exe()
                     .and_then(|path| std::fs::canonicalize(path).ok())
                 {
+                    if !same_executable_file(&executable, &deployment.executable) {
+                        if let Some(status) = child.try_wait().map_err(|error| {
+                            retryable(request, format!("cannot inspect spawned process: {error}"))
+                        })? {
+                            return Err(retryable(
+                                request,
+                                spawned_exit_message(status, &stderr_path),
+                            ));
+                        }
+                        let _ = child.kill();
+                        let _ = child.wait();
+                        return Err(permanent(
+                            request,
+                            format!(
+                                "live spawned process executable does not match the trusted catalogue: expected {}, observed {}",
+                                deployment.executable.display(),
+                                executable.display()
+                            ),
+                        ));
+                    }
                     break (process.start_time(), executable);
                 }
             }
@@ -431,18 +451,7 @@ impl LocalProcessDriver {
             }
             thread::sleep(Duration::from_millis(10));
         };
-        if !same_executable_file(&executable, &deployment.executable) {
-            let _ = child.kill();
-            let _ = child.wait();
-            return Err(permanent(
-                request,
-                format!(
-                    "spawned process executable does not match the trusted catalogue: expected {}, observed {}",
-                    deployment.executable.display(),
-                    executable.display()
-                ),
-            ));
-        }
+        debug_assert!(same_executable_file(&executable, &deployment.executable));
         let stability_deadline = Instant::now() + PROCESS_START_STABILITY;
         loop {
             if let Some(status) = child.try_wait().map_err(|error| {
