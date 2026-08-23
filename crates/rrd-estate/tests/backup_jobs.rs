@@ -1,8 +1,8 @@
 use rrd_contract::CanonicalId;
 use rrd_estate::{
-    BackupJobState, DesiredPhase, DesiredTarget, Error, EstateDocument, EstateRepository,
-    LeaseRequest, MutationContext, ObservationRequest, ObservedPhase, ReceiptBoundary,
-    ReceiptRequest, ScheduleBackup, SetDesired, public_backup_jobs,
+    public_backup_jobs, BackupJobState, DesiredPhase, DesiredTarget, Error, EstateDocument,
+    EstateRepository, LeaseRequest, MutationContext, ObservationRequest, ObservedPhase,
+    ReceiptBoundary, ReceiptRequest, ScheduleBackup, SetDesired,
 };
 use vyrm_store::{Engine, MemoryEngine, NativeEngine};
 
@@ -161,11 +161,9 @@ fn backup_schedule_denies_an_unobserved_or_running_instance() {
         })
         .unwrap();
     let error = repository.schedule_backup(&backup_request()).unwrap_err();
-    assert!(
-        error
-            .to_string()
-            .contains("requires desired and observed stopped")
-    );
+    assert!(error
+        .to_string()
+        .contains("requires desired and observed stopped"));
     assert!(repository.load().unwrap().unwrap().backup_jobs.is_empty());
 }
 

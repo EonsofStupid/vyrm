@@ -206,3 +206,27 @@ index.
   remain open. Create replay has an explicit 65,536-entry alpha scan bound.
 - Next gate: implement per-instance backup/restore jobs under the same local
   operator boundary, including durable job state and replay-safe recovery.
+
+## 2026-08-23 — F3 durable per-instance backup execution
+
+- Parent contract: `b71a612` (`feat(rrd): persist quiesced backup jobs`).
+- Capability: added fenced lease, prepared, completed, and failed transitions
+  for the strict backup-job resource; added a one-boundary reconciler and a
+  local effect driver fixed to
+  `<state-root>/instances/<instance>/rrd-data` and
+  `<state-root>/backups/<instance>`. The driver denies retained process records
+  before catalogue creation and authenticates the F1 catalogue before and
+  after each content-addressed logical backup.
+- Verification: all `rrd-estate` tests pass with strict all-target/all-feature
+  clippy. Tests cover durable-effect/lost-ack recovery across native reopen,
+  lease takeover with stale-worker fencing, one-entry catalogue convergence on
+  exact replay, and process-record denial before filesystem mutation.
+- Evidence boundary: a prepared job survives controller loss, then replay
+  returns the identical backup identity without a second catalogue revision.
+  Lease takeover preserves prepared evidence while advancing the fencing
+  epoch.
+- Limit: this checkpoint does not yet expose the reconciler as an operator
+  process, authorize backup scheduling, restore an absent instance, or provide
+  retention pruning. Cross-platform process-level qualification is still open.
+- Next gate: ship the one-step local backup controller and authorized schedule
+  command, then run the real-process crash/reopen matrix.

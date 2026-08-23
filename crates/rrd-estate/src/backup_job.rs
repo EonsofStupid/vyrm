@@ -1,7 +1,7 @@
 use super::{
+    encode, validate_ascii_key, validate_context, validate_error, validate_id_key, validate_sha256,
     Error, EstateDocument, EstateRepository, MutationContext, ObservedPhase, OperationLease,
-    Result, encode, validate_ascii_key, validate_context, validate_error, validate_id_key,
-    validate_sha256,
+    Result,
 };
 use rrd_contract::CanonicalId;
 use serde::{Deserialize, Serialize};
@@ -93,6 +93,46 @@ pub struct BackupScheduleOutcome {
     pub document: EstateDocument,
     pub job: EstateBackupJob,
     pub idempotent_replay: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct BackupLeaseRequest {
+    pub context: MutationContext,
+    pub worker: CanonicalId,
+    pub lease_ms: u64,
+}
+
+#[derive(Debug, Clone)]
+pub struct BackupPreparedRequest {
+    pub context: MutationContext,
+    pub worker: CanonicalId,
+    pub lease_epoch: u64,
+    pub evidence_sha256: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BackupResult {
+    pub backup_id: String,
+    pub archive_sha256: String,
+    pub catalogue_sha256: String,
+    pub evidence_sha256: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct BackupCompleteRequest {
+    pub context: MutationContext,
+    pub worker: CanonicalId,
+    pub lease_epoch: u64,
+    pub result: BackupResult,
+}
+
+#[derive(Debug, Clone)]
+pub struct BackupFailRequest {
+    pub context: MutationContext,
+    pub worker: CanonicalId,
+    pub lease_epoch: u64,
+    pub evidence_sha256: String,
+    pub error: String,
 }
 
 impl<'a, E: Engine + ?Sized> EstateRepository<'a, E> {
@@ -192,6 +232,184 @@ impl<'a, E: Engine + ?Sized> EstateRepository<'a, E> {
             document,
             job,
             idempotent_replay: false,
+        })
+    }
+
+    pub fn acquire_backup_lease(&self, request: &BackupLeaseRequest) -> Result<EstateDocument> {
+        validate_context(&request.context)?;
+        if !(1_000..=3_600_000).contains(&request.lease_ms) {
+            return Err(Error::Invalid(
+                "backup lease_ms must be in 1000..=3600000".into(),
+            ));
+        }
+        self.update(&request.context, "estate.backup.lease", |document| {
+            let job = backup_job_mut(document, &request.context.operation_id)?;
+            if job.state.is_terminal() {
+                return Err(Error::Invalid(
+                    "terminal backup job cannot be leased".into(),
+                ));
+            }
+            if job.lease.as_ref().is_some_and(|lease| {
+                lease.expires_at > request.context.at && lease.owner != request.worker
+            }) {
+                return Err(Error::LeaseBusy(job.id.to_string()));
+            }
+            if job.lease.as_ref().is_some_and(|lease| {
+                lease.expires_at > request.context.at && lease.owner == request.worker
+            }) {
+                return Ok(());
+            }
+            let epoch = job
+                .lease
+                .as_ref()
+                .map(|lease| lease.epoch)
+                .unwrap_or(0)
+                .checked_add(1)
+                .ok_or_else(|| Error::Invalid("backup lease epoch overflow".into()))?;
+            let expires_at = request
+                .context
+                .at
+                .checked_add(request.lease_ms)
+                .ok_or_else(|| Error::Invalid("backup lease expiry overflow".into()))?;
+            job.attempts = job
+                .attempts
+                .checked_add(1)
+                .ok_or_else(|| Error::Invalid("backup attempts overflow".into()))?;
+            if job.state == BackupJobState::Pending {
+                job.state = BackupJobState::Leased;
+            }
+            job.updated_at = request.context.at;
+            job.lease = Some(OperationLease {
+                owner: request.worker.clone(),
+                epoch,
+                acquired_at: request.context.at,
+                expires_at,
+            });
+            Ok(())
+        })
+    }
+
+    pub fn record_backup_prepared(
+        &self,
+        request: &BackupPreparedRequest,
+    ) -> Result<EstateDocument> {
+        validate_context(&request.context)?;
+        validate_sha256(&request.evidence_sha256, "backup prepared evidence")?;
+        self.update(&request.context, "estate.backup.prepared", |document| {
+            let job = backup_job_mut(document, &request.context.operation_id)?;
+            if let Some(existing) = job.receipts.iter().find(|receipt| {
+                receipt.boundary == BackupReceiptBoundary::Prepared
+                    && receipt.lease_epoch == request.lease_epoch
+            }) {
+                if existing.evidence_sha256 == request.evidence_sha256 {
+                    return Ok(());
+                }
+                return Err(Error::Invalid(
+                    "backup prepared boundary was rebound".into(),
+                ));
+            }
+            validate_backup_lease(
+                job,
+                &request.worker,
+                request.lease_epoch,
+                request.context.at,
+            )?;
+            if job.state != BackupJobState::Leased {
+                return Err(Error::Invalid(
+                    "backup prepare requires a leased job".into(),
+                ));
+            }
+            push_backup_receipt(
+                job,
+                BackupReceiptBoundary::Prepared,
+                request.lease_epoch,
+                request.context.at,
+                request.evidence_sha256.clone(),
+            )?;
+            job.state = BackupJobState::Prepared;
+            job.updated_at = request.context.at;
+            Ok(())
+        })
+    }
+
+    pub fn record_backup_completed(
+        &self,
+        request: &BackupCompleteRequest,
+    ) -> Result<EstateDocument> {
+        validate_context(&request.context)?;
+        validate_backup_result_fields(&request.result)?;
+        self.update(&request.context, "estate.backup.completed", |document| {
+            let job = backup_job_mut(document, &request.context.operation_id)?;
+            if job.state == BackupJobState::Succeeded {
+                if job.backup_id.as_ref() == Some(&request.result.backup_id)
+                    && job.archive_sha256.as_ref() == Some(&request.result.archive_sha256)
+                    && job.catalogue_sha256.as_ref() == Some(&request.result.catalogue_sha256)
+                    && job.receipts.iter().any(|receipt| {
+                        receipt.boundary == BackupReceiptBoundary::Completed
+                            && receipt.lease_epoch == request.lease_epoch
+                            && receipt.evidence_sha256 == request.result.evidence_sha256
+                    })
+                {
+                    return Ok(());
+                }
+                return Err(Error::Invalid("backup completion was rebound".into()));
+            }
+            validate_backup_lease(
+                job,
+                &request.worker,
+                request.lease_epoch,
+                request.context.at,
+            )?;
+            if job.state != BackupJobState::Prepared {
+                return Err(Error::Invalid(
+                    "backup completion requires a prepared job".into(),
+                ));
+            }
+            push_backup_receipt(
+                job,
+                BackupReceiptBoundary::Completed,
+                request.lease_epoch,
+                request.context.at,
+                request.result.evidence_sha256.clone(),
+            )?;
+            job.backup_id = Some(request.result.backup_id.clone());
+            job.archive_sha256 = Some(request.result.archive_sha256.clone());
+            job.catalogue_sha256 = Some(request.result.catalogue_sha256.clone());
+            job.state = BackupJobState::Succeeded;
+            job.updated_at = request.context.at;
+            job.error = None;
+            Ok(())
+        })
+    }
+
+    pub fn record_backup_failed(&self, request: &BackupFailRequest) -> Result<EstateDocument> {
+        validate_context(&request.context)?;
+        validate_sha256(&request.evidence_sha256, "backup failure evidence")?;
+        validate_error(Some(&request.error))?;
+        self.update(&request.context, "estate.backup.failed", |document| {
+            let job = backup_job_mut(document, &request.context.operation_id)?;
+            validate_backup_lease(
+                job,
+                &request.worker,
+                request.lease_epoch,
+                request.context.at,
+            )?;
+            if !matches!(job.state, BackupJobState::Leased | BackupJobState::Prepared) {
+                return Err(Error::Invalid(
+                    "backup failure requires an active job".into(),
+                ));
+            }
+            push_backup_receipt(
+                job,
+                BackupReceiptBoundary::Failed,
+                request.lease_epoch,
+                request.context.at,
+                request.evidence_sha256.clone(),
+            )?;
+            job.state = BackupJobState::Failed;
+            job.updated_at = request.context.at;
+            job.error = Some(request.error.clone());
+            Ok(())
         })
     }
 
@@ -314,6 +532,15 @@ pub(crate) fn validate_backup_state(document: &EstateDocument) -> Result<()> {
         if job.receipts.len() > MAX_BACKUP_RECEIPTS_PER_JOB {
             return Err(Error::Invalid("backup receipt limit exceeded".into()));
         }
+        if let Some(lease) = &job.lease {
+            if lease.epoch == 0
+                || lease.acquired_at == 0
+                || lease.expires_at <= lease.acquired_at
+                || lease.acquired_at < job.created_at
+            {
+                return Err(Error::Invalid("backup lease is invalid".into()));
+            }
+        }
         for receipt in &job.receipts {
             if receipt.lease_epoch == 0 || receipt.at == 0 {
                 return Err(Error::Invalid("backup receipt is invalid".into()));
@@ -381,21 +608,97 @@ fn validate_backup_result(job: &EstateBackupJob) -> Result<()> {
                     "active backup job lacks a lease attempt".into(),
                 ));
             }
+            if job.state == BackupJobState::Leased && !job.receipts.is_empty() {
+                return Err(Error::Invalid("leased backup job has receipts".into()));
+            }
+            if job.state == BackupJobState::Prepared
+                && !job
+                    .receipts
+                    .iter()
+                    .any(|receipt| receipt.boundary == BackupReceiptBoundary::Prepared)
+            {
+                return Err(Error::Invalid(
+                    "prepared backup job lacks its receipt".into(),
+                ));
+            }
         }
         BackupJobState::Succeeded => {
-            if result_count != 3 || job.error.is_some() {
+            if result_count != 3
+                || job.error.is_some()
+                || !job
+                    .receipts
+                    .iter()
+                    .any(|receipt| receipt.boundary == BackupReceiptBoundary::Completed)
+            {
                 return Err(Error::Invalid(
                     "succeeded backup job lacks its result".into(),
                 ));
             }
         }
         BackupJobState::Failed => {
-            if job.error.is_none() {
+            if job.error.is_none()
+                || !job
+                    .receipts
+                    .iter()
+                    .any(|receipt| receipt.boundary == BackupReceiptBoundary::Failed)
+            {
                 return Err(Error::Invalid("failed backup job lacks an error".into()));
             }
         }
     }
     Ok(())
+}
+
+fn backup_job_mut<'a>(
+    document: &'a mut EstateDocument,
+    id: &CanonicalId,
+) -> Result<&'a mut EstateBackupJob> {
+    document
+        .backup_jobs
+        .get_mut(id.as_str())
+        .ok_or_else(|| Error::NotFound(id.to_string()))
+}
+
+fn validate_backup_lease(
+    job: &EstateBackupJob,
+    worker: &CanonicalId,
+    epoch: u64,
+    at: u64,
+) -> Result<()> {
+    let lease = job
+        .lease
+        .as_ref()
+        .ok_or_else(|| Error::StaleLease(job.id.to_string()))?;
+    if lease.owner != *worker || lease.epoch != epoch || lease.expires_at <= at {
+        return Err(Error::StaleLease(job.id.to_string()));
+    }
+    Ok(())
+}
+
+fn push_backup_receipt(
+    job: &mut EstateBackupJob,
+    boundary: BackupReceiptBoundary,
+    lease_epoch: u64,
+    at: u64,
+    evidence_sha256: String,
+) -> Result<()> {
+    if job.receipts.len() == MAX_BACKUP_RECEIPTS_PER_JOB {
+        return Err(Error::Invalid("backup receipt limit exceeded".into()));
+    }
+    job.receipts.push(BackupJobReceipt {
+        boundary,
+        lease_epoch,
+        at,
+        evidence_sha256,
+    });
+    Ok(())
+}
+
+fn validate_backup_result_fields(result: &BackupResult) -> Result<()> {
+    validate_sha256(&result.backup_id, "backup identity")?;
+    validate_sha256(&result.archive_sha256, "backup archive")?;
+    validate_sha256(&result.catalogue_sha256, "backup catalogue")?;
+    validate_sha256(&result.evidence_sha256, "backup completion evidence")
 }
 
 fn validate_backup_label(label: &str) -> Result<()> {

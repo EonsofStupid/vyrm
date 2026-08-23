@@ -5,22 +5,31 @@
 //! never their source of truth.
 
 mod backup_job;
+mod backup_reconcile;
 mod local_authorization;
+mod local_backup;
 mod local_process;
 mod reconcile;
 
 pub use backup_job::{
-    BackupIdempotencyBinding, BackupJobReceipt, BackupJobState, BackupReceiptBoundary,
-    BackupScheduleOutcome, EstateBackupJob, MAX_BACKUP_IDEMPOTENCY_BINDINGS, MAX_BACKUP_JOBS,
-    MAX_BACKUP_RECEIPTS_PER_JOB, ScheduleBackup, public_backup_job, public_backup_jobs,
+    public_backup_job, public_backup_jobs, BackupCompleteRequest, BackupFailRequest,
+    BackupIdempotencyBinding, BackupJobReceipt, BackupJobState, BackupLeaseRequest,
+    BackupPreparedRequest, BackupReceiptBoundary, BackupResult, BackupScheduleOutcome,
+    EstateBackupJob, ScheduleBackup, MAX_BACKUP_IDEMPOTENCY_BINDINGS, MAX_BACKUP_JOBS,
+    MAX_BACKUP_RECEIPTS_PER_JOB,
+};
+pub use backup_reconcile::{
+    BackupDriverRequest, BackupReconcileBoundary, BackupReconcileOutcome, BackupReconciler,
+    EstateBackupDriver,
 };
 pub use local_authorization::{
-    LOCAL_OPERATOR_POLICY_FORMAT, LocalEstatePermission, LocalOperatorAuthorization,
-    LocalOperatorPolicy,
+    LocalEstatePermission, LocalOperatorAuthorization, LocalOperatorPolicy,
+    LOCAL_OPERATOR_POLICY_FORMAT,
 };
+pub use local_backup::LocalEstateBackupDriver;
 pub use local_process::{
-    LOCAL_DEPLOYMENT_FORMAT, LocalArgument, LocalDeployment, LocalDeploymentCatalog,
-    LocalProcessDriver, LocalShutdown,
+    LocalArgument, LocalDeployment, LocalDeploymentCatalog, LocalProcessDriver, LocalShutdown,
+    LOCAL_DEPLOYMENT_FORMAT,
 };
 pub use reconcile::{
     DriverEffect, DriverError, DriverErrorKind, DriverObservation, DriverRequest, EstateDriver,
