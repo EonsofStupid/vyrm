@@ -354,6 +354,7 @@ impl LocalProcessDriver {
             .stdin(Stdio::null())
             .stdout(Stdio::from(stdout))
             .stderr(Stdio::from(stderr));
+        configure_platform_environment(&mut command, request)?;
         let mut child = command
             .spawn()
             .map_err(|error| retryable(request, format!("cannot spawn instance: {error}")))?;
@@ -740,6 +741,29 @@ fn open_process_log(path: &Path) -> std::io::Result<File> {
         options.mode(0o600);
     }
     options.open(path)
+}
+
+#[cfg(windows)]
+fn configure_platform_environment(
+    command: &mut Command,
+    request: &DriverRequest,
+) -> std::result::Result<(), DriverError> {
+    let system_root = std::env::var_os("SystemRoot").ok_or_else(|| {
+        permanent(
+            request,
+            "Windows managed process launch requires the SystemRoot platform variable",
+        )
+    })?;
+    command.env("SystemRoot", system_root);
+    Ok(())
+}
+
+#[cfg(not(windows))]
+fn configure_platform_environment(
+    _command: &mut Command,
+    _request: &DriverRequest,
+) -> std::result::Result<(), DriverError> {
+    Ok(())
 }
 
 fn spawned_exit_message(status: std::process::ExitStatus, stderr_path: &Path) -> String {
