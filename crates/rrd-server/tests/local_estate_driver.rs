@@ -125,6 +125,19 @@ fn process_exists(pid: u32) -> bool {
     system.process(Pid::from_u32(pid)).is_some()
 }
 
+fn wait_for_file_text(path: &Path, expected: &str) -> bool {
+    let deadline = Instant::now() + Duration::from_secs(3);
+    loop {
+        if std::fs::read_to_string(path).is_ok_and(|text| text.contains(expected)) {
+            return true;
+        }
+        if Instant::now() >= deadline {
+            return false;
+        }
+        thread::sleep(Duration::from_millis(10));
+    }
+}
+
 fn run_controller_and_kill(
     database: &Path,
     state_root: &Path,
@@ -269,9 +282,10 @@ fn real_rrd_child_survives_controller_reopen_and_stops_without_data_deletion() {
     let instance_root = state_root.join("instances/project-a");
     assert!(instance_root.join("RRD.PROCESS.STDOUT.LOG").is_file());
     assert!(
-        std::fs::read_to_string(instance_root.join("RRD.PROCESS.STDERR.LOG"))
-            .unwrap()
-            .contains("rrd-server: http://127.0.0.1:"),
+        wait_for_file_text(
+            &instance_root.join("RRD.PROCESS.STDERR.LOG"),
+            "rrd-server: http://127.0.0.1:"
+        ),
         "the per-instance diagnostic log must retain the server startup boundary"
     );
 
