@@ -943,9 +943,7 @@ pub fn load_or_create_token_key(path: &Path) -> Result<[u8; TOKEN_KEY_BYTES]> {
         Ok(mut file) => {
             file.write_all(&key)?;
             file.sync_all()?;
-            if let Some(parent) = path.parent() {
-                File::open(parent)?.sync_all()?;
-            }
+            sync_parent(path)?;
             Ok(key)
         }
         Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
@@ -953,6 +951,16 @@ pub fn load_or_create_token_key(path: &Path) -> Result<[u8; TOKEN_KEY_BYTES]> {
         }
         Err(error) => Err(error.into()),
     }
+}
+
+#[cfg(unix)]
+fn sync_parent(path: &Path) -> io::Result<()> {
+    File::open(path.parent().expect("token key has a parent"))?.sync_all()
+}
+
+#[cfg(not(unix))]
+fn sync_parent(_path: &Path) -> io::Result<()> {
+    Ok(())
 }
 
 fn read_token_key(path: &Path) -> io::Result<[u8; TOKEN_KEY_BYTES]> {
