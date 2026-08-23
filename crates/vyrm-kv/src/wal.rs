@@ -11,6 +11,7 @@ const RECORD_MAGIC: &[u8; 4] = b"VYR1";
 const FILE_HEADER_BYTES: usize = 16;
 const RECORD_HEADER_BYTES: usize = 32;
 const RECORD_KIND_BATCH: u8 = 1;
+#[cfg(target_os = "linux")]
 const INITIAL_WAL_RESERVATION_BYTES: u64 = 1024 * 1024;
 const INITIAL_WAL_RESERVATION_MIN_BATCH_BYTES: usize = 16 * 1024;
 

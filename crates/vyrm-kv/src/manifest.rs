@@ -406,6 +406,15 @@ pub struct ManifestStore {
     _lock: File,
 }
 
+impl Drop for ManifestStore {
+    fn drop(&mut self) {
+        // Release explicitly before Windows closes the handle. Relying only on
+        // handle teardown can leave an immediate same-process reopen racing the
+        // OS lock release.
+        let _ = File::unlock(&self._lock);
+    }
+}
+
 impl ManifestStore {
     pub fn open(root: &Path) -> Result<Self> {
         std::fs::create_dir_all(root.join(MANIFEST_DIRECTORY))?;
