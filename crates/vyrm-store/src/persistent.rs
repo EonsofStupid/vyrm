@@ -186,6 +186,38 @@ impl Engine for PersistentEngine {
         }
     }
 
+    fn control_record(&self, key: &str) -> Result<Option<Vec<u8>>> {
+        match self {
+            Self::Native(engine) => Engine::control_record(engine, key),
+            Self::FjallCompatibility(engine) => Engine::control_record(engine, key),
+        }
+    }
+
+    fn commit_control_transition(
+        &self,
+        transition: &crate::ControlTransition,
+    ) -> Result<crate::ControlJournalEntry> {
+        match self {
+            Self::Native(engine) => Engine::commit_control_transition(engine, transition),
+            Self::FjallCompatibility(engine) => {
+                Engine::commit_control_transition(engine, transition)
+            }
+        }
+    }
+
+    fn control_journal_since(
+        &self,
+        after: u64,
+        limit: usize,
+    ) -> Result<Vec<crate::ControlJournalEntry>> {
+        match self {
+            Self::Native(engine) => Engine::control_journal_since(engine, after, limit),
+            Self::FjallCompatibility(engine) => {
+                Engine::control_journal_since(engine, after, limit)
+            }
+        }
+    }
+
     fn sequence(&self) -> Result<u64> {
         match self {
             Self::Native(engine) => Engine::sequence(engine),

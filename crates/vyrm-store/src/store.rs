@@ -1,5 +1,6 @@
 //! The substrate-backed claim store.
 
+use crate::control::{ControlJournalEntry, ControlTransition, validate_control_key};
 use crate::error::{Error, Result};
 use crate::gc::{RemovalReport, Tally, build_report};
 use crate::invocation::{self, Invocation, InvocationInput};
@@ -922,6 +923,88 @@ impl Store {
         tx.insert(&self.meta, receipt_key, serde_json::to_vec(&outcome)?);
         tx.commit()?;
         Ok(outcome)
+    }
+
+    pub fn control_record(&self, key: &str) -> Result<Option<Vec<u8>>> {
+        validate_control_key(key)?;
+        let snapshot = self.db.read_tx();
+        Ok(snapshot
+            .get(&self.meta, key.as_bytes())?
+            .map(|value| value.to_vec()))
+    }
+
+    pub fn commit_control_transition(
+        &self,
+        transition: &ControlTransition,
+    ) -> Result<ControlJournalEntry> {
+        transition.validate()?;
+        let mut tx = self
+            .db
+            .write_tx()
+            .durability(Durability::Authoritative.persist_mode());
+        let current = tx.get(&self.meta, transition.key.as_bytes())?;
+        if current.as_deref() != transition.expected.as_deref() {
+            return Err(Error::ControlConflict(transition.key.clone()));
+        }
+        let sequence = decode_optional_sequence(
+            tx.get(&self.meta, keyspaces::CONTROL_JOURNAL_SEQUENCE)?,
+        )?
+        .checked_add(1)
+        .ok_or(Error::SequenceOverflow)?;
+        let previous_digest = tx
+            .get(&self.meta, keyspaces::CONTROL_JOURNAL_LAST_DIGEST)?
+            .map(|value| String::from_utf8(value.to_vec()))
+            .transpose()
+            .map_err(|error| Error::CorruptWatermark(error.to_string()))?;
+        let entry = ControlJournalEntry::committed(sequence, transition, previous_digest);
+        match &transition.replacement {
+            Some(value) => tx.insert(&self.meta, transition.key.as_bytes(), value),
+            None => tx.remove(&self.meta, transition.key.as_bytes()),
+        }
+        tx.insert(
+            &self.meta,
+            keyspaces::control_journal_key(sequence),
+            serde_json::to_vec(&entry)?,
+        );
+        tx.insert(
+            &self.meta,
+            keyspaces::CONTROL_JOURNAL_SEQUENCE,
+            sequence.to_string().as_bytes(),
+        );
+        tx.insert(
+            &self.meta,
+            keyspaces::CONTROL_JOURNAL_LAST_DIGEST,
+            entry.digest.as_bytes(),
+        );
+        tx.commit()?;
+        Ok(entry)
+    }
+
+    pub fn control_journal_since(
+        &self,
+        after: u64,
+        limit: usize,
+    ) -> Result<Vec<ControlJournalEntry>> {
+        if limit == 0 {
+            return Err(Error::Substrate(
+                "control journal limit must be non-zero".into(),
+            ));
+        }
+        let snapshot = self.db.read_tx();
+        let start = keyspaces::control_journal_key(after.saturating_add(1));
+        let mut entries = Vec::new();
+        for guard in snapshot.range(&self.meta, start..) {
+            let (key, value) = guard.into_inner()?;
+            if !key.starts_with(b"server/journal/entries/") || entries.len() == limit {
+                break;
+            }
+            let entry: ControlJournalEntry = serde_json::from_slice(&value)?;
+            if !entry.verify() {
+                return Err(Error::Substrate("control journal digest mismatch".into()));
+            }
+            entries.push(entry);
+        }
+        Ok(entries)
     }
 
     /// Appends a single claim. Equivalent to a batch of one; provided for call

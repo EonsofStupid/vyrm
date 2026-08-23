@@ -2123,6 +2123,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "rrd-server"
+version = "0.1.0"
+dependencies = [
+ "rrd-contract",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "vyrm-core",
+ "vyrm-store",
+]
+
+[[package]]
 name = "rust_decimal"
 version = "1.42.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"

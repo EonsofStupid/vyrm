@@ -1,6 +1,7 @@
 # RRD server v1 implementation contract
 
-Status: F2 dependency plan; no endpoint is claimed as shipped by this document.
+Status: F2 dependency contract. The persistent coordinator is implemented; no
+network endpoint is claimed as shipped by this document.
 
 The first RRD server is a new process boundary, not an HTTP wrapper around the
 CLI and not an extension of `vyrmd`'s MCP protocol. `vyrmd` remains the AI-tool
@@ -32,7 +33,9 @@ field/row policy, and enterprise audit are F4 gates before remote exposure.
   read-your-writes state without mutation.
 - `POST /v1/transactions/{transaction}/commit` requires a mutation
   idempotency key, exact operation digest, and deadline; it commits through
-  `Engine::commit_data_transaction`.
+  the matching authoritative Engine transaction. The first implemented
+  mutation surface uses `Engine::append_batch_idempotent`; later multi-model
+  mutations must retain the same durable acceptance contract.
 - `DELETE /v1/transactions/{transaction}` aborts idempotently.
 
 Every response uses `ResponseEnvelope`; every failure uses the stable
@@ -47,6 +50,31 @@ the accepted response identity in the same commit as the mutation. Replaying
 the same key/digest returns the original result; the same key with a different
 digest returns `conflict`; no accepted mutation may be repeated after server
 restart. Runtime commit content identity remains a second independent guard.
+
+## Authoritative lifecycle journal
+
+Session and transaction state is not process memory and the journal is not a
+best-effort log. Every accepted lifecycle transition uses Engine compare-and-
+swap to update its materialized record and append a monotonically sequenced,
+SHA-256-chained journal entry in the same storage transaction. Each entry
+contains event time, actor/action, request and operation identities, the prior
+state digest, and the complete replacement state required to replay it.
+
+Persisted session state and journal entries contain only the session-token
+SHA-256; the raw bearer token is returned once and is never journaled. Session
+expiry atomically marks all open transactions expired. Begin, commit, replay,
+abort, abort replay, transaction expiry, and session expiry are explicit
+events. Successful activity advances idle expiry but never crosses absolute
+expiry. A compare-and-swap conflict fails closed rather than overwriting a
+concurrent lifecycle event.
+
+Claim acceptance and the session terminal transition are deliberately
+recoverable as two durable steps until the broader F6 transaction engine owns
+them together. If the process stops after claim acceptance but before
+`transaction.committed`, retrying the same key and operation digest returns the
+stored claim receipt without duplicating claims, then closes the lifecycle
+journal gap. This crash window is an exercised recovery contract, not an
+atomicity claim across two commits.
 
 ## Time and resource invariants
 

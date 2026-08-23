@@ -5,6 +5,7 @@
 //! database's physical MVCC sequence is deliberately independent of claim and
 //! runtime cursors stored in the batch.
 
+use crate::control::{ControlJournalEntry, ControlTransition, validate_control_key};
 use crate::engine::{Engine, PhysicalStoreEvidence, validate_idempotency};
 use crate::error::{Error, Result};
 use crate::gc::{RemovalReport, Tally, build_report};
@@ -480,6 +481,117 @@ impl Engine for NativeEngine {
         );
         write(&mut database, operations, Durability::Authoritative)?;
         Ok(outcome)
+    }
+
+    fn control_record(&self, key: &str) -> Result<Option<Vec<u8>>> {
+        validate_control_key(key)?;
+        let database = self.lock()?;
+        get(&database, database.snapshot(), keyspaces::META, key.as_bytes())
+    }
+
+    fn commit_control_transition(
+        &self,
+        transition: &ControlTransition,
+    ) -> Result<ControlJournalEntry> {
+        transition.validate()?;
+        let mut database = self.lock()?;
+        let snapshot = database.snapshot();
+        let current = get(
+            &database,
+            snapshot,
+            keyspaces::META,
+            transition.key.as_bytes(),
+        )?;
+        if current.as_deref() != transition.expected.as_deref() {
+            return Err(Error::ControlConflict(transition.key.clone()));
+        }
+        let sequence = read_sequence(
+            &database,
+            snapshot,
+            keyspaces::CONTROL_JOURNAL_SEQUENCE,
+        )?
+        .checked_add(1)
+        .ok_or(Error::SequenceOverflow)?;
+        let previous_digest = get(
+            &database,
+            snapshot,
+            keyspaces::META,
+            keyspaces::CONTROL_JOURNAL_LAST_DIGEST,
+        )?
+        .map(String::from_utf8)
+        .transpose()
+        .map_err(|error| Error::CorruptWatermark(error.to_string()))?;
+        let entry = ControlJournalEntry::committed(sequence, transition, previous_digest);
+        let mut operations = Vec::with_capacity(4);
+        match &transition.replacement {
+            Some(value) => put(
+                &mut operations,
+                keyspaces::META,
+                transition.key.as_bytes(),
+                value.clone(),
+            ),
+            None => operations.push(Mutation::Delete {
+                key: encoded_storage_key(
+                    &database,
+                    keyspaces::META,
+                    transition.key.as_bytes(),
+                )?,
+            }),
+        }
+        put(
+            &mut operations,
+            keyspaces::META,
+            &keyspaces::control_journal_key(sequence),
+            serde_json::to_vec(&entry)?,
+        );
+        put_sequence(
+            &mut operations,
+            keyspaces::CONTROL_JOURNAL_SEQUENCE,
+            sequence,
+        );
+        put(
+            &mut operations,
+            keyspaces::META,
+            keyspaces::CONTROL_JOURNAL_LAST_DIGEST,
+            entry.digest.as_bytes().to_vec(),
+        );
+        write(&mut database, operations, Durability::Authoritative)?;
+        Ok(entry)
+    }
+
+    fn control_journal_since(
+        &self,
+        after: u64,
+        limit: usize,
+    ) -> Result<Vec<ControlJournalEntry>> {
+        if limit == 0 {
+            return Err(Error::Substrate(
+                "control journal limit must be non-zero".into(),
+            ));
+        }
+        let database = self.lock()?;
+        scan_space_from(
+            &database,
+            database.snapshot(),
+            keyspaces::META,
+            &keyspaces::control_journal_key(after.saturating_add(1)),
+        )?
+        .into_iter()
+        .take_while(|(key, _)| {
+            database_codec(&database)
+                .ok()
+                .and_then(|codec| codec.strip(keyspaces::META, key))
+                .is_some_and(|logical| logical.starts_with(b"server/journal/entries/"))
+        })
+        .take(limit)
+        .map(|(_, bytes)| {
+            let entry: ControlJournalEntry = serde_json::from_slice(&bytes)?;
+            if !entry.verify() {
+                return Err(Error::Substrate("control journal digest mismatch".into()));
+            }
+            Ok(entry)
+        })
+        .collect()
     }
 
     fn sequence(&self) -> Result<u64> {

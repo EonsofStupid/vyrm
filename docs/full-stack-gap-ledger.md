@@ -177,10 +177,11 @@ canonical reads and audit roots.
 ### F2 — build the real RRD server and session/transaction boundary
 
 **Status:** dependency contract frozen in
-[`rrd-server-v1.md`](rrd-server-v1.md); implementation has not started. The
-contract keeps `vyrmd` as an MCP adapter, requires public payload types before
-handlers, denies non-loopback exposure before F4, and makes accepted-request
-idempotency durable rather than process-local.
+[`rrd-server-v1.md`](rrd-server-v1.md); persistent coordinator implemented;
+loopback HTTP process remains open. The contract keeps `vyrmd` as an MCP
+adapter, requires public payload types before handlers, denies non-loopback
+exposure before F4, and makes accepted-request idempotency durable rather than
+process-local.
 
 **Implementation progress 2026-08-23:** `rrd-contract` now owns bounded session
 limits/leases, transaction leases/states, the first public claim mutation, and
@@ -189,8 +190,17 @@ atomic idempotent claim append: client key, operation SHA-256, and accepted
 sequence receipt share the authoritative claim transaction in the existing
 metadata keyspace. Memory, Fjall compatibility, and native engines pass the
 same collision/replay contract, and both persistent engines replay after
-restart without advancing sequence. Session persistence and the HTTP process
-remain the next implementation sub-slice.
+restart without advancing sequence.
+
+The Engine control plane now atomically materializes compare-and-swap state and
+appends a monotonically sequenced, SHA-256-chained, replayable journal entry.
+The RRD coordinator uses it for persistent session creation/expiry, transaction
+begin/commit/replay/abort/expiry, quota enforcement, and bounded idle/absolute
+leases. Only token hashes reach storage. Native restart and the interrupted
+post-claim/pre-terminal-event recovery window are tested without duplicate
+claims. This does not yet constitute F4 user authentication or comprehensive
+API audit. The real loopback HTTP process, deadlines/cancellation, preview, and
+socket-level qualification remain the next F2 sub-slice.
 
 **Deliverables**
 

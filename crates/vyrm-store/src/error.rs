@@ -24,6 +24,8 @@ pub enum Error {
     RuntimeConflict { expected: u64, actual: u64 },
     /// One accepted client idempotency key was rebound to different content.
     IdempotencyConflict(String),
+    /// A control-plane transition observed different materialized state.
+    ControlConflict(String),
     /// A relation or event named a record that is not present in its scope.
     DanglingRuntimeReference(String),
     /// A typed write was attempted before its scope installed a registry.
@@ -73,6 +75,7 @@ impl fmt::Display for Error {
             Error::IdempotencyConflict(key) => {
                 write!(f, "idempotency key is already bound to different content: {key}")
             }
+            Error::ControlConflict(key) => write!(f, "control state changed concurrently: {key}"),
             Error::DanglingRuntimeReference(reference) => {
                 write!(f, "dangling runtime reference: {reference}")
             }

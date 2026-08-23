@@ -219,6 +219,13 @@ pub(crate) fn accepted_append_key(idempotency_key: &str) -> Vec<u8> {
     key
 }
 
+pub(crate) const CONTROL_JOURNAL_SEQUENCE: &[u8] = b"server/journal/sequence";
+pub(crate) const CONTROL_JOURNAL_LAST_DIGEST: &[u8] = b"server/journal/last-digest";
+
+pub(crate) fn control_journal_key(sequence: u64) -> Vec<u8> {
+    format!("server/journal/entries/{sequence:020}").into_bytes()
+}
+
 /// Key under which the invocation ordinal watermark is recorded.
 pub const INVOCATION_WATERMARK: &[u8] = b"watermark/invocations/ordinal";
 

@@ -20,6 +20,7 @@
 //! compose *around* an engine rather than implementing this trait: they
 //! accelerate reads and must never be the system of record.
 
+use crate::control::{ControlJournalEntry, ControlTransition, validate_control_key};
 use crate::error::{Error, Result};
 use crate::keyspaces::Durability;
 use crate::projection::{
@@ -157,6 +158,18 @@ pub trait Engine: ClaimSource<Error = Error> {
         operation_sha256: &str,
         claims: &[Claim],
     ) -> Result<IdempotentAppendOutcome>;
+
+    fn control_record(&self, key: &str) -> Result<Option<Vec<u8>>>;
+
+    /// Compare-and-swap one materialized control record and append its
+    /// hash-chained journal event in the same authoritative commit.
+    fn commit_control_transition(
+        &self,
+        transition: &ControlTransition,
+    ) -> Result<ControlJournalEntry>;
+
+    fn control_journal_since(&self, after: u64, limit: usize)
+        -> Result<Vec<ControlJournalEntry>>;
 
     /// Current claim sequence watermark.
     fn sequence(&self) -> Result<u64>;
@@ -442,6 +455,22 @@ impl Engine for Store {
     ) -> Result<IdempotentAppendOutcome> {
         Store::append_batch_idempotent(self, idempotency_key, operation_sha256, claims)
     }
+    fn control_record(&self, key: &str) -> Result<Option<Vec<u8>>> {
+        Store::control_record(self, key)
+    }
+    fn commit_control_transition(
+        &self,
+        transition: &ControlTransition,
+    ) -> Result<ControlJournalEntry> {
+        Store::commit_control_transition(self, transition)
+    }
+    fn control_journal_since(
+        &self,
+        after: u64,
+        limit: usize,
+    ) -> Result<Vec<ControlJournalEntry>> {
+        Store::control_journal_since(self, after, limit)
+    }
     fn sequence(&self) -> Result<u64> {
         Store::sequence(self)
     }
@@ -564,6 +593,8 @@ struct MemoryEngineInner {
     runtime_schemas: BTreeMap<ScopeId, RuntimeSchemaRegistry>,
     runtime_snapshots: BTreeMap<SnapshotId, SnapshotHandle>,
     accepted_appends: BTreeMap<String, IdempotentAppendOutcome>,
+    control_records: BTreeMap<String, Vec<u8>>,
+    control_journal: Vec<ControlJournalEntry>,
 }
 
 impl MemoryEngine {
@@ -694,6 +725,61 @@ impl Engine for MemoryEngine {
             .accepted_appends
             .insert(idempotency_key.into(), outcome.clone());
         Ok(outcome)
+    }
+
+    fn control_record(&self, key: &str) -> Result<Option<Vec<u8>>> {
+        validate_control_key(key)?;
+        Ok(self
+            .inner
+            .lock()
+            .expect("engine mutex")
+            .control_records
+            .get(key)
+            .cloned())
+    }
+
+    fn commit_control_transition(
+        &self,
+        transition: &ControlTransition,
+    ) -> Result<ControlJournalEntry> {
+        transition.validate()?;
+        let mut inner = self.inner.lock().expect("engine mutex");
+        if inner.control_records.get(&transition.key).map(Vec::as_slice)
+            != transition.expected.as_deref()
+        {
+            return Err(Error::ControlConflict(transition.key.clone()));
+        }
+        let sequence = inner.control_journal.len() as u64 + 1;
+        let previous = inner.control_journal.last().map(|entry| entry.digest.clone());
+        let entry = ControlJournalEntry::committed(sequence, transition, previous);
+        match &transition.replacement {
+            Some(value) => {
+                inner.control_records.insert(transition.key.clone(), value.clone());
+            }
+            None => {
+                inner.control_records.remove(&transition.key);
+            }
+        }
+        inner.control_journal.push(entry.clone());
+        Ok(entry)
+    }
+
+    fn control_journal_since(
+        &self,
+        after: u64,
+        limit: usize,
+    ) -> Result<Vec<ControlJournalEntry>> {
+        if limit == 0 {
+            return Err(Error::Substrate("control journal limit must be non-zero".into()));
+        }
+        let inner = self.inner.lock().expect("engine mutex");
+        Ok(inner
+            .control_journal
+            .iter()
+            .skip(after as usize)
+            .take(limit)
+            .cloned()
+            .collect())
     }
 
     fn sequence(&self) -> Result<u64> {

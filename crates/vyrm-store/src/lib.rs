@@ -24,6 +24,7 @@
 
 mod archive;
 mod backup;
+mod control;
 mod ds;
 mod engine;
 mod error;
@@ -49,6 +50,7 @@ pub use backup::{
     BACKUP_CATALOGUE_VERSION, BackupCatalogue, BackupCoverage, BackupEntry, create_logical_backup,
     load_backup_catalogue, restore_catalogued_backup, verify_backup_catalogue,
 };
+pub use control::{ControlJournalEntry, ControlTransition};
 pub use ds::{DataRuntime, DataRuntimeStep};
 pub use engine::{Engine, MemoryEngine, PhysicalStoreEvidence};
 pub use error::{Error, Result};

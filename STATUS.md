@@ -39,8 +39,15 @@ production distributed/Kubernetes operation, and cloud management.
   claim-transaction payloads are frozen, and client idempotency bindings are
   now committed atomically with claim batches in Memory, Fjall compatibility,
   and native VyrmKV. Same-key replay survives restart without duplicating a
-  claim; key/digest collisions fail closed. Persistent session leases and the
-  loopback HTTP process are not yet landed.
+  claim; key/digest collisions fail closed. Engine control state now combines
+  compare-and-swap materialization with a monotonic, SHA-256-chained,
+  replayable journal in one storage transaction. The persistent RRD
+  coordinator journals session and transaction creation, expiry, commit,
+  replay, and abort, renews bounded idle leases, expires child transactions,
+  and stores only token hashes. Restart and interrupted
+  post-claim/pre-terminal-event recovery are tested. The loopback HTTP process,
+  deadlines/cancellation, preview, and black-box socket matrix are not yet
+  landed; these transport leases are not F4 user authentication.
 
 - The bi-temporal claim kernel has immutable supersession corrections,
   canonical SHA-256 identities covering provenance and validity, and atomic
