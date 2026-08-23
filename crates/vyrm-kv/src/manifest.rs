@@ -417,15 +417,28 @@ impl Drop for ManifestStore {
 
 impl ManifestStore {
     pub fn open(root: &Path) -> Result<Self> {
-        std::fs::create_dir_all(root.join(MANIFEST_DIRECTORY))?;
-        std::fs::create_dir_all(root.join(CHECKPOINT_DIRECTORY))?;
+        let manifest_directory = root.join(MANIFEST_DIRECTORY);
+        let checkpoint_directory = root.join(CHECKPOINT_DIRECTORY);
+        std::fs::create_dir_all(&manifest_directory).map_err(|error| {
+            Error::io("creating manifest directory", &manifest_directory, error)
+        })?;
+        std::fs::create_dir_all(&checkpoint_directory).map_err(|error| {
+            Error::io(
+                "creating checkpoint directory",
+                &checkpoint_directory,
+                error,
+            )
+        })?;
+        let lock_path = root.join("MANIFEST.LOCK");
         let lock = OpenOptions::new()
             .read(true)
             .write(true)
             .create(true)
             .truncate(false)
-            .open(root.join("MANIFEST.LOCK"))?;
-        lock.lock()?;
+            .open(&lock_path)
+            .map_err(|error| Error::io("opening manifest lock", &lock_path, error))?;
+        lock.lock()
+            .map_err(|error| Error::io("acquiring manifest lock", &lock_path, error))?;
         Ok(Self {
             root: root.to_owned(),
             _lock: lock,

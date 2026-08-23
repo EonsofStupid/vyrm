@@ -1,10 +1,16 @@
 use std::fmt;
+use std::path::PathBuf;
 
 pub type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Debug)]
 pub enum Error {
     Io(std::io::Error),
+    IoContext {
+        operation: &'static str,
+        path: PathBuf,
+        source: std::io::Error,
+    },
     Corruption {
         offset: u64,
         reason: String,
@@ -35,6 +41,15 @@ impl fmt::Display for Error {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Io(error) => write!(formatter, "vyrmKV I/O: {error}"),
+            Self::IoContext {
+                operation,
+                path,
+                source,
+            } => write!(
+                formatter,
+                "vyrmKV I/O while {operation} {}: {source}",
+                path.display()
+            ),
             Self::Corruption { offset, reason } => {
                 write!(formatter, "vyrmKV corruption at byte {offset}: {reason}")
             }
@@ -70,6 +85,7 @@ impl std::error::Error for Error {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Self::Io(error) => Some(error),
+            Self::IoContext { source, .. } => Some(source),
             _ => None,
         }
     }
@@ -78,6 +94,20 @@ impl std::error::Error for Error {
 impl From<std::io::Error> for Error {
     fn from(value: std::io::Error) -> Self {
         Self::Io(value)
+    }
+}
+
+impl Error {
+    pub(crate) fn io(
+        operation: &'static str,
+        path: impl Into<PathBuf>,
+        source: std::io::Error,
+    ) -> Self {
+        Self::IoContext {
+            operation,
+            path: path.into(),
+            source,
+        }
     }
 }
 

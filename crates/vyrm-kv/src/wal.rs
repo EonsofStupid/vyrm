@@ -135,7 +135,11 @@ impl WalWriter {
         if let Some(offset) = recovery.torn_tail {
             return Err(Error::TornTail { offset });
         }
-        let mut file = OpenOptions::new().read(true).write(true).open(path)?;
+        let mut file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(path)
+            .map_err(|error| Error::io("opening WAL writer after recovery", path, error))?;
         file.seek(SeekFrom::Start(recovery.valid_bytes))?;
         Ok(Self {
             path: path.to_owned(),
@@ -298,7 +302,8 @@ where
             "WAL recovery sequence must be non-zero".into(),
         ));
     }
-    let mut file = File::open(path)?;
+    let mut file =
+        File::open(path).map_err(|error| Error::io("opening WAL for replay", path, error))?;
     let length = file.metadata()?.len();
     if length < FILE_HEADER_BYTES as u64 {
         return Err(Error::Corruption {
