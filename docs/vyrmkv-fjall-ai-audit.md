@@ -1,8 +1,8 @@
 # Fjall → vyrmKV AI-runtime audit
 
-Status: sparse-aware footprint correction and eight-profile AI-read matrix
-pass, 2026-08-22. The general append/replay promotion is revoked pending write,
-steady-RSS, and clean-reopen WAL-footprint gaps.
+Status: sparse-aware footprint correction, the canonical general fixture, and
+the eight-profile AI-read matrix pass locally. The scheduled scale matrix
+remains red on steady RSS and the extended clean-reopen WAL-footprint cell.
 
 ## Decision
 
@@ -143,14 +143,20 @@ every raw trial as an artifact.
 
 The corrected general harness initially exposed a full recovered-memtable clone
 on every bounded range. The ordered range walk fixed reads; compact sequence
-references, prepared batches, inline single-version chains, streaming one-pass
-recovery, keyspace-local writes, and bounded initial-WAL reservation then closed
-the remaining local gaps. The canonical nine-trial fixture records 1.333× write
-throughput, 0.769× write p95, 1.393× read throughput, 0.710× read p95, 0.160×
-recovery time, 0.936× peak RSS, and 0.915× allocated footprint. The corrected
-general gate is green locally; sustained and remote reproduction remain. The
-evidence is
-[`2026-08-22-vyrmkv-corrected-standard.json`](../eval/results/2026-08-22-vyrmkv-corrected-standard.json).
+references, prepared batches, exact-length values, one-or-many version chains,
+streaming one-pass recovery, keyspace-local writes, and bounded initial-WAL
+reservation then closed the remaining local gaps. The 2026-08-23 canonical
+rerun records 1.267× write throughput, 0.758× write p95, 1.390× read throughput,
+0.694× read p95, 0.155×
+recovery time, 0.915× peak RSS, and 0.915× allocated footprint. The corrected
+general gate remains green locally; sustained RSS, the extended WAL footprint,
+and remote reproduction remain. Evidence:
+[`standard compact-residency`](../eval/results/2026-08-23-vyrmkv-standard-compact-residency.json).
+
+The high-entropy embedding/fan-out AI profile was rerun because the residency
+change alters in-memory value ownership. It still passes at 1.769× read
+throughput, 0.514× p95 latency, and 0.976× clean-reopen allocated footprint.
+Evidence: [`embedding compact-residency`](../eval/results/2026-08-23-vyrmkv-ai-embedding-compact-residency.json).
 
 ## Ordered implementation gates
 

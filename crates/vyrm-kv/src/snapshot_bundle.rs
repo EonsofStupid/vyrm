@@ -333,7 +333,11 @@ impl SnapshotBundleFile {
         }
         Ok(selected
             .into_iter()
-            .map(|version| version.and_then(|(_, value)| value))
+            .map(|version| {
+                version
+                    .and_then(|(_, value)| value)
+                    .map(|value| value.into_vec())
+            })
             .collect())
     }
 
@@ -359,7 +363,7 @@ impl SnapshotBundleFile {
         }
         Ok(visible
             .into_iter()
-            .filter_map(|(key, version)| version.value.map(|value| (key, value)))
+            .filter_map(|(key, version)| version.value.map(|value| (key, value.into_vec())))
             .collect())
     }
 
@@ -484,7 +488,11 @@ impl SnapshotBundle {
         }
         Ok(selected
             .into_iter()
-            .map(|version| version.and_then(|(_, value)| value))
+            .map(|version| {
+                version
+                    .and_then(|(_, value)| value)
+                    .map(|value| value.into_vec())
+            })
             .collect())
     }
 

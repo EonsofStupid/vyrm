@@ -116,7 +116,7 @@ fn checked_in_ai_read_matrix_is_structurally_valid_and_green() {
             32,
         ),
         (
-            "2026-08-22-vyrmkv-ai-metadata-fanout-embedding-f32.json",
+            "2026-08-23-vyrmkv-ai-embedding-compact-residency.json",
             "metadata_fanout",
             "embedding_f32",
             32,
@@ -196,7 +196,7 @@ fn checked_in_ai_read_matrix_is_structurally_valid_and_green() {
 fn corrected_standard_evidence_records_a_bounded_strict_promotion() {
     let file = concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/../../eval/results/2026-08-22-vyrmkv-corrected-standard.json"
+        "/../../eval/results/2026-08-23-vyrmkv-standard-compact-residency.json"
     );
     let evidence: serde_json::Value =
         serde_json::from_slice(&std::fs::read(file).unwrap()).unwrap();
@@ -231,5 +231,65 @@ fn corrected_standard_evidence_records_a_bounded_strict_promotion() {
         "native_to_fjall_reopened_allocated",
     ] {
         assert!(evidence["ratios"][ratio].as_f64().unwrap() < 1.0);
+    }
+    let profile = &evidence["native"]["native_maintenance"];
+    assert_eq!(profile["memtable_version_record_bytes"], 24);
+    assert_eq!(profile["memtable_spilled_chains"], 1);
+    assert!(profile["memtable_owned_bytes_lower_bound"].as_u64().unwrap() > 0);
+}
+
+#[test]
+fn compact_residency_scale_evidence_is_attributed_but_still_red() {
+    let root = concat!(env!("CARGO_MANIFEST_DIR"), "/../../eval/results/");
+    for (name, trials, operations, maximum_rss_ratio, allocated_should_pass) in [
+        (
+            "2026-08-23-vyrmkv-sustained-compact-residency.json",
+            5,
+            16_384,
+            1.07,
+            true,
+        ),
+        (
+            "2026-08-23-vyrmkv-extended-compact-residency.json",
+            3,
+            70_000,
+            1.12,
+            false,
+        ),
+    ] {
+        let file = format!("{root}{name}");
+        let evidence: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&file).unwrap()).unwrap();
+        assert_eq!(evidence["format_version"], 3, "{file}");
+        assert_eq!(evidence["config"]["trials"], trials, "{file}");
+        assert_eq!(evidence["config"]["operations"], operations, "{file}");
+        assert_eq!(evidence["promotion"]["passes"], false, "{file}");
+        for backend in ["fjall", "native"] {
+            assert_eq!(evidence[backend]["correctness_verified"], true, "{file}");
+        }
+        let profile = &evidence["native"]["native_maintenance"];
+        assert_eq!(profile["memtable_spilled_chains"], 1, "{file}");
+        assert_eq!(profile["memtable_version_record_bytes"], 24, "{file}");
+        assert!(
+            profile["memtable_keys"].as_u64().unwrap()
+                < profile["memtable_versions"].as_u64().unwrap(),
+            "{file}"
+        );
+        assert!(
+            profile["memtable_owned_bytes_lower_bound"]
+                .as_u64()
+                .unwrap()
+                > profile["memtable_value_payload_bytes"].as_u64().unwrap(),
+            "{file}"
+        );
+        let rss = evidence["ratios"]["native_to_fjall_peak_rss"]
+            .as_f64()
+            .unwrap();
+        assert!(rss > 1.0 && rss <= maximum_rss_ratio, "{file}");
+        let allocated = evidence["ratios"]["native_to_fjall_reopened_allocated"]
+            .as_f64()
+            .unwrap();
+        assert_eq!(allocated <= 1.0, allocated_should_pass, "{file}");
+        assert!(allocated < 1.01, "{file}");
     }
 }

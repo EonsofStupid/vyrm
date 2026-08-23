@@ -86,6 +86,14 @@ struct MaintenanceEvidence {
     memtable_versions: u64,
     memtable_max_versions: u64,
     memtable_bytes: u64,
+    memtable_keys: u64,
+    memtable_key_payload_bytes: u64,
+    memtable_value_payload_bytes: u64,
+    memtable_tombstones: u64,
+    memtable_spilled_chains: u64,
+    memtable_spilled_version_capacity: u64,
+    memtable_version_record_bytes: u64,
+    memtable_owned_bytes_lower_bound: u64,
     automatic_flushes: u64,
     write_stalls: u64,
     failed_flushes: u64,
@@ -482,6 +490,32 @@ fn run_native(path: &Path, config: &Config) -> Result<BackendResult, String> {
         memtable_versions: required(physical.memtable_versions, "memtable versions")?,
         memtable_max_versions: required(physical.memtable_max_versions, "memtable version limit")?,
         memtable_bytes: required(physical.memtable_bytes, "memtable bytes")?,
+        memtable_keys: required(physical.memtable_keys, "memtable keys")?,
+        memtable_key_payload_bytes: required(
+            physical.memtable_key_payload_bytes,
+            "memtable key payload bytes",
+        )?,
+        memtable_value_payload_bytes: required(
+            physical.memtable_value_payload_bytes,
+            "memtable value payload bytes",
+        )?,
+        memtable_tombstones: required(physical.memtable_tombstones, "memtable tombstones")?,
+        memtable_spilled_chains: required(
+            physical.memtable_spilled_chains,
+            "memtable spilled chains",
+        )?,
+        memtable_spilled_version_capacity: required(
+            physical.memtable_spilled_version_capacity,
+            "memtable spilled version capacity",
+        )?,
+        memtable_version_record_bytes: required(
+            physical.memtable_version_record_bytes,
+            "memtable version record bytes",
+        )?,
+        memtable_owned_bytes_lower_bound: required(
+            physical.memtable_owned_bytes_lower_bound,
+            "memtable owned bytes lower bound",
+        )?,
         automatic_flushes: required(physical.automatic_flushes, "automatic flushes")?,
         write_stalls: required(
             physical.maintenance_write_stalls,
@@ -802,6 +836,46 @@ fn aggregate_maintenance(values: Vec<&MaintenanceEvidence>) -> Option<Maintenanc
                 .collect(),
         ),
         memtable_bytes: median_u64(values.iter().map(|value| value.memtable_bytes).collect()),
+        memtable_keys: median_u64(values.iter().map(|value| value.memtable_keys).collect()),
+        memtable_key_payload_bytes: median_u64(
+            values
+                .iter()
+                .map(|value| value.memtable_key_payload_bytes)
+                .collect(),
+        ),
+        memtable_value_payload_bytes: median_u64(
+            values
+                .iter()
+                .map(|value| value.memtable_value_payload_bytes)
+                .collect(),
+        ),
+        memtable_tombstones: median_u64(
+            values.iter().map(|value| value.memtable_tombstones).collect(),
+        ),
+        memtable_spilled_chains: median_u64(
+            values
+                .iter()
+                .map(|value| value.memtable_spilled_chains)
+                .collect(),
+        ),
+        memtable_spilled_version_capacity: median_u64(
+            values
+                .iter()
+                .map(|value| value.memtable_spilled_version_capacity)
+                .collect(),
+        ),
+        memtable_version_record_bytes: median_u64(
+            values
+                .iter()
+                .map(|value| value.memtable_version_record_bytes)
+                .collect(),
+        ),
+        memtable_owned_bytes_lower_bound: median_u64(
+            values
+                .iter()
+                .map(|value| value.memtable_owned_bytes_lower_bound)
+                .collect(),
+        ),
         automatic_flushes: median_u64(values.iter().map(|value| value.automatic_flushes).collect()),
         write_stalls: median_u64(values.iter().map(|value| value.write_stalls).collect()),
         failed_flushes: median_u64(values.iter().map(|value| value.failed_flushes).collect()),

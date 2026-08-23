@@ -26,7 +26,7 @@ pub use error::{Error, Result};
 pub use manifest::{
     Checkpoint, CurrentPointer, Manifest, ManifestStore, SegmentDescriptor, MANIFEST_FORMAT_VERSION,
 };
-pub use memtable::{Memtable, VersionedValue};
+pub use memtable::{Memtable, MemtableProfile, VersionedValue};
 pub use segment::{
     BlockCacheStats, Segment, DEFAULT_BLOCK_CACHE_BYTES, SEGMENT_BLOCK_TARGET_BYTES,
     SEGMENT_FORMAT_VERSION,

@@ -3230,7 +3230,6 @@ dependencies = [
  "ring",
  "serde",
  "serde_json",
- "smallvec",
  "tempfile",
  "vyrm-core",
 ]

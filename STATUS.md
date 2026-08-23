@@ -345,17 +345,19 @@ not roadmap language.
   is now legacy diagnostic evidence. The corrected lifecycle harness measures
   active, clean-reopen, and maintained states for both engines and records
   physical allocation. Exact semantics pass. Compact sequence references,
-  cached batch validation, inline one-version memtable chains, streaming
-  one-pass WAL recovery, keyspace-local writes, and bounded first-WAL
-  reservation now record 1.333× write throughput, 0.769× write p95, 1.393×
-  clean-reopen read throughput, 0.710× read p95, 0.160× recovery time, 0.936×
+  cached batch validation, exact-length values, one-or-many memtable chains,
+  streaming one-pass WAL recovery, keyspace-local writes, and bounded first-WAL
+  reservation now record 1.267× write throughput, 0.758× write p95, 1.390×
+  clean-reopen read throughput, 0.694× read p95, 0.155× recovery time, 0.915×
   peak RSS, and 0.915× allocated footprint. The separate eight-profile AI-read
   matrix passes its bounded correctness, throughput, p95, and clean-reopen
   allocation gates.
   These remain workload-scoped results—not a universal database claim.
-  The exact scheduled scale matrix remains red: read-heavy records 1.015× raw
-  peak RSS, sustained 1.123×, and the 70,000-operation profile 1.181× RSS plus
-  1.004× allocated footprint. All other strict cells in those profiles pass;
+  The exact scheduled scale matrix remains red: the prior read-heavy cell
+  records 1.015× raw peak RSS; compact residency improves sustained from
+  1.123× to 1.063× and the 70,000-operation profile from 1.181× to 1.114× RSS.
+  The extended profile remains 1.004× allocated footprint. All other strict
+  cells in those profiles pass;
   backend-native maintained reads remain diagnostic.
   Native now also persists access/removal evidence and the invocation/
   effectiveness ledger with Fjall-equality and reopen tests, closing the

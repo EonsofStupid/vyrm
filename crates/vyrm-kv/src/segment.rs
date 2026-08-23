@@ -291,7 +291,7 @@ struct SparseEntry {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct SegmentVersion {
     pub sequence: u64,
-    pub value: Option<Vec<u8>>,
+    pub value: Option<Box<[u8]>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -484,7 +484,7 @@ impl Segment {
     pub fn get(&self, key: &[u8], read_sequence: u64) -> Result<Option<Vec<u8>>> {
         Ok(self
             .get_version(key, read_sequence)?
-            .and_then(|version| version.value))
+            .and_then(|version| version.value.map(|value| value.into_vec())))
     }
 
     pub(crate) fn get_version(
@@ -625,7 +625,7 @@ impl Segment {
             return Ok(self
                 .visible_from(start, end, read_sequence)?
                 .into_iter()
-                .filter_map(|(key, version)| version.value.map(|value| (key, value)))
+                .filter_map(|(key, version)| version.value.map(|value| (key, value.into_vec())))
                 .collect());
         };
         let mut output = Vec::new();
@@ -637,7 +637,7 @@ impl Segment {
             }
             if current_key.as_slice() != record.key {
                 if let Some(value) = selected.take().and_then(|version| version.value) {
-                    output.push((std::mem::take(&mut current_key), value));
+                    output.push((std::mem::take(&mut current_key), value.into_vec()));
                 } else {
                     current_key.clear();
                 }
@@ -650,7 +650,7 @@ impl Segment {
             {
                 selected = Some(SegmentVersion {
                     sequence: record.sequence,
-                    value: record.value.map(<[u8]>::to_vec),
+                    value: record.value.map(Box::<[u8]>::from),
                 });
             }
             Ok(())
@@ -669,7 +669,7 @@ impl Segment {
             }
         }
         if let Some(value) = selected.and_then(|version| version.value) {
-            output.push((current_key, value));
+            output.push((current_key, value.into_vec()));
         }
         Ok(output)
     }
@@ -716,7 +716,7 @@ impl Segment {
             if record.sequence <= read_sequence {
                 let version = SegmentVersion {
                     sequence: record.sequence,
-                    value: record.value.map(<[u8]>::to_vec),
+                    value: record.value.map(Box::<[u8]>::from),
                 };
                 if grouped
                     .get(record.key)
@@ -887,7 +887,7 @@ fn owned_record(record: Record<'_>) -> SegmentRecord {
         key: record.key.to_vec(),
         version: VersionedValue {
             sequence: record.sequence,
-            value: record.value.map(<[u8]>::to_vec),
+            value: record.value.map(Box::<[u8]>::from),
         },
     }
 }
@@ -1621,7 +1621,7 @@ fn select_version(
             std::cmp::Ordering::Equal if record.sequence <= read_sequence => {
                 selected = Some(SegmentVersion {
                     sequence: record.sequence,
-                    value: record.value.map(<[u8]>::to_vec),
+                    value: record.value.map(Box::<[u8]>::from),
                 })
             }
             std::cmp::Ordering::Equal => {}
@@ -1650,7 +1650,7 @@ fn select_version_block(
             std::cmp::Ordering::Equal if record.sequence <= read_sequence => {
                 selected = Some(SegmentVersion {
                     sequence: record.sequence,
-                    value: record.value.map(<[u8]>::to_vec),
+                    value: record.value.map(Box::<[u8]>::from),
                 });
             }
             std::cmp::Ordering::Equal => {}

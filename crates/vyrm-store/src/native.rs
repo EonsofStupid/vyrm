@@ -283,6 +283,7 @@ impl Engine for NativeEngine {
         let maintenance = database.maintenance_policy();
         let compaction = database.compaction_policy();
         let maintenance_stats = database.maintenance_stats();
+        let memtable = database.memtable().profile();
         Ok(PhysicalStoreEvidence {
             backend: "vyrmkv_native".into(),
             evidence_level: "native_counters".into(),
@@ -291,6 +292,16 @@ impl Engine for NativeEngine {
             durable_sequence: Some(manifest.durable_sequence),
             memtable_versions: Some(database.memtable().version_count() as u64),
             memtable_bytes: Some(database.memtable().approximate_bytes() as u64),
+            memtable_keys: Some(memtable.key_count as u64),
+            memtable_key_payload_bytes: Some(memtable.key_payload_bytes as u64),
+            memtable_value_payload_bytes: Some(memtable.value_payload_bytes as u64),
+            memtable_tombstones: Some(memtable.tombstones as u64),
+            memtable_spilled_chains: Some(memtable.spilled_chains as u64),
+            memtable_spilled_version_capacity: Some(
+                memtable.spilled_version_capacity as u64,
+            ),
+            memtable_version_record_bytes: Some(memtable.version_record_bytes as u64),
+            memtable_owned_bytes_lower_bound: Some(memtable.owned_bytes_lower_bound as u64),
             memtable_max_versions: Some(maintenance.memtable_max_versions as u64),
             wal_payload_bytes: Some(database.wal_payload_bytes() as u64),
             wal_payload_max_bytes: Some(maintenance.wal_payload_max_bytes as u64),

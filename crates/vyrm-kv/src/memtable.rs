@@ -1,15 +1,87 @@
 use crate::{Error, Mutation, RecoveredBatch, Result, WriteBatch};
 use serde::{Deserialize, Serialize};
-use smallvec::SmallVec;
+use std::collections::btree_map::Entry;
 use std::collections::BTreeMap;
 use std::ops::Bound::{Excluded, Included, Unbounded};
 
-type VersionChain = SmallVec<[VersionedValue; 1]>;
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum VersionChain {
+    One(VersionedValue),
+    Many(Vec<VersionedValue>),
+}
+
+impl VersionChain {
+    fn from_vec(mut versions: Vec<VersionedValue>) -> Self {
+        if versions.len() == 1 {
+            Self::One(versions.pop().expect("one checked version"))
+        } else {
+            Self::Many(versions)
+        }
+    }
+
+    fn push(&mut self, version: VersionedValue) {
+        match self {
+            Self::Many(versions) => versions.push(version),
+            Self::One(_) => {
+                let Self::One(previous) =
+                    std::mem::replace(self, Self::Many(Vec::with_capacity(2)))
+                else {
+                    unreachable!("one-version branch changed during replacement")
+                };
+                let Self::Many(versions) = self else {
+                    unreachable!("replacement created a multi-version chain")
+                };
+                versions.push(previous);
+                versions.push(version);
+            }
+        }
+    }
+
+    fn as_slice(&self) -> &[VersionedValue] {
+        match self {
+            Self::One(version) => std::slice::from_ref(version),
+            Self::Many(versions) => versions,
+        }
+    }
+
+    fn iter(&self) -> std::slice::Iter<'_, VersionedValue> {
+        self.as_slice().iter()
+    }
+
+    fn spilled_capacity(&self) -> Option<usize> {
+        match self {
+            Self::One(_) => None,
+            Self::Many(versions) => Some(versions.capacity()),
+        }
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct VersionedValue {
     pub sequence: u64,
-    pub value: Option<Vec<u8>>,
+    /// Exact-length payload storage keeps the value descriptor two machine
+    /// words wide instead of carrying `Vec`'s unused capacity word. The full
+    /// record is three words on 64-bit targets; WAL/segment encodings are
+    /// unchanged.
+    pub value: Option<Box<[u8]>>,
+}
+
+/// Attributable mutable-memory components. `owned_bytes_lower_bound` excludes
+/// B-tree node metadata, allocator headers/fragmentation, and process pages;
+/// it is intentionally not presented as an RSS estimate.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MemtableProfile {
+    pub key_count: usize,
+    pub version_count: usize,
+    pub key_payload_bytes: usize,
+    pub value_payload_bytes: usize,
+    pub tombstones: usize,
+    pub spilled_chains: usize,
+    pub spilled_version_capacity: usize,
+    pub key_handle_bytes: usize,
+    pub version_chain_bytes: usize,
+    pub version_record_bytes: usize,
+    pub owned_bytes_lower_bound: usize,
 }
 
 /// Ordered MVCC reference memtable. Versions remain until snapshot-aware
@@ -75,7 +147,7 @@ impl Memtable {
                 previous = value.sequence;
                 approximate_bytes = approximate_bytes
                     .saturating_add(key.len())
-                    .saturating_add(value.value.as_ref().map_or(0, Vec::len))
+                    .saturating_add(value.value.as_ref().map_or(0, |value| value.len()))
                     .saturating_add(std::mem::size_of::<VersionedValue>());
             }
             version_count = version_count
@@ -132,18 +204,17 @@ impl Memtable {
         for (index, operation) in batch.operations.iter().enumerate() {
             let sequence = first_sequence + index as u64;
             let (key, value) = match operation {
-                Mutation::Put { key, value } => (key.clone(), Some(value.clone())),
+                Mutation::Put { key, value } => {
+                    (key.clone(), Some(value.clone().into_boxed_slice()))
+                }
                 Mutation::Delete { key } => (key.clone(), None),
             };
             self.approximate_bytes = self
                 .approximate_bytes
                 .saturating_add(key.len())
-                .saturating_add(value.as_ref().map_or(0, Vec::len))
+                .saturating_add(value.as_ref().map_or(0, |value| value.len()))
                 .saturating_add(std::mem::size_of::<VersionedValue>());
-            self.versions
-                .entry(key.into_boxed_slice())
-                .or_default()
-                .push(VersionedValue { sequence, value });
+            self.insert_version(key.into_boxed_slice(), VersionedValue { sequence, value });
         }
         self.maximum_sequence = last_sequence;
         self.version_count = next_version_count;
@@ -176,18 +247,15 @@ impl Memtable {
         for (index, operation) in batch.operations.into_iter().enumerate() {
             let sequence = first_sequence + index as u64;
             let (key, value) = match operation {
-                Mutation::Put { key, value } => (key, Some(value)),
+                Mutation::Put { key, value } => (key, Some(value.into_boxed_slice())),
                 Mutation::Delete { key } => (key, None),
             };
             self.approximate_bytes = self
                 .approximate_bytes
                 .saturating_add(key.len())
-                .saturating_add(value.as_ref().map_or(0, Vec::len))
+                .saturating_add(value.as_ref().map_or(0, |value| value.len()))
                 .saturating_add(std::mem::size_of::<VersionedValue>());
-            self.versions
-                .entry(key.into_boxed_slice())
-                .or_default()
-                .push(VersionedValue { sequence, value });
+            self.insert_version(key.into_boxed_slice(), VersionedValue { sequence, value });
         }
         self.maximum_sequence = last_sequence;
         self.version_count = next_version_count;
@@ -214,7 +282,7 @@ impl Memtable {
     ) -> Vec<(Vec<u8>, Vec<u8>)> {
         self.visible_from(start, end, read_sequence)
             .into_iter()
-            .filter_map(|(key, version)| version.value.map(|value| (key, value)))
+            .filter_map(|(key, version)| version.value.map(|value| (key, value.into_vec())))
             .collect()
     }
 
@@ -257,6 +325,50 @@ impl Memtable {
         self.approximate_bytes
     }
 
+    pub fn profile(&self) -> MemtableProfile {
+        let mut profile = MemtableProfile {
+            key_count: self.key_count(),
+            version_count: self.version_count(),
+            key_handle_bytes: std::mem::size_of::<Box<[u8]>>(),
+            version_chain_bytes: std::mem::size_of::<VersionChain>(),
+            version_record_bytes: std::mem::size_of::<VersionedValue>(),
+            ..MemtableProfile::default()
+        };
+        for (key, versions) in &self.versions {
+            profile.key_payload_bytes = profile.key_payload_bytes.saturating_add(key.len());
+            if let Some(capacity) = versions.spilled_capacity() {
+                profile.spilled_chains = profile.spilled_chains.saturating_add(1);
+                profile.spilled_version_capacity = profile
+                    .spilled_version_capacity
+                    .saturating_add(capacity);
+            }
+            for version in versions.iter() {
+                match &version.value {
+                    Some(value) => {
+                        profile.value_payload_bytes =
+                            profile.value_payload_bytes.saturating_add(value.len());
+                    }
+                    None => profile.tombstones = profile.tombstones.saturating_add(1),
+                }
+            }
+        }
+        profile.owned_bytes_lower_bound = profile
+            .key_count
+            .saturating_mul(
+                profile
+                    .key_handle_bytes
+                    .saturating_add(profile.version_chain_bytes),
+            )
+            .saturating_add(profile.key_payload_bytes)
+            .saturating_add(profile.value_payload_bytes)
+            .saturating_add(
+                profile
+                    .spilled_version_capacity
+                    .saturating_mul(profile.version_record_bytes),
+            );
+        profile
+    }
+
     pub fn all_versions(&self) -> impl Iterator<Item = (&[u8], &[VersionedValue])> {
         self.versions
             .iter()
@@ -265,5 +377,60 @@ impl Memtable {
 
     pub fn visible_versions(&self, read_sequence: u64) -> Vec<(Vec<u8>, VersionedValue)> {
         self.visible_from(&[], None, read_sequence)
+    }
+
+    fn insert_version(&mut self, key: Box<[u8]>, version: VersionedValue) {
+        match self.versions.entry(key) {
+            Entry::Vacant(entry) => {
+                entry.insert(VersionChain::One(version));
+            }
+            Entry::Occupied(mut entry) => entry.get_mut().push(version),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn profile_separates_attributable_bytes_from_rss() {
+        let mut table = Memtable::default();
+        let first = WriteBatch::new(vec![
+            Mutation::Put {
+                key: b"a".to_vec(),
+                value: b"one".to_vec(),
+            },
+            Mutation::Put {
+                key: b"a".to_vec(),
+                value: b"two".to_vec(),
+            },
+            Mutation::Delete { key: b"b".to_vec() },
+        ])
+        .unwrap();
+        table.apply_owned_write_batch(first, 1, 3).unwrap();
+
+        let profile = table.profile();
+        assert_eq!(profile.key_count, 2);
+        assert_eq!(profile.version_count, 3);
+        assert_eq!(profile.key_payload_bytes, 2);
+        assert_eq!(profile.value_payload_bytes, 6);
+        assert_eq!(profile.tombstones, 1);
+        assert_eq!(profile.spilled_chains, 1);
+        assert!(profile.spilled_version_capacity >= 2);
+        assert!(profile.owned_bytes_lower_bound >= 8);
+        #[cfg(target_pointer_width = "64")]
+        assert_eq!(profile.version_record_bytes, 24);
+    }
+
+    #[test]
+    fn exact_length_value_keeps_the_existing_serde_shape() {
+        let value = VersionedValue {
+            sequence: 7,
+            value: Some(vec![1, 2, 3].into_boxed_slice()),
+        };
+        let encoded = serde_json::to_string(&value).unwrap();
+        assert_eq!(encoded, r#"{"sequence":7,"value":[1,2,3]}"#);
+        assert_eq!(serde_json::from_str::<VersionedValue>(&encoded).unwrap(), value);
     }
 }

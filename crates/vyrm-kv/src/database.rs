@@ -1130,7 +1130,7 @@ impl Database {
             .min()
             .map(<[u8]>::to_vec)
         {
-            let mut versions = BTreeMap::<u64, Option<Vec<u8>>>::new();
+            let mut versions = BTreeMap::<u64, Option<Box<[u8]>>>::new();
             for (cursor, record) in cursors.iter_mut().zip(current.iter_mut()) {
                 while record.as_ref().is_some_and(|record| record.key == key) {
                     let observed = record.take().expect("record was checked");
@@ -1290,7 +1290,7 @@ impl Database {
         // therefore authoritative for this snapshot and lets hot runtime keys
         // avoid immutable-block I/O entirely.
         if let Some(version) = self.memtable.get_version(key, snapshot.sequence) {
-            return Ok(version.value.clone());
+            return Ok(version.value.as_deref().map(<[u8]>::to_vec));
         }
         let mut best_sequence = 0;
         let mut best_value = None;
@@ -1302,7 +1302,7 @@ impl Database {
                 }
             }
         }
-        Ok(best_value)
+        Ok(best_value.map(|value| value.into_vec()))
     }
 
     pub fn get_many(&self, keys: &[Vec<u8>], snapshot: Snapshot) -> Result<Vec<Option<Vec<u8>>>> {
@@ -1310,7 +1310,7 @@ impl Database {
         let mut unresolved = Vec::with_capacity(keys.len());
         for (index, key) in keys.iter().enumerate() {
             if let Some(version) = self.memtable.get_version(key, snapshot.sequence) {
-                values[index] = version.value.clone();
+                values[index] = version.value.as_deref().map(<[u8]>::to_vec);
             } else {
                 unresolved.push(index);
             }
@@ -1328,7 +1328,9 @@ impl Database {
                 .into_iter()
                 .enumerate()
             {
-                values[unresolved[position]] = version.and_then(|version| version.value);
+                values[unresolved[position]] = version
+                    .and_then(|version| version.value)
+                    .map(|value| value.into_vec());
             }
             return Ok(values);
         }
@@ -1342,7 +1344,7 @@ impl Database {
                 if let Some(version) = version {
                     if version.sequence > best_sequences[position] {
                         best_sequences[position] = version.sequence;
-                        values[unresolved[position]] = version.value;
+                        values[unresolved[position]] = version.value.map(|value| value.into_vec());
                     }
                 }
             }
@@ -1380,7 +1382,7 @@ impl Database {
         }
         Ok(visible
             .into_iter()
-            .filter_map(|(key, version)| version.value.map(|value| (key, value)))
+            .filter_map(|(key, version)| version.value.map(|value| (key, value.into_vec())))
             .collect())
     }
 
@@ -1440,7 +1442,7 @@ fn version_group_bytes(key: &[u8], versions: &[VersionedValue]) -> usize {
     versions.iter().fold(0usize, |bytes, version| {
         bytes
             .saturating_add(key.len())
-            .saturating_add(version.value.as_ref().map_or(0, Vec::len))
+            .saturating_add(version.value.as_ref().map_or(0, |value| value.len()))
             .saturating_add(std::mem::size_of::<VersionedValue>())
     })
 }
