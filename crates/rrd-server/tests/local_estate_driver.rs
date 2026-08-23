@@ -1,0 +1,294 @@
+use rrd_contract::CanonicalId;
+use rrd_estate::{
+    DesiredInstance, DesiredPhase, DesiredTarget, DriverErrorKind, DriverRequest, EstateDriver,
+    EstateRepository, LocalArgument, LocalDeployment, LocalDeploymentCatalog, LocalProcessDriver,
+    MutationContext, OperationKind, ReconcileBoundary, ReconcileOutcome, Reconciler, SetDesired,
+    LOCAL_DEPLOYMENT_FORMAT,
+};
+use sha2::{Digest, Sha256};
+use std::collections::BTreeMap;
+use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
+use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
+use vyrm_store::PersistentEngine;
+
+fn id(value: &str) -> CanonicalId {
+    CanonicalId::new(value).unwrap()
+}
+
+fn context(at: u64, operation: &str) -> MutationContext {
+    MutationContext {
+        at,
+        actor: "rrd-estate".into(),
+        request_id: format!("request-{operation}"),
+        operation_id: id(operation),
+    }
+}
+
+fn target(phase: DesiredPhase) -> DesiredTarget {
+    DesiredTarget {
+        phase,
+        deployment_ref: id("rrd-server"),
+        version: "0.1.0".into(),
+        configuration_sha256: "a".repeat(64),
+    }
+}
+
+fn file_sha256(path: &Path) -> String {
+    let bytes = std::fs::read(path).unwrap();
+    let digest = Sha256::digest(bytes);
+    let mut encoded = String::with_capacity(64);
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    for byte in digest {
+        encoded.push(HEX[usize::from(byte >> 4)] as char);
+        encoded.push(HEX[usize::from(byte & 0x0f)] as char);
+    }
+    encoded
+}
+
+fn catalog() -> LocalDeploymentCatalog {
+    static CATALOG: OnceLock<LocalDeploymentCatalog> = OnceLock::new();
+    CATALOG
+        .get_or_init(|| {
+            let executable = std::fs::canonicalize(env!("CARGO_BIN_EXE_rrd-server")).unwrap();
+            LocalDeploymentCatalog {
+                format: LOCAL_DEPLOYMENT_FORMAT,
+                deployments: BTreeMap::from([(
+                    "rrd-server".into(),
+                    LocalDeployment {
+                        id: id("rrd-server"),
+                        version: "0.1.0".into(),
+                        executable_sha256: file_sha256(&executable),
+                        executable,
+                        arguments: vec![
+                            LocalArgument::Literal("--db".into()),
+                            LocalArgument::InstancePath(PathBuf::from("rrd-data")),
+                            LocalArgument::Literal("--instance".into()),
+                            LocalArgument::InstanceId,
+                            LocalArgument::Literal("--bind".into()),
+                            LocalArgument::Literal("127.0.0.1:0".into()),
+                            LocalArgument::Literal("--token-key-file".into()),
+                            LocalArgument::InstancePath(PathBuf::from("RRD.SERVER.SECRET")),
+                        ],
+                        environment: BTreeMap::new(),
+                    },
+                )]),
+            }
+        })
+        .clone()
+}
+
+fn step(database: &Path, state_root: &Path, at: u64) -> ReconcileOutcome {
+    let engine = PersistentEngine::open(database).unwrap();
+    let driver = LocalProcessDriver::new(state_root, catalog()).unwrap();
+    let mut reconciler =
+        Reconciler::new(&engine, id("estate-a"), id("worker-one"), 30_000, driver).unwrap();
+    reconciler.step(at).unwrap()
+}
+
+fn assert_boundary(outcome: ReconcileOutcome, expected: ReconcileBoundary) {
+    assert!(matches!(
+        outcome,
+        ReconcileOutcome::Advanced { boundary, .. } if boundary == expected
+    ));
+}
+
+fn process_pid(state_root: &Path) -> Option<u32> {
+    let path = state_root.join("processes/project-a.json");
+    std::fs::read(path)
+        .ok()
+        .map(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).unwrap())
+        .and_then(|record| record["pid"].as_u64())
+        .map(|pid| u32::try_from(pid).unwrap())
+}
+
+fn process_exists(pid: u32) -> bool {
+    let mut system = System::new();
+    system.refresh_processes_specifics(
+        ProcessesToUpdate::Some(&[Pid::from_u32(pid)]),
+        true,
+        ProcessRefreshKind::nothing().without_tasks(),
+    );
+    system.process(Pid::from_u32(pid)).is_some()
+}
+
+struct ProcessCleanup {
+    state_root: PathBuf,
+}
+
+impl Drop for ProcessCleanup {
+    fn drop(&mut self) {
+        if let Some(pid) = process_pid(&self.state_root) {
+            let mut system = System::new();
+            system.refresh_processes_specifics(
+                ProcessesToUpdate::Some(&[Pid::from_u32(pid)]),
+                true,
+                ProcessRefreshKind::nothing().without_tasks(),
+            );
+            if let Some(process) = system.process(Pid::from_u32(pid)) {
+                let _ = process.kill();
+                let _ = process.wait();
+            }
+        }
+    }
+}
+
+#[test]
+fn real_rrd_child_survives_controller_reopen_and_stops_without_data_deletion() {
+    let temporary = tempfile::tempdir().unwrap();
+    let database = temporary.path().join("estate-authority");
+    let state_root = temporary.path().join("local-processes");
+    std::fs::create_dir(&state_root).unwrap();
+    let state_root = std::fs::canonicalize(state_root).unwrap();
+    let _cleanup = ProcessCleanup {
+        state_root: state_root.clone(),
+    };
+    {
+        let engine = PersistentEngine::open(&database).unwrap();
+        let repository = EstateRepository::new(&engine, id("estate-a"));
+        repository.create(&context(10, "create-estate")).unwrap();
+        repository
+            .set_desired(&SetDesired {
+                context: context(20, "start-project-a"),
+                instance_id: id("project-a"),
+                idempotency_key: "start-project-a".into(),
+                target: target(DesiredPhase::Running),
+            })
+            .unwrap();
+    }
+
+    assert_boundary(
+        step(&database, &state_root, 30),
+        ReconcileBoundary::LeaseAcquired,
+    );
+    assert_boundary(
+        step(&database, &state_root, 40),
+        ReconcileBoundary::Prepared,
+    );
+    assert_boundary(step(&database, &state_root, 50), ReconcileBoundary::Applied);
+    let started_pid = process_pid(&state_root).expect("driver persisted process identity");
+    assert!(process_exists(started_pid));
+
+    let replay_driver = LocalProcessDriver::new(&state_root, catalog()).unwrap();
+    let request = rrd_estate::DriverRequest {
+        estate_id: id("estate-a"),
+        instance_id: id("project-a"),
+        operation_id: id("start-project-a"),
+        kind: rrd_estate::OperationKind::Provision,
+        desired: rrd_estate::DesiredInstance {
+            generation: 1,
+            phase: DesiredPhase::Running,
+            deployment_ref: id("rrd-server"),
+            version: "0.1.0".into(),
+            configuration_sha256: "a".repeat(64),
+            updated_at: 20,
+        },
+    };
+    let mut replay_driver = replay_driver;
+    rrd_estate::EstateDriver::apply(&mut replay_driver, &request).unwrap();
+    assert_eq!(process_pid(&state_root), Some(started_pid));
+
+    assert_boundary(
+        step(&database, &state_root, 60),
+        ReconcileBoundary::Observed,
+    );
+    assert_boundary(
+        step(&database, &state_root, 70),
+        ReconcileBoundary::Completed,
+    );
+    {
+        let engine = PersistentEngine::open(&database).unwrap();
+        let repository = EstateRepository::new(&engine, id("estate-a"));
+        repository
+            .set_desired(&SetDesired {
+                context: context(80, "stop-project-a"),
+                instance_id: id("project-a"),
+                idempotency_key: "stop-project-a".into(),
+                target: target(DesiredPhase::Stopped),
+            })
+            .unwrap();
+    }
+    assert_boundary(
+        step(&database, &state_root, 90),
+        ReconcileBoundary::LeaseAcquired,
+    );
+    assert_boundary(
+        step(&database, &state_root, 100),
+        ReconcileBoundary::Prepared,
+    );
+    assert_boundary(
+        step(&database, &state_root, 110),
+        ReconcileBoundary::Applied,
+    );
+    assert!(!process_exists(started_pid));
+    assert!(state_root.join("instances/project-a/rrd-data").is_dir());
+    assert_boundary(
+        step(&database, &state_root, 120),
+        ReconcileBoundary::Observed,
+    );
+    assert_boundary(
+        step(&database, &state_root, 130),
+        ReconcileBoundary::Completed,
+    );
+    assert_eq!(process_pid(&state_root), None);
+}
+
+#[test]
+fn local_driver_refuses_to_signal_a_reused_or_forged_pid_identity() {
+    let temporary = tempfile::tempdir().unwrap();
+    let state_root = temporary.path().join("local-processes");
+    std::fs::create_dir(&state_root).unwrap();
+    let state_root = std::fs::canonicalize(state_root).unwrap();
+    let driver = LocalProcessDriver::new(&state_root, catalog()).unwrap();
+    let record_path = driver.process_record_path(&id("project-a"));
+    std::fs::create_dir_all(record_path.parent().unwrap()).unwrap();
+    let current_pid = std::process::id();
+    let current_executable = std::fs::canonicalize(std::env::current_exe().unwrap()).unwrap();
+    let mut system = System::new();
+    system.refresh_processes_specifics(
+        ProcessesToUpdate::Some(&[Pid::from_u32(current_pid)]),
+        true,
+        ProcessRefreshKind::nothing().without_tasks(),
+    );
+    let current_start = system
+        .process(Pid::from_u32(current_pid))
+        .unwrap()
+        .start_time();
+    std::fs::write(
+        &record_path,
+        serde_json::to_vec(&serde_json::json!({
+            "format": 1,
+            "instance_id": "project-a",
+            "operation_id": "old-operation",
+            "deployment_ref": "rrd-server",
+            "version": "0.1.0",
+            "configuration_sha256": "a".repeat(64),
+            "executable": current_executable,
+            "executable_sha256": "b".repeat(64),
+            "pid": current_pid,
+            "process_start_time_unix_s": current_start.saturating_add(1)
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+    let request = DriverRequest {
+        estate_id: id("estate-a"),
+        instance_id: id("project-a"),
+        operation_id: id("stop-project-a"),
+        kind: OperationKind::Stop,
+        desired: DesiredInstance {
+            generation: 2,
+            phase: DesiredPhase::Stopped,
+            deployment_ref: id("rrd-server"),
+            version: "0.1.0".into(),
+            configuration_sha256: "a".repeat(64),
+            updated_at: 20,
+        },
+    };
+    let mut driver = driver;
+    let error = driver.apply(&request).unwrap_err();
+    assert_eq!(error.kind, DriverErrorKind::Permanent);
+    assert!(error.message.contains("refusing to signal"));
+    assert!(process_exists(current_pid));
+    assert!(record_path.exists());
+}

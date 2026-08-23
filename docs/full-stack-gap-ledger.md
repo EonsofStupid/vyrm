@@ -266,6 +266,18 @@ and Connectome's `/api/estate` and workbench render desired→observed generatio
 activity, and operation state. Missing authority is explicitly labeled as a
 synthetic fallback.
 
+The first local process driver is also implemented and specified in
+[`local-process-driver-v1.md`](local-process-driver-v1.md). An operator-trusted
+catalogue binds canonical executable SHA-256 and typed argument sources; launch
+uses no shell and clears inherited environment. Durable process records bind
+PID/start-time/executable plus operation/deployment/configuration identity, and
+signals fail closed on mismatch. Current-host integration launches the real RRD
+server, reopens the controller objects at every state-machine step, proves start
+replay preserves PID, actually stops the child for a new desired generation,
+and retains its data. Actual controller-process kill injection, cross-platform
+qualification, graceful shutdown and the remaining deployment/upgrade/backup/
+restore jobs are still required for the F3 exit gate.
+
 ### F4 — establish security and governance before remote management
 
 **Deliverables**

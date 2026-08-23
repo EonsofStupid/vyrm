@@ -4,8 +4,13 @@
 //! reconciliation boundaries. Connectome is a projection of these records,
 //! never their source of truth.
 
+mod local_process;
 mod reconcile;
 
+pub use local_process::{
+    LocalArgument, LocalDeployment, LocalDeploymentCatalog, LocalProcessDriver,
+    LOCAL_DEPLOYMENT_FORMAT,
+};
 pub use reconcile::{
     DriverEffect, DriverError, DriverErrorKind, DriverObservation, DriverRequest, EstateDriver,
     ReconcileBoundary, ReconcileOutcome, Reconciler,

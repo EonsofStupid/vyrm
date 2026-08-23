@@ -29,10 +29,16 @@ desired state, observations, operation leases, idempotency bindings, receipts,
 and activity evidence advance through the authenticated Vyrm control journal.
 The state contract is documented in
 [`docs/estate-control-v1.md`](docs/estate-control-v1.md). A typed reconciler now
-advances one durable boundary per step and fences lease takeover; the production
-local-process driver remains a subsequent F3 slice. RRD and Connectome now
-consume the same typed read-only `EstateSnapshot`; the panel labels absent
-authority as a synthetic fallback instead of implying persistence.
+advances one durable boundary per step and fences lease takeover. RRD and
+Connectome consume the same typed read-only `EstateSnapshot`; the panel labels
+absent authority as a synthetic fallback instead of implying persistence.
+
+The first local-process driver is now implemented behind an operator-trusted
+catalogue: canonical absolute executable plus SHA-256, typed literal arguments
+without a shell, cleared environment, durable PID/start-time/executable
+identity, and fail-closed signaling. A real-RRD-child test proves restart replay
+and stop-without-data-deletion. Its limits and remaining controller-kill matrix
+are in [`docs/local-process-driver-v1.md`](docs/local-process-driver-v1.md).
 
 The system makes operational reasoning observable and enforceable without
 claiming access to a model's hidden chain-of-thought. It records goals, plans,
