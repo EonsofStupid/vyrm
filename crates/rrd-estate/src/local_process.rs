@@ -902,21 +902,37 @@ fn wait_for_owned_exit(
                 return Ok(true);
             }
             Some(process) => {
-                let executable = process
-                    .exe()
-                    .and_then(|path| std::fs::canonicalize(path).ok());
-                if process.start_time() != record.process_start_time_unix_s
-                    || executable.as_ref() != Some(&record.executable)
-                {
+                if process.start_time() != record.process_start_time_unix_s {
                     return Err(permanent(
                         request,
-                        "refusing fallback kill after managed PID identity changed",
+                        "refusing fallback kill after managed PID start identity changed",
                     ));
                 }
+                match process
+                    .exe()
+                    .and_then(|path| std::fs::canonicalize(path).ok())
+                {
+                    Some(executable) if executable != record.executable => {
+                        return Err(permanent(
+                            request,
+                            "refusing fallback kill after managed PID executable identity changed",
+                        ));
+                    }
+                    Some(_) => {
+                        if Instant::now() >= deadline {
+                            return Ok(false);
+                        }
+                    }
+                    None => {
+                        if Instant::now() >= deadline {
+                            return Err(permanent(
+                                request,
+                                "refusing fallback kill because managed PID executable identity could not be authenticated",
+                            ));
+                        }
+                    }
+                }
             }
-        }
-        if Instant::now() >= deadline {
-            return Ok(false);
         }
         thread::sleep(Duration::from_millis(10));
     }

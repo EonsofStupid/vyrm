@@ -99,10 +99,11 @@ fn step(database: &Path, state_root: &Path, at: u64) -> ReconcileOutcome {
 }
 
 fn assert_boundary(outcome: ReconcileOutcome, expected: ReconcileBoundary) {
+    let observed = format!("{outcome:?}");
     assert!(matches!(
         outcome,
         ReconcileOutcome::Advanced { boundary, .. } if boundary == expected
-    ));
+    ), "expected {expected:?}, observed {observed}");
 }
 
 fn process_pid(state_root: &Path) -> Option<u32> {
