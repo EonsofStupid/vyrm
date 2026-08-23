@@ -5,22 +5,22 @@
 //! database's physical MVCC sequence is deliberately independent of claim and
 //! runtime cursors stored in the batch.
 
-use crate::engine::{Engine, PhysicalStoreEvidence};
+use crate::engine::{Engine, PhysicalStoreEvidence, validate_idempotency};
 use crate::error::{Error, Result};
-use crate::gc::{build_report, RemovalReport, Tally};
+use crate::gc::{RemovalReport, Tally, build_report};
 use crate::invocation::{self, Invocation, InvocationInput, RecallOutcome};
 use crate::keyspaces::{self, Durability};
-use crate::store::AppendOutcome;
+use crate::store::{AppendOutcome, IdempotentAppendOutcome};
 use serde::de::DeserializeOwned;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard};
 use vyrm_core::{
-    key, projection_family, AuditEnvelope, Claim, ClaimSource, Millis, ObjectReference, Predicate,
-    ProjectionWork, ReadStamp, Reader, RetentionPin, RuntimeChange, RuntimeChangePage,
-    RuntimeCommit, RuntimeCommitOutcome, RuntimeLogAccumulator, RuntimeMerkleNode, RuntimeMutation,
-    RuntimeRecord, RuntimeRef, RuntimeRelation, RuntimeSchemaRegistry, ScopeId, SnapshotHandle,
-    SnapshotId, Subject,
+    AuditEnvelope, Claim, ClaimSource, Millis, ObjectReference, Predicate, ProjectionWork,
+    ReadStamp, Reader, RetentionPin, RuntimeChange, RuntimeChangePage, RuntimeCommit,
+    RuntimeCommitOutcome, RuntimeLogAccumulator, RuntimeMerkleNode, RuntimeMutation, RuntimeRecord,
+    RuntimeRef, RuntimeRelation, RuntimeSchemaRegistry, ScopeId, SnapshotHandle, SnapshotId,
+    Subject, key, projection_family,
 };
 use vyrm_kv::{
     CompactionOutcome, Database, DatabaseOptions, GarbageCollectionReport, Manifest, Mutation,
@@ -59,10 +59,23 @@ impl NativeEngine {
                 .next()
                 .is_none();
         let mut database = if !path.exists() || empty {
-            Database::create_with_options(path, options)?
+            Database::create_with_application_format(
+                path,
+                options,
+                keyspaces::NATIVE_KEYSPACE_TAG_FORMAT_V2,
+            )?
         } else {
             Database::open_with_options(path, options)?
         };
+        let _codec = keyspaces::NativeKeyCodec::from_application_format(
+            database.manifest().application_format,
+        )
+        .ok_or_else(|| {
+            Error::Substrate(format!(
+                "unsupported native application format {:?}",
+                database.manifest().application_format
+            ))
+        })?;
         reconcile_runtime_checkpoints(&mut database, None, 0)?;
         let path = database.root().to_owned();
         Ok(Self {
@@ -107,8 +120,11 @@ impl NativeEngine {
         let snapshot = database.snapshot();
         let mut tallies = BTreeMap::<(String, String), Tally>::new();
         for (stored_key, _) in scan_space(&database, snapshot, keyspaces::CLAIMS, &[])? {
-            let (subject, predicate) =
-                key::parse_claim_key(strip_space(keyspaces::CLAIMS, &stored_key)?)?;
+            let (subject, predicate) = key::parse_claim_key(strip_space(
+                database_codec(&database)?,
+                keyspaces::CLAIMS,
+                &stored_key,
+            )?)?;
             tallies
                 .entry((subject.to_string(), predicate.to_string()))
                 .or_default()
@@ -120,8 +136,11 @@ impl NativeEngine {
             keyspaces::ACCESS,
             &key::access_bound(since),
         )? {
-            let (at, reader, subject, predicate) =
-                key::parse_access_key(strip_space(keyspaces::ACCESS, &stored_key)?)?;
+            let (at, reader, subject, predicate) = key::parse_access_key(strip_space(
+                database_codec(&database)?,
+                keyspaces::ACCESS,
+                &stored_key,
+            )?)?;
             if at > evaluated_at {
                 break;
             }
@@ -187,7 +206,12 @@ impl NativeEngine {
             let record: Invocation = serde_json::from_slice(&value)?;
             if record.ordinal == ordinal {
                 found = Some((
-                    strip_space(keyspaces::INVOCATIONS, &stored_key)?.to_vec(),
+                    strip_space(
+                        database_codec(&database)?,
+                        keyspaces::INVOCATIONS,
+                        &stored_key,
+                    )?
+                    .to_vec(),
                     record,
                 ));
                 break;
@@ -388,6 +412,76 @@ impl Engine for NativeEngine {
         })
     }
 
+    fn append_batch_idempotent(
+        &self,
+        idempotency_key: &str,
+        operation_sha256: &str,
+        claims: &[Claim],
+    ) -> Result<IdempotentAppendOutcome> {
+        validate_idempotency(idempotency_key, operation_sha256)?;
+        if claims.is_empty() {
+            return Err(Error::Substrate("idempotent claim append must not be empty".into()));
+        }
+        for claim in claims {
+            claim.validate()?;
+        }
+        let mut database = self.lock()?;
+        let snapshot = database.snapshot();
+        let receipt_key = keyspaces::accepted_append_key(idempotency_key);
+        if let Some(bytes) = get(&database, snapshot, keyspaces::META, &receipt_key)? {
+            let mut outcome: IdempotentAppendOutcome = serde_json::from_slice(&bytes)?;
+            if outcome.operation_sha256 != operation_sha256 {
+                return Err(Error::IdempotencyConflict(idempotency_key.into()));
+            }
+            outcome.idempotent_replay = true;
+            return Ok(outcome);
+        }
+        let start = read_sequence(&database, snapshot, keyspaces::SEQUENCE_WATERMARK)?;
+        let mut sequence = start;
+        let mut operations = Vec::with_capacity(claims.len() * 2 + 2);
+        let mut sequence_operations = Vec::with_capacity(claims.len());
+        for claim in claims {
+            sequence = sequence.checked_add(1).ok_or(Error::SequenceOverflow)?;
+            let claim_key = key::claim_key(
+                &claim.subject,
+                &claim.predicate,
+                claim.valid_from,
+                claim.tx_time,
+            );
+            put(
+                &mut sequence_operations,
+                keyspaces::SEQUENCE_INDEX,
+                &key::sequence_key(sequence),
+                claim_key.clone(),
+            );
+            put(
+                &mut operations,
+                keyspaces::CLAIMS,
+                &claim_key,
+                serde_json::to_vec(claim)?,
+            );
+        }
+        operations.extend(sequence_operations);
+        put_sequence(&mut operations, keyspaces::SEQUENCE_WATERMARK, sequence);
+        let outcome = IdempotentAppendOutcome {
+            operation_sha256: operation_sha256.into(),
+            append: AppendOutcome {
+                first_sequence: start + 1,
+                last_sequence: sequence,
+                count: claims.len(),
+            },
+            idempotent_replay: false,
+        };
+        put(
+            &mut operations,
+            keyspaces::META,
+            &receipt_key,
+            serde_json::to_vec(&outcome)?,
+        );
+        write(&mut database, operations, Durability::Authoritative)?;
+        Ok(outcome)
+    }
+
     fn sequence(&self) -> Result<u64> {
         let database = self.lock()?;
         read_sequence(
@@ -408,11 +502,16 @@ impl Engine for NativeEngine {
         if from >= last {
             return Ok(Vec::new());
         }
-        let start = storage_key(
+        let start = encoded_storage_key(
+            &database,
             keyspaces::SEQUENCE_INDEX,
             &key::sequence_key(from.saturating_add(1)),
-        );
-        let inclusive_end = storage_key(keyspaces::SEQUENCE_INDEX, &key::sequence_key(last));
+        )?;
+        let inclusive_end = encoded_storage_key(
+            &database,
+            keyspaces::SEQUENCE_INDEX,
+            &key::sequence_key(last),
+        )?;
         let end = prefix_end(&inclusive_end)
             .ok_or_else(|| Error::Substrate("native sequence range has no upper bound".into()))?;
         let expected = usize::try_from(last - from)
@@ -428,7 +527,10 @@ impl Engine for NativeEngine {
                     return Ok(());
                 }
                 let encoded = database
-                    .get(&storage_key(keyspaces::CLAIMS, sequence_value), snapshot)?
+                    .get(
+                        &encoded_storage_key(&database, keyspaces::CLAIMS, sequence_value)?,
+                        snapshot,
+                    )?
                     .ok_or_else(|| {
                         Error::Substrate(format!(
                             "native sequence index references an absent claim in ({from}, {last}]"
@@ -452,7 +554,8 @@ impl Engine for NativeEngine {
         let snapshot = database.snapshot();
         let mut subjects = Vec::new();
         for (stored_key, _) in scan_space(&database, snapshot, keyspaces::CLAIMS, &[])? {
-            let claim_key = strip_space(keyspaces::CLAIMS, &stored_key)?;
+            let claim_key =
+                strip_space(database_codec(&database)?, keyspaces::CLAIMS, &stored_key)?;
             let (subject, _) = key::parse_claim_key(claim_key)?;
             if subjects
                 .last()
@@ -614,13 +717,19 @@ impl Engine for NativeEngine {
 
     fn release_runtime_snapshot(&self, id: &SnapshotId) -> Result<bool> {
         let mut database = self.lock()?;
-        let key = storage_key(keyspaces::RUNTIME_SNAPSHOTS, id.as_str().as_bytes());
-        if database.get(&key, database.snapshot())?.is_none() {
+        let stored_key = encoded_storage_key(
+            &database,
+            keyspaces::RUNTIME_SNAPSHOTS,
+            id.as_str().as_bytes(),
+        )?;
+        if database.get(&stored_key, database.snapshot())?.is_none() {
             return Ok(false);
         }
         write(
             &mut database,
-            vec![Mutation::Delete { key }],
+            vec![Mutation::Delete {
+                key: storage_key(keyspaces::RUNTIME_SNAPSHOTS, id.as_str().as_bytes()),
+            }],
             Durability::Authoritative,
         )?;
         database.release_checkpoint(&runtime_checkpoint_name(id))?;
@@ -1171,8 +1280,8 @@ pub fn native_runtime_commit_outcome(
 
 fn scan_claims(database: &Database, prefix: Vec<u8>, from: Vec<u8>) -> Result<Vec<Claim>> {
     let snapshot = database.snapshot();
-    let start = storage_key(keyspaces::CLAIMS, &from);
-    let full_prefix = storage_key(keyspaces::CLAIMS, &prefix);
+    let start = encoded_storage_key(database, keyspaces::CLAIMS, &from)?;
+    let full_prefix = encoded_storage_key(database, keyspaces::CLAIMS, &prefix)?;
     let end = prefix_end(&full_prefix)
         .ok_or_else(|| Error::Substrate("native claim prefix has no upper bound".into()))?;
     database
@@ -1605,10 +1714,19 @@ pub fn native_snapshot_artifact_view(
     bundle: &SnapshotBundleFile,
     scope: &ScopeId,
 ) -> Result<(ReadStamp, Vec<ObjectReference>)> {
-    let cursor_key = storage_key(keyspaces::META, keyspaces::RUNTIME_CURSOR);
-    let digest_key = storage_key(keyspaces::META, keyspaces::RUNTIME_LAST_DIGEST);
-    let accumulator_key = storage_key(keyspaces::META, keyspaces::RUNTIME_ACCUMULATOR_STATE);
-    let schema_key = storage_key(keyspaces::RUNTIME_SCHEMAS, scope.as_str().as_bytes());
+    let codec = snapshot_codec(bundle)?;
+    let cursor_key = codec
+        .encode(keyspaces::META, keyspaces::RUNTIME_CURSOR)
+        .expect("canonical keyspace");
+    let digest_key = codec
+        .encode(keyspaces::META, keyspaces::RUNTIME_LAST_DIGEST)
+        .expect("canonical keyspace");
+    let accumulator_key = codec
+        .encode(keyspaces::META, keyspaces::RUNTIME_ACCUMULATOR_STATE)
+        .expect("canonical keyspace");
+    let schema_key = codec
+        .encode(keyspaces::RUNTIME_SCHEMAS, scope.as_str().as_bytes())
+        .expect("canonical keyspace");
     let values = bundle
         .get_many(&[&cursor_key, &digest_key, &accumulator_key, &schema_key])
         .map_err(Error::from)?;
@@ -1679,7 +1797,7 @@ pub fn native_database_artifact_view(
     let snapshot = database.snapshot();
     let read = native_read_stamp(database, snapshot, scope)?;
     let rows = scan_space(database, snapshot, keyspaces::RUNTIME_OBJECTS, &[])?;
-    let objects = decode_snapshot_objects(rows, Some(scope))?;
+    let objects = decode_snapshot_objects(database_codec(database)?, rows, Some(scope))?;
     Ok((read, objects))
 }
 
@@ -1696,13 +1814,17 @@ fn native_snapshot_objects(
     bundle: &SnapshotBundleFile,
     required_scope: Option<&ScopeId>,
 ) -> Result<Vec<ObjectReference>> {
-    let start = storage_key(keyspaces::RUNTIME_OBJECTS, &[]);
+    let codec = snapshot_codec(bundle)?;
+    let start = codec
+        .encode(keyspaces::RUNTIME_OBJECTS, &[])
+        .expect("canonical keyspace");
     let end = prefix_end(&start);
     let values = bundle.scan(&start, end.as_deref()).map_err(Error::from)?;
-    decode_snapshot_objects(values, required_scope)
+    decode_snapshot_objects(codec, values, required_scope)
 }
 
 fn decode_snapshot_objects(
+    codec: keyspaces::NativeKeyCodec,
     values: Vec<(Vec<u8>, Vec<u8>)>,
     required_scope: Option<&ScopeId>,
 ) -> Result<Vec<ObjectReference>> {
@@ -1716,7 +1838,7 @@ fn decode_snapshot_objects(
         .map(|(stored_key, value)| {
             let object: ObjectReference = serde_json::from_slice(&value)?;
             object.validate()?;
-            let logical = strip_space(keyspaces::RUNTIME_OBJECTS, &stored_key)?;
+            let logical = strip_space(codec, keyspaces::RUNTIME_OBJECTS, &stored_key)?;
             let split = logical.iter().position(|byte| *byte == 0).ok_or_else(|| {
                 Error::Substrate("native snapshot object key has no scope boundary".into())
             })?;
@@ -1728,10 +1850,12 @@ fn decode_snapshot_objects(
                     "native snapshot object project scope differs from the transfer".into(),
                 ));
             }
-            let expected = storage_key(
-                keyspaces::RUNTIME_OBJECTS,
-                &runtime_identity_key(&encoded_scope, &object.reference),
-            );
+            let expected = codec
+                .encode(
+                    keyspaces::RUNTIME_OBJECTS,
+                    &runtime_identity_key(&encoded_scope, &object.reference),
+                )
+                .expect("canonical keyspace");
             if stored_key != expected {
                 return Err(Error::Substrate(
                     "native snapshot object key/value identity differs from its canonical reference"
@@ -1766,7 +1890,20 @@ fn runtime_identity_key(scope: &ScopeId, reference: &RuntimeRef) -> Vec<u8> {
     key
 }
 
-fn write(database: &mut Database, operations: Vec<Mutation>, durability: Durability) -> Result<()> {
+fn write(
+    database: &mut Database,
+    mut operations: Vec<Mutation>,
+    durability: Durability,
+) -> Result<()> {
+    let codec = database_codec(database)?;
+    if codec == keyspaces::NativeKeyCodec::TextV1 {
+        for operation in &mut operations {
+            let key = match operation {
+                Mutation::Put { key, .. } | Mutation::Delete { key } => key,
+            };
+            *key = transcode_staged_key(codec, std::mem::take(key))?;
+        }
+    }
     database.write_owned(
         WriteBatch::new(operations)?,
         match durability {
@@ -1775,6 +1912,20 @@ fn write(database: &mut Database, operations: Vec<Mutation>, durability: Durabil
         },
     )?;
     Ok(())
+}
+
+fn transcode_staged_key(codec: keyspaces::NativeKeyCodec, staged: Vec<u8>) -> Result<Vec<u8>> {
+    let (&tag, logical) = staged
+        .split_first()
+        .ok_or_else(|| Error::Substrate("staged native key is empty".into()))?;
+    let space = keyspaces::native_keyspace_for_tag(tag)
+        .ok_or_else(|| Error::Substrate(format!("unknown staged native keyspace tag {tag}")))?;
+    match codec {
+        keyspaces::NativeKeyCodec::TextV1 => keyspaces::NativeKeyCodec::TextV1
+            .encode(space, logical)
+            .ok_or_else(|| Error::Substrate(format!("unknown native keyspace {space:?}"))),
+        keyspaces::NativeKeyCodec::TagV2 => Ok(staged),
+    }
 }
 
 fn put(operations: &mut Vec<Mutation>, space: &str, key: &[u8], value: Vec<u8>) {
@@ -1815,7 +1966,7 @@ fn get(
     key: &[u8],
 ) -> Result<Option<Vec<u8>>> {
     database
-        .get(&storage_key(space, key), snapshot)
+        .get(&encoded_storage_key(database, space, key)?, snapshot)
         .map_err(Error::from)
 }
 
@@ -1836,7 +1987,7 @@ fn scan_space(
     space: &str,
     prefix: &[u8],
 ) -> Result<Vec<(Vec<u8>, Vec<u8>)>> {
-    let start = storage_key(space, prefix);
+    let start = encoded_storage_key(database, space, prefix)?;
     let end = prefix_end(&start);
     database
         .scan(&start, end.as_deref(), snapshot)
@@ -1849,25 +2000,59 @@ fn scan_space_from(
     space: &str,
     from: &[u8],
 ) -> Result<Vec<(Vec<u8>, Vec<u8>)>> {
-    let start = storage_key(space, from);
-    let end = prefix_end(&storage_key(space, &[]));
+    let start = encoded_storage_key(database, space, from)?;
+    let end = prefix_end(&encoded_storage_key(database, space, &[])?);
     database
         .scan(&start, end.as_deref(), snapshot)
         .map_err(Error::from)
 }
 
 fn storage_key(space: &str, key: &[u8]) -> Vec<u8> {
-    let mut stored = Vec::with_capacity(space.len() + key.len() + 1);
-    stored.extend_from_slice(space.as_bytes());
-    stored.push(0);
-    stored.extend_from_slice(key);
-    stored
+    keyspaces::NativeKeyCodec::TagV2
+        .encode(space, key)
+        .expect("native mutations use a canonical keyspace")
 }
 
-fn strip_space<'a>(space: &str, stored: &'a [u8]) -> Result<&'a [u8]> {
-    let prefix = storage_key(space, &[]);
-    stored
-        .strip_prefix(prefix.as_slice())
+#[cfg(test)]
+fn legacy_storage_key(space: &str, key: &[u8]) -> Vec<u8> {
+    keyspaces::NativeKeyCodec::TextV1
+        .encode(space, key)
+        .expect("native tests use a canonical keyspace")
+}
+
+fn database_codec(database: &Database) -> Result<keyspaces::NativeKeyCodec> {
+    keyspaces::NativeKeyCodec::from_application_format(database.manifest().application_format)
+        .ok_or_else(|| {
+            Error::Substrate(format!(
+                "unsupported native application format {:?}",
+                database.manifest().application_format
+            ))
+        })
+}
+
+fn snapshot_codec(bundle: &SnapshotBundleFile) -> Result<keyspaces::NativeKeyCodec> {
+    keyspaces::NativeKeyCodec::from_application_format(bundle.source_manifest.application_format)
+        .ok_or_else(|| {
+            Error::Substrate(format!(
+                "unsupported native snapshot application format {:?}",
+                bundle.source_manifest.application_format
+            ))
+        })
+}
+
+fn encoded_storage_key(database: &Database, space: &str, key: &[u8]) -> Result<Vec<u8>> {
+    database_codec(database)?
+        .encode(space, key)
+        .ok_or_else(|| Error::Substrate(format!("unknown native keyspace {space:?}")))
+}
+
+fn strip_space<'a>(
+    codec: keyspaces::NativeKeyCodec,
+    space: &str,
+    stored: &'a [u8],
+) -> Result<&'a [u8]> {
+    codec
+        .strip(space, stored)
         .ok_or_else(|| Error::Substrate(format!("key escaped native keyspace {space}")))
 }
 
@@ -1938,15 +2123,15 @@ mod tests {
             .write_owned(
                 WriteBatch::new(vec![
                     Mutation::Put {
-                        key: storage_key(keyspaces::SEQUENCE_INDEX, &key::sequence_key(1)),
+                        key: legacy_storage_key(keyspaces::SEQUENCE_INDEX, &key::sequence_key(1)),
                         value: claim_key.clone(),
                     },
                     Mutation::Put {
-                        key: storage_key(keyspaces::CLAIMS, &claim_key),
+                        key: legacy_storage_key(keyspaces::CLAIMS, &claim_key),
                         value: serde_json::to_vec(&claim).unwrap(),
                     },
                     Mutation::Put {
-                        key: storage_key(keyspaces::META, keyspaces::SEQUENCE_WATERMARK),
+                        key: legacy_storage_key(keyspaces::META, keyspaces::SEQUENCE_WATERMARK),
                         value: b"1".to_vec(),
                     },
                 ])
@@ -1958,6 +2143,88 @@ mod tests {
 
         let engine = NativeEngine::open(&root).unwrap();
         assert_eq!(Engine::claims_in_range(&engine, 0, 1).unwrap(), vec![claim]);
+    }
+
+    #[test]
+    fn new_native_database_authenticates_and_reopens_compact_keyspace_tags() {
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path().join("compact-native");
+        let expected = claim();
+        let engine = NativeEngine::open(&root).unwrap();
+        assert_eq!(
+            engine.manifest().unwrap().application_format,
+            Some(keyspaces::NATIVE_KEYSPACE_TAG_FORMAT_V2)
+        );
+        Engine::append_batch(&engine, std::slice::from_ref(&expected)).unwrap();
+        {
+            let database = engine.lock().unwrap();
+            let rows = database
+                .scan(&[1], Some(&[2]), database.snapshot())
+                .unwrap();
+            assert_eq!(rows.len(), 1);
+            assert_eq!(rows[0].0.first(), Some(&1));
+            assert!(
+                database
+                    .get(
+                        &legacy_storage_key(
+                            keyspaces::CLAIMS,
+                            &key::claim_key(
+                                &expected.subject,
+                                &expected.predicate,
+                                expected.valid_from,
+                                expected.tx_time,
+                            )
+                        ),
+                        database.snapshot(),
+                    )
+                    .unwrap()
+                    .is_none()
+            );
+        }
+        engine.flush(12).unwrap();
+        drop(engine);
+
+        let reopened = NativeEngine::open(&root).unwrap();
+        assert_eq!(
+            reopened.manifest().unwrap().application_format,
+            Some(keyspaces::NATIVE_KEYSPACE_TAG_FORMAT_V2)
+        );
+        assert_eq!(
+            Engine::claims_in_range(&reopened, 0, 1).unwrap(),
+            vec![expected]
+        );
+    }
+
+    #[test]
+    fn native_open_denies_unknown_authenticated_application_format() {
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path().join("unknown-native-format");
+        drop(
+            Database::create_with_application_format(&root, DatabaseOptions::default(), 7).unwrap(),
+        );
+        assert!(matches!(
+            NativeEngine::open(&root),
+            Err(Error::Substrate(reason)) if reason.contains("unsupported native application format")
+        ));
+    }
+
+    #[test]
+    fn compact_write_transcoder_denies_malformed_or_unknown_staged_keys() {
+        assert!(transcode_staged_key(keyspaces::NativeKeyCodec::TagV2, Vec::new()).is_err());
+        assert!(
+            transcode_staged_key(keyspaces::NativeKeyCodec::TagV2, b"\x13logical".to_vec())
+                .is_err()
+        );
+        assert_eq!(
+            transcode_staged_key(keyspaces::NativeKeyCodec::TagV2, b"\x01logical".to_vec(),)
+                .unwrap(),
+            b"\x01logical"
+        );
+        assert_eq!(
+            transcode_staged_key(keyspaces::NativeKeyCodec::TextV1, b"\x01logical".to_vec(),)
+                .unwrap(),
+            b"claims\0logical"
+        );
     }
 
     #[test]
@@ -1989,14 +2256,14 @@ mod tests {
             .write_owned(
                 WriteBatch::new(vec![
                     Mutation::Put {
-                        key: storage_key(
+                        key: legacy_storage_key(
                             keyspaces::RUNTIME_OBJECTS,
                             &runtime_identity_key(&first_scope, &first.reference),
                         ),
                         value: serde_json::to_vec(&first).unwrap(),
                     },
                     Mutation::Put {
-                        key: storage_key(
+                        key: legacy_storage_key(
                             keyspaces::RUNTIME_OBJECTS,
                             &runtime_identity_key(&second_scope, &second.reference),
                         ),

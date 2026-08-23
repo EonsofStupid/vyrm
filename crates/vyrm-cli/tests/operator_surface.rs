@@ -7,7 +7,7 @@
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use vyrm_store::{Engine, PersistentBackend, PersistentEngine, Store};
+use vyrm_store::{Engine, NativeEngine, PersistentBackend, PersistentEngine, Store};
 
 fn vyrm(db: &Path, args: &[&str]) -> (bool, String, String) {
     let output = Command::new(env!("CARGO_BIN_EXE_vyrm"))
@@ -91,6 +91,102 @@ fn storage_migration_runs_offline_and_exposes_status_and_rollback() {
         restored.get_projection("cli-migration").unwrap(),
         Some(b"preserved".to_vec())
     );
+}
+
+#[test]
+fn native_format_upgrade_cli_resumes_and_reports_the_ledger() {
+    let root = tempfile::tempdir().unwrap();
+    let db = root.path().join("native-format-upgrade");
+    drop(vyrm_kv::Database::create(&db).unwrap());
+    let legacy = NativeEngine::open(&db).unwrap();
+    legacy.put_projection("cli-format", b"preserved").unwrap();
+    drop(legacy);
+
+    let (ok, out, err) = vyrm(&db, &["storage", "format-upgrade", "--json"]);
+    assert!(ok, "native format upgrade failed: {err}");
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&out).unwrap()["phase"],
+        "complete"
+    );
+    let (ok, out, err) = vyrm(&db, &["storage", "format-status", "--json"]);
+    assert!(ok, "native format status failed: {err}");
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&out).unwrap()["phase"],
+        "complete"
+    );
+    assert_eq!(
+        NativeEngine::open(&db).unwrap().get_projection("cli-format").unwrap(),
+        Some(b"preserved".to_vec())
+    );
+}
+
+#[test]
+fn logical_archive_cli_exports_inspects_and_restores_a_new_root() {
+    let root = tempfile::tempdir().unwrap();
+    let source = root.path().join("archive-source");
+    let target = root.path().join("archive-restored");
+    let archive = root.path().join("source.rrd-archive");
+    let archive_arg = archive.to_str().unwrap();
+    let (ok, _, err) = vyrm(&source, &[
+        "assert", "--subject", "archive:claim", "--predicate", "status",
+        "--object", "preserved",
+    ]);
+    assert!(ok, "source assertion failed: {err}");
+
+    let (ok, out, err) = vyrm(&source, &[
+        "storage", "archive-export", "--archive", archive_arg, "--json",
+    ]);
+    assert!(ok, "archive export failed: {err}");
+    assert_eq!(serde_json::from_str::<serde_json::Value>(&out).unwrap()["claim_sequence"], 1);
+    let (ok, _, err) = vyrm(&source, &[
+        "storage", "archive-inspect", "--archive", archive_arg,
+    ]);
+    assert!(ok, "archive inspect failed: {err}");
+    let (ok, out, err) = vyrm(&target, &[
+        "storage", "archive-restore", "--archive", archive_arg, "--json",
+    ]);
+    assert!(ok, "archive restore failed: {err}");
+    assert_eq!(serde_json::from_str::<serde_json::Value>(&out).unwrap()["reopened"], true);
+    let (ok, out, err) = vyrm(&target, &[
+        "as-of", "--subject", "archive:claim", "--predicate", "status",
+    ]);
+    assert!(ok, "restored query failed: {err}");
+    assert!(out.contains("preserved"));
+}
+
+#[test]
+fn backup_catalogue_cli_creates_lists_and_restores() {
+    let root = tempfile::tempdir().unwrap();
+    let source = root.path().join("backup-source");
+    let target = root.path().join("backup-restored");
+    let catalogue = root.path().join("backups");
+    let catalogue_arg = catalogue.to_str().unwrap();
+    assert!(vyrm(&source, &[
+        "assert", "--subject", "backup:claim", "--predicate", "status",
+        "--object", "retained",
+    ]).0);
+    let (ok, out, err) = vyrm(&source, &[
+        "storage", "backup-create", "--catalogue", catalogue_arg,
+        "--label", "alpha", "--json",
+    ]);
+    assert!(ok, "backup create failed: {err}");
+    let entry: serde_json::Value = serde_json::from_str(&out).unwrap();
+    let backup_id = entry["backup_id"].as_str().unwrap();
+
+    let (ok, out, err) = vyrm(&source, &[
+        "storage", "backup-list", "--catalogue", catalogue_arg, "--json",
+    ]);
+    assert!(ok, "backup list failed: {err}");
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&out).unwrap()["backups"][0]["backup_id"],
+        backup_id
+    );
+    let (ok, _, err) = vyrm(&target, &[
+        "storage", "backup-restore", "--catalogue", catalogue_arg,
+        "--backup-id", backup_id,
+    ]);
+    assert!(ok, "backup restore failed: {err}");
+    assert_eq!(PersistentEngine::open(&target).unwrap().sequence().unwrap(), 1);
 }
 
 #[test]

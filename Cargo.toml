@@ -1,6 +1,7 @@
 [workspace]
 resolver = "2"
 members = [
+    "crates/rrd-contract",
     "crates/vyrm-core",
     "crates/vyrm-ql",
     "crates/vyrm-store",

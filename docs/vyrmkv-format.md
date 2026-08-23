@@ -2,9 +2,9 @@
 
 Status: M3 persistence and semantic gates pass; the corrected nine-trial local
 general performance fixture now passes every strict cell. Remote reproduction
-and the separate extended RSS cell remain promotion gates. WAL, manifest,
-checkpoint, and physical
-snapshot-bundle formats are version 1. Atomic mutation writes are version 2
+and remote reproduction remain promotion gates. WAL, checkpoint/`CURRENT`, and
+physical snapshot-bundle formats are version 1. Manifests are version 2 with
+strict version-1 reads. Atomic mutation writes are version 2
 with strict version-1 recovery. New immutable segments are version 3 and the
 reader retains explicit version-1/version-2 compatibility.
 The format is pre-release. Any format change before alpha must increment its
@@ -103,13 +103,29 @@ manifest fails.
 - Replaying unchanged bytes is idempotent and returns the same batch list and
   valid boundary.
 
-## Manifest v1
+## Manifest v2
 
 A manifest is immutable, has a monotonic generation, names its parent digest
 after generation 1, declares the durable/WAL sequence boundary, and lists every
 reachable immutable segment. Segment order is canonicalized by level, first
 key, and content identity before hashing. A manifest's SHA-256 digest excludes
 only its own `digest` field.
+
+Version 2 also authenticates an optional non-zero `application_format`. The
+physical KV layer treats that identity as opaque and preserves it through every
+flush, compaction, and snapshot install. Native `vyrm-store` databases bind the
+identity `VYRSK002` and encode each of the 18 frozen logical keyspaces as one
+stable non-zero byte before the logical key. This replaces repeated
+`keyspace-name + NUL` prefixes without making key interpretation heuristic.
+Unknown native application identities fail closed. Physical snapshot install
+requires identical source/target application formats; cross-format transfer is
+a logical migration, never an implicit physical rewrite.
+
+The reader retains manifest v1 exactly: absence of `application_format` selects
+the legacy textual native-key codec and the digest is recomputed over the
+original v1 field set. The `CURRENT` pointer and named-checkpoint control files
+remain format 1 because their wire shape did not change. New unbound low-level
+databases use manifest v2 with no application identity.
 
 Every segment descriptor carries its content identity/checksum, key range,
 sequence range, entry count, and byte count. Duplicate identities, inverted
@@ -245,9 +261,14 @@ and reports physical allocation rather than sparse apparent length. Semantics
 and the bounded AI-read matrix pass. The corrected nine-trial local general
 fixture now also passes write throughput/p95, clean-reopen reads/recovery/RSS,
 and allocated footprint after compact sequence references and streaming
-one-pass recovery. Fjall remains live as a compatibility and performance
-oracle pending sustained and remote reproduction; no general native database
-superiority claim is made.
+one-pass recovery. Compact authenticated keyspace tags then removed exactly
+1,400,004 live key-payload bytes at 70,000 claims. A nine-trial extended rerun
+moved clean-reopen RSS from 1.026× Fjall to 0.984× and allocated bytes from
+0.987× to 0.945× while preserving complete-corpus verification. A subsequent
+read-heavy rerun exposed bimodal authoritative-write p95 and is retained as a
+red local diagnostic pending remote reproduction; favorable scale cells are
+not averaged over it. Fjall remains live as a compatibility and performance
+oracle; no general native database superiority claim is made.
 
 Manifest publication now holds an OS-level exclusive lock for the publication
 session. It validates expected `CURRENT`, generation, and parent; syncs immutable
@@ -269,6 +290,7 @@ reachable through historical manifests/checkpoints until GC proves otherwise.
 - [`batch-v1.hex`](../crates/vyrm-kv/fixtures/batch-v1.hex)
 - [`batch-v2.hex`](../crates/vyrm-kv/fixtures/batch-v2.hex)
 - [`manifest-v1.json`](../crates/vyrm-kv/fixtures/manifest-v1.json)
+- [`manifest-v2.json`](../crates/vyrm-kv/fixtures/manifest-v2.json)
 - [`snapshot-bundle-v1.hex`](../crates/vyrm-kv/fixtures/snapshot-bundle-v1.hex)
 
 CRC32C calculation uses the platform-dispatched implementation while retaining

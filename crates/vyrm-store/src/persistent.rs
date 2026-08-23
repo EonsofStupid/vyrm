@@ -6,8 +6,8 @@
 //! restart and never guesses that an existing store can be reinterpreted.
 
 use crate::{
-    migration_status, Durability, Engine, Error, Invocation, InvocationInput, MigrationPhase,
-    NativeEngine, PhysicalStoreEvidence, RecallOutcome, RemovalReport, Result, Store,
+    Durability, Engine, Error, Invocation, InvocationInput, MigrationPhase, NativeEngine,
+    PhysicalStoreEvidence, RecallOutcome, RemovalReport, Result, Store, migration_status,
 };
 use std::path::Path;
 use vyrm_core::{
@@ -46,7 +46,7 @@ impl PersistentEngine {
                 phase => {
                     return Err(Error::Migration(format!(
                         "database has an active {phase:?} migration; resume or roll it back"
-                    )))
+                    )));
                 }
             }
         }
@@ -167,6 +167,22 @@ impl Engine for PersistentEngine {
         match self {
             Self::Native(engine) => Engine::append_batch(engine, claims),
             Self::FjallCompatibility(engine) => Engine::append_batch(engine, claims),
+        }
+    }
+
+    fn append_batch_idempotent(
+        &self,
+        idempotency_key: &str,
+        operation_sha256: &str,
+        claims: &[Claim],
+    ) -> Result<crate::IdempotentAppendOutcome> {
+        match self {
+            Self::Native(engine) => {
+                Engine::append_batch_idempotent(engine, idempotency_key, operation_sha256, claims)
+            }
+            Self::FjallCompatibility(engine) => {
+                Engine::append_batch_idempotent(engine, idempotency_key, operation_sha256, claims)
+            }
         }
     }
 

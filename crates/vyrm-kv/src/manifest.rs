@@ -7,7 +7,9 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use vyrm_core::digest;
 
-pub const MANIFEST_FORMAT_VERSION: u16 = 1;
+pub const MANIFEST_FORMAT_VERSION: u16 = 2;
+const LEGACY_MANIFEST_FORMAT_VERSION: u16 = 1;
+const MANIFEST_CONTROL_FORMAT_VERSION: u16 = 1;
 const CURRENT_FILE: &str = "CURRENT";
 const MANIFEST_DIRECTORY: &str = "manifests";
 const CHECKPOINT_DIRECTORY: &str = "checkpoints";
@@ -60,6 +62,8 @@ impl SegmentDescriptor {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Manifest {
     pub format_version: u16,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub application_format: Option<u64>,
     pub generation: u64,
     pub parent: Option<String>,
     pub created_at: u64,
@@ -76,7 +80,52 @@ impl Manifest {
         created_at: u64,
         durable_sequence: u64,
         wal_start_sequence: u64,
+        segments: Vec<SegmentDescriptor>,
+    ) -> Result<Self> {
+        Self::new_inner(
+            generation,
+            parent,
+            created_at,
+            durable_sequence,
+            wal_start_sequence,
+            segments,
+            None,
+        )
+    }
+
+    pub fn new_with_application_format(
+        generation: u64,
+        parent: Option<String>,
+        created_at: u64,
+        durable_sequence: u64,
+        wal_start_sequence: u64,
+        segments: Vec<SegmentDescriptor>,
+        application_format: u64,
+    ) -> Result<Self> {
+        if application_format == 0 {
+            return Err(Error::InvalidManifest(
+                "application format identity must be non-zero".into(),
+            ));
+        }
+        Self::new_inner(
+            generation,
+            parent,
+            created_at,
+            durable_sequence,
+            wal_start_sequence,
+            segments,
+            Some(application_format),
+        )
+    }
+
+    fn new_inner(
+        generation: u64,
+        parent: Option<String>,
+        created_at: u64,
+        durable_sequence: u64,
+        wal_start_sequence: u64,
         mut segments: Vec<SegmentDescriptor>,
+        application_format: Option<u64>,
     ) -> Result<Self> {
         segments.sort_by(|left, right| {
             left.level
@@ -86,6 +135,7 @@ impl Manifest {
         });
         let mut manifest = Self {
             format_version: MANIFEST_FORMAT_VERSION,
+            application_format,
             generation,
             parent,
             created_at,
@@ -100,11 +150,26 @@ impl Manifest {
     }
 
     pub fn validate(&self) -> Result<()> {
-        if self.format_version != MANIFEST_FORMAT_VERSION {
+        if !matches!(
+            self.format_version,
+            LEGACY_MANIFEST_FORMAT_VERSION | MANIFEST_FORMAT_VERSION
+        ) {
             return Err(Error::UnsupportedVersion {
                 object: "manifest",
                 version: self.format_version,
             });
+        }
+        if self.format_version == LEGACY_MANIFEST_FORMAT_VERSION
+            && self.application_format.is_some()
+        {
+            return Err(Error::InvalidManifest(
+                "manifest v1 cannot declare an application format".into(),
+            ));
+        }
+        if self.application_format == Some(0) {
+            return Err(Error::InvalidManifest(
+                "application format identity must be non-zero".into(),
+            ));
         }
         self.validate_components()?;
         let expected = digest::sha256_hex(&self.bytes_without_digest()?);
@@ -179,9 +244,31 @@ impl Manifest {
     }
 
     fn bytes_without_digest(&self) -> Result<Vec<u8>> {
+        if self.format_version == LEGACY_MANIFEST_FORMAT_VERSION {
+            #[derive(Serialize)]
+            struct LegacyContent<'a> {
+                format_version: u16,
+                generation: u64,
+                parent: &'a Option<String>,
+                created_at: u64,
+                durable_sequence: u64,
+                wal_start_sequence: u64,
+                segments: &'a [SegmentDescriptor],
+            }
+            return Ok(serde_json::to_vec(&LegacyContent {
+                format_version: self.format_version,
+                generation: self.generation,
+                parent: &self.parent,
+                created_at: self.created_at,
+                durable_sequence: self.durable_sequence,
+                wal_start_sequence: self.wal_start_sequence,
+                segments: &self.segments,
+            })?);
+        }
         #[derive(Serialize)]
         struct Content<'a> {
             format_version: u16,
+            application_format: &'a Option<u64>,
             generation: u64,
             parent: &'a Option<String>,
             created_at: u64,
@@ -191,6 +278,7 @@ impl Manifest {
         }
         Ok(serde_json::to_vec(&Content {
             format_version: self.format_version,
+            application_format: &self.application_format,
             generation: self.generation,
             parent: &self.parent,
             created_at: self.created_at,
@@ -227,7 +315,7 @@ impl Checkpoint {
     fn new(name: &str, manifest: &Manifest, created_at: u64) -> Result<Self> {
         validate_checkpoint_name(name)?;
         let mut checkpoint = Self {
-            format_version: MANIFEST_FORMAT_VERSION,
+            format_version: MANIFEST_CONTROL_FORMAT_VERSION,
             name: name.to_owned(),
             manifest: manifest.digest.clone(),
             generation: manifest.generation,
@@ -239,7 +327,7 @@ impl Checkpoint {
     }
 
     fn validate(&self) -> Result<()> {
-        if self.format_version != MANIFEST_FORMAT_VERSION {
+        if self.format_version != MANIFEST_CONTROL_FORMAT_VERSION {
             return Err(Error::UnsupportedVersion {
                 object: "checkpoint",
                 version: self.format_version,
@@ -273,7 +361,7 @@ impl Checkpoint {
 impl CurrentPointer {
     fn new(manifest: &Manifest) -> Self {
         let mut pointer = Self {
-            format_version: MANIFEST_FORMAT_VERSION,
+            format_version: MANIFEST_CONTROL_FORMAT_VERSION,
             generation: manifest.generation,
             manifest: manifest.digest.clone(),
             checksum: String::new(),
@@ -283,7 +371,7 @@ impl CurrentPointer {
     }
 
     fn validate(&self) -> Result<()> {
-        if self.format_version != MANIFEST_FORMAT_VERSION {
+        if self.format_version != MANIFEST_CONTROL_FORMAT_VERSION {
             return Err(Error::UnsupportedVersion {
                 object: "CURRENT pointer",
                 version: self.format_version,

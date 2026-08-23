@@ -1,4 +1,4 @@
-use vyrm_kv::{Error, Manifest, ManifestStore, SegmentDescriptor};
+use vyrm_kv::{Error, MANIFEST_FORMAT_VERSION, Manifest, ManifestStore, SegmentDescriptor};
 
 fn segment(id: &str, first: &[u8], last: &[u8], minimum: u64, maximum: u64) -> SegmentDescriptor {
     SegmentDescriptor {
@@ -58,12 +58,60 @@ fn manifest_identity_is_stable_and_segment_order_is_canonical() {
     left.validate().unwrap();
 
     let actual = format!("{}\n", serde_json::to_string_pretty(&left).unwrap());
-    let fixture = concat!(env!("CARGO_MANIFEST_DIR"), "/fixtures/manifest-v1.json");
+    assert_eq!(left.format_version, MANIFEST_FORMAT_VERSION);
+    assert_eq!(left.application_format, None);
+    let fixture = concat!(env!("CARGO_MANIFEST_DIR"), "/fixtures/manifest-v2.json");
     if std::env::var_os("VYRM_UPDATE_GOLDENS").is_some() {
         std::fs::create_dir_all(format!("{}/fixtures", env!("CARGO_MANIFEST_DIR"))).unwrap();
         std::fs::write(fixture, &actual).unwrap();
     }
     assert_eq!(actual, std::fs::read_to_string(fixture).unwrap());
+}
+
+#[test]
+fn legacy_manifest_fixture_remains_digest_compatible() {
+    let fixture = include_bytes!("../fixtures/manifest-v1.json");
+    let manifest: Manifest = serde_json::from_slice(fixture).unwrap();
+    assert_eq!(manifest.format_version, 1);
+    assert_eq!(manifest.application_format, None);
+    manifest.validate().unwrap();
+    assert_eq!(
+        manifest.digest,
+        "d3386887b9d8b15a4667c62f6f3301b10e77b58cd9ca794c3c540aa3740ed88a"
+    );
+}
+
+#[test]
+fn application_format_is_authenticated_and_v1_cannot_claim_one() {
+    let mut manifest = Manifest::new_with_application_format(
+        1,
+        None,
+        100,
+        0,
+        1,
+        Vec::new(),
+        0x5659_5253_4b30_3032,
+    )
+    .unwrap();
+    assert_eq!(manifest.format_version, MANIFEST_FORMAT_VERSION);
+    assert_eq!(manifest.application_format, Some(0x5659_5253_4b30_3032));
+    manifest.validate().unwrap();
+
+    manifest.application_format = Some(7);
+    assert!(matches!(
+        manifest.validate(),
+        Err(Error::InvalidManifest(reason)) if reason.contains("digest")
+    ));
+    assert!(Manifest::new_with_application_format(1, None, 100, 0, 1, Vec::new(), 0).is_err());
+
+    let mut legacy: serde_json::Value =
+        serde_json::from_slice(include_bytes!("../fixtures/manifest-v1.json")).unwrap();
+    legacy["application_format"] = serde_json::json!(7);
+    let legacy: Manifest = serde_json::from_value(legacy).unwrap();
+    assert!(matches!(
+        legacy.validate(),
+        Err(Error::InvalidManifest(reason)) if reason.contains("v1")
+    ));
 }
 
 #[test]

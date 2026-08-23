@@ -65,7 +65,9 @@ pub struct RebuildOutcome {
 pub enum GroundingReport {
     Grounded(GroundedStamp),
     /// The projection diverged from its recomputation and is now quarantined.
-    Divergence { differences: Vec<String> },
+    Divergence {
+        differences: Vec<String>,
+    },
 }
 
 /// Persisted form: entries are the claims themselves, sorted by (subject,
@@ -147,7 +149,9 @@ impl CurrentProjection {
     }
 
     pub(crate) fn from_stored_bytes(bytes: &[u8]) -> Result<CurrentProjection> {
-        Ok(CurrentProjection::from_stored(serde_json::from_slice(bytes)?))
+        Ok(CurrentProjection::from_stored(serde_json::from_slice(
+            bytes,
+        )?))
     }
 
     /// The map itself, for the grounding differential in `engine.rs`.

@@ -23,20 +23,20 @@
 use crate::error::{Error, Result};
 use crate::keyspaces::Durability;
 use crate::projection::{
-    difference, CurrentProjection, GroundedStamp, GroundingReport, ProjectionStatus,
-    CURRENT_PROJECTION,
+    CURRENT_PROJECTION, CurrentProjection, GroundedStamp, GroundingReport, ProjectionStatus,
+    difference,
 };
-use crate::store::{AppendOutcome, Store};
+use crate::store::{AppendOutcome, IdempotentAppendOutcome, Store};
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Mutex;
 use vyrm_core::reference::MemoryClaims;
 use vyrm_core::{
-    projection_family, resolve_as_of, AuditEnvelope, Claim, ClaimSource, DataTransaction,
-    DataTransactionView, Millis, ObjectReference, Predicate, ProjectionWork, ReadStamp, Reader,
-    RetentionPin, RuntimeChange, RuntimeChangePage, RuntimeCommit, RuntimeCommitOutcome,
-    RuntimeGeo, RuntimeGraphSnapshot, RuntimeLogAccumulator, RuntimeMutation, RuntimeRecord,
-    RuntimeRef, RuntimeRelation, RuntimeSchemaRegistry, RuntimeSeriesSample, RuntimeVector,
-    ScopeId, SnapshotHandle, SnapshotId, Subject,
+    AuditEnvelope, Claim, ClaimSource, DataTransaction, DataTransactionView, Millis,
+    ObjectReference, Predicate, ProjectionWork, ReadStamp, Reader, RetentionPin, RuntimeChange,
+    RuntimeChangePage, RuntimeCommit, RuntimeCommitOutcome, RuntimeGeo, RuntimeGraphSnapshot,
+    RuntimeLogAccumulator, RuntimeMutation, RuntimeRecord, RuntimeRef, RuntimeRelation,
+    RuntimeSchemaRegistry, RuntimeSeriesSample, RuntimeVector, ScopeId, SnapshotHandle, SnapshotId,
+    Subject, projection_family, resolve_as_of,
 };
 
 /// A read-only physical counter snapshot used to attribute bounded storage
@@ -148,6 +148,15 @@ pub trait Engine: ClaimSource<Error = Error> {
     /// Appends claims atomically with authoritative durability, advancing
     /// the sequence watermark in the same transaction.
     fn append_batch(&self, claims: &[Claim]) -> Result<AppendOutcome>;
+
+    /// Atomically binds a client idempotency key to one operation digest and
+    /// accepted claim-sequence interval. Retry survives process restart.
+    fn append_batch_idempotent(
+        &self,
+        idempotency_key: &str,
+        operation_sha256: &str,
+        claims: &[Claim],
+    ) -> Result<IdempotentAppendOutcome>;
 
     /// Current claim sequence watermark.
     fn sequence(&self) -> Result<u64>;
@@ -425,6 +434,14 @@ impl Engine for Store {
     fn append_batch(&self, claims: &[Claim]) -> Result<AppendOutcome> {
         Store::append_batch(self, claims)
     }
+    fn append_batch_idempotent(
+        &self,
+        idempotency_key: &str,
+        operation_sha256: &str,
+        claims: &[Claim],
+    ) -> Result<IdempotentAppendOutcome> {
+        Store::append_batch_idempotent(self, idempotency_key, operation_sha256, claims)
+    }
     fn sequence(&self) -> Result<u64> {
         Store::sequence(self)
     }
@@ -546,6 +563,7 @@ struct MemoryEngineInner {
     runtime_commits: BTreeMap<String, RuntimeCommitOutcome>,
     runtime_schemas: BTreeMap<ScopeId, RuntimeSchemaRegistry>,
     runtime_snapshots: BTreeMap<SnapshotId, SnapshotHandle>,
+    accepted_appends: BTreeMap<String, IdempotentAppendOutcome>,
 }
 
 impl MemoryEngine {
@@ -593,6 +611,25 @@ fn infallible<T>(result: std::result::Result<T, std::convert::Infallible>) -> T 
     }
 }
 
+pub(crate) fn validate_idempotency(key: &str, digest: &str) -> Result<()> {
+    if key.is_empty()
+        || key.len() > 128
+        || !key
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b':'))
+    {
+        return Err(Error::Substrate("invalid idempotency key".into()));
+    }
+    if digest.len() != 64
+        || !digest
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+    {
+        return Err(Error::Substrate("operation digest must be lowercase SHA-256".into()));
+    }
+    Ok(())
+}
+
 impl Engine for MemoryEngine {
     fn physical_store_evidence(&self) -> Result<PhysicalStoreEvidence> {
         Ok(PhysicalStoreEvidence::logical_only("memory"))
@@ -615,6 +652,48 @@ impl Engine for MemoryEngine {
             last_sequence: start + claims.len() as u64,
             count: claims.len(),
         })
+    }
+
+    fn append_batch_idempotent(
+        &self,
+        idempotency_key: &str,
+        operation_sha256: &str,
+        claims: &[Claim],
+    ) -> Result<IdempotentAppendOutcome> {
+        validate_idempotency(idempotency_key, operation_sha256)?;
+        let mut inner = self.inner.lock().expect("engine mutex");
+        if let Some(outcome) = inner.accepted_appends.get(idempotency_key) {
+            if outcome.operation_sha256 != operation_sha256 {
+                return Err(Error::IdempotencyConflict(idempotency_key.into()));
+            }
+            let mut replay = outcome.clone();
+            replay.idempotent_replay = true;
+            return Ok(replay);
+        }
+        for claim in claims {
+            claim.validate()?;
+        }
+        if claims.is_empty() {
+            return Err(Error::Substrate("idempotent claim append must not be empty".into()));
+        }
+        let start = inner.order.len() as u64;
+        for claim in claims {
+            inner.claims.insert(claim.clone())?;
+            inner.order.push(claim.clone());
+        }
+        let outcome = IdempotentAppendOutcome {
+            operation_sha256: operation_sha256.into(),
+            append: AppendOutcome {
+                first_sequence: start + 1,
+                last_sequence: start + claims.len() as u64,
+                count: claims.len(),
+            },
+            idempotent_replay: false,
+        };
+        inner
+            .accepted_appends
+            .insert(idempotency_key.into(), outcome.clone());
+        Ok(outcome)
     }
 
     fn sequence(&self) -> Result<u64> {

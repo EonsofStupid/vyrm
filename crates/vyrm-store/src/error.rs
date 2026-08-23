@@ -22,6 +22,8 @@ pub enum Error {
     Quarantined(String),
     /// Optimistic concurrency rejected a writer that observed an older head.
     RuntimeConflict { expected: u64, actual: u64 },
+    /// One accepted client idempotency key was rebound to different content.
+    IdempotencyConflict(String),
     /// A relation or event named a record that is not present in its scope.
     DanglingRuntimeReference(String),
     /// A typed write was attempted before its scope installed a registry.
@@ -43,6 +45,8 @@ pub enum Error {
     Object(String),
     /// Explicit storage migration failed closed.
     Migration(String),
+    /// Logical archive export, validation, or restore failed closed.
+    Archive(String),
     /// A referenced immutable object is absent.
     ObjectMissing(String),
     /// Stored bytes do not match their content address.
@@ -66,6 +70,9 @@ impl fmt::Display for Error {
                 f,
                 "runtime commit conflict: expected cursor {expected}, actual cursor {actual}"
             ),
+            Error::IdempotencyConflict(key) => {
+                write!(f, "idempotency key is already bound to different content: {key}")
+            }
             Error::DanglingRuntimeReference(reference) => {
                 write!(f, "dangling runtime reference: {reference}")
             }
@@ -94,6 +101,7 @@ impl fmt::Display for Error {
             }
             Error::Object(message) => write!(f, "object store: {message}"),
             Error::Migration(message) => write!(f, "storage migration: {message}"),
+            Error::Archive(message) => write!(f, "logical archive: {message}"),
             Error::ObjectMissing(digest) => write!(f, "object missing: {digest}"),
             Error::ObjectCorrupt { expected, actual } => write!(
                 f,

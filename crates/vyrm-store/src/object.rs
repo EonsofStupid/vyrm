@@ -11,7 +11,7 @@ use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
-use vyrm_core::{digest, ObjectReceipt, ObjectReference};
+use vyrm_core::{ObjectReceipt, ObjectReference, digest};
 
 static STAGE_ORDINAL: AtomicU64 = AtomicU64::new(1);
 
@@ -571,11 +571,13 @@ mod tests {
             store.put_verified_stream(&sha256, bytes.len() as u64, &mut truncated),
             Err(Error::ObjectLengthMismatch { .. })
         ));
-        assert!(store
-            .inventory(&BTreeSet::new())
-            .unwrap()
-            .staging_files
-            .is_empty());
+        assert!(
+            store
+                .inventory(&BTreeSet::new())
+                .unwrap()
+                .staging_files
+                .is_empty()
+        );
     }
 
     #[test]

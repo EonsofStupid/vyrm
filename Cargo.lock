@@ -2115,6 +2115,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "rrd-contract"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "rust_decimal"
 version = "1.42.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3140,6 +3148,7 @@ dependencies = [
  "tiktoken-rs",
  "tracing-subscriber",
  "vyrm-core",
+ "vyrm-kv",
  "vyrm-node",
  "vyrm-store",
 ]

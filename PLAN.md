@@ -2,12 +2,34 @@
 
 | Field | Value |
 |-------|-------|
-| Status | Runtime completion plus persisted schema pass landed 2026-08-19; historical execution journal retained below. |
+| Status | Full-stack correction active 2026-08-23; kernel history retained below. |
 | Governs | Sequencing and acceptance of work against `SPEC.md` |
 | Does not govern | Contracts, terminology, or requirements. Those are `SPEC.md` only. |
 
 This document sequences work. It does not restate requirements. Where the two
 disagree, `SPEC.md` is authoritative and this document is wrong.
+
+> **Full-stack sequencing correction (2026-08-23).** The bounded VyrmKV/Fjall
+> optimization and SurrealDB 3.0.5 claim diagnostic were performed before a
+> complete competitor capability inventory. That sequencing was wrong. No
+> further narrow optimization or blanket competitor claim is authorized until
+> the SurrealDB-first, Qdrant-second inventories and row-level gap ledger drive
+> the work. Active order is F0 public contracts, F1 operable persistence and
+> backup/restore, F2 server/session transactions, F3 persistent estate
+> reconciliation, F4 security/audit, F5 SDKs, F6 multi-model/realtime, F7
+> vector/inference, F8 distributed/Kubernetes qualification, and F9 faithful
+> Connectome operations. See [`docs/full-stack-gap-ledger.md`](docs/full-stack-gap-ledger.md),
+> [`docs/surrealdb-capability-inventory.md`](docs/surrealdb-capability-inventory.md),
+> and [`docs/qdrant-capability-inventory.md`](docs/qdrant-capability-inventory.md).
+
+> **F0/F1 execution overlay (2026-08-23).** The initial public RRD contract and
+> current persistence-format verification gate are complete. Logical archive
+> v1 now exports and validates a stable two-log cut, restores exact claim and
+> runtime coordinates into a new native root, verifies reopen, and is retained
+> through an authenticated content-addressed catalogue with explicit coverage.
+> The next dependency-critical slice is the general resumable migration ledger
+> and cross-version recovery matrix; object closure remains an explicit F1
+> follow-up rather than an implied property of catalogue v1.
 
 > **Current-state overlay (2026-08-18).** The original grounding table below is
 > retained as historical evidence and is not the current status board. The
@@ -21,8 +43,9 @@ disagree, `SPEC.md` is authoritative and this document is wrong.
 > an isolated, platform-molded instance for each major platform. Related small
 > projects may use an explicitly configured umbrella instance. There is no
 > implicit estate-wide store. The active follow-on is to enforce this boundary
-> with a versioned instance manifest and scoped runtime state. SurrealDB and
-> Qdrant capability adoption is postponed. See `docs/instance-topology.md`.
+> with a versioned instance manifest and scoped runtime state. The earlier
+> sentence postponing SurrealDB/Qdrant capability analysis is superseded by the
+> 2026-08-23 full-stack correction above. See `docs/instance-topology.md`.
 
 > **Prompt-flight overlay (2026-08-18).** Connectome now records controlled
 > fresh/pruned/full prompt flights. Fresh means a new provider session with zero
@@ -118,11 +141,13 @@ disagree, `SPEC.md` is authoritative and this document is wrong.
 > prepared batches, inline single-version chains, streaming one-pass recovery,
 > keyspace-local writes, and bounded first-WAL reservation now make the
 > corrected nine-trial local fixture pass every strict performance cell. Fjall
-> remains live as an oracle pending remote reproduction and closure of the
-> remaining 70,000-operation RSS cell. Format-4 paged verification and a
+> remains live as an oracle pending remote reproduction. Format-4 paged verification and a
 > borrowed fallible scan visitor now make read-heavy and sustained green while
-> checking every corpus ordinal; extended passes every strict cell except
-> 1.026× peak RSS. The
+> checking every corpus ordinal. Manifest v2 now authenticates a frozen
+> one-byte native keyspace codec while retaining exact manifest/text-prefix-v1
+> reads. It removes 1,400,004 extended key bytes and moves the nine-trial
+> 70,000-operation row from 1.026× RSS to a passing 0.984×. A fresh read-heavy
+> write-p95 diagnostic is red and remains a remote-reproduction gate. The
 > dedicated eight-profile AI-read matrix passes its bounded gates.
 > The sparse index holds byte ranges into canonical segment storage rather than
 > duplicate heap keys. The deterministic physical mutation gate now adds
@@ -212,6 +237,10 @@ disagree, `SPEC.md` is authoritative and this document is wrong.
 > baseline, not a Qdrant superiority claim. Compact binary/mmap, SIMD/GPU,
 > sparse/multivector ANN, embeddings, and external comparison remain gated.
 > See `docs/vyrm-vector-search.md`.
+> The existing symmetric-int8 experiment is explicitly not TurboQuant. A real
+> planner-visible TurboQuant codec remains gated on the primary paper's seeded
+> rotation, distribution-matched packed scalar codes, residual QJL estimator,
+> frozen vectors, exact-oracle recall/bias evidence, and scalar/SIMD parity.
 
 > **M6 embedding/edge overlay (2026-08-19).** The local kernel gate is closed.
 > `vyrm-embed` now provides source-digest/model/read-stamp-bound jobs, two-read

@@ -71,7 +71,9 @@ pub struct RemovalReport {
 
 impl RemovalReport {
     pub fn candidates(&self) -> impl Iterator<Item = &PairStatus> {
-        self.pairs.iter().filter(|p| p.verdict == Verdict::Candidate)
+        self.pairs
+            .iter()
+            .filter(|p| p.verdict == Verdict::Candidate)
     }
 
     pub fn retained(&self) -> impl Iterator<Item = &PairStatus> {

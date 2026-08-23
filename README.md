@@ -7,6 +7,22 @@ owns the LSM authority and evidence needed by those layers; it does not own
 workflow orchestration or UI semantics. A columnar analytical path remains a
 measured future addition, not a property of the current row/key-value engine.
 
+> **Full-stack baseline (2026-08-23).** Vyrm is a substantive local alpha
+> persistence/runtime kernel; it is not yet a complete SurrealDB- or
+> Qdrant-class product. Before further competitor optimization, the current
+> SurrealDB and Qdrant surfaces were inventoried and mapped to executable Vyrm
+> evidence. The authoritative dependency order, including true backup/restore,
+> estate reconciliation, public server transactions, security, SDKs, realtime,
+> vector lifecycle, inference, and Kubernetes operation, is in
+> [`docs/full-stack-gap-ledger.md`](docs/full-stack-gap-ledger.md). See the
+> [SurrealDB inventory](docs/surrealdb-capability-inventory.md) first and the
+> [Qdrant inventory](docs/qdrant-capability-inventory.md) second.
+
+The first F0 artifact is [`rrd-contract`](crates/rrd-contract): a
+transport-neutral, versioned public vocabulary with frozen JSON rather than an
+internal Rust API being mislabeled as an SDK. Its scope and limitations are in
+[`docs/rrd-public-contract.md`](docs/rrd-public-contract.md).
+
 The system makes operational reasoning observable and enforceable without
 claiming access to a model's hidden chain-of-thought. It records goals, plans,
 attempts, tool observations, decisions, verification, outcomes, context
@@ -360,10 +376,13 @@ Native compaction is now a bounded leveled streaming step with deterministic
 candidate selection, key-partitioned output, protected-snapshot pruning, and
 non-overlapping levels above L0. Segment-v3 validation derives authenticated
 block-local negative filters that reject point misses before block I/O without
-introducing another persisted truth. These are local fixture claims, not
-general database superiority: the final extended RSS cell, remote repetition,
-asynchronous immutable-memtable flush, and family-aware maintenance remain
-explicit gates before Fjall compatibility retirement.
+introducing another persisted truth. Manifest-authenticated compact keyspace
+tags now remove exactly 1,400,004 live key bytes in the extended profile; its
+fresh nine-trial row passes at 0.984× RSS and 0.945× allocated footprint. These
+are local fixture claims, not general database superiority: a fresh read-heavy
+write-p95 diagnostic, remote repetition, asynchronous immutable-memtable flush,
+and family-aware maintenance remain explicit gates before Fjall compatibility
+retirement.
 The canonical `PersistentEngine` now creates native stores for missing paths and
 reopens them by their authenticated `CURRENT` marker. CLI, `vyrmd`, and
 Connectome use that selector. Existing non-native directories remain on the
@@ -374,6 +393,20 @@ retained Fjall/archive evidence, divergence-safe rollback, and fail-closed
 normal opens during cutover. Native access/removal evidence and the invocation/
 effectiveness ledger now match Fjall and survive reopen, so the default does not
 drop trigger-optimization evidence.
+
+F1 now also has a backend-independent RRD logical archive and local backup
+catalogue. `storage archive-export|archive-inspect|archive-restore` preserves
+claim sequence, runtime cursor, original runtime commits, and the runtime hash
+chain while restoring only into an absent root through hidden staging and a
+verified reopen. `storage backup-create|backup-list|backup-restore` adds an
+authenticated catalogue and content-addressed archive retention. Catalogue v1
+states its boundary directly: claims and typed runtime are included, object
+payloads are references only, projections require rebuild, and the backup is
+not yet application-complete. See
+[`docs/rrd-logical-archive.md`](docs/rrd-logical-archive.md).
+`storage format-upgrade|format-status` separately operates the authenticated,
+resumable exact-successor TextV1→TagV2 migration across all 18 physical logical
+keyspaces; it retains the predecessor and denies source drift before cutover.
 
 ## Instance boundary
 
@@ -428,6 +461,9 @@ statistically significant model-performance claim.
   recovery, manifest, and authenticated physical snapshot-bundle contracts
 - [`docs/vyrmkv-benchmark.md`](docs/vyrmkv-benchmark.md) — isolated
   Fjall/native methodology, baseline, and promotion verdict
+- [`docs/vyrm-surrealdb-differential.md`](docs/vyrm-surrealdb-differential.md)
+  — version-pinned external SurrealKV claim-runtime comparison, server/end-to-end
+  timings, measured wins, and the retained disk loss
 - [`docs/vyrmkv-fjall-ai-audit.md`](docs/vyrmkv-fjall-ai-audit.md) — exact
   Fjall/native boundary, AI-specific physical opportunities, and hot-set proof
 - [`eval/results/2026-08-18-summary.json`](eval/results/2026-08-18-summary.json)

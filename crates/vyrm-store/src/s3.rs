@@ -11,7 +11,7 @@ use crate::{
 };
 use std::collections::BTreeSet;
 use std::io::{Cursor, Read};
-use vyrm_core::{digest, ObjectReceipt, ObjectReference};
+use vyrm_core::{ObjectReceipt, ObjectReference, digest};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct S3ObjectMetadata {

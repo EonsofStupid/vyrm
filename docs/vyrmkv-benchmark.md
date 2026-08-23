@@ -1,7 +1,9 @@
 # vyrmKV promotion benchmark
 
 Status: the physical mixed-mutation soak, migration rehearsal, corrected local
-general promotion, and dedicated AI-read matrix pass their bounded gates.
+general promotion, and dedicated AI-read matrix pass their bounded gates. The
+former extended RSS miss is closed by manifest-authenticated compact keyspace
+tags; a fresh read-heavy tail-latency diagnostic is red pending reproduction.
 
 The benchmark runs Fjall and native `vyrmKV` in separate fresh child processes.
 Both receive the same valid claim corpus, authoritative batch boundaries, and
@@ -85,11 +87,14 @@ moves extended clean-reopen allocation from 1.004× to 0.987×. The deterministi
 footprint gap is closed. Backend-native maintained reads remain diagnostic
 because the maintenance actions differ.
 
-Extended still records a strict RSS miss at 1.026×; every other strict extended
-cell passes, including 1.300× write throughput, 0.840× write p95, 1.742× read
-throughput, 0.585× read p95, 0.222× recovery, and 0.987× allocated footprint.
-That final RSS cell is retained rather than inferred away from favorable
-latency and throughput.
+Manifest v2 now authenticates native application format `VYRSK002`; its frozen
+one-byte keyspace tags remove exactly 1,400,004 extended live key-payload bytes.
+The final direct-tag nine-trial extended rerun passes every strict cell: 1.390×
+write throughput, 0.662× write p95, 1.715× read throughput, 0.589× read p95,
+0.218× recovery, 0.984× RSS (51,820 versus 52,680 KiB), and 0.945× allocated
+footprint. The old
+1.026× RSS failure remains checked in as historical evidence rather than being
+overwritten.
 
 The new physical evidence explains the shape rather than inferring it from RSS.
 At sustained scale, 32,896 versions occupy 32,769 keys; only one chain spills.
@@ -100,16 +105,17 @@ one 1,024-record history allocation. B-tree node metadata, allocator overhead,
 fragmentation, process baseline, and page residency are explicitly excluded;
 the counter is not mislabeled as RSS.
 
-Accordingly, canonical, read-heavy, sustained, and the eight AI profiles are
-green, but the scheduled matrix remains red at its largest scale. Evidence:
+The post-format canonical, sustained, extended, and eight prior AI profiles are
+green. A same-machine read-heavy rerun records bimodal fsync-sensitive native
+write p95 and fails that one cell despite favorable throughput, read, recovery,
+RSS, and allocation results. It remains red until repeated remote evidence can
+separate host storage variance from a reproducible regression. Evidence:
 [`read-heavy streaming-scan v4`](../eval/results/2026-08-23-vyrmkv-read-heavy-streaming-scan-v4.json),
 [`sustained streaming-scan v4`](../eval/results/2026-08-23-vyrmkv-sustained-streaming-scan-v4.json),
-and [`extended streaming-scan v4`](../eval/results/2026-08-23-vyrmkv-extended-streaming-scan-v4.json).
-Fjall compatibility retirement still requires closing the final extended
-B-tree/key-prefix RSS gap plus repeated remote evidence; the repository does
-not average that failure away. Compact native keyspace identifiers are the
-leading structural candidate, but they require an explicit persisted-key
-format and migration rather than a benchmark-only rewrite.
+[`extended compact-tag v4`](../eval/results/2026-08-23-vyrmkv-extended-keyspace-tag-v2-v4.json),
+and [`read-heavy red diagnostic`](../eval/results/2026-08-23-vyrmkv-read-heavy-direct-tag-v2-v4.json).
+Fjall compatibility retirement still requires the repeated remote matrix; the
+repository does not average the read-heavy tail miss away.
 
 ## Invalidated legacy M3/M3.5 evidence
 

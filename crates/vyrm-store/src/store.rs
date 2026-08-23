@@ -1,7 +1,7 @@
 //! The substrate-backed claim store.
 
 use crate::error::{Error, Result};
-use crate::gc::{build_report, RemovalReport, Tally};
+use crate::gc::{RemovalReport, Tally, build_report};
 use crate::invocation::{self, Invocation, InvocationInput};
 use crate::keyspaces::{self, Durability};
 use fjall::{KeyspaceCreateOptions, Readable, SingleWriterTxDatabase, SingleWriterTxKeyspace};
@@ -9,19 +9,26 @@ use serde::de::DeserializeOwned;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use vyrm_core::{
-    key, projection_family, AuditEnvelope, Claim, ClaimSource, Millis, Predicate, ProjectionWork,
-    ReadStamp, Reader, RetentionPin, RuntimeChange, RuntimeChangePage, RuntimeCommit,
-    RuntimeCommitOutcome, RuntimeLogAccumulator, RuntimeMerkleNode, RuntimeMutation, RuntimeRecord,
-    RuntimeRef, RuntimeRelation, RuntimeSchemaRegistry, ScopeId, SnapshotHandle, SnapshotId,
-    Subject,
+    AuditEnvelope, Claim, ClaimSource, Millis, Predicate, ProjectionWork, ReadStamp, Reader,
+    RetentionPin, RuntimeChange, RuntimeChangePage, RuntimeCommit, RuntimeCommitOutcome,
+    RuntimeLogAccumulator, RuntimeMerkleNode, RuntimeMutation, RuntimeRecord, RuntimeRef,
+    RuntimeRelation, RuntimeSchemaRegistry, ScopeId, SnapshotHandle, SnapshotId, Subject, key,
+    projection_family,
 };
 
 /// Sequences assigned by an append.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct AppendOutcome {
     pub first_sequence: u64,
     pub last_sequence: u64,
     pub count: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct IdempotentAppendOutcome {
+    pub operation_sha256: String,
+    pub append: AppendOutcome,
+    pub idempotent_replay: bool,
 }
 
 pub struct Store {
@@ -850,6 +857,71 @@ impl Store {
             last_sequence: sequence,
             count: claims.len(),
         })
+    }
+
+    pub fn append_batch_idempotent(
+        &self,
+        idempotency_key: &str,
+        operation_sha256: &str,
+        claims: &[Claim],
+    ) -> Result<IdempotentAppendOutcome> {
+        crate::engine::validate_idempotency(idempotency_key, operation_sha256)?;
+        if claims.is_empty() {
+            return Err(Error::Substrate("idempotent claim append must not be empty".into()));
+        }
+        for claim in claims {
+            claim.validate()?;
+        }
+        let mut tx = self
+            .db
+            .write_tx()
+            .durability(Durability::Authoritative.persist_mode());
+        let receipt_key = keyspaces::accepted_append_key(idempotency_key);
+        if let Some(bytes) = tx.get(&self.meta, &receipt_key)? {
+            let mut outcome: IdempotentAppendOutcome = serde_json::from_slice(&bytes)?;
+            if outcome.operation_sha256 != operation_sha256 {
+                return Err(Error::IdempotencyConflict(idempotency_key.into()));
+            }
+            outcome.idempotent_replay = true;
+            return Ok(outcome);
+        }
+        let start = match tx.get(&self.meta, keyspaces::SEQUENCE_WATERMARK)? {
+            Some(value) => decode_sequence(&value)?,
+            None => 0,
+        };
+        let mut sequence = start;
+        for claim in claims {
+            sequence = sequence.checked_add(1).ok_or(Error::SequenceOverflow)?;
+            let claim_key = key::claim_key(
+                &claim.subject,
+                &claim.predicate,
+                claim.valid_from,
+                claim.tx_time,
+            );
+            tx.insert(
+                &self.sequence_index,
+                key::sequence_key(sequence),
+                claim_key.clone(),
+            );
+            tx.insert(&self.claims, claim_key, serde_json::to_vec(claim)?);
+        }
+        tx.insert(
+            &self.meta,
+            keyspaces::SEQUENCE_WATERMARK,
+            sequence.to_string().as_bytes(),
+        );
+        let outcome = IdempotentAppendOutcome {
+            operation_sha256: operation_sha256.into(),
+            append: AppendOutcome {
+                first_sequence: start + 1,
+                last_sequence: sequence,
+                count: claims.len(),
+            },
+            idempotent_replay: false,
+        };
+        tx.insert(&self.meta, receipt_key, serde_json::to_vec(&outcome)?);
+        tx.commit()?;
+        Ok(outcome)
     }
 
     /// Appends a single claim. Equivalent to a batch of one; provided for call

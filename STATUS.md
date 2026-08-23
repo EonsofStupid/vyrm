@@ -1,10 +1,46 @@
-# Runtime status — 2026-08-22
+# Runtime status — 2026-08-23
 
-vyrm now implements the complete runtime loop described by the current plan.
-It is pre-release software, but the listed behavior is executable and tested,
-not roadmap language.
+Vyrm implements the complete **local reasoning-runtime loop** described by the
+earlier kernel plan. It does not implement the complete database/vector/cloud
+product stack. The previous work optimized bounded VyrmKV/Fjall and SurrealDB
+3.0.5 cells before inventorying the current SurrealDB and Qdrant products; that
+was a sequencing error. The bounded evidence remains valid, but it is not a
+full-stack or superiority result.
+
+The corrected baseline is now explicit in
+[`docs/full-stack-gap-ledger.md`](docs/full-stack-gap-ledger.md), preceded by
+the complete product-capability inventories for
+[SurrealDB](docs/surrealdb-capability-inventory.md) and
+[Qdrant](docs/qdrant-capability-inventory.md). The largest unfilled areas are a
+public database server/session/transaction surface, authoritative persistent
+estate reconciliation, supported SDKs, comprehensive authentication and audit,
+object-complete/signed backup policy, live subscriptions, general multi-model query
+and indexes, the full vector query/payload-index/quantization lifecycle,
+production distributed/Kubernetes operation, and cloud management.
 
 ## Landed
+
+- F0 freezes the first public `rrd-contract` resource, envelope,
+  idempotency, capability-negotiation, and error vocabulary independently of
+  private Vyrm types. F1 now provides a content-authenticated logical archive,
+  exact claim/runtime replay, restore-to-absent-root with hidden staging and
+  reopen verification, an authenticated content-addressed backup catalogue,
+  corruption/retry tests, and CLI operations. Catalogue coverage deliberately
+  reports object payloads as referenced-only and the backup as not yet
+  application-complete; object closure, signatures/encryption, retention
+  policy, and a broader released-version matrix remain open.
+- The authenticated native-format ledger implements the exact-successor
+  TextV1→TagV2 transition across all 18 keyspaces with invisible staging,
+  retained predecessor/archive evidence, source-drift denial, restart resume
+  across every durable/rename boundary, CLI status, and idempotent completion.
+  The initial cross-version recovery row also restores a legacy-format logical
+  archive into a fresh current-format root.
+- F2 implementation has started at the durable boundary: public session and
+  claim-transaction payloads are frozen, and client idempotency bindings are
+  now committed atomically with claim batches in Memory, Fjall compatibility,
+  and native VyrmKV. Same-key replay survives restart without duplicating a
+  claim; key/digest collisions fail closed. Persistent session leases and the
+  loopback HTTP process are not yet landed.
 
 - The bi-temporal claim kernel has immutable supersession corrections,
   canonical SHA-256 identities covering provenance and validity, and atomic
@@ -301,15 +337,17 @@ not roadmap language.
   live pgvector superiority claim is made.
 - M3 native storage persistence and semantic gates pass in the standalone
   `vyrm-kv` crate. The corrected nine-trial local general performance fixture
-  now passes every strict cell; remote reproduction and the separate extended
-  RSS cell remain. WAL v1 now has frozen CRC32C file/frame formats; atomic batch
+  passes, and compact authenticated keyspace tags close the former extended RSS
+  cell; remote reproduction and a fresh read-heavy tail diagnostic remain. WAL
+  v1 now has frozen CRC32C file/frame formats; atomic batch
   v2 compacts operation
   framing while the recovery reader retains the frozen v1 vector. Batches reserve
   atomic sequence ranges and expose explicit buffered/authoritative
   acknowledgments. Recovery is idempotent, repairs only a torn tail when asked,
   and fails closed on complete corruption.
-  Immutable manifest v1 types canonicalize segment reachability and bind it to
-  a SHA-256 identity. Checked-in byte/JSON vectors and torn/corrupt/version
+  Immutable manifest v2 types canonicalize segment reachability, bind an opaque
+  application format, and retain exact manifest-v1 reads. Checked-in byte/JSON
+  vectors and torn/corrupt/version
   tests protect this boundary. The native mutation codec allocates one MVCC
   sequence per operation inside one atomic WAL frame; ordered memtables retain
   historical values/tombstones for repeatable point/range reads across reopen.
@@ -323,7 +361,8 @@ not roadmap language.
   manifest by expected-parent CAS. Reopen validates every reachable segment and
   replays at the manifest WAL boundary, preserving historical snapshots across
   repeated flushes. `NativeEngine` now maps the complete semantic `Engine` port
-  onto stable prefixed keys and atomic native batches. Three-backend tests cover
+  onto manifest-authenticated compact keyspace tags and atomic native batches;
+  legacy manifest-v1 stores retain their textual-prefix codec. Three-backend tests cover
   claims, projections, schema/cardinality enforcement, hash-chain replay,
   leased snapshots, stamped transactions, concurrent global CAS, flush/reopen,
   and exact `vyrmQL` execution. Snapshot-aware compaction retains versions at
@@ -360,10 +399,12 @@ not roadmap language.
   pages. A fallible borrowed scan visitor removes the prior whole-range
   materialization without weakening verification. Read-heavy and sustained are
   green across nine trials at 0.908×/0.979× RSS and 0.934×/0.764× write p95.
-  Batch v2 keeps extended allocation at 0.987×. The exact scheduled scale
-  matrix remains red only because the 70,000-operation profile records 1.026×
-  RSS; all of its other strict cells pass. This cell is not averaged away;
-  backend-native maintained reads remain diagnostic.
+  Manifest-authenticated one-byte keyspace tags remove exactly 1,400,004 live
+  key-payload bytes in the extended workload. Its fresh nine-trial row now
+  passes at 0.984× RSS and 0.945× allocated footprint, alongside 1.390× write
+  and 1.715× read throughput. A post-format read-heavy rerun is red only on
+  bimodal authoritative-write p95 and remains an explicit remote-reproduction
+  gate; backend-native maintained reads remain diagnostic.
   Native now also persists access/removal evidence and the invocation/
   effectiveness ledger with Fjall-equality and reopen tests, closing the
   operator-data gap that previously prevented runtime entry points from using
@@ -437,6 +478,9 @@ remote repetition remains required before compatibility retirement.
   `docs/vyrmds-architecture-research.md`,
   `docs/vyrm-vector-search.md`, `docs/vyrm-embedding-edge.md`, and
   `docs/vyrm-cluster-m7.md`.
+  The current symmetric-int8 experiment is not TurboQuant. A primary-paper
+  implementation with seeded rotation, packed distribution-matched scalar
+  codes, residual QJL, and exact-oracle quality evidence remains open.
 
 - JavaScript application-run claims use script-sensitive canonical event
   subjects such as `package:bun:test`, `package:pnpm:run:typecheck`, and
@@ -511,4 +555,10 @@ store from being paired with that root. Explicit umbrella execution is the
 remaining topology work. SurrealDB inspired the record-edge, transaction,
 changefeed, reference-integrity, and temporal-query capability analysis; no
 SurrealDB code or database dependency was imported. Search/vector work remains
-separate. See `docs/instance-topology.md` and `docs/runtime-graph.md`.
+separate. A new external-process claim-runtime differential pins SurrealDB
+3.0.5/SurrealKV and verifies both complete corpora. Vyrm wins the bounded
+throughput, latency, restart, and RSS cells, including against Surreal's
+server-reported execution time, but loses reopened allocated disk at 1.380×;
+therefore no all-cells or general superiority claim is made. See
+`docs/instance-topology.md`, `docs/runtime-graph.md`, and
+`docs/vyrm-surrealdb-differential.md`.

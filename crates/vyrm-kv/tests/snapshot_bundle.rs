@@ -1,6 +1,7 @@
 use vyrm_kv::{
-    Database, Durability, Error, FailureMode, Mutation, SnapshotBundle, SnapshotBundleFile,
-    SnapshotExportBoundary, SnapshotInstallBoundary, WriteBatch, SNAPSHOT_BUNDLE_FORMAT_VERSION,
+    Database, DatabaseOptions, Durability, Error, FailureMode, Mutation,
+    SNAPSHOT_BUNDLE_FORMAT_VERSION, SnapshotBundle, SnapshotBundleFile, SnapshotExportBoundary,
+    SnapshotInstallBoundary, WriteBatch,
 };
 
 #[test]
@@ -248,6 +249,47 @@ fn corruption_and_truncation_are_denied_before_manifest_publication() {
     decoded.segments[0].bytes[0] ^= 0x01;
     assert!(target.install_snapshot_bundle(&decoded, 2).is_err());
     assert_eq!(target.manifest(), &original_manifest);
+    assert_eq!(target.snapshot().sequence, 0);
+}
+
+#[test]
+fn physical_snapshot_install_denies_application_format_mismatch_before_mutation() {
+    let source_directory = tempfile::tempdir().unwrap();
+    let mut source = Database::create_with_application_format(
+        source_directory.path(),
+        DatabaseOptions::default(),
+        11,
+    )
+    .unwrap();
+    source
+        .write_owned(
+            WriteBatch::new(vec![put("truth", "source")]).unwrap(),
+            Durability::Authoritative,
+        )
+        .unwrap();
+    let bundle = source.export_snapshot_bundle(1).unwrap();
+    let spool = source_directory.path().join("application-format.snapshot");
+    let file = source.export_snapshot_file(1, spool).unwrap();
+
+    let target_directory = tempfile::tempdir().unwrap();
+    let mut target = Database::create_with_application_format(
+        target_directory.path(),
+        DatabaseOptions::default(),
+        12,
+    )
+    .unwrap();
+    let original = target.manifest().clone();
+    assert!(matches!(
+        target.install_snapshot_bundle(&bundle, 2),
+        Err(Error::InvalidManifest(reason)) if reason.contains("application format")
+    ));
+    assert_eq!(target.manifest(), &original);
+    assert_eq!(target.snapshot().sequence, 0);
+    assert!(matches!(
+        target.install_snapshot_file(&file, 2),
+        Err(Error::InvalidManifest(reason)) if reason.contains("application format")
+    ));
+    assert_eq!(target.manifest(), &original);
     assert_eq!(target.snapshot().sequence, 0);
 }
 

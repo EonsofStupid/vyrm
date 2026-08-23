@@ -5,14 +5,14 @@
 //! absent sibling, and two directory renames perform cutover. The Fjall source
 //! and archive remain available for rollback and diagnosis.
 
-use crate::{keyspaces, Engine, Error, NativeEngine, Result, Store};
+use crate::{Engine, Error, NativeEngine, Result, Store, keyspaces};
 use serde::{Deserialize, Serialize};
 use std::fs::{self, File, OpenOptions};
 use std::io::{ErrorKind, Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use vyrm_core::digest::Sha256;
-use vyrm_kv::{Database, Durability as KvDurability, Mutation, WriteBatch};
+use vyrm_kv::{Database, DatabaseOptions, Durability as KvDurability, Mutation, WriteBatch};
 
 const ARCHIVE_MAGIC: &[u8; 8] = b"VYRMIG01";
 const ARCHIVE_VERSION: u16 = 1;
@@ -436,14 +436,17 @@ fn rebuild_staging(artifacts: &Artifacts, expected: &MigrationInventory, at: u64
         fs::remove_dir_all(&artifacts.staging).map_err(migration_io)?;
         sync_parent(&artifacts.staging)?;
     }
-    let mut database = Database::create(&artifacts.staging)?;
+    let mut database = Database::create_with_application_format(
+        &artifacts.staging,
+        DatabaseOptions::default(),
+        keyspaces::NATIVE_KEYSPACE_TAG_FORMAT_V2,
+    )?;
     let mut operations = Vec::new();
     let mut estimated = 0usize;
     let actual = read_archive(&artifacts.archive, |space, key, value| {
-        let mut physical = Vec::with_capacity(keyspaces::ALL[space].len() + 1 + key.len());
-        physical.extend_from_slice(keyspaces::ALL[space].as_bytes());
-        physical.push(0);
-        physical.extend_from_slice(key);
+        let physical = keyspaces::NativeKeyCodec::TagV2
+            .encode(keyspaces::ALL[space], key)
+            .expect("archive keyspace is canonical");
         let cost = physical
             .len()
             .saturating_add(value.len())
@@ -495,10 +498,9 @@ fn verify_staging(artifacts: &Artifacts, expected: &MigrationInventory) -> Resul
         )));
     }
     let actual = read_archive(&artifacts.archive, |space, key, value| {
-        let mut physical = Vec::new();
-        physical.extend_from_slice(keyspaces::ALL[space].as_bytes());
-        physical.push(0);
-        physical.extend_from_slice(key);
+        let physical = keyspaces::NativeKeyCodec::TagV2
+            .encode(keyspaces::ALL[space], key)
+            .expect("archive keyspace is canonical");
         if database.get(&physical, snapshot)?.as_deref() != Some(value) {
             return Err(Error::Migration(format!(
                 "staging bytes diverge for keyspace {}",
@@ -752,7 +754,7 @@ impl ArchiveWriter {
     }
 }
 
-fn read_archive(
+pub(crate) fn read_archive(
     path: &Path,
     mut record: impl FnMut(usize, &[u8], &[u8]) -> Result<()>,
 ) -> Result<MigrationInventory> {

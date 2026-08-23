@@ -2,10 +2,20 @@
 
 | Field | Value |
 |-------|-------|
-| Status | Draft. Pre-release. Subject to revision without migration guarantees. |
+| Status | Draft. Pre-release. Public RRD contract v1 is now migration-gated. |
 | Default substrate | Native `vyrmKV`; pre-existing non-native directories reopen through the Fjall 3.1.8 compatibility adapter until explicitly migrated |
-| Scope | Tier 0 only: development-time persistence and recall for a single operator |
+| Scope | Vyrm kernel plus the inward boundary of the multi-tier RRD product; outward product delivery is sequenced by the full-stack ledger |
 | Supersedes | Nothing. Extends `docs/architecture-journal.md` and `automaton/docs/00-abstract-layer.md`. |
+
+> **Full-stack expansion (2026-08-23).** The original Tier-0 kernel remains the
+> inward semantic authority, but it is no longer the complete product scope.
+> [`rrd-contract`](crates/rrd-contract) freezes the transport-neutral public
+> resource, capability, request, operation, idempotency, response, and error
+> vocabulary without exposing substrate types. The dependency-ordered product
+> requirements and promotion gates are authoritative in
+> [`docs/full-stack-gap-ledger.md`](docs/full-stack-gap-ledger.md). The closed
+> kernel API below remains closed; new server, estate, SDK, query, vector, and
+> operations surfaces compose above it rather than widening it accidentally.
 
 ## 1 · Conventions
 

@@ -36,12 +36,37 @@ limits. It contains:
 Readers reject unsupported versions or flags, reordered/renamed keyspaces,
 invalid ordinals, empty or oversized keys, oversized values, non-increasing
 keys within a keyspace, inconsistent counters, digest mismatch, truncation, and
-trailing bytes. Import writes bounded vyrmKV batches and prefixes each logical
-key with `keyspace + NUL`, exactly like `NativeEngine`.
+trailing bytes. The archive remains logical and independent of physical prefix
+encoding. Import writes bounded vyrmKV batches into a manifest-authenticated
+`VYRSK002` target and replaces each canonical keyspace name with its frozen
+one-byte native tag. Existing manifest-v1 native stores remain readable through
+the legacy `keyspace + NUL` codec; this migration never silently rewrites them.
 
 The empty archive is frozen by
 `crates/vyrm-store/tests/fixtures/migration-v1-empty.hex`; an incompatible byte
 change requires a new format version and golden vector.
+
+## Native TextV1 to TagV2 exact-successor migration
+
+`vyrm storage format-upgrade` is the explicit offline migration from the
+legacy native textual-keyspace application format to manifest-authenticated
+`VYRSK002` one-byte tags. No other source/target pair is accepted. It reuses the
+same authenticated 18-keyspace logical archive, so projections, invocation
+evidence, audit/outbox state, snapshots, and every other allocated keyspace are
+preserved—not only claims and runtime state.
+
+The authenticated sibling ledger advances through `exported`, `imported`,
+`verified`, `source_moved`, `cutover`, and `complete`. Import is invisible in a
+sibling staging root. Before moving the source, the migrator exports it again
+and requires the same complete inventory, denying post-export writes. Cutover
+retains the original TextV1 directory and archive. Resume reconciles both
+unmarked directory-rename windows, and repeated completion is idempotent.
+
+Tests inject failure after every durable phase and both rename boundaries,
+verify post-export mutation denial, compare all logical keyspaces, reopen the
+TagV2 result, and retain an independently openable TextV1 source. A separate
+logical-recovery row exports an RRD archive from TextV1 and restores it into a
+new current-format root.
 
 ## Durable phases
 

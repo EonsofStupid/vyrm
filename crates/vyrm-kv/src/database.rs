@@ -277,6 +277,30 @@ impl Database {
     }
 
     pub fn create_with_options(root: &Path, options: DatabaseOptions) -> Result<Self> {
+        Self::create_with_options_and_application_format(root, options, None)
+    }
+
+    /// Creates a database whose manifests authenticate the higher-level key
+    /// encoding interpreted by its owner. The physical engine treats this
+    /// non-zero identity as opaque and preserves it across every publication.
+    pub fn create_with_application_format(
+        root: &Path,
+        options: DatabaseOptions,
+        application_format: u64,
+    ) -> Result<Self> {
+        if application_format == 0 {
+            return Err(Error::InvalidConfiguration(
+                "application format identity must be non-zero".into(),
+            ));
+        }
+        Self::create_with_options_and_application_format(root, options, Some(application_format))
+    }
+
+    fn create_with_options_and_application_format(
+        root: &Path,
+        options: DatabaseOptions,
+        application_format: Option<u64>,
+    ) -> Result<Self> {
         let options = options.validate()?;
         if root.exists() {
             if !root.is_dir() || std::fs::read_dir(root)?.next().is_some() {
@@ -290,7 +314,7 @@ impl Database {
         let manifests = ManifestStore::open(root)?;
         std::fs::create_dir(root.join(WAL_DIRECTORY))?;
         std::fs::create_dir(root.join(SEGMENT_DIRECTORY))?;
-        let manifest = Manifest::new(1, None, 0, 0, 1, Vec::new())?;
+        let manifest = new_manifest(1, None, 0, 0, 1, Vec::new(), application_format)?;
         let wal = WalWriter::create_at(&wal_path(root, 1), 1)?;
         manifests.publish(&manifest, None)?;
         Ok(Self {
@@ -554,7 +578,7 @@ impl Database {
         inject_failure(failure, FlushBoundary::SuccessorWalSynced)?;
         let mut descriptors = self.manifest.segments.clone();
         descriptors.push(segment.descriptor.clone());
-        let next = Manifest::new(
+        let next = new_manifest(
             self.manifest
                 .generation
                 .checked_add(1)
@@ -564,6 +588,7 @@ impl Database {
             sequence,
             next_sequence,
             descriptors,
+            self.manifest.application_format,
         )?;
         self.manifests.publish(&next, Some(&self.manifest.digest))?;
         self.wal = successor;
@@ -691,6 +716,11 @@ impl Database {
         at: u64,
         failure: Option<(SnapshotInstallBoundary, FailureMode)>,
     ) -> Result<Manifest> {
+        if bundle.source_manifest.application_format != self.manifest.application_format {
+            return Err(Error::InvalidManifest(
+                "snapshot application format differs from the target database".into(),
+            ));
+        }
         let source_sequence = bundle.source_manifest.durable_sequence;
         let current_sequence = self.snapshot().sequence;
         if source_sequence == current_sequence
@@ -735,7 +765,7 @@ impl Database {
         inject_snapshot_install_failure(failure, SnapshotInstallBoundary::SuccessorWalSynced)?;
 
         let previous = self.manifest.digest.clone();
-        let manifest = Manifest::new(
+        let manifest = new_manifest(
             self.manifest
                 .generation
                 .checked_add(1)
@@ -746,6 +776,7 @@ impl Database {
             source_sequence,
             next_sequence,
             bundle.source_manifest.segments.clone(),
+            self.manifest.application_format,
         )?;
         self.manifests.publish(&manifest, Some(&previous))?;
         self.wal = successor;
@@ -774,6 +805,11 @@ impl Database {
         failure: Option<(SnapshotInstallBoundary, FailureMode)>,
     ) -> Result<Manifest> {
         bundle.validate()?;
+        if bundle.source_manifest.application_format != self.manifest.application_format {
+            return Err(Error::InvalidManifest(
+                "snapshot application format differs from the target database".into(),
+            ));
+        }
         let source_sequence = bundle.source_manifest.durable_sequence;
         let current_sequence = self.snapshot().sequence;
         if source_sequence == current_sequence
@@ -817,7 +853,7 @@ impl Database {
         inject_snapshot_install_failure(failure, SnapshotInstallBoundary::SuccessorWalSynced)?;
 
         let previous = self.manifest.digest.clone();
-        let manifest = Manifest::new(
+        let manifest = new_manifest(
             self.manifest
                 .generation
                 .checked_add(1)
@@ -828,6 +864,7 @@ impl Database {
             source_sequence,
             next_sequence,
             bundle.source_manifest.segments.clone(),
+            self.manifest.application_format,
         )?;
         self.manifests.publish(&manifest, Some(&previous))?;
         self.wal = successor;
@@ -930,7 +967,7 @@ impl Database {
                 .iter()
                 .map(|segment| segment.descriptor.clone()),
         );
-        let next = Manifest::new(
+        let next = new_manifest(
             self.manifest
                 .generation
                 .checked_add(1)
@@ -940,6 +977,7 @@ impl Database {
             durable,
             self.manifest.wal_start_sequence,
             descriptors,
+            self.manifest.application_format,
         )?;
         self.manifests
             .publish(&next, Some(previous_manifest.as_str()))?;
@@ -1450,6 +1488,36 @@ impl Database {
     /// Current shared immutable-block residency and effectiveness counters.
     pub fn block_cache_stats(&self) -> crate::BlockCacheStats {
         block_cache_stats(&self.block_cache)
+    }
+}
+
+fn new_manifest(
+    generation: u64,
+    parent: Option<String>,
+    created_at: u64,
+    durable_sequence: u64,
+    wal_start_sequence: u64,
+    segments: Vec<crate::SegmentDescriptor>,
+    application_format: Option<u64>,
+) -> Result<Manifest> {
+    match application_format {
+        Some(application_format) => Manifest::new_with_application_format(
+            generation,
+            parent,
+            created_at,
+            durable_sequence,
+            wal_start_sequence,
+            segments,
+            application_format,
+        ),
+        None => Manifest::new(
+            generation,
+            parent,
+            created_at,
+            durable_sequence,
+            wal_start_sequence,
+            segments,
+        ),
     }
 }
 

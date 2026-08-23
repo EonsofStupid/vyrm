@@ -228,7 +228,11 @@ impl Writer {
     }
 
     pub fn stats(&self) -> WriterStats {
-        self.shared.state.lock().expect("writer state poisoned").stats
+        self.shared
+            .state
+            .lock()
+            .expect("writer state poisoned")
+            .stats
     }
 
     /// Count of submitted claims now durable, in submission order.
@@ -247,7 +251,11 @@ impl Writer {
 
     /// Count of claims accepted by [`Writer::submit`].
     pub fn submitted(&self) -> u64 {
-        self.shared.state.lock().expect("writer state poisoned").submitted
+        self.shared
+            .state
+            .lock()
+            .expect("writer state poisoned")
+            .submitted
     }
 
     /// Flushes pending claims and stops the commit thread.

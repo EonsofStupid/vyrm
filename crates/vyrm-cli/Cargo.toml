@@ -16,6 +16,7 @@ serde_json = { workspace = true }
 
 [dev-dependencies]
 tempfile = "3"
+vyrm-kv = { path = "../vyrm-kv" }
 # A/B harness only: real token counts for both arms of the controlled
 # comparison. o200k_base is a proxy tokenizer — no Claude tokenizer is
 # public — which is sound because the reported quantity is the ratio and

@@ -274,6 +274,44 @@ pub enum StorageAction {
     Status,
     /// Restore the retained Fjall source if native has not diverged.
     Rollback,
+    /// Export a content-authenticated, backend-independent logical archive.
+    ArchiveExport {
+        #[arg(long)]
+        archive: std::path::PathBuf,
+    },
+    /// Validate a logical archive without mutating a database.
+    ArchiveInspect {
+        #[arg(long)]
+        archive: std::path::PathBuf,
+    },
+    /// Restore a logical archive into the absent `--db` root.
+    ArchiveRestore {
+        #[arg(long)]
+        archive: std::path::PathBuf,
+    },
+    /// Create an authenticated catalogue entry and retained logical archive.
+    BackupCreate {
+        #[arg(long)]
+        catalogue: std::path::PathBuf,
+        #[arg(long)]
+        label: String,
+    },
+    /// List a catalogue after authenticating it and all retained archives.
+    BackupList {
+        #[arg(long)]
+        catalogue: std::path::PathBuf,
+    },
+    /// Restore one catalogued backup into the absent `--db` root.
+    BackupRestore {
+        #[arg(long)]
+        catalogue: std::path::PathBuf,
+        #[arg(long)]
+        backup_id: String,
+    },
+    /// Start or resume the exact-successor native application-format upgrade.
+    FormatUpgrade,
+    /// Inspect the authenticated native application-format migration ledger.
+    FormatStatus,
 }
 
 impl Command {
@@ -304,6 +342,14 @@ impl Command {
             Command::Storage { action: StorageAction::Migrate } => "storage-migrate",
             Command::Storage { action: StorageAction::Status } => "storage-status",
             Command::Storage { action: StorageAction::Rollback } => "storage-rollback",
+            Command::Storage { action: StorageAction::ArchiveExport { .. } } => "storage-archive-export",
+            Command::Storage { action: StorageAction::ArchiveInspect { .. } } => "storage-archive-inspect",
+            Command::Storage { action: StorageAction::ArchiveRestore { .. } } => "storage-archive-restore",
+            Command::Storage { action: StorageAction::BackupCreate { .. } } => "storage-backup-create",
+            Command::Storage { action: StorageAction::BackupList { .. } } => "storage-backup-list",
+            Command::Storage { action: StorageAction::BackupRestore { .. } } => "storage-backup-restore",
+            Command::Storage { action: StorageAction::FormatUpgrade } => "storage-format-upgrade",
+            Command::Storage { action: StorageAction::FormatStatus } => "storage-format-status",
         }
     }
 
@@ -419,6 +465,22 @@ impl Command {
                 vec![format!("name={name}"), format!("evidence={evidence}")]
             }
             Command::Harness { action: HarnessAction::Status } => Vec::new(),
+            Command::Storage { action: StorageAction::ArchiveExport { archive }
+                | StorageAction::ArchiveInspect { archive }
+                | StorageAction::ArchiveRestore { archive } } => {
+                vec![format!("archive={}", archive.display())]
+            }
+            Command::Storage { action: StorageAction::BackupCreate { catalogue, label } } => vec![
+                format!("catalogue={}", catalogue.display()),
+                format!("label={label}"),
+            ],
+            Command::Storage { action: StorageAction::BackupList { catalogue } } => {
+                vec![format!("catalogue={}", catalogue.display())]
+            }
+            Command::Storage { action: StorageAction::BackupRestore { catalogue, backup_id } } => vec![
+                format!("catalogue={}", catalogue.display()),
+                format!("backup_id={backup_id}"),
+            ],
             Command::Storage { .. } => Vec::new(),
         }
     }
@@ -437,28 +499,140 @@ pub fn execute_offline(
         Command::Storage { action } => action,
         _ => return None,
     };
-    Some((|| {
-        let report = match action {
-            StorageAction::Migrate => Some(vyrm_store::migrate_fjall_to_native(db, now)?),
-            StorageAction::Status => vyrm_store::migration_status(db)?,
-            StorageAction::Rollback => Some(vyrm_store::rollback_fjall_migration(db)?),
-        };
-        let text = if json {
-            serde_json::to_string_pretty(&report)?
-        } else if let Some(report) = report {
-            format!(
-                "storage migration {:?}: {} entries / {} bytes / sha256 {}\nFjall backup: {}\nArchive: {}",
-                report.phase,
-                report.inventory.entries,
-                report.inventory.payload_bytes,
-                report.inventory.archive_sha256,
-                report.fjall_backup.display(),
-                report.archive.display(),
-            )
-        } else {
-            "no storage migration marker".into()
-        };
-        Ok(text.into())
+    Some((|| match action {
+        StorageAction::Migrate | StorageAction::Status | StorageAction::Rollback => {
+            let report = match action {
+                StorageAction::Migrate => Some(vyrm_store::migrate_fjall_to_native(db, now)?),
+                StorageAction::Status => vyrm_store::migration_status(db)?,
+                StorageAction::Rollback => Some(vyrm_store::rollback_fjall_migration(db)?),
+                _ => unreachable!("matched migration action"),
+            };
+            let text = if json {
+                serde_json::to_string_pretty(&report)?
+            } else if let Some(report) = report {
+                format!(
+                    "storage migration {:?}: {} entries / {} bytes / sha256 {}\nFjall backup: {}\nArchive: {}",
+                    report.phase,
+                    report.inventory.entries,
+                    report.inventory.payload_bytes,
+                    report.inventory.archive_sha256,
+                    report.fjall_backup.display(),
+                    report.archive.display(),
+                )
+            } else {
+                "no storage migration marker".into()
+            };
+            Ok(text.into())
+        }
+        StorageAction::ArchiveExport { archive } => {
+            let engine = PersistentEngine::open(db)?;
+            let inventory = vyrm_store::export_logical_archive(&engine, archive)?;
+            let text = if json {
+                serde_json::to_string_pretty(&inventory)?
+            } else {
+                format!(
+                    "logical archive: {} actions / {} claims / {} runtime mutations / sha256 {}\nArchive: {}",
+                    inventory.action_count, inventory.claim_sequence,
+                    inventory.runtime_mutations, inventory.archive_sha256, archive.display()
+                )
+            };
+            Ok(text.into())
+        }
+        StorageAction::ArchiveInspect { archive } => {
+            let inventory = vyrm_store::inspect_logical_archive(archive)?;
+            let text = if json {
+                serde_json::to_string_pretty(&inventory)?
+            } else {
+                format!(
+                    "logical archive verified: {} actions / claim sequence {} / runtime cursor {} / sha256 {}",
+                    inventory.action_count, inventory.claim_sequence,
+                    inventory.runtime_cursor, inventory.archive_sha256
+                )
+            };
+            Ok(text.into())
+        }
+        StorageAction::ArchiveRestore { archive } => {
+            let report = vyrm_store::restore_logical_archive_to_new_root(archive, db, now)?;
+            let text = if json {
+                serde_json::to_string_pretty(&report)?
+            } else {
+                format!(
+                    "logical archive restored and reopened: {}\nTarget: {}",
+                    report.inventory.archive_sha256, report.target.display()
+                )
+            };
+            Ok(text.into())
+        }
+        StorageAction::BackupCreate { catalogue, label } => {
+            let engine = PersistentEngine::open(db)?;
+            let entry = vyrm_store::create_logical_backup(&engine, catalogue, label, now)?;
+            let text = if json {
+                serde_json::to_string_pretty(&entry)?
+            } else {
+                format!(
+                    "backup {} retained as {}\nCoverage: claims and typed runtime included; object payloads referenced only; application-complete=false",
+                    entry.backup_id, entry.archive_file
+                )
+            };
+            Ok(text.into())
+        }
+        StorageAction::BackupList { catalogue } => {
+            let verified = vyrm_store::verify_backup_catalogue(catalogue)?;
+            let text = if json {
+                serde_json::to_string_pretty(&verified)?
+            } else if verified.backups.is_empty() {
+                "backup catalogue is empty".into()
+            } else {
+                verified.backups.iter().map(|entry| format!(
+                    "{} {} at {} (claims {}, runtime {}, application-complete={})",
+                    entry.backup_id, entry.label, entry.created_at,
+                    entry.archive.claim_sequence, entry.archive.runtime_cursor,
+                    entry.application_complete
+                )).collect::<Vec<_>>().join("\n")
+            };
+            Ok(text.into())
+        }
+        StorageAction::BackupRestore { catalogue, backup_id } => {
+            let report = vyrm_store::restore_catalogued_backup(catalogue, backup_id, db, now)?;
+            let text = if json {
+                serde_json::to_string_pretty(&report)?
+            } else {
+                format!(
+                    "catalogued backup restored and reopened: {}\nTarget: {}",
+                    backup_id, report.target.display()
+                )
+            };
+            Ok(text.into())
+        }
+        StorageAction::FormatUpgrade => {
+            let ledger = vyrm_store::migrate_native_format(db, now)?;
+            let text = if json {
+                serde_json::to_string_pretty(&ledger)?
+            } else {
+                format!(
+                    "native format migration {:?}: {:?} -> {} / {} entries / sha256 {}",
+                    ledger.phase, ledger.source_application_format,
+                    ledger.target_application_format, ledger.inventory.entries,
+                    ledger.inventory.archive_sha256
+                )
+            };
+            Ok(text.into())
+        }
+        StorageAction::FormatStatus => {
+            let ledger = vyrm_store::native_format_migration_status(db)?;
+            let text = if json {
+                serde_json::to_string_pretty(&ledger)?
+            } else if let Some(ledger) = ledger {
+                format!(
+                    "native format migration {:?}: {:?} -> {}",
+                    ledger.phase, ledger.source_application_format,
+                    ledger.target_application_format
+                )
+            } else {
+                "no native format migration ledger".into()
+            };
+            Ok(text.into())
+        }
     })())
 }
 

@@ -123,6 +123,10 @@ establish superiority over Qdrant or any other vector database.
 - HNSW currently accelerates only dense vectors; sparse and multi-vector ANN
   remain exact-only.
 - Scalar quantization is an experiment, not a published planner path.
+- TurboQuant is not implemented. The current `ScalarQuantizedVector` is a
+  per-vector symmetric int8 baseline; it does not perform TurboQuant's seeded
+  random rotation, distribution-matched scalar quantization, bit packing, or
+  residual 1-bit QJL correction and must never be labeled TurboQuant.
 - HNSW graph artifacts remain canonical JSON and storage-heavy. Dense exact
   payloads now have a compact mmap representation; compact graph/payload bitmap
   indexes and background optimization remain open.
@@ -135,3 +139,22 @@ establish superiority over Qdrant or any other vector database.
 
 Cross-system Qdrant proof remains a separate fixed-hardware protocol after the
 remaining production paths are ready.
+
+## TurboQuant implementation gate
+
+The primary contract is Zandieh et al.,
+[“TurboQuant: Online Vector Quantization with Near-optimal Distortion Rate”](https://arxiv.org/abs/2504.19874)
+(ICLR 2026). Promotion requires an independent exact implementation and frozen
+vectors for normalization/norm retention, deterministic seeded rotation,
+distribution-matched centroids and indices at each supported bit width,
+packed-code decoding, and the residual QJL estimator used for unbiased inner
+products. Exact f32 vectors remain authoritative for quality measurement and
+final reranking.
+
+The evidence matrix must report encode/index time, bytes per vector including
+norms/seeds/residual sketches, MSE, inner-product bias/variance, Recall@k before
+and after exact reranking, filtered recall, query throughput and p50/p95/p99,
+scalar/SIMD parity, artifact authentication, reopen, and adversarial/non-power-
+of-two dimensions. Only then may the planner expose a `turboquant` artifact
+codec; importing the name onto the existing int8 baseline is explicitly
+forbidden.

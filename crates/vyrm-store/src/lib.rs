@@ -22,6 +22,8 @@
 //! external mutex in the prior runtime protected only correction 1; with that
 //! corrected, reads run concurrently.
 
+mod archive;
+mod backup;
 mod ds;
 mod engine;
 mod error;
@@ -36,24 +38,33 @@ mod persistent;
 mod projection;
 mod s3;
 mod store;
+mod upgrade;
 mod writer;
 
+pub use archive::{
+    LOGICAL_ARCHIVE_VERSION, LogicalArchiveInventory, LogicalRestoreReport, export_logical_archive,
+    inspect_logical_archive, restore_logical_archive_to_new_root,
+};
+pub use backup::{
+    BACKUP_CATALOGUE_VERSION, BackupCatalogue, BackupCoverage, BackupEntry, create_logical_backup,
+    load_backup_catalogue, restore_catalogued_backup, verify_backup_catalogue,
+};
 pub use ds::{DataRuntime, DataRuntimeStep};
 pub use engine::{Engine, MemoryEngine, PhysicalStoreEvidence};
 pub use error::{Error, Result};
-pub use footprint::{measure_storage_footprint, FootprintBytes, StorageFootprint};
+pub use footprint::{FootprintBytes, StorageFootprint, measure_storage_footprint};
 pub use gc::{PairStatus, RemovalReport, Verdict};
 pub use invocation::{Effectiveness, Invocation, InvocationInput, Outcome, RecallOutcome, Trigger};
 pub use keyspaces::Durability;
 pub use migration::{
-    migrate_fjall_to_native, migrate_fjall_to_native_with_fault, migration_status,
-    rollback_fjall_migration, MigrationFault, MigrationInventory, MigrationPhase, MigrationReport,
+    MigrationFault, MigrationInventory, MigrationPhase, MigrationReport, migrate_fjall_to_native,
+    migrate_fjall_to_native_with_fault, migration_status, rollback_fjall_migration,
 };
 pub use native::{
-    native_database_artifact_view, native_runtime_commit_context, native_runtime_commit_outcome,
+    NativeEngine, NativeRuntimeCommitPlan, native_database_artifact_view,
+    native_runtime_commit_context, native_runtime_commit_outcome,
     native_snapshot_all_object_references, native_snapshot_artifact_view,
-    native_snapshot_object_references, prepare_native_runtime_commit, NativeEngine,
-    NativeRuntimeCommitPlan,
+    native_snapshot_object_references, prepare_native_runtime_commit,
 };
 pub use object::{
     ImmutableObjectStore, LocalObjectStore, ObjectInventory, ObjectInventoryEntry,
@@ -61,11 +72,15 @@ pub use object::{
 };
 pub use persistent::{PersistentBackend, PersistentEngine};
 pub use projection::{
-    CurrentProjection, GroundedStamp, GroundingReport, ProjectionStatus, RebuildOutcome,
-    CURRENT_PROJECTION,
+    CURRENT_PROJECTION, CurrentProjection, GroundedStamp, GroundingReport, ProjectionStatus,
+    RebuildOutcome,
 };
 pub use s3::{ConditionalPut, S3CompatibleObjectStore, S3ObjectClient, S3ObjectMetadata};
-pub use store::{AppendOutcome, Store};
+pub use store::{AppendOutcome, IdempotentAppendOutcome, Store};
+pub use upgrade::{
+    migrate_native_format, migrate_native_format_with_fault, native_format_migration_status,
+    FormatMigrationFault, FormatMigrationLedger, FormatMigrationPhase,
+};
 pub use vyrm_core::{
     DataTransaction, DataTransactionView, ReadStamp, RetentionPin, RetentionPinId,
     RuntimeChangePage, RuntimeCommitOutcome, SnapshotHandle, SnapshotId,

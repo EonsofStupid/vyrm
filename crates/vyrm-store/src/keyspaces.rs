@@ -81,8 +81,143 @@ pub const ALL: [&str; 18] = [
     RUNTIME_SNAPSHOTS,
 ];
 
+/// Manifest-authenticated native logical-key encoding. Format 1 stores the
+/// UTF-8 keyspace name followed by NUL. Format 2 stores one stable non-zero tag;
+/// the archive remains logical and therefore independent of either encoding.
+pub(crate) const NATIVE_KEYSPACE_TAG_FORMAT_V2: u64 = 0x5659_5253_4b30_3032; // `VYRSK002`
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum NativeKeyCodec {
+    TextV1,
+    TagV2,
+}
+
+impl NativeKeyCodec {
+    pub(crate) fn from_application_format(format: Option<u64>) -> Option<Self> {
+        match format {
+            None => Some(Self::TextV1),
+            Some(NATIVE_KEYSPACE_TAG_FORMAT_V2) => Some(Self::TagV2),
+            Some(_) => None,
+        }
+    }
+
+    pub(crate) fn encode(self, space: &str, key: &[u8]) -> Option<Vec<u8>> {
+        match self {
+            Self::TextV1 => {
+                let mut stored = Vec::with_capacity(space.len() + 1 + key.len());
+                stored.extend_from_slice(space.as_bytes());
+                stored.push(0);
+                stored.extend_from_slice(key);
+                Some(stored)
+            }
+            Self::TagV2 => {
+                let mut stored = Vec::with_capacity(1 + key.len());
+                stored.push(native_keyspace_tag(space)?);
+                stored.extend_from_slice(key);
+                Some(stored)
+            }
+        }
+    }
+
+    pub(crate) fn strip<'a>(self, space: &str, stored: &'a [u8]) -> Option<&'a [u8]> {
+        match self {
+            Self::TextV1 => {
+                let prefix = self.encode(space, &[])?;
+                stored.strip_prefix(prefix.as_slice())
+            }
+            Self::TagV2 => stored.strip_prefix(&[native_keyspace_tag(space)?]),
+        }
+    }
+}
+
+pub(crate) fn native_keyspace_tag(space: &str) -> Option<u8> {
+    match space {
+        CLAIMS => Some(1),
+        SEQUENCE_INDEX => Some(2),
+        ACCESS => Some(3),
+        META => Some(4),
+        INVOCATIONS => Some(5),
+        PROJECTIONS => Some(6),
+        RUNTIME_CHANGES => Some(7),
+        RUNTIME_RECORDS => Some(8),
+        RUNTIME_RELATIONS => Some(9),
+        RUNTIME_VECTORS => Some(10),
+        RUNTIME_SERIES => Some(11),
+        RUNTIME_GEO => Some(12),
+        RUNTIME_OBJECTS => Some(13),
+        RUNTIME_OUTBOX => Some(14),
+        RUNTIME_AUDIT => Some(15),
+        RUNTIME_COMMITS => Some(16),
+        RUNTIME_SCHEMAS => Some(17),
+        RUNTIME_SNAPSHOTS => Some(18),
+        _ => None,
+    }
+}
+
+pub(crate) fn native_keyspace_for_tag(tag: u8) -> Option<&'static str> {
+    tag.checked_sub(1)
+        .and_then(|index| ALL.get(usize::from(index)))
+        .copied()
+}
+
+#[cfg(test)]
+mod native_key_codec_tests {
+    use super::*;
+
+    #[test]
+    fn native_keyspace_tags_are_frozen_unique_and_canonical() {
+        let tags = ALL
+            .iter()
+            .map(|space| native_keyspace_tag(space).unwrap())
+            .collect::<Vec<_>>();
+        assert_eq!(tags, (1_u8..=18).collect::<Vec<_>>());
+        for (space, tag) in ALL.iter().zip(tags) {
+            assert_eq!(native_keyspace_for_tag(tag), Some(*space));
+        }
+        assert_eq!(
+            NativeKeyCodec::from_application_format(None),
+            Some(NativeKeyCodec::TextV1)
+        );
+        assert_eq!(
+            NativeKeyCodec::from_application_format(Some(NATIVE_KEYSPACE_TAG_FORMAT_V2)),
+            Some(NativeKeyCodec::TagV2)
+        );
+        assert_eq!(NativeKeyCodec::from_application_format(Some(7)), None);
+        assert_eq!(native_keyspace_tag("unknown"), None);
+        assert_eq!(native_keyspace_for_tag(0), None);
+        assert_eq!(native_keyspace_for_tag(19), None);
+    }
+
+    #[test]
+    fn native_key_codecs_round_trip_frozen_wire_bytes() {
+        let logical = b"subject/predicate";
+        let legacy = NativeKeyCodec::TextV1.encode(CLAIMS, logical).unwrap();
+        assert_eq!(legacy, b"claims\0subject/predicate");
+        assert_eq!(
+            NativeKeyCodec::TextV1.strip(CLAIMS, &legacy),
+            Some(logical.as_slice())
+        );
+
+        let compact = NativeKeyCodec::TagV2.encode(CLAIMS, logical).unwrap();
+        assert_eq!(compact, b"\x01subject/predicate");
+        assert_eq!(
+            NativeKeyCodec::TagV2.strip(CLAIMS, &compact),
+            Some(logical.as_slice())
+        );
+
+        assert_eq!(NativeKeyCodec::TagV2.encode("unknown", logical), None);
+        assert_eq!(NativeKeyCodec::TagV2.strip(SEQUENCE_INDEX, &compact), None);
+    }
+}
+
 /// Key under which the claim sequence watermark is recorded.
 pub const SEQUENCE_WATERMARK: &[u8] = b"watermark/claims/sequence";
+
+pub(crate) fn accepted_append_key(idempotency_key: &str) -> Vec<u8> {
+    let mut key = b"accepted/claim-append/".to_vec();
+    key.extend_from_slice(idempotency_key.as_bytes());
+    key
+}
 
 /// Key under which the invocation ordinal watermark is recorded.
 pub const INVOCATION_WATERMARK: &[u8] = b"watermark/invocations/ordinal";
