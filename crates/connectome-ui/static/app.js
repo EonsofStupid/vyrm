@@ -231,21 +231,26 @@
       return;
     }
     const nodes = state.data.cluster?.nodes || [];
+    const authority = estate.snapshot;
+    const managed = authority?.instances || [];
+    const operations = authority?.operations || [];
     const visibleNodes = nodes.length ? nodes : [{ canonical_node_id: estate.id, state: estate.state, shard: 0, raft_node_id: 0, applied_lag: 0, latest_cursor: estate.runtime_cursor, alerts: [] }];
-    $('#main').innerHTML = pageHead('Estates', 'The local project boundary, its storage ownership, and every observed runtime member. Cloud fleet control remains a later control plane.', `<span class="badge ${estate.state}">${escapeHtml(estate.control_plane)} control</span>`) + `
+    $('#main').innerHTML = pageHead('Estates', 'Persisted desired state, observed evidence, activity, and reconciliation work for this project boundary.', `<span class="badge ${estate.state}">${escapeHtml(estate.authority)} · ${escapeHtml(estate.control_plane)}</span>`) + `
       <section class="metrics estate-metrics">
         ${metric('Bound estates', estates.length, 'one project boundary')}
-        ${metric('Observed nodes', visibleNodes.length, nodes.length ? 'retained telemetry' : 'local process')}
-        ${metric('Runtime head', estate.runtime_cursor, 'global commit cursor')}
-        ${metric('Data surfaces', state.data.tables?.length || 0, `${state.data.models?.length || 0} schema scope(s)`)}
+        ${metric('Managed instances', managed.length, authority ? `${managed.filter((instance) => instance.activity.class === 'active').length} active` : 'authority not initialized')}
+        ${metric('Estate revision', authority?.revision ?? '—', `${operations.filter((operation) => !['succeeded', 'failed', 'superseded'].includes(operation.state)).length} open operation(s)`)}
+        ${metric('Runtime head', estate.runtime_cursor, `${visibleNodes.length} telemetry node(s)`)}
       </section>
       <section class="estate-layout">
         <article class="estate-map" aria-label="Estate topology">
-          <header><div><span class="eyebrow">LOCAL ESTATE</span><h2>${escapeHtml(estate.id)}</h2></div><code>${escapeHtml(estate.mode)}</code></header>
-          <div class="estate-core"><span class="estate-orbit"></span><strong>${escapeHtml(estate.id)}</strong><small>${escapeHtml(estate.storage_backend)} · cursor ${human(estate.runtime_cursor)}</small></div>
-          <div class="estate-node-grid">${visibleNodes.map((node) => `<button type="button" class="estate-node ${node.alerts?.length ? 'attention' : ''}" data-open-estate-node="${escapeHtml(node.latest_sample_digest || '')}"><span></span><strong>${escapeHtml(node.canonical_node_id)}</strong><code>shard ${human(node.shard)} · raft ${human(node.raft_node_id)}</code><small>${escapeHtml(node.state)} · lag ${human(node.applied_lag)}</small></button>`).join('')}</div>
+          <header><div><span class="eyebrow">${authority ? 'AUTHORITATIVE ESTATE' : 'SYNTHETIC LOCAL FALLBACK'}</span><h2>${escapeHtml(estate.id)}</h2></div><code>${escapeHtml(estate.mode)}</code></header>
+          <div class="estate-core"><span class="estate-orbit"></span><strong>${escapeHtml(estate.id)}</strong><small>${escapeHtml(estate.storage_backend)} · ${authority ? `revision ${human(authority.revision)}` : `cursor ${human(estate.runtime_cursor)}`}</small></div>
+          <div class="estate-node-grid">${managed.length ? managed.map((instance) => `<article class="estate-node ${instance.observed.phase === 'failed' ? 'attention' : ''}"><span></span><strong>${escapeHtml(instance.id)}</strong><code>desired ${escapeHtml(instance.desired.phase)} → observed ${escapeHtml(instance.observed.phase)}</code><small>generation ${human(instance.observed.generation)}/${human(instance.desired.generation)} · ${escapeHtml(instance.activity.class)} · ${escapeHtml(instance.desired.version)}</small></article>`).join('') : visibleNodes.map((node) => `<button type="button" class="estate-node ${node.alerts?.length ? 'attention' : ''}" data-open-estate-node="${escapeHtml(node.latest_sample_digest || '')}"><span></span><strong>${escapeHtml(node.canonical_node_id)}</strong><code>shard ${human(node.shard)} · raft ${human(node.raft_node_id)}</code><small>${escapeHtml(node.state)} · lag ${human(node.applied_lag)}</small></button>`).join('')}</div>
         </article>
         <aside class="estate-contracts">
+          <article><span>AUTHORITY</span><strong>${escapeHtml(estate.authority)}</strong><code>${authority ? `format ${human(authority.format_version)} · revision ${human(authority.revision)}` : 'no persistent estate document'}</code><small>${authority ? `${human(authority.idempotency_binding_count)} protected idempotency binding(s)` : 'Initialize RRD estate authority to replace this inferred row.'}</small></article>
+          <article><span>RECONCILIATION OPERATIONS</span><strong>${human(operations.length)} retained</strong><div class="estate-operation-list">${operations.length ? operations.slice(-5).reverse().map((operation) => `<div><code>${escapeHtml(operation.kind)}</code><b>${escapeHtml(operation.state)}</b><small>${escapeHtml(operation.instance_id)} · gen ${human(operation.desired_generation)} · attempt ${human(operation.attempts)}</small></div>`).join('') : '<small>No authoritative operations recorded.</small>'}</div></article>
           <article><span>STORAGE BOUNDARY</span><strong>${escapeHtml(estate.storage_backend)}</strong><code>${escapeHtml(estate.root)}</code><small>Member ${escapeHtml(estate.member)}</small></article>
           <article><span>PROJECT SCOPE</span><strong>${escapeHtml(estate.scope)}</strong><code>cursor ${human(estate.runtime_cursor)}</code><small>All views remain bound to this manifest.</small></article>
           <article class="future-boundary"><span>HOSTING CONTROL PLANE</span><strong>Not attached</strong><code>local-only</code><small>Reserved for the later cloud hosting tab; no remote action is implied.</small></article>

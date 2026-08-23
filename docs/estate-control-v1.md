@@ -69,3 +69,17 @@ This is state-machine recovery evidence, not yet production process-driver
 qualification. The next driver slice must bind trusted executable paths and
 argument vectors without a shell, preserve per-instance process identity across
 controller restart, and run actual process-kill tests at the same boundaries.
+
+## Read projections
+
+`rrd-contract::EstateSnapshot` is the stable outward projection; the internal
+aggregate is not serialized as an accidental SDK. It retains desired/observed
+generations, activity evidence, leases, operation receipts and errors but
+exposes only the number of idempotency bindings, not their client keys.
+
+RRD serves it through the session-authenticated
+`POST /v1/estates/{estate}/read` endpoint. Connectome projects the same type in
+`/api/estate` and the full workbench snapshot. When no authoritative document
+exists, Connectome labels its manifest-derived row `synthetic` and never
+presents it as reconciled control-plane state. Both Connectome paths are
+read-only and tests prove they do not advance the estate revision.

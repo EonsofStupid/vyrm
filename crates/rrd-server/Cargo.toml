@@ -8,6 +8,7 @@ description = "RRD loopback server lifecycle and persistent session/transaction 
 
 [dependencies]
 rrd-contract = { path = "../rrd-contract" }
+rrd-estate = { path = "../rrd-estate" }
 vyrm-core = { path = "../vyrm-core" }
 vyrm-store = { path = "../vyrm-store" }
 serde = { workspace = true }

@@ -26,6 +26,7 @@ pub type Result<T> = std::result::Result<T, ServiceError>;
 #[derive(Debug)]
 pub enum ServiceError {
     Contract(String),
+    Estate(String),
     Store(vyrm_store::Error),
     SessionNotFound,
     Unauthenticated,
@@ -52,6 +53,12 @@ impl std::error::Error for ServiceError {}
 impl From<vyrm_store::Error> for ServiceError {
     fn from(value: vyrm_store::Error) -> Self {
         Self::Store(value)
+    }
+}
+
+impl From<rrd_estate::Error> for ServiceError {
+    fn from(value: rrd_estate::Error) -> Self {
+        Self::Estate(value.to_string())
     }
 }
 
@@ -144,6 +151,25 @@ impl<E: Engine> RrdService<E> {
 
     pub fn engine(&self) -> &E {
         &self.engine
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn read_estate(
+        &self,
+        session_id: &CorrelationId,
+        token: &CorrelationId,
+        estate_id: CanonicalId,
+        _request: &rrd_contract::ReadEstate,
+        now: u64,
+        request_id: &str,
+        operation_id: &str,
+    ) -> Result<Option<rrd_contract::EstateSnapshot>> {
+        self.authorize(session_id, token, now, request_id, operation_id)?;
+        let repository = rrd_estate::EstateRepository::new(&self.engine, estate_id);
+        repository
+            .load()
+            .map(|document| document.as_ref().map(rrd_estate::public_snapshot))
+            .map_err(Into::into)
     }
 
     pub fn create_session(

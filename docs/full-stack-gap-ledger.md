@@ -259,7 +259,12 @@ operation ID deduplicates the retried effect; takeover preserves prepared work,
 and newer desired generations terminally supersede unfinished stale work. This
 does **not** complete F3: the production local-process driver, actual
 process-kill qualification, deployment/upgrade/backup/restore state machines,
-Connectome read projection and authorized mutations remain open.
+and authorized mutations remain open. The read-only projection is now wired:
+`rrd-contract::EstateSnapshot` prevents the internal aggregate becoming the
+wire contract, RRD requires a live session plus matching estate/instance path,
+and Connectome's `/api/estate` and workbench render desired→observed generation,
+activity, and operation state. Missing authority is explicitly labeled as a
+synthetic fallback.
 
 ### F4 — establish security and governance before remote management
 

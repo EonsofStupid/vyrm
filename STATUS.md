@@ -67,8 +67,11 @@ production distributed/Kubernetes operation, and cloud management.
   by the stable operation ID, expired-worker takeover preserves prepared work,
   and new desired generations supersede stale unfinished operations. The
   production local-process driver, actual process-kill qualification,
-  backup/restore jobs, Connectome projection and authorized mutations remain
-  open; the existing UI `EstateView` is still only a synthetic read model.
+  backup/restore jobs and authorized mutations remain open. The stable public
+  `EstateSnapshot` is now available through a session-authenticated RRD read
+  endpoint and Connectome's read-only `/api/estate`/workbench projection.
+  Connectome shows desired→observed generations, activity and operation state;
+  if authority is absent it explicitly labels the local manifest row synthetic.
 
 - The bi-temporal claim kernel has immutable supersession corrections,
   canonical SHA-256 identities covering provenance and validity, and atomic

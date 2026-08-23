@@ -1,11 +1,12 @@
 use rrd_contract::{
     transaction_operation_sha256, BeginTransaction, CanonicalId, CapabilityDescriptor,
     CapabilityStatus, CloseSession, CommitReceipt, CommitTransaction, CorrelationId,
-    DeploymentMode, ErrorBody, ErrorCode, IdempotencyBinding, Liveness, PreviewTransaction,
-    Readiness, RenewSession, RequestContext, RequestEnvelope, ResourceId, ResourceKind,
-    ResourcePath, ResponseEnvelope, ResponseOutcome, ServiceCapabilities, SessionEndState,
-    SessionLease, SessionLimits, SessionTermination, TransactionMutation, TransactionPreview,
-    TransactionState, PROTOCOL, PROTOCOL_VERSION,
+    DeploymentMode, ErrorBody, ErrorCode, EstateActivityPolicySnapshot, EstateSnapshot,
+    IdempotencyBinding, Liveness, PreviewTransaction, ReadEstate, Readiness, RenewSession,
+    RequestContext, RequestEnvelope, ResourceId, ResourceKind, ResourcePath, ResponseEnvelope,
+    ResponseOutcome, ServiceCapabilities, SessionEndState, SessionLease, SessionLimits,
+    SessionTermination, TransactionMutation, TransactionPreview, TransactionState, PROTOCOL,
+    PROTOCOL_VERSION,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -146,6 +147,50 @@ fn malformed_identifiers_and_unknown_fields_fail_during_decode() {
         .unwrap()
         .insert("unknown".into(), serde_json::json!(true));
     assert!(serde_json::from_value::<RequestEnvelope<FixturePayload>>(request).is_err());
+}
+
+#[test]
+fn estate_read_contract_has_frozen_field_names_and_strict_empty_payload() {
+    let snapshot = EstateSnapshot {
+        format_version: 1,
+        id: CanonicalId::new("estate-a").unwrap(),
+        revision: 7,
+        created_at_unix_ms: 10,
+        updated_at_unix_ms: 20,
+        activity_policy: EstateActivityPolicySnapshot {
+            idle_after_ms: 300_000,
+            stale_after_ms: 1_800_000,
+            neglected_after_ms: 604_800_000,
+        },
+        instances: Vec::new(),
+        operations: Vec::new(),
+        idempotency_binding_count: 0,
+    };
+    let expected = serde_json::json!({
+        "format_version": 1,
+        "id": "estate-a",
+        "revision": 7,
+        "created_at_unix_ms": 10,
+        "updated_at_unix_ms": 20,
+        "activity_policy": {
+            "idle_after_ms": 300000,
+            "stale_after_ms": 1800000,
+            "neglected_after_ms": 604800000
+        },
+        "instances": [],
+        "operations": [],
+        "idempotency_binding_count": 0
+    });
+    assert_eq!(serde_json::to_value(&snapshot).unwrap(), expected);
+    assert_eq!(
+        serde_json::from_value::<EstateSnapshot>(expected).unwrap(),
+        snapshot
+    );
+    assert_eq!(
+        serde_json::from_str::<ReadEstate>("{}").unwrap(),
+        ReadEstate {}
+    );
+    assert!(serde_json::from_str::<ReadEstate>(r#"{"unknown":true}"#).is_err());
 }
 
 #[test]

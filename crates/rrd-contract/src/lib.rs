@@ -19,6 +19,181 @@ pub const MAX_TRANSACTION_CLAIMS: usize = 4_096;
 pub const MIN_LEASE_MS: u64 = 1_000;
 pub const MAX_LEASE_MS: u64 = 3_600_000;
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ReadEstate {}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EstateDesiredPhase {
+    Running,
+    Stopped,
+    Absent,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EstateObservedPhase {
+    Unknown,
+    Provisioning,
+    Starting,
+    Running,
+    Stopping,
+    Stopped,
+    Deleting,
+    Absent,
+    Failed,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EstateActivityClass {
+    Unknown,
+    Active,
+    Idle,
+    Stale,
+    Neglected,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EstateOperationKind {
+    Provision,
+    Start,
+    Stop,
+    Restart,
+    Upgrade,
+    Delete,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EstateOperationState {
+    Pending,
+    Leased,
+    Prepared,
+    Applied,
+    Succeeded,
+    Failed,
+    Superseded,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EstateReceiptBoundary {
+    Prepared,
+    Applied,
+    Completed,
+    Failed,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct EstateActivityPolicySnapshot {
+    pub idle_after_ms: u64,
+    pub stale_after_ms: u64,
+    pub neglected_after_ms: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct EstateDesiredSnapshot {
+    pub generation: u64,
+    pub phase: EstateDesiredPhase,
+    pub deployment_ref: CanonicalId,
+    pub version: String,
+    pub configuration_sha256: String,
+    pub updated_at_unix_ms: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct EstateObservedSnapshot {
+    pub generation: u64,
+    pub phase: EstateObservedPhase,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub version: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub process_id: Option<u32>,
+    pub observed_at_unix_ms: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub evidence_sha256: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct EstateActivitySnapshot {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_meaningful_runtime_at_unix_ms: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_heartbeat_at_unix_ms: Option<u64>,
+    pub class: EstateActivityClass,
+    pub evaluated_at_unix_ms: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct EstateInstanceSnapshot {
+    pub id: CanonicalId,
+    pub desired: EstateDesiredSnapshot,
+    pub observed: EstateObservedSnapshot,
+    pub activity: EstateActivitySnapshot,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct EstateLeaseSnapshot {
+    pub owner: CanonicalId,
+    pub epoch: u64,
+    pub acquired_at_unix_ms: u64,
+    pub expires_at_unix_ms: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct EstateReceiptSnapshot {
+    pub boundary: EstateReceiptBoundary,
+    pub lease_epoch: u64,
+    pub at_unix_ms: u64,
+    pub evidence_sha256: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct EstateOperationSnapshot {
+    pub id: CanonicalId,
+    pub instance_id: CanonicalId,
+    pub kind: EstateOperationKind,
+    pub desired_generation: u64,
+    pub request_sha256: String,
+    pub state: EstateOperationState,
+    pub attempts: u32,
+    pub created_at_unix_ms: u64,
+    pub updated_at_unix_ms: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lease: Option<EstateLeaseSnapshot>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub receipts: Vec<EstateReceiptSnapshot>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct EstateSnapshot {
+    pub format_version: u16,
+    pub id: CanonicalId,
+    pub revision: u64,
+    pub created_at_unix_ms: u64,
+    pub updated_at_unix_ms: u64,
+    pub activity_policy: EstateActivityPolicySnapshot,
+    pub instances: Vec<EstateInstanceSnapshot>,
+    pub operations: Vec<EstateOperationSnapshot>,
+    pub idempotency_binding_count: u32,
+}
+
 pub type Result<T> = std::result::Result<T, ContractError>;
 
 #[derive(Debug, Clone, PartialEq, Eq)]

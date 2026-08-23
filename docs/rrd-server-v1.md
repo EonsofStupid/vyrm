@@ -38,6 +38,11 @@ places that secret elsewhere. `X-RRD-Session` carries the session identifier;
   maximum concurrent transactions, and a server-generated secret token.
 - `POST /v1/sessions/{session}/renew` rotates the token and never extends past
   absolute expiry.
+- `POST /v1/estates/{estate}/read` returns the typed public `EstateSnapshot`
+  for a resource path containing that estate and this server instance. It
+  requires a live session token, exposes no raw idempotency keys, and performs
+  no estate mutation. Session leases are still transport credentials rather
+  than F4 authorization.
 - `DELETE /v1/sessions/{session}` closes the session and aborts its open
   transactions idempotently.
 - `POST /v1/transactions` captures an Engine read stamp and creates one
@@ -121,6 +126,10 @@ transaction quota, claim-scope preview, explicit abort and close, same-process
 and post-restart commit replay, idempotency collision, disconnect/retry,
 concurrent same-operation convergence, graceful shutdown, and refusal by both
 the library and real binary to bind remotely before F4.
+
+The matrix also proves that an unauthenticated estate read is denied, URL and
+resource-estate identities must agree, and the response is the public snapshot
+rather than the persisted authority document.
 
 F2 is not closed by that matrix. Remaining black-box gates are cancellation of
 long-running query work, deadline races during generalized commit, prospective

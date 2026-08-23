@@ -7,6 +7,8 @@ publish.workspace = true
 description = "Local developer workbench and visualizer for vyrm/connectome instances"
 
 [dependencies]
+rrd-contract = { path = "../rrd-contract" }
+rrd-estate = { path = "../rrd-estate" }
 vyrm-core = { path = "../vyrm-core" }
 vyrm-cluster = { path = "../vyrm-cluster", features = ["openraft-transport"] }
 vyrm-ql = { path = "../vyrm-ql" }

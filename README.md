@@ -30,7 +30,9 @@ and activity evidence advance through the authenticated Vyrm control journal.
 The state contract is documented in
 [`docs/estate-control-v1.md`](docs/estate-control-v1.md). A typed reconciler now
 advances one durable boundary per step and fences lease takeover; the production
-local-process driver and Connectome projection remain subsequent F3 slices.
+local-process driver remains a subsequent F3 slice. RRD and Connectome now
+consume the same typed read-only `EstateSnapshot`; the panel labels absent
+authority as a synthetic fallback instead of implying persistence.
 
 The system makes operational reasoning observable and enforceable without
 claiming access to a model's hidden chain-of-thought. It records goals, plans,

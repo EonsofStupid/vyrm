@@ -8,7 +8,7 @@ use axum::Router;
 use rrd_contract::{
     AbortTransaction, BeginTransaction, CanonicalId, CapabilityDescriptor, CapabilityStatus,
     CloseSession, CommitTransaction, CorrelationId, CreateSession, DeploymentMode, ErrorBody,
-    ErrorCode, Liveness, PreviewTransaction, Readiness, RenewSession, RequestContext,
+    ErrorCode, Liveness, PreviewTransaction, ReadEstate, Readiness, RenewSession, RequestContext,
     RequestEnvelope, ResourceId, ResourceKind, ResponseEnvelope, ResponseOutcome,
     ServiceCapabilities, PROTOCOL, PROTOCOL_VERSION,
 };
@@ -201,6 +201,9 @@ impl AppState {
                 self.close_session(&headers, &body, path, now)
             }
             (Method::POST, "/v1/transactions") => self.begin_transaction(&headers, &body, now),
+            (Method::POST, path) if estate_action(path, "read").is_some() => {
+                self.read_estate(&headers, &body, path, now)
+            }
             (Method::POST, path) if transaction_action(path, "preview").is_some() => {
                 self.preview_transaction(&headers, &body, path, now)
             }
@@ -329,6 +332,49 @@ impl AppState {
                         envelope.context.operation_id.as_str(),
                     )
                     .map_err(api_error)
+            },
+        )
+    }
+
+    fn read_estate(&self, headers: &HeaderMap, body: &[u8], path: &str, now: u64) -> HttpResponse {
+        let estate = estate_action(path, "read").expect("route checked");
+        self.with_authenticated_envelope::<ReadEstate, _, _>(
+            headers,
+            body,
+            now,
+            false,
+            None,
+            |envelope, session, token| {
+                let estate = CanonicalId::new(estate).map_err(|error| {
+                    ApiError::new(ErrorCode::InvalidArgument, error.to_string(), false)
+                })?;
+                let resource_estate = envelope
+                    .resource
+                    .segments
+                    .iter()
+                    .find(|segment| segment.kind == ResourceKind::Estate)
+                    .map(|segment| &segment.id);
+                if resource_estate != Some(&estate) {
+                    return Err(ApiError::new(
+                        ErrorCode::FailedPrecondition,
+                        "request resource does not target the path estate",
+                        false,
+                    ));
+                }
+                self.service
+                    .read_estate(
+                        session,
+                        token,
+                        estate,
+                        &envelope.payload,
+                        now,
+                        envelope.context.request_id.as_str(),
+                        envelope.context.operation_id.as_str(),
+                    )
+                    .map_err(api_error)?
+                    .ok_or_else(|| {
+                        ApiError::new(ErrorCode::NotFound, "estate authority not found", false)
+                    })
             },
         )
     }
@@ -761,6 +807,7 @@ fn api_error(error: ServiceError) -> ApiError {
             ApiError::new(ErrorCode::Conflict, message, true)
         }
         ServiceError::Store(_) => ApiError::new(ErrorCode::Internal, message, false),
+        ServiceError::Estate(_) => ApiError::new(ErrorCode::Internal, message, false),
     }
 }
 
@@ -803,6 +850,12 @@ fn transaction_id(path: &str) -> Option<&str> {
     (!id.is_empty() && !id.contains('/')).then_some(id)
 }
 
+fn estate_action<'a>(path: &'a str, action: &str) -> Option<&'a str> {
+    path.strip_prefix("/v1/estates/")?
+        .strip_suffix(&format!("/{action}"))
+        .filter(|id| !id.is_empty() && !id.contains('/'))
+}
+
 fn capabilities(instance: &CanonicalId, backend: CanonicalId) -> ServiceCapabilities {
     let mut capabilities = vec![
         CapabilityDescriptor {
@@ -816,6 +869,16 @@ fn capabilities(instance: &CanonicalId, backend: CanonicalId) -> ServiceCapabili
             limitation: Some(format!(
                 "claim mutation surface on {backend}; F6 multi-model transactions remain open"
             )),
+        },
+        CapabilityDescriptor {
+            name: CanonicalId::new("estate-authority-read").unwrap(),
+            contract_version: 1,
+            status: CapabilityStatus::Experimental,
+            limits: BTreeMap::new(),
+            limitation: Some(
+                "session-authenticated read-only estate snapshots; F4 authorization and mutations remain unavailable"
+                    .into(),
+            ),
         },
         CapabilityDescriptor {
             name: CanonicalId::new("lifecycle-journal").unwrap(),

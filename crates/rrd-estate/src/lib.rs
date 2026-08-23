@@ -417,6 +417,140 @@ impl EstateDocument {
     }
 }
 
+pub fn public_snapshot(document: &EstateDocument) -> rrd_contract::EstateSnapshot {
+    rrd_contract::EstateSnapshot {
+        format_version: document.format,
+        id: document.id.clone(),
+        revision: document.revision,
+        created_at_unix_ms: document.created_at,
+        updated_at_unix_ms: document.updated_at,
+        activity_policy: rrd_contract::EstateActivityPolicySnapshot {
+            idle_after_ms: document.activity_policy.idle_after_ms,
+            stale_after_ms: document.activity_policy.stale_after_ms,
+            neglected_after_ms: document.activity_policy.neglected_after_ms,
+        },
+        instances: document
+            .instances
+            .values()
+            .map(|instance| rrd_contract::EstateInstanceSnapshot {
+                id: instance.id.clone(),
+                desired: rrd_contract::EstateDesiredSnapshot {
+                    generation: instance.desired.generation,
+                    phase: match instance.desired.phase {
+                        DesiredPhase::Running => rrd_contract::EstateDesiredPhase::Running,
+                        DesiredPhase::Stopped => rrd_contract::EstateDesiredPhase::Stopped,
+                        DesiredPhase::Absent => rrd_contract::EstateDesiredPhase::Absent,
+                    },
+                    deployment_ref: instance.desired.deployment_ref.clone(),
+                    version: instance.desired.version.clone(),
+                    configuration_sha256: instance.desired.configuration_sha256.clone(),
+                    updated_at_unix_ms: instance.desired.updated_at,
+                },
+                observed: rrd_contract::EstateObservedSnapshot {
+                    generation: instance.observed.generation,
+                    phase: public_observed_phase(instance.observed.phase),
+                    version: instance.observed.version.clone(),
+                    process_id: instance.observed.process_id,
+                    observed_at_unix_ms: instance.observed.observed_at,
+                    evidence_sha256: instance.observed.evidence_sha256.clone(),
+                    error: instance.observed.error.clone(),
+                },
+                activity: rrd_contract::EstateActivitySnapshot {
+                    last_meaningful_runtime_at_unix_ms: instance
+                        .activity
+                        .last_meaningful_runtime_at,
+                    last_heartbeat_at_unix_ms: instance.activity.last_heartbeat_at,
+                    class: match instance.activity.class {
+                        ActivityClass::Unknown => rrd_contract::EstateActivityClass::Unknown,
+                        ActivityClass::Active => rrd_contract::EstateActivityClass::Active,
+                        ActivityClass::Idle => rrd_contract::EstateActivityClass::Idle,
+                        ActivityClass::Stale => rrd_contract::EstateActivityClass::Stale,
+                        ActivityClass::Neglected => rrd_contract::EstateActivityClass::Neglected,
+                    },
+                    evaluated_at_unix_ms: instance.activity.evaluated_at,
+                },
+            })
+            .collect(),
+        operations: document
+            .operations
+            .values()
+            .map(|operation| rrd_contract::EstateOperationSnapshot {
+                id: operation.id.clone(),
+                instance_id: operation.instance_id.clone(),
+                kind: match operation.kind {
+                    OperationKind::Provision => rrd_contract::EstateOperationKind::Provision,
+                    OperationKind::Start => rrd_contract::EstateOperationKind::Start,
+                    OperationKind::Stop => rrd_contract::EstateOperationKind::Stop,
+                    OperationKind::Restart => rrd_contract::EstateOperationKind::Restart,
+                    OperationKind::Upgrade => rrd_contract::EstateOperationKind::Upgrade,
+                    OperationKind::Delete => rrd_contract::EstateOperationKind::Delete,
+                },
+                desired_generation: operation.desired_generation,
+                request_sha256: operation.request_sha256.clone(),
+                state: match operation.state {
+                    OperationState::Pending => rrd_contract::EstateOperationState::Pending,
+                    OperationState::Leased => rrd_contract::EstateOperationState::Leased,
+                    OperationState::Prepared => rrd_contract::EstateOperationState::Prepared,
+                    OperationState::Applied => rrd_contract::EstateOperationState::Applied,
+                    OperationState::Succeeded => rrd_contract::EstateOperationState::Succeeded,
+                    OperationState::Failed => rrd_contract::EstateOperationState::Failed,
+                    OperationState::Superseded => rrd_contract::EstateOperationState::Superseded,
+                },
+                attempts: operation.attempts,
+                created_at_unix_ms: operation.created_at,
+                updated_at_unix_ms: operation.updated_at,
+                lease: operation
+                    .lease
+                    .as_ref()
+                    .map(|lease| rrd_contract::EstateLeaseSnapshot {
+                        owner: lease.owner.clone(),
+                        epoch: lease.epoch,
+                        acquired_at_unix_ms: lease.acquired_at,
+                        expires_at_unix_ms: lease.expires_at,
+                    }),
+                receipts: operation
+                    .receipts
+                    .iter()
+                    .map(|receipt| rrd_contract::EstateReceiptSnapshot {
+                        boundary: match receipt.boundary {
+                            ReceiptBoundary::Prepared => {
+                                rrd_contract::EstateReceiptBoundary::Prepared
+                            }
+                            ReceiptBoundary::Applied => {
+                                rrd_contract::EstateReceiptBoundary::Applied
+                            }
+                            ReceiptBoundary::Completed => {
+                                rrd_contract::EstateReceiptBoundary::Completed
+                            }
+                            ReceiptBoundary::Failed => rrd_contract::EstateReceiptBoundary::Failed,
+                        },
+                        lease_epoch: receipt.lease_epoch,
+                        at_unix_ms: receipt.at,
+                        evidence_sha256: receipt.evidence_sha256.clone(),
+                    })
+                    .collect(),
+                error: operation.error.clone(),
+            })
+            .collect(),
+        idempotency_binding_count: u32::try_from(document.idempotency.len())
+            .expect("bounded estate idempotency count fits u32"),
+    }
+}
+
+fn public_observed_phase(phase: ObservedPhase) -> rrd_contract::EstateObservedPhase {
+    match phase {
+        ObservedPhase::Unknown => rrd_contract::EstateObservedPhase::Unknown,
+        ObservedPhase::Provisioning => rrd_contract::EstateObservedPhase::Provisioning,
+        ObservedPhase::Starting => rrd_contract::EstateObservedPhase::Starting,
+        ObservedPhase::Running => rrd_contract::EstateObservedPhase::Running,
+        ObservedPhase::Stopping => rrd_contract::EstateObservedPhase::Stopping,
+        ObservedPhase::Stopped => rrd_contract::EstateObservedPhase::Stopped,
+        ObservedPhase::Deleting => rrd_contract::EstateObservedPhase::Deleting,
+        ObservedPhase::Absent => rrd_contract::EstateObservedPhase::Absent,
+        ObservedPhase::Failed => rrd_contract::EstateObservedPhase::Failed,
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct MutationContext {
     pub at: u64,

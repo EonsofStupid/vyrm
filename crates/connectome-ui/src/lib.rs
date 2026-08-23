@@ -302,6 +302,9 @@ pub struct EstateView {
     pub root: PathBuf,
     pub member: PathBuf,
     pub control_plane: &'static str,
+    pub authority: &'static str,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub snapshot: Option<rrd_contract::EstateSnapshot>,
 }
 
 /// A logical, inspectable runtime surface. These are not presented as physical
@@ -627,7 +630,17 @@ pub fn snapshot(
         InstanceMode::Dedicated => "dedicated",
         InstanceMode::Umbrella => "umbrella",
     };
-    let instance_state = health.state;
+    let authoritative_estate = rrd_contract::CanonicalId::new(binding.manifest.id.clone())
+        .ok()
+        .map(|estate_id| rrd_estate::EstateRepository::new(store, estate_id).load())
+        .transpose()?
+        .flatten()
+        .as_ref()
+        .map(rrd_estate::public_snapshot);
+    let instance_state = authoritative_estate
+        .as_ref()
+        .map(estate_state)
+        .unwrap_or(health.state);
     let runtime_cursor = health.runtime_cursor;
     let estates = vec![EstateView {
         id: binding.manifest.id.clone(),
@@ -639,7 +652,17 @@ pub fn snapshot(
         observed_nodes: cluster.nodes.len(),
         root: binding.instance_root.clone(),
         member: binding.member.clone(),
-        control_plane: "local",
+        control_plane: if authoritative_estate.is_some() {
+            "rrd-estate"
+        } else {
+            "synthetic-local"
+        },
+        authority: if authoritative_estate.is_some() {
+            "authoritative"
+        } else {
+            "synthetic"
+        },
+        snapshot: authoritative_estate,
     }];
     let tables = table_catalog(
         runtime_cursor,
@@ -679,6 +702,43 @@ pub fn snapshot(
         capabilities: capabilities(false),
         graph,
     })
+}
+
+fn estate_state(estate: &rrd_contract::EstateSnapshot) -> &'static str {
+    if estate
+        .instances
+        .iter()
+        .any(|instance| instance.observed.phase == rrd_contract::EstateObservedPhase::Failed)
+        || estate
+            .operations
+            .iter()
+            .any(|operation| operation.state == rrd_contract::EstateOperationState::Failed)
+    {
+        return "failed";
+    }
+    if estate.instances.is_empty() {
+        return "empty";
+    }
+    if estate.instances.iter().all(|instance| {
+        instance.desired.generation == instance.observed.generation
+            && matches!(
+                (instance.desired.phase, instance.observed.phase),
+                (
+                    rrd_contract::EstateDesiredPhase::Running,
+                    rrd_contract::EstateObservedPhase::Running
+                ) | (
+                    rrd_contract::EstateDesiredPhase::Stopped,
+                    rrd_contract::EstateObservedPhase::Stopped
+                ) | (
+                    rrd_contract::EstateDesiredPhase::Absent,
+                    rrd_contract::EstateObservedPhase::Absent
+                )
+            )
+    }) {
+        "ready"
+    } else {
+        "reconciling"
+    }
 }
 
 fn scoped_models(
@@ -1760,6 +1820,13 @@ fn respond(
                     &serde_json::json!({"error":error.to_string()}),
                 ),
             },
+            Err(error) => json_response(
+                StatusCode(500),
+                &serde_json::json!({"error":error.to_string()}),
+            ),
+        },
+        "/api/estate" => match snapshot(store, binding, now()) {
+            Ok(value) => json_response(StatusCode(200), &value.estates),
             Err(error) => json_response(
                 StatusCode(500),
                 &serde_json::json!({"error":error.to_string()}),

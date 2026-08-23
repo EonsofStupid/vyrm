@@ -206,6 +206,11 @@ kbd { background: var(--panel-3); border: 1px solid #373d37; border-radius: 4px;
 .estate-contracts article strong { font-size: 14px; }
 .estate-contracts article code { overflow: hidden; color: var(--mint); font: 9px var(--mono); text-overflow: ellipsis; }
 .estate-contracts article small { color: var(--muted); font-size: 10px; line-height: 1.45; }
+.estate-operation-list { display: grid; gap: 5px; }
+.estate-operation-list > div { display: grid; grid-template-columns: 1fr auto; gap: 3px 8px; padding: 7px 0; border-top: 1px solid var(--line-soft); }
+.estate-operation-list > div code { color: var(--violet); }
+.estate-operation-list > div b { color: var(--muted); font: 8px var(--mono); font-weight: 500; text-transform: uppercase; }
+.estate-operation-list > div small { grid-column: 1 / -1; font: 8px var(--mono); }
 .estate-contracts .future-boundary { border-style: dashed; opacity: .72; }
 .estate-action { min-height: 38px; }
 

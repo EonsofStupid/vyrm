@@ -224,7 +224,9 @@ fn snapshot_exposes_runtime_objects_without_mutating_the_store() {
     assert_eq!(snapshot.instance.mode, "dedicated");
     assert_eq!(snapshot.estates.len(), 1);
     assert_eq!(snapshot.estates[0].id, binding.manifest.id);
-    assert_eq!(snapshot.estates[0].control_plane, "local");
+    assert_eq!(snapshot.estates[0].control_plane, "synthetic-local");
+    assert_eq!(snapshot.estates[0].authority, "synthetic");
+    assert!(snapshot.estates[0].snapshot.is_none());
     assert_eq!(snapshot.tables.len(), 9);
     assert_eq!(
         snapshot

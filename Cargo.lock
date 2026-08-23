@@ -542,6 +542,8 @@ checksum = "ea0095f6103c2a8b44acd6fd15960c801dafebf02e21940360833e0673f48ba7"
 name = "connectome-ui"
 version = "0.1.0"
 dependencies = [
+ "rrd-contract",
+ "rrd-estate",
  "serde",
  "serde_json",
  "tempfile",
@@ -2296,6 +2298,7 @@ dependencies = [
  "getrandom 0.3.4",
  "hmac",
  "rrd-contract",
+ "rrd-estate",
  "serde",
  "serde_json",
  "sha2",

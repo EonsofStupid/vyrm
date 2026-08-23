@@ -9,6 +9,15 @@ use std::thread::JoinHandle;
 use std::time::Duration;
 use vyrm_store::PersistentEngine;
 
+fn estate_context(at: u64, operation: &str) -> rrd_estate::MutationContext {
+    rrd_estate::MutationContext {
+        at,
+        actor: "rrd-estate".into(),
+        request_id: format!("request-{operation}"),
+        operation_id: CanonicalId::new(operation).unwrap(),
+    }
+}
+
 struct RunningServer {
     address: SocketAddr,
     shutdown: Option<tokio::sync::oneshot::Sender<()>>,
@@ -166,6 +175,81 @@ fn start_root() -> (tempfile::TempDir, PathBuf, RunningServer) {
     let root = temporary.path().join("instance");
     let server = start(&root);
     (temporary, root, server)
+}
+
+#[test]
+fn authenticated_estate_read_returns_the_public_snapshot_only() {
+    let temporary = tempfile::tempdir().unwrap();
+    let root = temporary.path().join("instance");
+    {
+        let engine = PersistentEngine::open(&root).unwrap();
+        let repository =
+            rrd_estate::EstateRepository::new(&engine, CanonicalId::new("estate-a").unwrap());
+        repository
+            .create(&estate_context(10, "create-estate"))
+            .unwrap();
+        repository
+            .set_desired(&rrd_estate::SetDesired {
+                context: estate_context(20, "deploy-project-a"),
+                instance_id: CanonicalId::new("project-a").unwrap(),
+                idempotency_key: "deploy-project-a".into(),
+                target: rrd_estate::DesiredTarget {
+                    phase: rrd_estate::DesiredPhase::Running,
+                    deployment_ref: CanonicalId::new("local-rrd").unwrap(),
+                    version: "0.1.0".into(),
+                    configuration_sha256: "a".repeat(64),
+                },
+            })
+            .unwrap();
+    }
+    let server = start(&root);
+    let create = envelope(
+        json!({
+            "limits": {
+                "idle_timeout_ms": 60_000,
+                "absolute_timeout_ms": 300_000,
+                "max_open_transactions": 2,
+            }
+        }),
+        Some("estate-session"),
+        None,
+    );
+    let (status, created) = post(&server, "/v1/sessions", &create, None);
+    assert_eq!(status, 200);
+    let session_id = payload(&created)["session_id"].as_str().unwrap();
+    let token = payload(&created)["token"].as_str().unwrap();
+
+    let mut read = envelope(json!({}), None, None);
+    read["resource"]["segments"] = json!([
+        {"kind": "estate", "id": "estate-a"},
+        {"kind": "instance", "id": "socket-test"}
+    ]);
+    let (status, denied) = post(&server, "/v1/estates/estate-a/read", &read, None);
+    assert_eq!(status, 401);
+    assert_eq!(denied["outcome"]["error"]["code"], "unauthenticated");
+
+    let (status, response) = post(
+        &server,
+        "/v1/estates/estate-a/read",
+        &read,
+        Some((session_id, token)),
+    );
+    assert_eq!(status, 200, "{response}");
+    assert_eq!(payload(&response)["id"], "estate-a");
+    assert_eq!(payload(&response)["revision"], 2);
+    assert_eq!(payload(&response)["instances"][0]["id"], "project-a");
+    assert_eq!(payload(&response)["operations"][0]["state"], "pending");
+    assert!(payload(&response).get("idempotency").is_none());
+    assert_eq!(payload(&response)["idempotency_binding_count"], 1);
+
+    let (status, mismatch) = post(
+        &server,
+        "/v1/estates/other-estate/read",
+        &read,
+        Some((session_id, token)),
+    );
+    assert_eq!(status, 412);
+    assert_eq!(mismatch["outcome"]["error"]["code"], "failed_precondition");
 }
 
 #[test]
