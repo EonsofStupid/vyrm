@@ -6,12 +6,12 @@
 //! runtime cursors stored in the batch.
 
 use crate::control::{
-    validate_control_key, verify_control_page, verify_control_tail, ControlJournalEntry,
-    ControlTransition,
+    ControlJournalEntry, ControlTransition, validate_control_key, verify_control_page,
+    verify_control_tail,
 };
-use crate::engine::{validate_idempotency, Engine, PhysicalStoreEvidence};
+use crate::engine::{Engine, PhysicalStoreEvidence, validate_idempotency};
 use crate::error::{Error, Result};
-use crate::gc::{build_report, RemovalReport, Tally};
+use crate::gc::{RemovalReport, Tally, build_report};
 use crate::invocation::{self, Invocation, InvocationInput, RecallOutcome};
 use crate::keyspaces::{self, Durability};
 use crate::store::{AppendOutcome, IdempotentAppendOutcome};
@@ -20,11 +20,11 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard};
 use vyrm_core::{
-    key, projection_family, AuditEnvelope, Claim, ClaimSource, Millis, ObjectReference, Predicate,
-    ProjectionWork, ReadStamp, Reader, RetentionPin, RuntimeChange, RuntimeChangePage,
-    RuntimeCommit, RuntimeCommitOutcome, RuntimeLogAccumulator, RuntimeMerkleNode, RuntimeMutation,
-    RuntimeRecord, RuntimeRef, RuntimeRelation, RuntimeSchemaRegistry, ScopeId, SnapshotHandle,
-    SnapshotId, Subject,
+    AuditEnvelope, Claim, ClaimSource, Millis, ObjectReference, Predicate, ProjectionWork,
+    ReadStamp, Reader, RetentionPin, RuntimeChange, RuntimeChangePage, RuntimeCommit,
+    RuntimeCommitOutcome, RuntimeLogAccumulator, RuntimeMerkleNode, RuntimeMutation, RuntimeRecord,
+    RuntimeRef, RuntimeRelation, RuntimeSchemaRegistry, ScopeId, SnapshotHandle, SnapshotId,
+    Subject, key, projection_family,
 };
 use vyrm_kv::{
     CompactionOutcome, Database, DatabaseOptions, GarbageCollectionReport, Manifest, Mutation,
@@ -434,9 +434,7 @@ impl Engine for NativeEngine {
     ) -> Result<IdempotentAppendOutcome> {
         validate_idempotency(idempotency_key, operation_sha256)?;
         if claims.is_empty() {
-            return Err(Error::Substrate(
-                "idempotent claim append must not be empty".into(),
-            ));
+            return Err(Error::Substrate("idempotent claim append must not be empty".into()));
         }
         for claim in claims {
             claim.validate()?;
@@ -501,12 +499,7 @@ impl Engine for NativeEngine {
     fn control_record(&self, key: &str) -> Result<Option<Vec<u8>>> {
         validate_control_key(key)?;
         let database = self.lock()?;
-        get(
-            &database,
-            database.snapshot(),
-            keyspaces::META,
-            key.as_bytes(),
-        )
+        get(&database, database.snapshot(), keyspaces::META, key.as_bytes())
     }
 
     fn commit_control_transition(
@@ -525,8 +518,11 @@ impl Engine for NativeEngine {
         if current.as_deref() != transition.expected.as_deref() {
             return Err(Error::ControlConflict(transition.key.clone()));
         }
-        let current_sequence =
-            read_sequence(&database, snapshot, keyspaces::CONTROL_JOURNAL_SEQUENCE)?;
+        let current_sequence = read_sequence(
+            &database,
+            snapshot,
+            keyspaces::CONTROL_JOURNAL_SEQUENCE,
+        )?;
         let previous_digest = get(
             &database,
             snapshot,
@@ -566,7 +562,11 @@ impl Engine for NativeEngine {
                 value.clone(),
             ),
             None => operations.push(Mutation::Delete {
-                key: encoded_storage_key(&database, keyspaces::META, transition.key.as_bytes())?,
+                key: encoded_storage_key(
+                    &database,
+                    keyspaces::META,
+                    transition.key.as_bytes(),
+                )?,
             }),
         }
         put(
@@ -590,7 +590,11 @@ impl Engine for NativeEngine {
         Ok(entry)
     }
 
-    fn control_journal_since(&self, after: u64, limit: usize) -> Result<Vec<ControlJournalEntry>> {
+    fn control_journal_since(
+        &self,
+        after: u64,
+        limit: usize,
+    ) -> Result<Vec<ControlJournalEntry>> {
         if limit == 0 {
             return Err(Error::Substrate(
                 "control journal limit must be non-zero".into(),
@@ -2317,21 +2321,23 @@ mod tests {
                 .unwrap();
             assert_eq!(rows.len(), 1);
             assert_eq!(rows[0].0.first(), Some(&1));
-            assert!(database
-                .get(
-                    &legacy_storage_key(
-                        keyspaces::CLAIMS,
-                        &key::claim_key(
-                            &expected.subject,
-                            &expected.predicate,
-                            expected.valid_from,
-                            expected.tx_time,
-                        )
-                    ),
-                    database.snapshot(),
-                )
-                .unwrap()
-                .is_none());
+            assert!(
+                database
+                    .get(
+                        &legacy_storage_key(
+                            keyspaces::CLAIMS,
+                            &key::claim_key(
+                                &expected.subject,
+                                &expected.predicate,
+                                expected.valid_from,
+                                expected.tx_time,
+                            )
+                        ),
+                        database.snapshot(),
+                    )
+                    .unwrap()
+                    .is_none()
+            );
         }
         engine.flush(12).unwrap();
         drop(engine);

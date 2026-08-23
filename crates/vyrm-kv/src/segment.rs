@@ -357,8 +357,7 @@ impl Segment {
         if let Err(error) = (|| -> std::io::Result<()> {
             file.write_all(&bytes)?;
             file.sync_all()?;
-            std::fs::rename(&temporary, &path)?;
-            File::open(directory)?.sync_all()
+            crate::publish_rename(directory, &temporary, &path)
         })() {
             let _ = std::fs::remove_file(&temporary);
             return Err(Error::Io(error));
@@ -470,8 +469,7 @@ impl Segment {
         if let Err(error) = (|| -> std::io::Result<()> {
             file.write_all(bytes)?;
             file.sync_all()?;
-            std::fs::rename(&temporary, &path)?;
-            File::open(directory)?.sync_all()
+            crate::publish_rename(directory, &temporary, &path)
         })() {
             let _ = std::fs::remove_file(&temporary);
             return Err(Error::Io(error));

@@ -7,7 +7,6 @@ use crate::{
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
-use std::fs::File;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -1626,7 +1625,7 @@ fn remove_candidates(
         removed.push(file_name);
     }
     if !removed.is_empty() {
-        File::open(directory)?.sync_all()?;
+        crate::sync_directory(directory)?;
     }
     Ok(())
 }

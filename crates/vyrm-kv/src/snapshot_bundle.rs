@@ -172,7 +172,7 @@ impl SnapshotBundleFile {
             }
             output.sync_all()?;
             if let Some(parent) = destination.parent() {
-                File::open(parent)?.sync_all()?;
+                crate::sync_directory(parent)?;
             }
             hook(SnapshotExportBoundary::FileSynced)?;
             Ok(())

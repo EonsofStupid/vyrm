@@ -571,7 +571,7 @@ impl ManifestStore {
         let path = directory.join(format!("{name}.json"));
         match std::fs::remove_file(path) {
             Ok(()) => {
-                File::open(directory)?.sync_all()?;
+                crate::sync_directory(&directory)?;
                 Ok(true)
             }
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
@@ -631,8 +631,7 @@ fn persist_rename(directory: &Path, temporary: &Path, target: &Path, bytes: &[u8
     if let Err(error) = (|| -> std::io::Result<()> {
         file.write_all(bytes)?;
         file.sync_all()?;
-        std::fs::rename(temporary, target)?;
-        File::open(directory)?.sync_all()
+        crate::publish_rename(directory, temporary, target)
     })() {
         let _ = std::fs::remove_file(temporary);
         return Err(Error::Io(error));
