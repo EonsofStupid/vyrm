@@ -33,14 +33,18 @@ advances one durable boundary per step and fences lease takeover. RRD and
 Connectome consume the same typed read-only `EstateSnapshot`; the panel labels
 absent authority as a synthetic fallback instead of implying persistence.
 
-The first local-process driver is now implemented behind an operator-trusted
+The first local-process driver is implemented behind an operator-trusted
 catalogue: canonical absolute executable plus SHA-256, typed literal arguments
 without a shell, cleared environment, durable PID/start-time/executable
 identity, and fail-closed signaling. A real-RRD-child test proves restart replay
-and stop-without-data-deletion. A black-box controller test now kills the actual
-controller after every start/stop transition, including the effect-before-record
-gap, and proves deterministic recovery. Its evidence and remaining
-cross-platform/graceful-shutdown limits are in
+and stop-without-data-deletion. Managed RRD children use a bounded request/
+completion-file graceful-shutdown handshake, reauthenticate ownership before
+forced fallback, and retain per-instance process logs. A black-box controller
+test kills the actual controller after every start/stop transition, including
+the effect-before-record gap, and proves deterministic recovery. The complete
+process matrix now passes on Linux, Windows, and macOS. Its evidence and
+remaining packaging, authorized mutation, backup/restore, and log-retention
+limits are in
 [`docs/local-process-driver-v1.md`](docs/local-process-driver-v1.md). Strict
 slice evidence is appended to
 [`docs/implementation-journal.md`](docs/implementation-journal.md).

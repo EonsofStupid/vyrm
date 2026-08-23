@@ -82,8 +82,15 @@ production distributed/Kubernetes operation, and cloud management.
   denied. A separate one-step controller is now killed by a black-box harness
   after every start and stop boundary, including after the real effect but
   before `applied`; retries preserve the start PID or converge from an already
-  completed stop. Operator mutation/packaging, graceful managed-child shutdown,
-  per-instance backup/restore and Windows/macOS qualification keep F3 open.
+  completed stop. Managed children now use a bounded, paired request/completion
+  file protocol, reauthenticate PID/start/executable ownership before forced
+  fallback, and retain per-instance startup logs. The native process matrix
+  passes the full authority, process-contract, real child/controller recovery,
+  and strict-clippy sequence on Linux, Windows, and macOS. Operator mutation/
+  packaging, per-instance backup/restore, and bounded log retention keep F3
+  open. The aggregate workspace job is still red on the separate OpenRaft
+  `real_consensus_replicates_canonical_runtime_truth_to_every_voter` test; that
+  is not counted as process-driver qualification evidence.
 
 - The bi-temporal claim kernel has immutable supersession corrections,
   canonical SHA-256 identities covering provenance and validity, and atomic

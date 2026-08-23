@@ -101,3 +101,34 @@ index.
   release builds. Graceful managed-child shutdown, Windows/macOS behavior,
   packaging, authorized mutations, and per-instance backup/restore remain open.
 - Next gate: graceful shutdown and cross-platform process qualification.
+
+## 2026-08-23 — F3 graceful shutdown and native process qualification
+
+- Commits: `530a556`, `4a0b5b4`, `d0a1f11`, `ea4e6af`, `9da9dc2`,
+  `acf161e`, `3f2da6d`, and `f9e5a89`.
+- Capability: added a persisted bounded request/completion-file shutdown
+  policy, graceful RRD drain, ownership reauthentication before forced kill,
+  per-instance process logs, startup stability detection, portable token and
+  storage publication, and the minimal Windows platform environment required
+  for loopback networking.
+- Verification:
+  `CARGO_BUILD_JOBS=1 CARGO_INCREMENTAL=0 cargo test -p rrd-server --test local_estate_driver --locked -- --nocapture`
+  passed locally; `cargo clippy -p rrd-estate -p rrd-server --all-targets --locked -- -D warnings`
+  passed locally. GitHub Actions run
+  [`32666043965`](https://github.com/EonsofStupid/vyrm/actions/runs/32666043965)
+  passed persistent authority, RRD binary contracts, real child/controller
+  recovery, and strict clippy on Ubuntu, Windows, and macOS.
+- Evidence: a normal stop requires RRD's durable completion marker after Axum
+  drain; a deliberately unwatched request forces the bounded fallback without
+  fabricating completion; effect-gap recovery retains process/data identity;
+  forged PID identity remains denied. Preserved stderr identified and closed a
+  Windows Winsock startup failure caused by clearing `SystemRoot`.
+- Limit: packaging, operator-authorized mutation, per-instance backup/restore,
+  and bounded process-log rotation/retention remain open. The aggregate
+  workspace job in the cited run failed the separate OpenRaft
+  `real_consensus_replicates_canonical_runtime_truth_to_every_voter` test, so
+  the run is evidence for this native process matrix, not a repository-wide
+  green claim.
+- Next gate: make the deployment catalogue/install surface operable without
+  hand-authored executable paths, then expose explicitly authorized estate
+  mutations before backup/restore jobs.
