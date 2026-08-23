@@ -258,3 +258,23 @@ index.
   administration, and service/installer packaging remain open.
 - Next gate: freeze the restore-to-absent-instance contract and implement its
   verified, replay-safe state machine before retention work.
+
+## 2026-08-23 — execution-order correction: full foundation first
+
+- Decision: stop deepening one F3 subsystem while later product layers remain
+  absent. Establish an honest breadth-first walking skeleton through F3–F9,
+  preserving explicit alpha limits, before exhaustive hardening, optimization,
+  or competitive benchmark claims.
+- Required order: close local restore/retention/lifecycle operability; add the
+  F4 security/audit skeleton; generate all F5 SDK skeletons from one contract;
+  establish F6 multi-model/query/realtime; establish F7 vector/AI/TurboQuant
+  paths; establish F8 distributed/Kubernetes/hybrid deployment; then make F9
+  Connectome the authoritative operations and diagnostics client.
+- Non-deferrable checks: each breadth slice must still prevent corruption,
+  destructive overwrite, unauthenticated mutation, and false capability
+  claims. These are implementation gates, not post-foundation optimization.
+- Deferred depth: exhaustive platform/fault matrices, fine-grained policy,
+  performance tuning, and SurrealDB/Qdrant/Fjall comparisons follow only after
+  every foundation layer has a real executable path.
+- Trigger: operator review correctly identified that the prior sequence was
+  over-investing in F3 depth relative to the stated full-product objective.
