@@ -24,13 +24,14 @@ fn value(output: &Output) -> serde_json::Value {
     serde_json::from_slice(&output.stdout).unwrap()
 }
 
+#[cfg(unix)]
 fn private(path: &Path) {
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600)).unwrap();
-    }
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600)).unwrap();
 }
+
+#[cfg(not(unix))]
+fn private(_path: &Path) {}
 
 #[test]
 fn authorized_admin_mutations_replay_reopen_and_journal_exact_identity() {
