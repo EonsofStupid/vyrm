@@ -1,11 +1,11 @@
 //! Authenticated local backup catalogue over retained logical archives.
 
 use crate::{
-    Engine, Error, LogicalArchiveInventory, LogicalRestoreReport, Result, export_logical_archive,
-    inspect_logical_archive, restore_logical_archive_to_new_root,
+    export_logical_archive, inspect_logical_archive, restore_logical_archive_to_new_root, Engine,
+    Error, LogicalArchiveInventory, LogicalRestoreReport, Result,
 };
 use serde::{Deserialize, Serialize};
-use std::fs::{self, File, OpenOptions};
+use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::{Component, Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -92,8 +92,7 @@ pub fn create_logical_backup<E: Engine>(
         }
         fs::remove_file(&staging).map_err(backup_io)?;
     } else {
-        fs::rename(&staging, &archive_path).map_err(backup_io)?;
-        sync_parent(&archive_path)?;
+        vyrm_kv::publish_rename(&archives, &staging, &archive_path).map_err(backup_io)?;
     }
 
     let backup_id = digest::sha256_hex(
@@ -242,8 +241,8 @@ fn write_catalogue(root: &Path, catalogue: BackupCatalogue) -> Result<()> {
             .map_err(backup_io)?;
         file.write_all(&bytes).map_err(backup_io)?;
         file.sync_all().map_err(backup_io)?;
-        fs::rename(&temporary, &path).map_err(backup_io)?;
-        sync_parent(&path)
+        drop(file);
+        vyrm_kv::publish_rename(root, &temporary, &path).map_err(backup_io)
     })();
     if result.is_err() && temporary.exists() {
         fs::remove_file(&temporary).map_err(backup_io)?;
@@ -332,12 +331,4 @@ fn resolve_archive(root: &Path, value: &str) -> Result<PathBuf> {
 
 fn backup_io(error: std::io::Error) -> Error {
     Error::Archive(error.to_string())
-}
-
-fn sync_parent(path: &Path) -> Result<()> {
-    let parent = path.parent().unwrap_or_else(|| Path::new("."));
-    File::open(parent)
-        .map_err(backup_io)?
-        .sync_all()
-        .map_err(backup_io)
 }

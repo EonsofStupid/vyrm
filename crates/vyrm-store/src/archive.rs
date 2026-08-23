@@ -137,8 +137,7 @@ pub fn restore_logical_archive_to_new_root(
                 target.display()
             )));
         }
-        fs::rename(&staging, target).map_err(archive_io)?;
-        sync_parent(target)?;
+        vyrm_kv::publish_rename(parent, &staging, target).map_err(archive_io)?;
         Ok(LogicalRestoreReport {
             archive: archive.to_owned(),
             target: target.to_owned(),
@@ -344,8 +343,7 @@ fn write_archive(
             writer.action(action)?;
         }
         let inventory = writer.finish(claim_sequence, runtime_cursor)?;
-        fs::rename(&temporary, path).map_err(archive_io)?;
-        sync_parent(path)?;
+        vyrm_kv::publish_rename(parent, &temporary, path).map_err(archive_io)?;
         Ok(inventory)
     })();
     if result.is_err() && temporary.exists() {
@@ -629,14 +627,6 @@ fn archive_read_error(error: std::io::Error) -> Error {
 
 fn archive_io(error: std::io::Error) -> Error {
     Error::Archive(error.to_string())
-}
-
-fn sync_parent(path: &Path) -> Result<()> {
-    let parent = path.parent().unwrap_or_else(|| Path::new("."));
-    File::open(parent)
-        .map_err(archive_io)?
-        .sync_all()
-        .map_err(archive_io)
 }
 
 fn hex(digest: [u8; 32]) -> String {

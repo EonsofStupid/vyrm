@@ -27,24 +27,19 @@ pub(crate) fn sync_directory(_path: &Path) -> std::io::Result<()> {
 }
 
 #[cfg(unix)]
-pub(crate) fn publish_rename(
-    directory: &Path,
-    temporary: &Path,
-    target: &Path,
-) -> std::io::Result<()> {
+/// Atomically publishes a completed temporary file or directory and requests
+/// durable parent-directory metadata where the platform supports it.
+pub fn publish_rename(directory: &Path, temporary: &Path, target: &Path) -> std::io::Result<()> {
     std::fs::rename(temporary, target)?;
     sync_directory(directory)
 }
 
 #[cfg(windows)]
-pub(crate) fn publish_rename(
-    _directory: &Path,
-    temporary: &Path,
-    target: &Path,
-) -> std::io::Result<()> {
+/// Atomically replaces a target using write-through Windows rename semantics.
+pub fn publish_rename(_directory: &Path, temporary: &Path, target: &Path) -> std::io::Result<()> {
     use std::os::windows::ffi::OsStrExt;
     use windows_sys::Win32::Storage::FileSystem::{
-        MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH, MoveFileExW,
+        MoveFileExW, MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH,
     };
 
     let temporary = temporary
@@ -71,11 +66,8 @@ pub(crate) fn publish_rename(
 }
 
 #[cfg(not(any(unix, windows)))]
-pub(crate) fn publish_rename(
-    _directory: &Path,
-    temporary: &Path,
-    target: &Path,
-) -> std::io::Result<()> {
+/// Publishes a completed temporary path on other supported platforms.
+pub fn publish_rename(_directory: &Path, temporary: &Path, target: &Path) -> std::io::Result<()> {
     std::fs::rename(temporary, target)
 }
 
