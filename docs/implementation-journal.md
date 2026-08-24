@@ -514,3 +514,23 @@ index.
   archival, and atomic application-mutation/audit-completion publication remain
   open. F4 also still requires provisioning, TLS/mTLS, secret providers, row/
   field policy, and rate limits.
+
+## 2026-08-24 — machine-readable F5 endpoint catalogue
+
+- Commit: `d9cd948` (`feat(contract): publish endpoint catalogue`).
+- Canonical source: `rrd-contract::EndpointCatalogue` freezes all 20 current
+  public operations with canonical identity, HTTP method/path template,
+  authentication mode, mutation/idempotency classification, closed security
+  action, and public request/response type names.
+- Validation: operations and method/path pairs are unique, sorted, bounded,
+  ASCII and versioned; mutating GET routes and private Rust type paths fail
+  closed.
+- Runtime: `GET /v1/schema/endpoints` serves the exact catalogue and capability
+  negotiation advertises its endpoint count. A real-socket test decodes the
+  version and all 20 entries.
+- Verification: `rrd-contract` and `rrd-server` tests plus strict all-target/
+  all-feature clippy and `git diff --check` passed.
+- Limit: the catalogue is the route-generation source, not a complete OpenAPI/
+  JSON Schema bundle or a supported client. Next is the Rust network client and
+  shared black-box fixture, followed by TypeScript, Python, Go, Java, and .NET
+  packages generated from the same operation/type vocabulary.
