@@ -123,6 +123,12 @@ pub enum Source {
     Event {
         kind: RuntimeType,
     },
+    Series {
+        kind: RuntimeType,
+    },
+    Geo {
+        kind: RuntimeType,
+    },
     Claim {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         predicate: Option<Predicate>,
@@ -135,6 +141,8 @@ impl Source {
             Self::Record { kind } => format!("record:{kind}"),
             Self::Relation { kind } => format!("relation:{kind}"),
             Self::Event { kind } => format!("event:{kind}"),
+            Self::Series { kind } => format!("series:{kind}"),
+            Self::Geo { kind } => format!("geo:{kind}"),
             Self::Claim {
                 predicate: Some(predicate),
             } => format!("claim:{predicate}"),
@@ -471,6 +479,12 @@ impl Parser {
                 .map_err(|error| ParseError::new(token.offset, error.to_string())),
             "event" => RuntimeType::new(name)
                 .map(|kind| Source::Event { kind })
+                .map_err(|error| ParseError::new(token.offset, error.to_string())),
+            "series" => RuntimeType::new(name)
+                .map(|kind| Source::Series { kind })
+                .map_err(|error| ParseError::new(token.offset, error.to_string())),
+            "geo" => RuntimeType::new(name)
+                .map(|kind| Source::Geo { kind })
                 .map_err(|error| ParseError::new(token.offset, error.to_string())),
             "claim" => Predicate::new(name)
                 .map(|predicate| Source::Claim {

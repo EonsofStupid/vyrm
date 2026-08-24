@@ -2,7 +2,8 @@ use crate::{BoundFilter, Error, LogicalOperator, PhysicalOperator, PhysicalPlan,
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use vyrm_core::{
-    resolve_as_of, Claim, RuntimeChange, RuntimeGraphSnapshot, RuntimeMutation, RuntimeValue,
+    resolve_as_of, Claim, GeoValue, RuntimeChange, RuntimeGeo, RuntimeGraphSnapshot,
+    RuntimeMutation, RuntimeValue, SeriesValue,
 };
 use vyrm_ql::{Projection, Source};
 use vyrm_store::Engine;
@@ -458,7 +459,147 @@ fn rows_for_source(
                 })
             })
             .collect(),
+        Source::Series { kind } => changes
+            .iter()
+            .filter(|change| change.cursor <= known_at_cursor && &change.scope == scope)
+            .filter_map(|change| {
+                let RuntimeMutation::SeriesSample { sample } = &change.mutation else {
+                    return None;
+                };
+                if &sample.series.kind != kind || sample.observed_at > valid_at {
+                    return None;
+                }
+                let mut values = sample.properties.clone();
+                values.insert("id".into(), string(sample.reference.id.to_string()));
+                values.insert("kind".into(), string(sample.reference.kind.to_string()));
+                values.insert("series_kind".into(), string(sample.series.kind.to_string()));
+                values.insert("series_id".into(), string(sample.series.id.to_string()));
+                values.insert(
+                    "observed_at".into(),
+                    RuntimeValue::Unsigned(sample.observed_at),
+                );
+                values.insert("value".into(), series_value(&sample.value));
+                Some(QueryRow {
+                    identity: format!(
+                        "series:{}:{}:{}:{}",
+                        sample.series.kind,
+                        sample.series.id,
+                        sample.observed_at,
+                        sample.reference.id
+                    ),
+                    values,
+                })
+            })
+            .collect(),
+        Source::Geo { kind } => geo_rows(changes, scope, kind, valid_at, known_at_cursor),
         Source::Claim { predicate } => claim_rows(changes, scope, predicate.as_ref(), valid_at),
+    }
+}
+
+fn geo_rows(
+    changes: &[RuntimeChange],
+    scope: &vyrm_core::ScopeId,
+    kind: &vyrm_core::RuntimeType,
+    valid_at: u64,
+    known_at_cursor: u64,
+) -> Vec<QueryRow> {
+    let mut active = BTreeMap::<vyrm_core::RuntimeRef, (u64, RuntimeGeo)>::new();
+    for change in changes
+        .iter()
+        .filter(|change| change.cursor <= known_at_cursor && &change.scope == scope)
+    {
+        let RuntimeMutation::Geo { geo } = &change.mutation else {
+            continue;
+        };
+        if &geo.reference.kind != kind
+            || geo.valid_from > valid_at
+            || geo.valid_to.is_some_and(|end| valid_at >= end)
+        {
+            continue;
+        }
+        let replace = active.get(&geo.reference).is_none_or(|(cursor, current)| {
+            geo.valid_from > current.valid_from
+                || (geo.valid_from == current.valid_from && change.cursor > *cursor)
+        });
+        if replace {
+            active.insert(geo.reference.clone(), (change.cursor, geo.clone()));
+        }
+    }
+    active
+        .into_values()
+        .map(|(_, geo)| {
+            let mut values = geo.properties;
+            values.insert("id".into(), string(geo.reference.id.to_string()));
+            values.insert("kind".into(), string(geo.reference.kind.to_string()));
+            values.insert("subject_kind".into(), string(geo.subject.kind.to_string()));
+            values.insert("subject_id".into(), string(geo.subject.id.to_string()));
+            values.insert("field".into(), string(geo.field));
+            values.insert("valid_from".into(), RuntimeValue::Unsigned(geo.valid_from));
+            values.insert("valid_to".into(), optional_u64(geo.valid_to));
+            insert_geo_value(&mut values, &geo.value);
+            QueryRow {
+                identity: format!("geo:{}:{}", geo.reference.kind, geo.reference.id),
+                values,
+            }
+        })
+        .collect()
+}
+
+fn series_value(value: &SeriesValue) -> RuntimeValue {
+    match value {
+        SeriesValue::Integer(value) => RuntimeValue::Integer(*value),
+        SeriesValue::Unsigned(value) => RuntimeValue::Unsigned(*value),
+        SeriesValue::Decimal(value) => RuntimeValue::Decimal(value.clone()),
+        SeriesValue::Bool(value) => RuntimeValue::Bool(*value),
+        SeriesValue::String(value) => RuntimeValue::String(value.clone()),
+    }
+}
+
+fn insert_geo_value(values: &mut BTreeMap<String, RuntimeValue>, geo: &GeoValue) {
+    for field in [
+        "longitude",
+        "latitude",
+        "southwest_longitude",
+        "southwest_latitude",
+        "northeast_longitude",
+        "northeast_latitude",
+    ] {
+        values.insert(field.into(), RuntimeValue::Null);
+    }
+    match geo {
+        GeoValue::Point { point } => {
+            values.insert("geometry_kind".into(), string("point".into()));
+            values.insert(
+                "longitude".into(),
+                RuntimeValue::Decimal(point.longitude.to_string()),
+            );
+            values.insert(
+                "latitude".into(),
+                RuntimeValue::Decimal(point.latitude.to_string()),
+            );
+        }
+        GeoValue::BoundingBox {
+            southwest,
+            northeast,
+        } => {
+            values.insert("geometry_kind".into(), string("bounding_box".into()));
+            values.insert(
+                "southwest_longitude".into(),
+                RuntimeValue::Decimal(southwest.longitude.to_string()),
+            );
+            values.insert(
+                "southwest_latitude".into(),
+                RuntimeValue::Decimal(southwest.latitude.to_string()),
+            );
+            values.insert(
+                "northeast_longitude".into(),
+                RuntimeValue::Decimal(northeast.longitude.to_string()),
+            );
+            values.insert(
+                "northeast_latitude".into(),
+                RuntimeValue::Decimal(northeast.latitude.to_string()),
+            );
+        }
     }
 }
 

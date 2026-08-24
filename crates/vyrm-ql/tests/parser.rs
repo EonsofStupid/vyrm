@@ -11,6 +11,8 @@ fn parser_corpus_round_trips_to_one_canonical_form() {
         "FROM event:tool_result AT VALID 99 KNOWN 42 WHERE ok = true AND retries = 2 PROJECT cursor, ok",
         "FROM claim:status AT VALID 1000 KNOWN HEAD WHERE object = \"ready\" PROJECT subject, object",
         "FROM claim AT VALID 0 KNOWN 0 PROJECT * LIMIT 1",
+        "FROM series:metric AT VALID 1000 KNOWN HEAD WHERE series_id = \"latency\" PROJECT observed_at, value",
+        "FROM geo:location AT VALID 1000 KNOWN HEAD PROJECT subject_id, geometry_kind",
     ];
     for source in corpus {
         let first = parse(source).unwrap_or_else(|error| panic!("{source}: {error}"));

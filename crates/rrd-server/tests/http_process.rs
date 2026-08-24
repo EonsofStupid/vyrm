@@ -973,6 +973,50 @@ fn data_transaction_atomically_commits_every_public_model_and_replays_after_rest
     assert_eq!(search["hits"][0]["subject"]["id"], "alpha");
     assert_eq!(search["hits"][0]["source_cursor"], 8);
     assert!((search["hits"][0]["score"].as_f64().unwrap() - 1.0).abs() < 1e-9);
+    for (query, identity, expected) in [
+        (
+            "FROM series:series AT VALID 100 KNOWN HEAD WHERE series_id = \"latency\" PROJECT observed_at, value",
+            "series:series:latency:100:latency-100",
+            ("value", "unsigned", json!(17)),
+        ),
+        (
+            "FROM geo:location AT VALID 100 KNOWN HEAD WHERE subject_id = \"alpha\" PROJECT geometry_kind, longitude, latitude",
+            "geo:location:alpha-office",
+            ("longitude", "decimal", json!("-73")),
+        ),
+    ] {
+        let request = envelope(
+            json!({
+                "scope": "instance:socket-test",
+                "query": query,
+                "parameters": {},
+                "budget": {
+                    "max_scanned_changes": 100,
+                    "max_rows": 10,
+                    "max_output_bytes": 4096,
+                    "max_batch_rows": 10
+                }
+            }),
+            None,
+            None,
+        );
+        let (status, queried) = post(
+            &server,
+            "/v1/query",
+            &request,
+            Some((&session_id, &token)),
+        );
+        assert_eq!(status, 200, "{queried}");
+        let result = payload(&queried);
+        assert_eq!(result["known_at_cursor"], 11);
+        assert_eq!(result["plan"]["exact"], true);
+        assert_eq!(result["rows"][0]["identity"], identity);
+        assert_eq!(result["rows"][0]["values"][expected.0]["type"], expected.1);
+        assert_eq!(
+            result["rows"][0]["values"][expected.0]["value"],
+            expected.2
+        );
+    }
     let first_feed = envelope(
         json!({
             "scope": "instance:socket-test",

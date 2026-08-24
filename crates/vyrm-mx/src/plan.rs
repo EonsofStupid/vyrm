@@ -453,6 +453,66 @@ fn fields_for_source(source: &Source, schema: &RuntimeSchemaRegistry) -> Result<
                     .collect(),
             )
         }
+        Source::Series { .. } => (
+            &[
+                ("id", &[RuntimeValueType::String]),
+                ("kind", &[RuntimeValueType::String]),
+                ("series_kind", &[RuntimeValueType::String]),
+                ("series_id", &[RuntimeValueType::String]),
+                ("observed_at", &[RuntimeValueType::Unsigned]),
+                (
+                    "value",
+                    &[
+                        RuntimeValueType::Integer,
+                        RuntimeValueType::Unsigned,
+                        RuntimeValueType::Decimal,
+                        RuntimeValueType::Bool,
+                        RuntimeValueType::String,
+                    ],
+                ),
+            ],
+            Vec::new(),
+        ),
+        Source::Geo { .. } => (
+            &[
+                ("id", &[RuntimeValueType::String]),
+                ("kind", &[RuntimeValueType::String]),
+                ("subject_kind", &[RuntimeValueType::String]),
+                ("subject_id", &[RuntimeValueType::String]),
+                ("field", &[RuntimeValueType::String]),
+                ("valid_from", &[RuntimeValueType::Unsigned]),
+                (
+                    "valid_to",
+                    &[RuntimeValueType::Null, RuntimeValueType::Unsigned],
+                ),
+                ("geometry_kind", &[RuntimeValueType::String]),
+                (
+                    "longitude",
+                    &[RuntimeValueType::Null, RuntimeValueType::Decimal],
+                ),
+                (
+                    "latitude",
+                    &[RuntimeValueType::Null, RuntimeValueType::Decimal],
+                ),
+                (
+                    "southwest_longitude",
+                    &[RuntimeValueType::Null, RuntimeValueType::Decimal],
+                ),
+                (
+                    "southwest_latitude",
+                    &[RuntimeValueType::Null, RuntimeValueType::Decimal],
+                ),
+                (
+                    "northeast_longitude",
+                    &[RuntimeValueType::Null, RuntimeValueType::Decimal],
+                ),
+                (
+                    "northeast_latitude",
+                    &[RuntimeValueType::Null, RuntimeValueType::Decimal],
+                ),
+            ],
+            Vec::new(),
+        ),
         Source::Claim { .. } => (
             &[
                 ("subject", &[RuntimeValueType::String]),

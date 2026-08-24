@@ -1,9 +1,10 @@
 use std::collections::{BTreeMap, BTreeSet};
 use vyrm_core::{
-    Claim, Predicate, Producer, RuntimeCommit, RuntimeEvent, RuntimeEventSchema,
-    RuntimeGraphSnapshot, RuntimeMutation, RuntimeProperties, RuntimePropertySchema, RuntimeRecord,
-    RuntimeRecordSchema, RuntimeRef, RuntimeRelation, RuntimeRelationSchema, RuntimeSchemaRegistry,
-    RuntimeType, RuntimeValue, RuntimeValueType, ScopeId, Subject,
+    Claim, GeoPoint, GeoValue, Predicate, Producer, RuntimeCommit, RuntimeEvent,
+    RuntimeEventSchema, RuntimeGeo, RuntimeGraphSnapshot, RuntimeMutation, RuntimeProperties,
+    RuntimePropertySchema, RuntimeRecord, RuntimeRecordSchema, RuntimeRef, RuntimeRelation,
+    RuntimeRelationSchema, RuntimeSchemaRegistry, RuntimeSeriesSample, RuntimeType, RuntimeValue,
+    RuntimeValueType, ScopeId, SeriesValue, Subject,
 };
 use vyrm_mx::{bind, execute, plan, Catalog, Error, ExecutionBudget, Parameters, PhysicalOperator};
 use vyrm_ql::{parse, CursorExpr, Projection, Query, Source, TemporalSelector, TimeExpr};
@@ -37,6 +38,10 @@ fn schema() -> RuntimeMutation {
             ]),
             ..RuntimeRecordSchema::default()
         },
+    );
+    registry.records.insert(
+        RuntimeType::new("metric").unwrap(),
+        RuntimeRecordSchema::default(),
     );
     registry.relations.insert(
         RuntimeType::new("depends_on").unwrap(),
@@ -122,6 +127,39 @@ fn fixture_commit() -> RuntimeCommit {
                     },
                 ),
             },
+            RuntimeMutation::Record {
+                record: RuntimeRecord {
+                    reference: RuntimeRef::new("metric", "latency").unwrap(),
+                    valid_from: 10,
+                    valid_to: None,
+                    properties: RuntimeProperties::new(),
+                },
+            },
+            RuntimeMutation::SeriesSample {
+                sample: RuntimeSeriesSample {
+                    reference: RuntimeRef::new("sample", "latency-100").unwrap(),
+                    series: RuntimeRef::new("metric", "latency").unwrap(),
+                    observed_at: 100,
+                    value: SeriesValue::Decimal("12.5".into()),
+                    properties: RuntimeProperties::new(),
+                },
+            },
+            RuntimeMutation::Geo {
+                geo: RuntimeGeo {
+                    reference: RuntimeRef::new("location", "alpha").unwrap(),
+                    subject: RuntimeRef::new("document", "a").unwrap(),
+                    field: "position".into(),
+                    valid_from: 10,
+                    valid_to: None,
+                    value: GeoValue::Point {
+                        point: GeoPoint {
+                            longitude: -122.4,
+                            latitude: 37.8,
+                        },
+                    },
+                    properties: RuntimeProperties::new(),
+                },
+            },
         ],
     }
 }
@@ -187,6 +225,41 @@ fn memory_fjall_and_native_return_identical_exact_rows() {
 }
 
 #[test]
+fn series_and_geo_queries_match_every_persistent_engine() {
+    for (text, field, expected) in [
+        (
+            "FROM series:metric AT VALID 100 KNOWN HEAD WHERE series_id = \"latency\" PROJECT observed_at, value EXPLAIN CONTRACT",
+            "value",
+            RuntimeValue::Decimal("12.5".into()),
+        ),
+        (
+            "FROM geo:location AT VALID 100 KNOWN HEAD WHERE subject_id = \"a\" PROJECT geometry_kind, longitude, latitude EXPLAIN CONTRACT",
+            "longitude",
+            RuntimeValue::Decimal("-122.4".into()),
+        ),
+    ] {
+        let memory = MemoryEngine::new();
+        let fjall_root = tempfile::tempdir().unwrap();
+        let fjall = Store::open(fjall_root.path()).unwrap();
+        let native_root = tempfile::tempdir().unwrap();
+        let native = NativeEngine::open(&native_root.path().join("native")).unwrap();
+        let left = execute_fixture(&memory, text);
+        assert_eq!(left, execute_fixture(&fjall, text), "{text}");
+        assert_eq!(left, execute_fixture(&native, text), "{text}");
+        assert_eq!(left.returned_rows, 1, "{text}");
+        assert_eq!(left.batches[0].rows[0].values[field], expected, "{text}");
+    }
+
+    for text in [
+        "FROM series:metric AT VALID 99 KNOWN HEAD PROJECT *",
+        "FROM geo:location AT VALID 9 KNOWN HEAD PROJECT *",
+    ] {
+        let engine = MemoryEngine::new();
+        assert_eq!(execute_fixture(&engine, text).returned_rows, 0, "{text}");
+    }
+}
+
+#[test]
 fn all_source_families_execute_at_explicit_time() {
     let engine = MemoryEngine::new();
     engine.commit_runtime(&fixture_commit()).unwrap();
@@ -203,6 +276,14 @@ fn all_source_families_execute_at_explicit_time() {
         (
             "FROM claim:status AT VALID 100 KNOWN HEAD PROJECT subject, object",
             "claim:document:a:status",
+        ),
+        (
+            "FROM series:metric AT VALID 100 KNOWN HEAD WHERE series_id = \"latency\" PROJECT observed_at, value",
+            "series:metric:latency:100:latency-100",
+        ),
+        (
+            "FROM geo:location AT VALID 100 KNOWN HEAD WHERE subject_id = \"a\" PROJECT geometry_kind, longitude, latitude",
+            "geo:location:alpha",
         ),
     ] {
         let query = parse(text).unwrap();
@@ -232,7 +313,7 @@ fn bound_event_cursor_uses_one_exact_authoritative_position_on_every_engine() {
             [
                 PhysicalOperator::AuthoritativeEventCursorLookup {
                     cursor: 5,
-                    through_cursor: 6,
+                    through_cursor: 9,
                     exact: true,
                     ..
                 },
@@ -302,14 +383,17 @@ fn event_cursor_outside_the_stamp_is_an_exact_empty_path() {
 fn cursor_lookup_uses_authenticated_logarithmic_validation() {
     const EVENTS: u64 = 4_096;
     let engine = MemoryEngine::new();
-    engine.commit_runtime(&fixture_commit()).unwrap();
+    let fixture_head = engine
+        .commit_runtime(&fixture_commit())
+        .unwrap()
+        .last_cursor;
     let subject = RuntimeRef::new("document", "a").unwrap();
     engine
         .commit_runtime(&RuntimeCommit {
             scope: ScopeId::new("instance:test").unwrap(),
             at: 101,
             actor: "agent:bulk".into(),
-            expected_cursor: 6,
+            expected_cursor: fixture_head,
             mutations: (0..EVENTS)
                 .map(|_| RuntimeMutation::Event {
                     event: RuntimeEvent {
@@ -322,7 +406,7 @@ fn cursor_lookup_uses_authenticated_logarithmic_validation() {
         })
         .unwrap();
     let catalog = Catalog::capture(&engine, &ScopeId::new("instance:test").unwrap()).unwrap();
-    let head = 6 + EVENTS;
+    let head = fixture_head + EVENTS;
 
     let point = parse(&format!(
         "FROM event:tool_result AT VALID 101 KNOWN HEAD WHERE cursor = {head} PROJECT cursor"
