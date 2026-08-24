@@ -980,6 +980,11 @@ fn data_transaction_atomically_commits_every_public_model_and_replays_after_rest
             ("value", "unsigned", json!(17)),
         ),
         (
+            "FROM series:series AT VALID 100 KNOWN HEAD WHERE observed_at >= 100 AND series_id != \"other\" PROJECT observed_at",
+            "series:series:latency:100:latency-100",
+            ("observed_at", "unsigned", json!(100)),
+        ),
+        (
             "FROM geo:location AT VALID 100 KNOWN HEAD WHERE subject_id = \"alpha\" PROJECT geometry_kind, longitude, latitude",
             "geo:location:alpha-office",
             ("longitude", "decimal", json!("-73")),

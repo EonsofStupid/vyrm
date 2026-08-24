@@ -1,6 +1,7 @@
 use vyrm_core::{RuntimeType, RuntimeValue};
 use vyrm_ql::{
-    parse, CursorExpr, Filter, Projection, Query, Source, TemporalSelector, TimeExpr, ValueExpr,
+    parse, ComparisonOperator, CursorExpr, Filter, Projection, Query, Source, TemporalSelector,
+    TimeExpr, ValueExpr,
 };
 
 #[test]
@@ -9,6 +10,7 @@ fn parser_corpus_round_trips_to_one_canonical_form() {
         "FROM record:document AT VALID 100 KNOWN HEAD PROJECT *",
         "from relation:depends_on at valid $when known $cursor where state = \"open\" project id, from_id limit 20 explain contract",
         "FROM event:tool_result AT VALID 99 KNOWN 42 WHERE ok = true AND retries = 2 PROJECT cursor, ok",
+        "FROM event:tool_result AT VALID 99 KNOWN 42 WHERE retries >= 2 AND retries < 5 PROJECT cursor, retries",
         "FROM claim:status AT VALID 1000 KNOWN HEAD WHERE object = \"ready\" PROJECT subject, object",
         "FROM claim AT VALID 0 KNOWN 0 PROJECT * LIMIT 1",
         "FROM series:metric AT VALID 1000 KNOWN HEAD WHERE series_id = \"latency\" PROJECT observed_at, value",
@@ -36,6 +38,7 @@ fn typed_sdk_and_text_construct_the_same_ast() {
     );
     typed.filters.push(Filter {
         field: "status".into(),
+        comparison: ComparisonOperator::Equal,
         value: ValueExpr::Literal(RuntimeValue::String("open".into())),
     });
     typed.projection = Projection::Fields(vec!["id".into(), "status".into()]);
@@ -57,6 +60,7 @@ fn malformed_or_ambiguous_queries_fail_with_offsets() {
         "FROM unknown:doc AT VALID 1 KNOWN HEAD PROJECT *",
         "FROM record:doc AT VALID latest KNOWN HEAD PROJECT *",
         "FROM record:doc AT VALID 1 KNOWN HEAD WHERE status open PROJECT *",
+        "FROM record:doc AT VALID 1 KNOWN HEAD WHERE status ! \"open\" PROJECT *",
         "FROM record:doc AT VALID 1 KNOWN HEAD PROJECT id,",
         "FROM record:doc AT VALID 1 KNOWN HEAD PROJECT * LIMIT 0",
         "FROM record:doc AT VALID 1 KNOWN HEAD PROJECT * EXPLAIN",

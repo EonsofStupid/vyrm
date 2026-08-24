@@ -2,7 +2,10 @@ use crate::{Catalog, Error, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use vyrm_core::{digest, ReadStamp, RuntimeSchemaRegistry, RuntimeValue, RuntimeValueType};
-use vyrm_ql::{CursorExpr, Projection, Query, Source, TimeExpr, ValueExpr, QUERY_CONTRACT_VERSION};
+use vyrm_ql::{
+    ComparisonOperator, CursorExpr, Projection, Query, Source, TimeExpr, ValueExpr,
+    QUERY_CONTRACT_VERSION,
+};
 
 pub type Parameters = BTreeMap<String, RuntimeValue>;
 type FieldTypes = Vec<RuntimeValueType>;
@@ -12,6 +15,8 @@ type BuiltinFields = &'static [(&'static str, &'static [RuntimeValueType])];
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BoundFilter {
     pub field: String,
+    #[serde(default, skip_serializing_if = "ComparisonOperator::is_equal")]
+    pub comparison: ComparisonOperator,
     pub value: RuntimeValue,
 }
 
@@ -153,8 +158,10 @@ pub fn bind(query: &Query, parameters: &Parameters, catalog: &Catalog) -> Result
                     .get(&filter.field)
                     .expect("filter field was checked before parameter resolution"),
             )?;
+            ensure_comparison(&filter.field, filter.comparison, &value)?;
             Ok(BoundFilter {
                 field: filter.field.clone(),
+                comparison: filter.comparison,
                 value,
             })
         })
@@ -289,7 +296,7 @@ fn event_cursor_filter(bound: &BoundQuery) -> Option<u64> {
         return None;
     }
     bound.filters.iter().find_map(|filter| {
-        (filter.field == "cursor")
+        (filter.field == "cursor" && filter.comparison == ComparisonOperator::Equal)
             .then_some(&filter.value)
             .and_then(|value| match value {
                 RuntimeValue::Unsigned(cursor) => Some(*cursor),
@@ -370,6 +377,37 @@ fn ensure_value_type(
         Err(Error::Binding(format!(
             "filter value for {field:?} does not match accepted types {accepted:?}"
         )))
+    }
+}
+
+fn ensure_comparison(
+    field: &str,
+    comparison: ComparisonOperator,
+    value: &RuntimeValue,
+) -> Result<()> {
+    if !comparison.is_ordering()
+        || matches!(
+            value,
+            RuntimeValue::Integer(_) | RuntimeValue::Unsigned(_) | RuntimeValue::String(_)
+        )
+    {
+        Ok(())
+    } else {
+        Err(Error::Binding(format!(
+            "ordering comparison {} is not supported for the value type of {field:?}",
+            comparison_label(comparison)
+        )))
+    }
+}
+
+fn comparison_label(comparison: ComparisonOperator) -> &'static str {
+    match comparison {
+        ComparisonOperator::Equal => "=",
+        ComparisonOperator::NotEqual => "!=",
+        ComparisonOperator::LessThan => "<",
+        ComparisonOperator::LessThanOrEqual => "<=",
+        ComparisonOperator::GreaterThan => ">",
+        ComparisonOperator::GreaterThanOrEqual => ">=",
     }
 }
 

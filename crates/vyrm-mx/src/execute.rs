@@ -5,7 +5,7 @@ use vyrm_core::{
     resolve_as_of, Claim, GeoValue, RuntimeChange, RuntimeGeo, RuntimeGraphSnapshot,
     RuntimeMutation, RuntimeValue, SeriesValue,
 };
-use vyrm_ql::{Projection, Source, TraversalDirection};
+use vyrm_ql::{ComparisonOperator, Projection, Source, TraversalDirection};
 use vyrm_store::Engine;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -752,7 +752,37 @@ fn claim_rows(
 }
 
 fn matches_filter(row: &QueryRow, filter: &BoundFilter) -> bool {
-    row.values.get(&filter.field) == Some(&filter.value)
+    let Some(actual) = row.values.get(&filter.field) else {
+        return false;
+    };
+    match filter.comparison {
+        ComparisonOperator::Equal => actual == &filter.value,
+        ComparisonOperator::NotEqual => actual != &filter.value,
+        ComparisonOperator::LessThan => ordered(actual, &filter.value) == Some(-1),
+        ComparisonOperator::LessThanOrEqual => {
+            matches!(ordered(actual, &filter.value), Some(-1 | 0))
+        }
+        ComparisonOperator::GreaterThan => ordered(actual, &filter.value) == Some(1),
+        ComparisonOperator::GreaterThanOrEqual => {
+            matches!(ordered(actual, &filter.value), Some(0 | 1))
+        }
+    }
+}
+
+fn ordered(left: &RuntimeValue, right: &RuntimeValue) -> Option<i8> {
+    use std::cmp::Ordering;
+
+    let ordering = match (left, right) {
+        (RuntimeValue::Integer(left), RuntimeValue::Integer(right)) => left.cmp(right),
+        (RuntimeValue::Unsigned(left), RuntimeValue::Unsigned(right)) => left.cmp(right),
+        (RuntimeValue::String(left), RuntimeValue::String(right)) => left.cmp(right),
+        _ => return None,
+    };
+    Some(match ordering {
+        Ordering::Less => -1,
+        Ordering::Equal => 0,
+        Ordering::Greater => 1,
+    })
 }
 
 fn apply_projection(row: &mut QueryRow, projection: &Projection) {

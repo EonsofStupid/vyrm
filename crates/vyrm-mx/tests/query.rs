@@ -7,7 +7,9 @@ use vyrm_core::{
     RuntimeValueType, ScopeId, SeriesValue, Subject,
 };
 use vyrm_mx::{bind, execute, plan, Catalog, Error, ExecutionBudget, Parameters, PhysicalOperator};
-use vyrm_ql::{parse, CursorExpr, Projection, Query, Source, TemporalSelector, TimeExpr};
+use vyrm_ql::{
+    parse, ComparisonOperator, CursorExpr, Projection, Query, Source, TemporalSelector, TimeExpr,
+};
 use vyrm_store::{Engine, MemoryEngine, NativeEngine, Store};
 
 fn value(value: &str) -> RuntimeValue {
@@ -267,6 +269,51 @@ fn series_and_geo_queries_match_every_persistent_engine() {
         let engine = MemoryEngine::new();
         assert_eq!(execute_fixture(&engine, text).returned_rows, 0, "{text}");
     }
+}
+
+#[test]
+fn typed_comparisons_match_every_persistent_engine_and_reject_unsupported_ordering() {
+    let text = "FROM series:metric AT VALID 100 KNOWN HEAD WHERE observed_at >= 100 AND series_id != \"other\" PROJECT series_id, observed_at EXPLAIN CONTRACT";
+    let memory = MemoryEngine::new();
+    let fjall_root = tempfile::tempdir().unwrap();
+    let fjall = Store::open(fjall_root.path()).unwrap();
+    let native_root = tempfile::tempdir().unwrap();
+    let native = NativeEngine::open(&native_root.path().join("native")).unwrap();
+    let expected = execute_fixture(&memory, text);
+    assert_eq!(expected, execute_fixture(&fjall, text));
+    assert_eq!(expected, execute_fixture(&native, text));
+    assert_eq!(expected.returned_rows, 1);
+    assert_eq!(
+        expected.batches[0].rows[0].values["observed_at"],
+        RuntimeValue::Unsigned(100)
+    );
+    for predicate in [
+        "observed_at = 100",
+        "observed_at != 101",
+        "observed_at < 101",
+        "observed_at <= 100",
+        "observed_at > 99",
+        "observed_at >= 100",
+    ] {
+        let engine = MemoryEngine::new();
+        let query = format!(
+            "FROM series:metric AT VALID 100 KNOWN HEAD WHERE {predicate} PROJECT observed_at"
+        );
+        assert_eq!(execute_fixture(&engine, &query).returned_rows, 1, "{query}");
+    }
+
+    let parsed = parse(text).unwrap();
+    assert_eq!(parsed.filters[1].comparison, ComparisonOperator::NotEqual);
+
+    let catalog = Catalog::capture(&memory, &ScopeId::new("instance:test").unwrap()).unwrap();
+    let decimal_ordering =
+        parse("FROM series:metric AT VALID 100 KNOWN HEAD WHERE value > $minimum PROJECT value")
+            .unwrap();
+    let parameters = Parameters::from([("minimum".into(), RuntimeValue::Decimal("10.0".into()))]);
+    assert!(matches!(
+        bind(&decimal_ordering, &parameters, &catalog),
+        Err(Error::Binding(_))
+    ));
 }
 
 #[test]

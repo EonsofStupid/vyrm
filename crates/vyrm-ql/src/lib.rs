@@ -103,7 +103,9 @@ impl Query {
                     out.push_str(" AND ");
                 }
                 out.push_str(&filter.field);
-                out.push_str(" = ");
+                out.push(' ');
+                out.push_str(filter.comparison.canonical());
+                out.push(' ');
                 out.push_str(&filter.value.canonical());
             }
         }
@@ -240,7 +242,45 @@ impl CursorExpr {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Filter {
     pub field: String,
+    #[serde(default, skip_serializing_if = "ComparisonOperator::is_equal")]
+    pub comparison: ComparisonOperator,
     pub value: ValueExpr,
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ComparisonOperator {
+    #[default]
+    Equal,
+    NotEqual,
+    LessThan,
+    LessThanOrEqual,
+    GreaterThan,
+    GreaterThanOrEqual,
+}
+
+impl ComparisonOperator {
+    pub fn is_equal(&self) -> bool {
+        *self == Self::Equal
+    }
+
+    pub fn is_ordering(self) -> bool {
+        matches!(
+            self,
+            Self::LessThan | Self::LessThanOrEqual | Self::GreaterThan | Self::GreaterThanOrEqual
+        )
+    }
+
+    fn canonical(self) -> &'static str {
+        match self {
+            Self::Equal => "=",
+            Self::NotEqual => "!=",
+            Self::LessThan => "<",
+            Self::LessThanOrEqual => "<=",
+            Self::GreaterThan => ">",
+            Self::GreaterThanOrEqual => ">=",
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -327,6 +367,11 @@ impl Token {
             TokenKind::Colon => "':'".into(),
             TokenKind::Comma => "','".into(),
             TokenKind::Equals => "'='".into(),
+            TokenKind::NotEquals => "'!='".into(),
+            TokenKind::LessThan => "'<'".into(),
+            TokenKind::LessThanOrEqual => "'<='".into(),
+            TokenKind::GreaterThan => "'>'".into(),
+            TokenKind::GreaterThanOrEqual => "'>='".into(),
             TokenKind::Star => "'*'".into(),
         }
     }
@@ -340,6 +385,11 @@ enum TokenKind {
     Colon,
     Comma,
     Equals,
+    NotEquals,
+    LessThan,
+    LessThanOrEqual,
+    GreaterThan,
+    GreaterThanOrEqual,
     Star,
 }
 
@@ -365,6 +415,28 @@ fn tokenize(input: &str) -> Result<Vec<Token>, ParseError> {
             b'=' => {
                 cursor += 1;
                 TokenKind::Equals
+            }
+            b'!' if bytes.get(cursor + 1) == Some(&b'=') => {
+                cursor += 2;
+                TokenKind::NotEquals
+            }
+            b'<' => {
+                cursor += 1;
+                if bytes.get(cursor) == Some(&b'=') {
+                    cursor += 1;
+                    TokenKind::LessThanOrEqual
+                } else {
+                    TokenKind::LessThan
+                }
+            }
+            b'>' => {
+                cursor += 1;
+                if bytes.get(cursor) == Some(&b'=') {
+                    cursor += 1;
+                    TokenKind::GreaterThanOrEqual
+                } else {
+                    TokenKind::GreaterThan
+                }
             }
             b'*' => {
                 cursor += 1;
@@ -430,7 +502,10 @@ fn tokenize(input: &str) -> Result<Vec<Token>, ParseError> {
             _ => {
                 while cursor < bytes.len()
                     && !bytes[cursor].is_ascii_whitespace()
-                    && !matches!(bytes[cursor], b':' | b',' | b'=' | b'*' | b'"')
+                    && !matches!(
+                        bytes[cursor],
+                        b':' | b',' | b'=' | b'!' | b'<' | b'>' | b'*' | b'"'
+                    )
                 {
                     cursor += 1;
                 }
@@ -626,9 +701,13 @@ impl Parser {
         loop {
             let field = self.word("filter field")?;
             validate_field(&field, self.previous_offset())?;
-            self.punctuation(TokenKind::Equals, "'=' after filter field")?;
+            let comparison = self.comparison()?;
             let value = self.value_expr()?;
-            filters.push(Filter { field, value });
+            filters.push(Filter {
+                field,
+                comparison,
+                value,
+            });
             if self.peek().is_some_and(|token| token.is_keyword("AND")) {
                 self.cursor += 1;
             } else {
@@ -636,6 +715,22 @@ impl Parser {
             }
         }
         Ok(filters)
+    }
+
+    fn comparison(&mut self) -> Result<ComparisonOperator, ParseError> {
+        let token = self.next("comparison operator")?;
+        match token.kind {
+            TokenKind::Equals => Ok(ComparisonOperator::Equal),
+            TokenKind::NotEquals => Ok(ComparisonOperator::NotEqual),
+            TokenKind::LessThan => Ok(ComparisonOperator::LessThan),
+            TokenKind::LessThanOrEqual => Ok(ComparisonOperator::LessThanOrEqual),
+            TokenKind::GreaterThan => Ok(ComparisonOperator::GreaterThan),
+            TokenKind::GreaterThanOrEqual => Ok(ComparisonOperator::GreaterThanOrEqual),
+            _ => Err(ParseError::new(
+                token.offset,
+                format!("expected comparison operator, found {}", token.describe()),
+            )),
+        }
     }
 
     fn value_expr(&mut self) -> Result<ValueExpr, ParseError> {
