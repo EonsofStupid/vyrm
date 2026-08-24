@@ -28,8 +28,8 @@ consumer of that public contract. It negotiates capabilities, covers all 21
 currently published operations, bounds time and response bytes, preserves
 typed errors and request identity, and safely retries reads or
 idempotency-bound mutations after transport loss. It remains loopback-only
-until the remote TLS gate is qualified; the other two supported-language
-clients and shared conformance matrix remain open.
+until the remote TLS gate is qualified; the remaining .NET client and shared
+conformance matrix remain open.
 
 The TypeScript F5 walking skeleton is in [`sdks/typescript`](sdks/typescript).
 It generates exact operation/request/response types from the authoritative
@@ -52,6 +52,14 @@ and enforces strict envelopes, bounded I/O, deadlines, safe retries, resource
 identity, mutation idempotency, authentication, and loopback-only cleartext.
 Generated payload models, shared real-server conformance, and module release
 remain open.
+
+The Java 21 F5 walking skeleton is in [`sdks/java`](sdks/java). It generates a
+closed route enum from OpenAPI, uses the standard HTTP client plus Jackson 3.2,
+and enforces exact envelopes, bounded reads, deadlines, safe retries,
+authentication, resources, idempotency, redirect denial, and loopback-only
+cleartext. Maven compiles with warnings as errors and runs real-loopback JUnit 6
+tests; async transport, generated payload models, shared conformance, and
+publication remain open.
 
 F3 now has its first authority artifact in
 [`rrd-estate`](crates/rrd-estate): a bounded, versioned estate document whose

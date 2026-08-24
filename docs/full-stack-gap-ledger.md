@@ -418,8 +418,8 @@ wire type derives JSON Schema, and deterministic OpenAPI 3.1 is built from that
 catalogue rather than maintained separately. The server publishes both at
 `GET /v1/schema/endpoints` and `GET /v1/schema/openapi`; a frozen SHA-256 fails
 unreviewed schema drift. This removes handwritten route and payload discovery
-as SDK sources. TypeScript, Python, and Go now have walking skeletons; the two
-remaining language packages and shared black-box conformance remain open.
+as SDK sources. TypeScript, Python, Go, and Java now have walking skeletons;
+the .NET package and shared black-box conformance remain open.
 
 The first Rust client is now implemented in `rrd-client` and specified by
 [`rrd-rust-client-v1.md`](rrd-rust-client-v1.md). It is async, depends only on
@@ -452,8 +452,7 @@ absolute/per-attempt deadlines, safe retry, API-key/session authentication,
 typed errors, and loopback-only cleartext. Pydantic validates response
 envelopes; uv, Ruff, strict mypy, pytest, generation drift, and distribution
 builds gate the package. Async transport, generated per-payload models, shared
-real-server conformance, and publication remain open. Go, Java, and .NET remain
-absent.
+real-server conformance, and publication remain open.
 
 The Go walking skeleton is implemented in `sdks/go` and specified by
 [`rrd-go-client-v1.md`](rrd-go-client-v1.md). Its shell-free generator emits a
@@ -464,7 +463,18 @@ resource validation, mutation idempotency, combined deadlines, safe transport
 retry, API-key/session authentication, redirect denial, and loopback-only
 cleartext. Generation drift, `gofmt`, `go vet`, behavioral tests, and the race
 detector gate it. Generated payload types, shared real-server/version
-conformance, and publication remain open. Java and .NET remain absent.
+conformance, and publication remain open.
+
+The Java walking skeleton is implemented in `sdks/java` and specified by
+[`rrd-java-client-v1.md`](rrd-java-client-v1.md). Its generator emits a closed
+operation enum with route/auth/mutation metadata for all 21 operations. Java's
+HTTP client plus Jackson 3.2 enforce bounded reads, exact envelopes, correlation,
+resources, mutation idempotency, combined deadlines, safe I/O retry,
+authentication, redirect denial, and loopback-only cleartext. Maven/Java 21
+warnings-as-errors compilation, generator drift, packaging, and real-loopback
+JUnit 6 tests gate it. Async/caller cancellation, generated payload types,
+dependency verification, shared conformance, and publication remain open. .NET
+remains absent.
 
 **Deliverables**
 

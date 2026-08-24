@@ -657,3 +657,26 @@ index.
 - Limit: generated per-payload types, shared real-server/version conformance,
   examples/reference generation, and module publication remain open. Java and
   .NET are the next breadth slices.
+
+## 2026-08-24 — generated Java RRD client foundation
+
+- Commit: `9204459` (`feat(sdk): add generated Java RRD client`).
+- Generated surface: a shell-free generator emits a closed Java enum carrying
+  method/path/authentication/mutation metadata for all 21 OpenAPI operations,
+  with exact checked-in drift detection.
+- Runtime: the Java 21 client provides generic operation coverage plus
+  capability, catalogue, OpenAPI, and session helpers. It disables redirects,
+  rejects non-loopback cleartext without arbitrary DNS resolution, validates
+  identities/resources, requires mutation idempotency, combines absolute and
+  per-attempt deadlines, bounds response bodies, correlates response identity,
+  authenticates API-key/session calls, and retries only safe I/O failures.
+- Validation/tooling: Jackson 3.2 parses JSON but explicit closed-field checks
+  reject malformed envelope/outcome/error shapes. Maven pins its plugins and
+  compiles Java 21 with all lint warnings treated as errors.
+- Evidence: the generator drift gate, packaged JAR, and three JUnit 6
+  real-loopback tests pass. Tests cover dropped-connection retry, capability
+  identity, session/query auth and envelopes, resource identity, remote-
+  cleartext/deadline denial, typed permission errors, and all 21 operations.
+- Limit: async/caller cancellation, generated per-payload models, dependency
+  verification, shared real-server/version conformance, and Maven Central
+  publication remain open. .NET is the final F5 breadth slice.

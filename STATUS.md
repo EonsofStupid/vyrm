@@ -14,7 +14,7 @@ the complete product-capability inventories for
 [Qdrant](docs/qdrant-capability-inventory.md). Public loopback server/session/
 transaction, persistent estate, deny-by-default security/audit, and the first
 supported Rust client now have executable walking skeletons. The largest
-unfilled areas are the other two supported SDKs, object-complete/signed backup
+unfilled areas are the remaining .NET SDK, object-complete/signed backup
 policy, live subscriptions, general multi-model query and indexes, the full
 vector query/payload-index/quantization lifecycle, production distributed/
 Kubernetes operation, and authoritative Connectome management.
@@ -129,12 +129,13 @@ Kubernetes operation, and authoritative Connectome management.
   ArkType, and passes Biome, strict TypeScript, generation-drift, retry/auth/
   query/error tests. The Python walking skeleton derives the same closed route
   surface, validates envelopes with Pydantic, and passes uv lock/build,
-  generation-drift, Ruff, strict mypy, retry/auth/query/error tests. Shared
-  real-server conformance, packaging, generated Python payload models, async
-  Python. The generated Go walking skeleton covers all 21 operations with a
+  generation-drift, Ruff, strict mypy, retry/auth/query/error tests. The
+  generated Go walking skeleton covers all 21 operations with a
   standard-library client and passes format, vet, drift, behavioral, and race
-  gates. Shared real-server conformance, packaging, generated payload models,
-  async Python, and Java and .NET clients keep F5 open.
+  gates. The generated Java 21 walking skeleton covers all 21 operations,
+  compiles with warnings as errors, and passes real-loopback JUnit retry/auth/
+  query/error tests. Shared conformance, packaging, generated payload models,
+  async Python/Java, and the .NET client keep F5 open.
 
 - The bi-temporal claim kernel has immutable supersession corrections,
   canonical SHA-256 identities covering provenance and validity, and atomic
