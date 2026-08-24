@@ -459,3 +459,27 @@ index.
   slice binds session creation and every current HTTP route to it and records
   allowed/denied/failed outcomes. TLS/mTLS, secret providers, row/field policy,
   rate limits, and provisioning remain open; remote bind stays denied.
+
+## 2026-08-24 — principal-bound HTTP action enforcement
+
+- Commit: `fb01db6` (`feat(rrd): enforce principal action policy`).
+- Session boundary: an instance with initialized security state requires
+  `X-RRD-Principal` and `Authorization: ApiKey …` for session creation. The
+  authenticated principal is durably bound to the session and included in
+  idempotency collision checks; API-key material is not stored.
+- Authorization: every currently authenticated RRD route maps to one closed
+  `rrd-security::Action`. Each request authenticates the bearer lease and then
+  re-evaluates current principal validity and exact resource-prefix grants, so
+  a disabled identity or removed grant affects an existing session.
+- Compatibility boundary: instances without initialized authority remain in
+  explicitly advertised loopback development mode. Security capability state
+  is visible in negotiation. Non-loopback bind remains denied in every mode.
+- Evidence: a real-socket differential denies missing and wrong API keys,
+  allows the granted exact VyrmQL query, denies an ungranted backup with 403,
+  and verifies the runtime cursor did not change.
+- Verification: all `rrd-security` and `rrd-server` tests passed, including 16
+  real-socket cases and existing process-kill matrices; strict all-target/all-
+  feature clippy and `git diff --check` passed.
+- Limit: endpoint audit completion is the next F4 slice. Provisioning, TLS/
+  mTLS, secret providers, row/field policy, rate limits, and remote exposure
+  remain open.
