@@ -1,8 +1,9 @@
 # VyrmQL index catalogue foundation
 
-Status: authoritative persistent catalogue and fail-closed planner evidence are
-implemented. Materialized scalar artifacts, verified artifact readers, public
-RRD administration routes, and index-selected execution remain open.
+Status: authoritative persistent catalogue, content-addressed exact scalar
+artifacts, verified selection/execution, and fail-closed planner evidence are
+implemented. Public RRD administration routes, uniqueness enforcement,
+incremental maintenance, and broader index families remain open.
 
 An index definition binds a stable projection ID to one non-recursive VyrmQL
 source, an ordered list of one to sixteen fields, and an optional uniqueness
@@ -21,18 +22,30 @@ Each entry carries the shared projection stamp:
 The catalogue is authoritative control state, not a buffered projection blob.
 Every create, rebuild, publish, quarantine, and retire uses compare-and-swap and
 appends to the authenticated control journal. A ready entry is usable only when
-its configuration still hashes identically and its source cursor covers the
-requested known cursor. Publication cannot name cursor zero, a cursor beyond
-that scope's head, the wrong generation, or a non-building entry.
+its configuration still hashes identically, its source cursor exactly equals
+the requested known cursor, and its built valid-time equals the query
+valid-time. Exact equality is required because a newer artifact could contain
+knowledge unavailable at an older bi-temporal read. Publication cannot name
+cursor zero, a cursor beyond that scope's head, the wrong generation, or a
+non-building entry.
 
-VyrmMX captures the catalogue with the schema. A query whose filters match the
-leading fields of an index receives a named candidate with generation, state,
-freshness, and prefix evidence in `EXPLAIN CONTRACT`. The candidate remains
-unselected and non-exact until a content-verified artifact reader is connected;
-the authoritative log path continues to answer the query. This makes current
-planning behavior inspectable without claiming acceleration before it exists.
+VyrmMX builds an artifact by executing the exact all-fields reference query at
+one captured head and explicit valid-time. Canonical rows are durably published
+under a content-addressed projection name before the catalogue marks that
+generation ready. The executor revalidates the read stamp, artifact digest,
+scope, definition, generation, source cursor, schema revision, valid-time, and
+row count before using the bytes. Filters and projection are reapplied by the
+same reference evaluator.
 
-Tests run the lifecycle identically on memory, Fjall compatibility, and native
-VyrmKV, fence a stale build generation, reject an invalid definition without a
-control mutation, verify the journal chain, prove native reopen, and assert the
-planner's explicit rejection evidence. The full workspace test suite passes.
+A query whose filters match the leading fields of an exact ready artifact
+selects it in `EXPLAIN CONTRACT`. A stale cursor, different valid-time,
+building/quarantined state, or absent coverage keeps the authoritative log
+selected. Multiple eligible artifacts choose the longest matching prefix and
+then stable index identity. This is a usable exact snapshot index, not yet an
+incrementally maintained or universally temporal index.
+
+Tests build and query real rows identically on memory, Fjall compatibility, and
+native VyrmKV, prove stale fallback after a write, fence a stale generation,
+reject invalid definitions before control mutation, verify the journal chain,
+reopen the native artifact, and fail closed on corrupted artifact bytes. The
+full workspace test suite passes.

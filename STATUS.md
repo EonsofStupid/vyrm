@@ -151,15 +151,17 @@ Kubernetes operation, and authoritative Connectome management.
   paths, and terminates cycles; three-engine and secured-RRD tests pass. Only
   frozen series/geo built-ins are bindable today. Scalar equality, inequality,
   and ordering predicates are typed and deterministic; ordering currently
-  accepts only integer, unsigned, and string operands. Materialized index
-  access, spatial operators, full text, mutating VyrmQL, streaming, and push
+  accepts only integer, unsigned, and string operands. Incremental and broader
+  index families, spatial operators, full text, mutating VyrmQL, streaming, and push
   subscriptions keep F6 open.
-  The first index lifecycle foundation is also executable: schema-bound
+  The first index lifecycle and serving foundation is also executable: schema-bound
   compound definitions persist through authoritative control-state CAS,
   generation fencing and ready/building/quarantined/retiring state survive
-  native reopen, and matching queries expose freshness/prefix evidence. The
-  planner refuses those candidates until a verified artifact reader exists;
-  materialization, selection, uniqueness enforcement, and public administration
+  native reopen, and exact snapshot artifacts are durably content-addressed.
+  Matching queries select an artifact only when generation, cursor, schema,
+  valid-time, configuration, bytes, and digest agree; stale state falls back to
+  the authoritative log and corrupted bytes fail closed. Uniqueness,
+  incremental maintenance, broader index families, and public administration
   remain open.
   Resumable semantic polling now evaluates one query at exact resume/head
   cursors and returns deterministic added/updated/removed rows with bounded,

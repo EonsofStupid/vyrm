@@ -833,3 +833,27 @@ index.
 - Limit: this is resumable polling, not push delivery. Changefeed-assisted
   wakeup, streaming/backpressure, retained subscription leases, and ergonomic
   typed helpers in every SDK remain open.
+
+## 2026-08-24 — verified exact scalar index artifacts
+
+- Commit: `600873e` (`feat(query): serve verified scalar index artifacts`).
+- Build path: a building catalogue generation executes the all-fields reference
+  query at one captured head and explicit valid-time, then durably publishes
+  canonical rows under a content-addressed projection name before marking the
+  generation ready.
+- Selection: a matching index is exact only when source cursor and valid-time
+  equal the query, lifecycle is ready, and artifact coverage is present. The
+  planner chooses longest matching prefix with stable identity tie-breaking;
+  newer/older cursors or different valid-times retain the authoritative scan.
+- Execution: the reader independently verifies the captured read stamp, bytes,
+  SHA-256, scope, definition/configuration, generation, cursor, schema revision,
+  valid-time, and row count before reapplying the shared filter/projection
+  evaluator.
+- Evidence: real open/closed document rows select and execute through the
+  artifact identically on memory, Fjall compatibility, and native VyrmKV; a
+  subsequent write proves stale fallback; native reopen serves the artifact;
+  corrupted bytes fail closed. VyrmMX strict Clippy and the full workspace test
+  suite pass.
+- Limit: this is an exact snapshot artifact, not incremental maintenance.
+  Uniqueness, public RRD administration, count/spatial/full-text index families,
+  and historical-valid-time artifact policy remain open.

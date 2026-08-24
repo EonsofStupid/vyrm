@@ -81,10 +81,12 @@ support `=`, `!=`, `<`, `<=`, `>`, and `>=`; ordering is deliberately limited to
 integers, unsigned integers, and strings until an exact decimal ordering contract
 lands. A persistent CAS-backed index catalogue now validates compound scalar
 definitions, fences build generations, tracks freshness/lifecycle state, and
-shows unselected candidates in plan evidence. It deliberately does not select
-an index until verified materialization and artifact reads exist. See
+publishes content-addressed exact snapshot artifacts. VyrmMX selects and
+revalidates an artifact only at its exact known cursor and valid-time, falls
+back after new writes, and fails closed on corrupted bytes. Public index
+administration, uniqueness, and incremental maintenance remain open. See
 [`docs/vyrmql-index-catalogue-v1.md`](docs/vyrmql-index-catalogue-v1.md).
-Full text, mutating statements, materialized scalar indexes, and push
+Full text, mutating statements, broader/incremental indexes, and push
 subscriptions remain open. VyrmMX now also computes deterministic resumable
 semantic live-query deltas (added/updated/removed rows) between exact runtime
 cursors. Authenticated polling is exposed through RRD and the generated route

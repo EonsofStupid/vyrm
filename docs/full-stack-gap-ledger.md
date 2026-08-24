@@ -527,8 +527,10 @@ The first index lifecycle slice persists schema-bound compound definitions in
 CAS-protected control state, journals every lifecycle transition, fences stale
 builder generations, and binds readiness to configuration/artifact digests and
 an exact per-scope source cursor. VyrmMX emits matching prefix/freshness
-candidates but keeps them unselected until a verified materialized reader is
-implemented. See [`vyrmql-index-catalogue-v1.md`](vyrmql-index-catalogue-v1.md).
+candidates. It now builds durable content-addressed exact snapshot artifacts
+and selects them only at the exact source cursor and valid-time after complete
+identity/digest revalidation; stale queries use the authoritative log. See
+[`vyrmql-index-catalogue-v1.md`](vyrmql-index-catalogue-v1.md).
 
 **Deliverables**
 
@@ -536,7 +538,8 @@ implemented. See [`vyrmql-index-catalogue-v1.md`](vyrmql-index-catalogue-v1.md).
 - General document/record/edge CRUD and schemafull/schemaless policy.
 - Relational links, richer graph/path algebra, and spatial operators.
 - Materialized ordinary/compound/unique/count, spatial and full-text indexes;
-  scalar definition/lifecycle authority exists, but artifact execution does not.
+  exact scalar snapshot artifacts now execute, while uniqueness, incremental
+  maintenance, public administration, count, spatial, and full-text remain open.
 - Full-text analyzers and a replacement lexical stack measured against the old
   BM25 path; this is where the later LFG/TurboQuant retrieval integration lands.
 - Planner cardinality/cost evidence, `EXPLAIN ANALYZE`, streaming batches and
