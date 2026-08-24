@@ -1139,6 +1139,7 @@ impl<E: Engine> RrdService<E> {
             return Err(ServiceError::OperationDigestMismatch);
         }
         let (mut bytes, mut state) = self.load_authenticated(session_id, token)?;
+        self.validate_collection_vector_mutations(request)?;
         let record = state
             .transactions
             .get(transaction_id)
@@ -1284,6 +1285,94 @@ impl<E: Engine> RrdService<E> {
             operation_id,
         )?;
         Ok(accepted_receipt)
+    }
+
+    fn validate_collection_vector_mutations(&self, request: &CommitTransaction) -> Result<()> {
+        let addressed = request.mutations.iter().any(|mutation| {
+            matches!(
+                mutation,
+                TransactionMutation::PutVector {
+                    collection_id: Some(_),
+                    ..
+                }
+            )
+        });
+        if !addressed {
+            return Ok(());
+        }
+        let scope = ScopeId::new(format!("instance:{}", self.instance)).map_err(core_vector)?;
+        let catalogue = vyrm_vector::VectorCollectionRepository::new(&self.engine, scope)
+            .load()
+            .map_err(vector_collection_error)?;
+        for mutation in &request.mutations {
+            let TransactionMutation::PutVector {
+                collection_id: Some(collection_id),
+                vector_name: Some(vector_name),
+                field,
+                value,
+                provenance,
+                ..
+            } = mutation
+            else {
+                continue;
+            };
+            let collection = catalogue
+                .collections
+                .get(&ProjectionId::new(collection_id.as_str()).map_err(core_vector)?)
+                .ok_or_else(|| {
+                    ServiceError::Vector(format!("unknown vector collection {collection_id}"))
+                })?;
+            let config = collection
+                .definition
+                .vectors
+                .get(&ProjectionId::new(vector_name.as_str()).map_err(core_vector)?)
+                .ok_or_else(|| {
+                    ServiceError::Vector(format!(
+                        "unknown named vector {vector_name} in collection {collection_id}"
+                    ))
+                })?;
+            if config.field != field.as_str() {
+                return Err(ServiceError::Vector(
+                    "vector mutation field differs from its named-vector contract".into(),
+                ));
+            }
+            let query = match value {
+                DataVectorValue::Dense { values } => VectorSearchQuery::Dense {
+                    values: values.clone(),
+                },
+                DataVectorValue::Sparse {
+                    dimensions,
+                    indices,
+                    values,
+                } => VectorSearchQuery::Sparse {
+                    dimensions: *dimensions,
+                    indices: indices.clone(),
+                    values: values.clone(),
+                },
+                DataVectorValue::MultiDense {
+                    dimensions,
+                    vectors,
+                } => VectorSearchQuery::MultiDense {
+                    dimensions: *dimensions,
+                    vectors: vectors.clone(),
+                    comparator: rrd_contract::MultiVectorComparator::MaxSim,
+                },
+            };
+            validate_collection_query(config, &query)?;
+            if let Some(model) = &config.embedding_model {
+                let provenance = provenance.as_ref().ok_or_else(|| {
+                    ServiceError::Vector(
+                        "model-bound named vector requires embedding provenance".into(),
+                    )
+                })?;
+                if provenance.model != model.name || provenance.model_sha256 != model.digest {
+                    return Err(ServiceError::Vector(
+                        "vector mutation provenance differs from its named-vector model".into(),
+                    ));
+                }
+            }
+        }
+        Ok(())
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -2433,6 +2522,8 @@ fn public_runtime_mutation(
         TransactionMutation::PutVector {
             reference,
             subject,
+            collection_id: _,
+            vector_name: _,
             field,
             valid_from,
             valid_to,
@@ -2780,6 +2871,8 @@ fn public_data_mutation(mutation: &RuntimeMutation) -> Result<TransactionMutatio
         RuntimeMutation::Vector { vector } => TransactionMutation::PutVector {
             reference: public_change_ref(&vector.reference)?,
             subject: public_change_ref(&vector.subject)?,
+            collection_id: None,
+            vector_name: None,
             field: public_change_id(&vector.field)?,
             valid_from: vector.valid_from,
             valid_to: vector.valid_to,

@@ -14,7 +14,7 @@ use std::fmt;
 pub const PROTOCOL: &str = "rrd";
 pub const PROTOCOL_VERSION: u16 = 1;
 pub const OPENAPI_DOCUMENT_SHA256: &str =
-    "1d25005eeccb5d39ebd927ee842036e2d8fbf74d21a33e3887d73c8b6b0c3d50";
+    "d31ea8c4d50edb1c3b1640abf55fc18657ba49ac134785c4d3f682d7c4af3c2f";
 pub const MAX_ID_BYTES: usize = 128;
 pub const MAX_MESSAGE_BYTES: usize = 4_096;
 pub const MAX_CAPABILITIES: usize = 512;
@@ -2656,6 +2656,10 @@ pub enum TransactionMutation {
     PutVector {
         reference: DataReference,
         subject: DataReference,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        collection_id: Option<CanonicalId>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        vector_name: Option<CanonicalId>,
         field: CanonicalId,
         valid_from: u64,
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -2747,6 +2751,8 @@ impl TransactionMutation {
             }
             Self::AppendEvent { properties, .. } => validate_data_properties(properties),
             Self::PutVector {
+                collection_id,
+                vector_name,
                 valid_from,
                 valid_to,
                 value,
@@ -2754,6 +2760,11 @@ impl TransactionMutation {
                 properties,
                 ..
             } => {
+                if collection_id.is_some() != vector_name.is_some() {
+                    return invalid(
+                        "vector mutation collection_id and vector_name must be supplied together",
+                    );
+                }
                 validate_data_window(*valid_from, *valid_to)?;
                 let dimensions = validate_data_vector(value)?;
                 if let Some(provenance) = provenance {

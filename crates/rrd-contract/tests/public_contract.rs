@@ -427,6 +427,27 @@ fn vector_collection_contract_is_named_bounded_and_search_addressable() {
     }
     .validate()
     .is_err());
+    let point: TransactionMutation = serde_json::from_value(serde_json::json!({
+        "mutation": "put_vector",
+        "reference": {"kind": "embedding", "id": "alpha-title"},
+        "subject": {"kind": "document", "id": "alpha"},
+        "collection_id": "documents",
+        "vector_name": "title",
+        "field": "title_embedding",
+        "valid_from": 42,
+        "value": {"kind": "dense", "values": [0.6, 0.8]},
+        "properties": {"tenant": {"type": "string", "value": "alpha"}}
+    }))
+    .unwrap();
+    point.validate().unwrap();
+    let mut incomplete = serde_json::to_value(point).unwrap();
+    incomplete.as_object_mut().unwrap().remove("vector_name");
+    assert!(
+        serde_json::from_value::<TransactionMutation>(incomplete)
+            .unwrap()
+            .validate()
+            .is_err()
+    );
 }
 
 #[test]

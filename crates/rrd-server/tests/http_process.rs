@@ -913,6 +913,39 @@ fn data_transaction_atomically_commits_every_public_model_and_replays_after_rest
         .as_str()
         .unwrap()
         .to_owned();
+    let ensure_collection = envelope(
+        json!({
+            "scope": "instance:socket-test",
+            "collection_id": "documents",
+            "vectors": [{
+                "name": "title",
+                "field": "title_embedding",
+                "kind": "dense",
+                "dimensions": 2,
+                "metric": "cosine",
+                "memory_tier": "cached"
+            }]
+        }),
+        Some("ensure-documents-collection"),
+        None,
+    );
+    let (status, denied) = post(
+        &server,
+        "/v1/vector/collections/ensure",
+        &ensure_collection,
+        None,
+    );
+    assert_eq!(status, 401, "{denied}");
+    let (status, ensured) = post(
+        &server,
+        "/v1/vector/collections/ensure",
+        &ensure_collection,
+        Some((&session_id, &token)),
+    );
+    assert_eq!(status, 200, "{ensured}");
+    assert_eq!(payload(&ensured)["collection"]["collection_id"], "documents");
+    assert_eq!(payload(&ensured)["collection"]["generation"], 1);
+    assert_eq!(payload(&ensured)["idempotent_replay"], false);
     let zero_digest = "0".repeat(64);
     let mutations = json!([
         {
@@ -997,6 +1030,8 @@ fn data_transaction_atomically_commits_every_public_model_and_replays_after_rest
             "mutation": "put_vector",
             "reference": {"kind": "embedding", "id": "alpha-title"},
             "subject": {"kind": "document", "id": "alpha"},
+            "collection_id": "documents",
+            "vector_name": "title",
             "field": "title_embedding",
             "valid_from": 100,
             "value": {"kind": "dense", "values": [0.6, 0.8]},
@@ -1055,39 +1090,6 @@ fn data_transaction_atomically_commits_every_public_model_and_replays_after_rest
     assert_eq!(receipt["last_claim_sequence"], 1);
     assert_eq!(receipt["idempotent_replay"], false);
     assert_eq!(receipt["runtime_commit_sha256"].as_str().unwrap().len(), 64);
-    let ensure_collection = envelope(
-        json!({
-            "scope": "instance:socket-test",
-            "collection_id": "documents",
-            "vectors": [{
-                "name": "title",
-                "field": "title_embedding",
-                "kind": "dense",
-                "dimensions": 2,
-                "metric": "cosine",
-                "memory_tier": "cached"
-            }]
-        }),
-        Some("ensure-documents-collection"),
-        None,
-    );
-    let (status, denied) = post(
-        &server,
-        "/v1/vector/collections/ensure",
-        &ensure_collection,
-        None,
-    );
-    assert_eq!(status, 401, "{denied}");
-    let (status, ensured) = post(
-        &server,
-        "/v1/vector/collections/ensure",
-        &ensure_collection,
-        Some((&session_id, &token)),
-    );
-    assert_eq!(status, 200, "{ensured}");
-    assert_eq!(payload(&ensured)["collection"]["collection_id"], "documents");
-    assert_eq!(payload(&ensured)["collection"]["generation"], 1);
-    assert_eq!(payload(&ensured)["idempotent_replay"], false);
     let (status, replayed) = post(
         &server,
         "/v1/vector/collections/ensure",
