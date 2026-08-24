@@ -418,8 +418,8 @@ wire type derives JSON Schema, and deterministic OpenAPI 3.1 is built from that
 catalogue rather than maintained separately. The server publishes both at
 `GET /v1/schema/endpoints` and `GET /v1/schema/openapi`; a frozen SHA-256 fails
 unreviewed schema drift. This removes handwritten route and payload discovery
-as SDK sources. TypeScript now has a walking skeleton; the four remaining
-language packages and shared black-box conformance remain open.
+as SDK sources. TypeScript and Python now have walking skeletons; the three
+remaining language packages and shared black-box conformance remain open.
 
 The first Rust client is now implemented in `rrd-client` and specified by
 [`rrd-rust-client-v1.md`](rrd-rust-client-v1.md). It is async, depends only on
@@ -441,7 +441,19 @@ and Biome 2 plus strict TypeScript gate the package. Mock-transport tests cover
 bounded retry, API-key session creation, bearer query, identity, deadline,
 remote-cleartext and typed-error behavior. Shared real-server conformance,
 package publication, and generated per-payload runtime validators keep this
-client at walking-skeleton status. Python, Go, Java, and .NET remain absent.
+client at walking-skeleton status.
+
+The Python walking skeleton is implemented in `sdks/python` and specified by
+[`rrd-python-client-v1.md`](rrd-python-client-v1.md). Its shell-free generator
+derives the closed operation/route/auth/mutation map from the same OpenAPI
+authority. The synchronous HTTPX client covers all 21 operations and enforces
+bounded responses, correlation, resource identity, mutation idempotency,
+absolute/per-attempt deadlines, safe retry, API-key/session authentication,
+typed errors, and loopback-only cleartext. Pydantic validates response
+envelopes; uv, Ruff, strict mypy, pytest, generation drift, and distribution
+builds gate the package. Async transport, generated per-payload models, shared
+real-server conformance, and publication remain open. Go, Java, and .NET remain
+absent.
 
 **Deliverables**
 

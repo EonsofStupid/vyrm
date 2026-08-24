@@ -14,7 +14,7 @@ the complete product-capability inventories for
 [Qdrant](docs/qdrant-capability-inventory.md). Public loopback server/session/
 transaction, persistent estate, deny-by-default security/audit, and the first
 supported Rust client now have executable walking skeletons. The largest
-unfilled areas are the other five supported SDKs, object-complete/signed backup
+unfilled areas are the other four supported SDKs, object-complete/signed backup
 policy, live subscriptions, general multi-model query and indexes, the full
 vector query/payload-index/quantization lifecycle, production distributed/
 Kubernetes operation, and authoritative Connectome management.
@@ -127,8 +127,11 @@ Kubernetes operation, and authoritative Connectome management.
   only enforcement. The TypeScript walking skeleton now generates its
   full operation surface from OpenAPI, validates network envelopes with
   ArkType, and passes Biome, strict TypeScript, generation-drift, retry/auth/
-  query/error tests. Shared real-server conformance, packaging, and Python,
-  Go, Java, and .NET clients keep F5 open.
+  query/error tests. The Python walking skeleton derives the same closed route
+  surface, validates envelopes with Pydantic, and passes uv lock/build,
+  generation-drift, Ruff, strict mypy, retry/auth/query/error tests. Shared
+  real-server conformance, packaging, generated Python payload models, async
+  Python, and Go, Java, and .NET clients keep F5 open.
 
 - The bi-temporal claim kernel has immutable supersession corrections,
   canonical SHA-256 identities covering provenance and validity, and atomic

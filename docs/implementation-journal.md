@@ -609,3 +609,27 @@ index.
 - Limit: per-payload ArkType generation, browser/released-package matrices, and
   shared real-server conformance remain open. Python, Go, Java, and .NET are the
   next breadth slices.
+
+## 2026-08-24 — generated Python RRD client foundation
+
+- Commit: `00dd754` (`feat(sdk): add generated Python RRD client`).
+- Generated surface: a shell-free generator projects the closed operation ID,
+  HTTP method/path, authentication, and mutation map for all 21 routes from the
+  authoritative OpenAPI document. Checked-in output has an explicit drift gate.
+- Runtime: the synchronous HTTPX client provides generic coverage for every
+  operation plus capability, catalogue, OpenAPI, and session helpers. It
+  enforces loopback-only cleartext, canonical identities, resource paths,
+  mutation idempotency, bounded streamed responses, absolute/per-attempt
+  deadlines, response correlation, safe retry, API-key/session headers, and
+  typed API errors.
+- Validation/tooling: Pydantic rejects malformed outer response envelopes;
+  exact dependency and tool versions are locked with uv. Ruff is the sole
+  formatter/linter and strict mypy gates the public source.
+- Evidence: generation drift, Ruff, strict mypy, four pytest transport tests,
+  and wheel/source-distribution builds pass. Tests cover retry negotiation,
+  session/query auth and envelope construction, remote-cleartext/deadline
+  denial, typed permission errors, and complete catalogue generation.
+- Limit: this is a synchronous generic-payload walking skeleton. Async support,
+  generated per-payload models, shared real-server/version conformance, and
+  package publication remain open. Go, Java, and .NET are the next breadth
+  slices.
