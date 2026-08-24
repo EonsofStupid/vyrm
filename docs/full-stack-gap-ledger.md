@@ -394,6 +394,15 @@ revocation, secret providers, row/field policy, rate limits, application-
 mutation/audit-completion atomicity, oversized-body/handler-failure coverage,
 retention/rotation, and external archival remain open.
 
+The first provisioning boundary is now executable through
+`rrd-security-bootstrap`. A strict versioned manifest references mounted
+credential files; only credential digests enter the persistent authority. It
+is idempotent for identical material, denies drift after initialization, accepts
+only bounded/private in-mount credential files, and has restart/reopen evidence.
+This unblocks fresh Kubernetes volumes without adding an unauthenticated server
+bootstrap route. Authorized ongoing policy/credential administration remains
+open.
+
 **Deliverables**
 
 - Local users/service principals, password/key handling and short-lived tokens.

@@ -491,6 +491,12 @@ enter the lifecycle journal. See
 [`docs/rrd-server-v1.md`](docs/rrd-server-v1.md) for the wire and recovery
 contract.
 
+Fresh instances can initialize that authority offline with
+`rrd-security-bootstrap`. Its versioned manifest contains only credential-file
+references; mounted credential bytes are bounded, hashed, never journaled, and
+identical retries converge while drift fails. See
+[`docs/rrd-security-bootstrap-v1.md`](docs/rrd-security-bootstrap-v1.md).
+
 For JS/TanStack workflows, successful and failed tool runs are journaled under
 canonical, manager-specific subjects—`package:bun:*`, `package:pnpm:*`,
 `package:npm:*`, and `package:yarn:*`. Script names remain part of the identity,

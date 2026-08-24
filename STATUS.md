@@ -118,6 +118,11 @@ Kubernetes operation, and authoritative Connectome management.
   keeps cleartext loopback-only. Provisioning, certificate reload/revocation,
   secret providers, row/field policy, rate limits, audit retention/archival,
   and application-mutation/audit-completion atomicity keep F4 open.
+  Fresh-volume initialization is now supported by an offline, versioned
+  `rrd-security-bootstrap` manifest whose credential entries are mounted-file
+  references. Exact retries converge after reopen, drift fails, and raw
+  credential bytes never enter policy or journal state. Authorized ongoing
+  policy/credential administration remains open.
 - F5 publishes one validated catalogue for all 28 current RRD operations and
   serves it from the running process. JSON Schema for every public wire type
   and deterministic OpenAPI 3.1 are derived from the same authority, served by

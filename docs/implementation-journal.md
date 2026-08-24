@@ -1086,3 +1086,22 @@ index.
 - Limit: certificates are startup-loaded. Live rotation, CRL/OCSP, secret-
   provider/Kubernetes integration, certificate-to-principal binding, HTTP/2,
   and distributed qualification remain open.
+
+## 2026-08-24 — offline security-authority bootstrap
+
+- Commit: `7a48c32` (`feat(security): add offline authority bootstrap`).
+- Surface: `rrd-security-bootstrap` accepts an explicit database, instance,
+  versioned JSON manifest, and timestamp. Principal entries reference absolute
+  mounted credential files rather than embedding credentials.
+- Safety: manifest and credential reads are bounded; paths may use Kubernetes
+  projected-secret symlinks only inside their mount; credential files must be
+  private regular files on Unix. Only SHA-256 digests enter the validated
+  persistent `SecurityState` and authenticated control transition.
+- Recovery: the same material is an idempotent no-op after process/database
+  reopen. Any changed policy or credential fails without replacing the initial
+  authority.
+- Evidence: the black-box process test initializes, repeats, reopens, verifies
+  secret absence, changes the credential, and observes drift denial. Strict
+  Clippy passes.
+- Limit: authorized ongoing principal/policy mutation and secret rotation APIs
+  remain open; this command owns initial offline provisioning only.
