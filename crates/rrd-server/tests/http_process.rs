@@ -637,6 +637,118 @@ fn bounded_changefeed_follow_wakes_on_a_commit_and_times_out_at_the_same_cursor(
             .unwrap()
             .is_empty()
     );
+
+    let live = envelope(
+        json!({
+            "scope": "instance:socket-test",
+            "query": "FROM record:document AT VALID 100 KNOWN HEAD PROJECT title",
+            "parameters": {},
+            "after_cursor": 3,
+            "budget": {
+                "max_scanned_changes": 100,
+                "max_rows": 10,
+                "max_output_bytes": 4096,
+                "max_batch_rows": 10
+            },
+            "max_delta_rows": 10,
+            "wait_timeout_ms": 1_000
+        }),
+        None,
+        None,
+    );
+    let address = server.address;
+    let live_body = serde_json::to_vec(&live).unwrap();
+    let live_session = session_id.clone();
+    let live_token = token.clone();
+    let waiting = std::thread::spawn(move || {
+        let authorization = format!("Bearer {live_token}");
+        http(
+            address,
+            "POST",
+            "/v1/query/live/poll",
+            &[
+                ("Content-Type", "application/json"),
+                ("X-RRD-Session", &live_session),
+                ("Authorization", &authorization),
+            ],
+            &live_body,
+        )
+    });
+    std::thread::sleep(Duration::from_millis(50));
+    let begin = envelope(
+        json!({"scope": "data", "timeout_ms": 10_000}),
+        Some("live-follow-begin"),
+        None,
+    );
+    let (status, began) = post(
+        &server,
+        "/v1/transactions",
+        &begin,
+        Some((&session_id, &token)),
+    );
+    assert_eq!(status, 200, "{began}");
+    let transaction = payload(&began)["transaction_id"].as_str().unwrap();
+    let mutations = json!([{
+        "mutation": "put_record",
+        "reference": {"kind": "document", "id": "alpha"},
+        "valid_from": 100,
+        "properties": {"title": {"type": "string", "value": "Alpha updated"}}
+    }]);
+    let typed: Vec<TransactionMutation> = serde_json::from_value(mutations.clone()).unwrap();
+    let commit = envelope(
+        json!({
+            "operation_sha256": transaction_operation_sha256(&typed),
+            "mutations": mutations
+        }),
+        Some("live-follow-commit"),
+        Some(u64::MAX),
+    );
+    let (status, committed) = post(
+        &server,
+        &format!("/v1/transactions/{transaction}/commit"),
+        &commit,
+        Some((&session_id, &token)),
+    );
+    assert_eq!(status, 200, "{committed}");
+    assert_eq!(payload(&committed)["last_runtime_cursor"], 4);
+    let (status, followed) = waiting.join().unwrap();
+    assert_eq!(status, 200, "{followed}");
+    assert_eq!(payload(&followed)["timed_out"], false);
+    assert_eq!(payload(&followed)["through_cursor"], 4);
+    assert_eq!(payload(&followed)["updated"].as_array().unwrap().len(), 1);
+    assert_eq!(
+        payload(&followed)["updated"][0]["after"]["values"]["title"]["value"],
+        "Alpha updated"
+    );
+
+    let live_timeout = envelope(
+        json!({
+            "scope": "instance:socket-test",
+            "query": "FROM record:document AT VALID 100 KNOWN HEAD PROJECT title",
+            "parameters": {},
+            "after_cursor": 4,
+            "budget": {
+                "max_scanned_changes": 100,
+                "max_rows": 10,
+                "max_output_bytes": 4096,
+                "max_batch_rows": 10
+            },
+            "max_delta_rows": 10,
+            "wait_timeout_ms": 50
+        }),
+        None,
+        None,
+    );
+    let (status, timed_out) = post(
+        &server,
+        "/v1/query/live/poll",
+        &live_timeout,
+        Some((&session_id, &token)),
+    );
+    assert_eq!(status, 200, "{timed_out}");
+    assert_eq!(payload(&timed_out)["timed_out"], true);
+    assert_eq!(payload(&timed_out)["through_cursor"], 4);
+    assert!(payload(&timed_out)["waited_ms"].as_u64().unwrap() >= 50);
 }
 
 #[test]

@@ -404,31 +404,49 @@ impl<E: Engine> RrdService<E> {
             .iter()
             .map(|(name, value)| Ok((name.clone(), runtime_value(value)?)))
             .collect::<Result<vyrm_mx::Parameters>>()?;
-        let execution = vyrm_mx::ExecutionBudget {
-            max_scanned_changes: usize::try_from(request.budget.max_scanned_changes)
-                .map_err(|_| ServiceError::Query("query scan budget exceeds usize".into()))?,
-            max_rows: usize::try_from(request.budget.max_rows)
-                .map_err(|_| ServiceError::Query("query row budget exceeds usize".into()))?,
-            max_output_bytes: usize::try_from(request.budget.max_output_bytes)
-                .map_err(|_| ServiceError::Query("query output budget exceeds usize".into()))?,
-            max_batch_rows: usize::try_from(request.budget.max_batch_rows)
-                .map_err(|_| ServiceError::Query("query batch budget exceeds usize".into()))?,
+        let live_budget = vyrm_mx::LiveQueryBudget {
+            execution: query_execution_budget(&request.budget)?,
+            max_delta_rows: usize::try_from(request.max_delta_rows)
+                .map_err(|_| ServiceError::Query("live query delta budget exceeds usize".into()))?,
         };
-        let delta = vyrm_mx::poll_live_query(
-            &self.engine,
-            &scope,
-            &query,
-            &parameters,
-            request.after_cursor,
-            &vyrm_mx::LiveQueryBudget {
-                execution,
-                max_delta_rows: usize::try_from(request.max_delta_rows).map_err(|_| {
-                    ServiceError::Query("live query delta budget exceeds usize".into())
-                })?,
-            },
-        )
-        .map_err(|error| ServiceError::Query(error.to_string()))?;
+        let started = Instant::now();
+        let timeout = Duration::from_millis(request.wait_timeout_ms);
+        let (delta, timed_out, waited_ms) = loop {
+            let delta = vyrm_mx::poll_live_query(
+                &self.engine,
+                &scope,
+                &query,
+                &parameters,
+                request.after_cursor,
+                &live_budget,
+            )
+            .map_err(|error| ServiceError::Query(error.to_string()))?;
+            let elapsed = started.elapsed();
+            if delta.through_cursor > request.after_cursor
+                || request.wait_timeout_ms == 0
+                || elapsed >= timeout
+            {
+                let timed_out = delta.through_cursor == request.after_cursor
+                    && delta.added.is_empty()
+                    && delta.updated.is_empty()
+                    && delta.removed.is_empty()
+                    && request.wait_timeout_ms > 0
+                    && elapsed >= timeout;
+                break (
+                    delta,
+                    timed_out,
+                    u64::try_from(elapsed.as_millis()).unwrap_or(u64::MAX),
+                );
+            }
+            std::thread::sleep(
+                timeout
+                    .saturating_sub(elapsed)
+                    .min(Duration::from_millis(25)),
+            );
+        };
         Ok(LiveQueryDeltaResult {
+            timed_out,
+            waited_ms,
             query_sha256: delta.query_digest,
             from_cursor: delta.from_cursor,
             through_cursor: delta.through_cursor,

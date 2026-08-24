@@ -507,6 +507,16 @@ impl AppState {
             SecurityAction::QueryLivePoll,
             None,
             |envelope, session, token| {
+                if envelope.context.deadline_unix_ms.is_some_and(|deadline| {
+                    now.checked_add(envelope.payload.wait_timeout_ms)
+                        .is_none_or(|completion| completion > deadline)
+                }) {
+                    return Err(ApiError::new(
+                        ErrorCode::DeadlineExceeded,
+                        "live query wait exceeds the request deadline",
+                        false,
+                    ));
+                }
                 self.service
                     .poll_live_query(
                         session,

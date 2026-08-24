@@ -6279,6 +6279,11 @@ export interface operations {
                         };
                         query: string;
                         scope: string;
+                        /**
+                         * Format: uint64
+                         * @default 0
+                         */
+                        wait_timeout_ms?: number;
                     };
                     protocol: string;
                     /** Format: uint16 */
@@ -6411,6 +6416,7 @@ export interface operations {
                                 }[];
                                 /** Format: uint64 */
                                 through_cursor: number;
+                                timed_out: boolean;
                                 updated: {
                                     after: {
                                         identity: string;
@@ -6503,6 +6509,8 @@ export interface operations {
                                         };
                                     };
                                 }[];
+                                /** Format: uint64 */
+                                waited_ms: number;
                             };
                             /** @constant */
                             status: "ok";
@@ -6633,6 +6641,7 @@ export interface operations {
                                 }[];
                                 /** Format: uint64 */
                                 through_cursor: number;
+                                timed_out: boolean;
                                 updated: {
                                     after: {
                                         identity: string;
@@ -6725,6 +6734,8 @@ export interface operations {
                                         };
                                     };
                                 }[];
+                                /** Format: uint64 */
+                                waited_ms: number;
                             };
                             /** @constant */
                             status: "ok";

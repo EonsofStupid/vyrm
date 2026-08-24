@@ -333,11 +333,15 @@ fn live_query_contract_is_resumable_bounded_and_strict() {
         after_cursor: 41,
         budget: QueryBudget::default(),
         max_delta_rows: 256,
+        wait_timeout_ms: 1_000,
     };
     request.validate().unwrap();
     let mut encoded = serde_json::to_value(&request).unwrap();
     encoded["stream"] = serde_json::json!(true);
     assert!(serde_json::from_value::<PollLiveQuery>(encoded).is_err());
+    let mut invalid_wait = request.clone();
+    invalid_wait.wait_timeout_ms = 5_001;
+    assert!(invalid_wait.validate().is_err());
     let mut invalid = request;
     invalid.max_delta_rows = 0;
     assert!(invalid.validate().is_err());

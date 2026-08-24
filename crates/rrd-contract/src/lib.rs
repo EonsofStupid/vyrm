@@ -14,7 +14,7 @@ use std::fmt;
 pub const PROTOCOL: &str = "rrd";
 pub const PROTOCOL_VERSION: u16 = 1;
 pub const OPENAPI_DOCUMENT_SHA256: &str =
-    "a09f34b834a8f1d238f34fd48b29baa5e7b907537f5b9d9478f856571b804c29";
+    "03022f754ed41db19435b047589f83139ef294f0589a80231c3f47e3080b18d8";
 pub const MAX_ID_BYTES: usize = 128;
 pub const MAX_MESSAGE_BYTES: usize = 4_096;
 pub const MAX_CAPABILITIES: usize = 512;
@@ -28,6 +28,7 @@ pub const MAX_QUERY_ROWS: u64 = 100_000;
 pub const MAX_QUERY_OUTPUT_BYTES: u64 = 768 * 1024;
 pub const MAX_QUERY_BATCH_ROWS: u64 = 1_024;
 pub const MAX_LIVE_QUERY_DELTA_ROWS: u64 = 100_000;
+pub const MAX_LIVE_QUERY_WAIT_MS: u64 = 5_000;
 pub const MAX_VECTOR_SEARCH_CHANGES: u64 = 1_000_000;
 pub const MAX_VECTOR_SEARCH_TOP_K: u64 = 100_000;
 pub const MAX_CHANGEFEED_PAGE: u64 = 4_096;
@@ -209,6 +210,8 @@ pub struct PollLiveQuery {
     #[serde(default)]
     pub budget: QueryBudget,
     pub max_delta_rows: u64,
+    #[serde(default)]
+    pub wait_timeout_ms: u64,
 }
 
 impl PollLiveQuery {
@@ -225,6 +228,11 @@ impl PollLiveQuery {
                 "live query max_delta_rows must be in 1..={MAX_LIVE_QUERY_DELTA_ROWS}"
             ));
         }
+        if self.wait_timeout_ms > MAX_LIVE_QUERY_WAIT_MS {
+            return invalid(format!(
+                "live query wait_timeout_ms must be in 0..={MAX_LIVE_QUERY_WAIT_MS}"
+            ));
+        }
         Ok(())
     }
 }
@@ -239,6 +247,8 @@ pub struct LiveQueryRowChange {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct LiveQueryDeltaResult {
+    pub timed_out: bool,
+    pub waited_ms: u64,
     pub query_sha256: String,
     pub from_cursor: u64,
     pub through_cursor: u64,
