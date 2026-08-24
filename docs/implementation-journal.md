@@ -405,3 +405,33 @@ index.
 - Next gate: expose backup/restore and diagnostics through the canonical RRD
   service, then begin F4 identity and policy rather than deepening transport
   streaming first.
+
+## 2026-08-24 — RRD managed logical backup and restore
+
+- Commit: `42456c0` (`feat(rrd): operate managed backup restore`).
+- Capability: added authenticated `POST /v1/backups`,
+  `POST /v1/backups/list`, and `POST /v1/restores` over the existing logical
+  archive and authenticated catalogue. Public requests are path-closed; the
+  server derives per-instance backup and restore roots and restores only into
+  a generated absent root.
+- Recovery: backup and restore operations durably bind idempotency key,
+  operation digest, request identity, and prepared/completed state. Backup
+  archive labels are operation-qualified so a completed filesystem effect can
+  be rediscovered after a lost acknowledgement. An existing restore target is
+  accepted only after reopening it and matching archive claim/runtime
+  watermarks.
+- Evidence: the real-socket fixture denies unauthenticated creation, proves
+  idempotency collision denial, creates and verifies the catalogue, restores
+  and reopens a new root, checks its runtime cursor, restarts the server, and
+  replays both operations without duplicating either effect.
+- Verification: all `rrd-contract` and `rrd-server` tests passed, including 15
+  real-socket cases and the existing estate process-kill matrices; strict
+  all-target/all-feature clippy and `git diff --check` passed.
+- Limit: the archive declares object payloads referenced-only and application
+  completeness false. Retention/RPO policy, active-root deployment switch,
+  and an exact process-kill injection between this service's filesystem effect
+  and completed control record remain open.
+- Sequencing correction: establish a runnable breadth baseline across F4-F9
+  and Automaton/LFG integration before returning to performance optimization.
+  The next product slice is F4 identity, deny-by-default policy, secrets/TLS,
+  and comprehensive public-operation audit.
