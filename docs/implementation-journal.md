@@ -932,3 +932,26 @@ index.
 - Limit: this does not yet implement point/payload administration, payload
   indexes, physical memory-tier enforcement, persistent HNSW serving,
   inference, or TurboQuant.
+
+## 2026-08-24 — collection-bound atomic vector point writes
+
+- Commit: `537f27e` (`feat(vector): bind point writes to named collections`).
+- Contract: `put_vector` additively accepts paired `collection_id` and
+  `vector_name` coordinates. Unpaired coordinates fail strict validation; the
+  reviewed OpenAPI digest is now
+  `d31ea8c4d50edb1c3b1640abf55fc18657ba49ac134785c4d3f682d7c4af3c2f`.
+- Commit gate: after authenticating the session and before recording commit
+  intent, RRD resolves every addressed vector against the persistent catalogue
+  and validates field, dense/sparse/multi-dense kind, dimensions, and required
+  model name/digest provenance. The existing vector properties remain the
+  point payload and commit atomically with records, relations, events, claims,
+  series, geo, and object references.
+- Evidence: the real multi-model process fixture now creates the collection
+  before committing its point, binds the vector to `documents/title`, then
+  searches it through the same catalogue. Strict contract pairing, server
+  compilation, focused real-process execution, TypeScript generation/ArkType/
+  Biome/type/tests, and strict Clippy pass.
+- Limit: this reuses the unified ACID transaction authority and does not invent
+  a parallel point store. Dedicated retrieve/delete/scroll/batch point routes,
+  payload-index administration, and collection-aware SDK convenience methods
+  remain open.

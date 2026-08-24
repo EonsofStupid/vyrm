@@ -44,11 +44,13 @@ conflict.
 
 RRD exposes authenticated ensure/list operations with separate deny-by-default
 actions. Collection-addressed search resolves the stored definition and rejects
-kind/dimension drift before planning. Native reopen and real-process tests prove
-replay, collision, list, denial, and exact search through the catalogue. This
-is collection/named-vector administration; point/payload administration,
-physical memory-tier enforcement, and persistent ANN artifact serving remain
-open.
+kind/dimension drift before planning. Atomic `put_vector` mutations may also
+bind collection plus vector name; commit validates field, kind, dimensions, and
+model provenance before retaining the vector and payload properties in the
+unified data transaction. Native reopen and real-process tests prove replay,
+collision, list, denial, bound point commit, and exact search through the
+catalogue. Dedicated point lifecycle/scroll APIs, payload indexes, physical
+memory-tier enforcement, and persistent ANN artifact serving remain open.
 
 ## Rebuildable projections
 

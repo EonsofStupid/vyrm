@@ -102,8 +102,11 @@ control-journal history. A collection binds one or more named dense, sparse, or
 multi-dense vector spaces to exact fields, dimensions, metrics, optional model
 digests, and pinned/cached/cold placement policy. Authenticated ensure/list
 routes have distinct deny-by-default actions, and collection-addressed search
-resolves and validates that contract before executing the exact oracle. Point
-and payload administration, filtered persisted ANN serving, inference, and
+resolves and validates that contract before executing the exact oracle. Atomic
+`put_vector` point writes can bind collection plus vector name; commit validates
+field, kind, dimensions, and model provenance while retaining payload
+properties in the unified multi-model transaction. Dedicated point lifecycle/
+scroll APIs, payload indexes, filtered persisted ANN serving, inference, and
 TurboQuant remain open.
 
 F3 now has its first authority artifact in

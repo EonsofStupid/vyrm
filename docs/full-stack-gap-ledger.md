@@ -567,16 +567,20 @@ idempotency receipts, and journal history. Definitions bind field, dense/
 sparse/multi-dense kind, dimensions, metric, optional model digest, and
 pinned/cached/cold policy. Authenticated ensure/list routes have distinct
 actions, all six SDK route catalogues discover them, and collection-addressed
-exact search enforces the definition. Native reopen plus real-process denial,
-replay, collision, list, mismatch, and search tests pass. Point/payload
-administration, physical tier enforcement, filtered persisted ANN, inference,
-and TurboQuant remain open.
+exact search enforces the definition. Atomic vector writes can bind the same
+collection/name and validate field, kind, dimensions, and model provenance
+before committing payload properties with the unified transaction. Native
+reopen plus real-process denial, replay, collision, list, bound point commit,
+mismatch, and search tests pass. Dedicated point lifecycle/scroll APIs, payload
+indexes, physical tier enforcement, filtered persisted ANN, inference, and
+TurboQuant remain open.
 
 **Deliverables**
 
 - Collections/points/named-vector/payload administration. Collection and
-  named-vector ensure/list are implemented; point/payload administration is
-  still open.
+  named-vector ensure/list plus collection-bound atomic vector/payload writes
+  are implemented; dedicated point lifecycle/scroll and payload-index
+  administration remain open.
 - Compact mutable dense HNSW and sparse index lifecycle.
 - Typed payload indexes and true one-stage filtered traversal; ACORN-quality
   restrictive-filter path evaluated on fixed selectivity corpora.

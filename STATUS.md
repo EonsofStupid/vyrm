@@ -179,9 +179,12 @@ Kubernetes operation, and authoritative Connectome management.
   Ensure/list use separate authorization actions, durable idempotency receipts,
   stable generations, and the authenticated control journal. Search may address
   a collection plus vector name and fails before execution on kind/dimension
-  drift. Native reopen, replay, collision, list, denial, and real-process exact
-  search pass. Point/payload administration, persisted filtered ANN serving,
-  inference, physical tier enforcement, and TurboQuant remain F7 work.
+  drift. Atomic vector point writes can bind the same coordinates and validate
+  field, kind, dimensions, and model provenance before commit while preserving
+  payload properties. Native reopen, replay, collision, list, denial, bound
+  point commit, and real-process exact search pass. Dedicated point lifecycle/
+  scroll APIs, payload indexes, persisted filtered ANN serving, inference,
+  physical tier enforcement, and TurboQuant remain F7 work.
 
 - The bi-temporal claim kernel has immutable supersession corrections,
   canonical SHA-256 identities covering provenance and validity, and atomic

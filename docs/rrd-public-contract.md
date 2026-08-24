@@ -36,7 +36,10 @@ pinned/cached/cold placement. Ensure is mutation-idempotent; list exposes the
 authoritative catalogue revision and stable collection generation. Search may
 use the original field/metric address for compatibility or a collection plus
 vector name; the latter resolves the persisted contract and rejects kind or
-dimension drift before executing.
+dimension drift before executing. `put_vector` mutations may carry the same
+collection/vector coordinates; the server validates their field, kind,
+dimensions, and required model provenance before committing them with all
+other record/graph/series/geo mutations and their payload properties.
 
 The first vector-read contract supports bounded dense, sparse, and
 multi-dense/MaxSim queries across cosine, dot, Euclidean, and Manhattan
