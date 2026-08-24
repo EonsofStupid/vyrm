@@ -348,3 +348,44 @@ fn selected_index_fails_closed_when_artifact_bytes_are_corrupted() {
         Err(Error::Integrity(_))
     ));
 }
+
+#[test]
+fn operation_receipts_replay_and_reject_idempotency_collisions() {
+    let engine = MemoryEngine::new();
+    let query_catalogue = seed(&engine);
+    let index_id = ProjectionId::new("document-status-title").unwrap();
+    let repository = IndexCatalogueRepository::new(&engine, scope());
+    repository
+        .create(&context(2, "create"), &query_catalogue, definition())
+        .unwrap();
+    let ready = repository
+        .build(
+            &context(3, "build"),
+            &index_id,
+            10,
+            &ExecutionBudget::default(),
+        )
+        .unwrap();
+    let entry = ready.entries[&index_id].clone();
+    let operation_digest = digest::sha256_hex(b"ensure-document-status-title");
+    repository
+        .record_operation(
+            &context(4, "record"),
+            "ensure-key".into(),
+            operation_digest.clone(),
+            entry.clone(),
+        )
+        .unwrap();
+    assert_eq!(
+        repository
+            .operation_receipt("ensure-key", &operation_digest)
+            .unwrap()
+            .unwrap()
+            .entry,
+        entry
+    );
+    assert!(matches!(
+        repository.operation_receipt("ensure-key", &digest::sha256_hex(b"different")),
+        Err(Error::Catalog(_))
+    ));
+}

@@ -60,6 +60,18 @@ export const endpoints = {
     "authentication": "session_bearer",
     "mutation": false
   },
+  "query-index-ensure": {
+    "method": "POST",
+    "path": "/v1/query/indexes/ensure",
+    "authentication": "session_bearer",
+    "mutation": true
+  },
+  "query-index-list": {
+    "method": "POST",
+    "path": "/v1/query/indexes/list",
+    "authentication": "session_bearer",
+    "mutation": false
+  },
   "query-live-poll": {
     "method": "POST",
     "path": "/v1/query/live/poll",

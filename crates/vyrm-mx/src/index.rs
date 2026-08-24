@@ -11,6 +11,7 @@ pub const INDEX_CATALOGUE_CONTRACT_VERSION: u16 = 1;
 pub const INDEX_ARTIFACT_CONTRACT_VERSION: u16 = 1;
 const MAX_INDEX_FIELDS: usize = 16;
 const MAX_INDEX_ARTIFACT_ROWS: usize = 1_000_000;
+const MAX_INDEX_OPERATION_RECEIPTS: usize = 100_000;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -141,6 +142,8 @@ pub struct IndexCatalogue {
     pub scope: ScopeId,
     pub revision: u64,
     pub entries: BTreeMap<ProjectionId, IndexEntry>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub operations: BTreeMap<String, IndexOperationReceipt>,
 }
 
 impl IndexCatalogue {
@@ -150,6 +153,7 @@ impl IndexCatalogue {
             scope,
             revision: 0,
             entries: BTreeMap::new(),
+            operations: BTreeMap::new(),
         }
     }
 
@@ -161,28 +165,36 @@ impl IndexCatalogue {
             )));
         }
         for (id, entry) in &self.entries {
-            entry.definition.validate()?;
-            entry.stamp.validate().map_err(|error| {
-                Error::Integrity(format!("invalid index stamp for {id}: {error}"))
-            })?;
-            if id != &entry.definition.id
-                || id != &entry.stamp.id
-                || entry.stamp.config_digest != entry.definition.config_digest()?
+            validate_index_entry(id, entry)?;
+        }
+        if self.operations.len() > MAX_INDEX_OPERATION_RECEIPTS {
+            return Err(Error::Integrity(
+                "index operation receipt limit exceeded".into(),
+            ));
+        }
+        for (key, receipt) in &self.operations {
+            if key.is_empty()
+                || receipt.operation_digest.len() != 64
+                || !receipt
+                    .operation_digest
+                    .bytes()
+                    .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
             {
-                return Err(Error::Integrity(format!(
-                    "index identity or configuration digest disagrees for {id}"
-                )));
+                return Err(Error::Integrity(
+                    "index operation receipt identity is invalid".into(),
+                ));
             }
-            if entry.stamp.state == ProjectionState::Ready
-                && (entry.built_valid_at.is_none() || entry.artifact_rows.is_none())
-            {
-                return Err(Error::Integrity(format!(
-                    "ready index {id} is missing artifact coverage"
-                )));
-            }
+            validate_index_entry(&receipt.entry.definition.id, &receipt.entry)?;
         }
         Ok(())
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct IndexOperationReceipt {
+    pub operation_digest: String,
+    pub entry: IndexEntry,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -241,6 +253,67 @@ impl<'a, E: Engine> IndexCatalogueRepository<'a, E> {
         }
         catalogue.validate()?;
         Ok(catalogue)
+    }
+
+    pub fn operation_receipt(
+        &self,
+        idempotency_key: &str,
+        operation_digest: &str,
+    ) -> Result<Option<IndexOperationReceipt>> {
+        let catalogue = self.load()?;
+        let Some(receipt) = catalogue.operations.get(idempotency_key) else {
+            return Ok(None);
+        };
+        if receipt.operation_digest != operation_digest {
+            return Err(Error::Catalog(
+                "index idempotency key is bound to a different operation".into(),
+            ));
+        }
+        Ok(Some(receipt.clone()))
+    }
+
+    pub fn record_operation(
+        &self,
+        context: &IndexMutationContext,
+        idempotency_key: String,
+        operation_digest: String,
+        entry: IndexEntry,
+    ) -> Result<IndexCatalogue> {
+        context.validate()?;
+        if idempotency_key.is_empty()
+            || operation_digest.len() != 64
+            || !operation_digest
+                .bytes()
+                .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+        {
+            return Err(Error::Catalog(
+                "index operation requires a canonical idempotency key and SHA-256".into(),
+            ));
+        }
+        validate_index_entry(&entry.definition.id, &entry)?;
+        self.update(context, "index.operation_recorded", move |catalogue| {
+            if let Some(existing) = catalogue.operations.get(&idempotency_key) {
+                if existing.operation_digest == operation_digest && existing.entry == entry {
+                    return Ok(());
+                }
+                return Err(Error::Catalog(
+                    "index idempotency key is bound to a different operation".into(),
+                ));
+            }
+            if catalogue.operations.len() >= MAX_INDEX_OPERATION_RECEIPTS {
+                return Err(Error::Budget(
+                    "index operation receipt limit exceeded".into(),
+                ));
+            }
+            catalogue.operations.insert(
+                idempotency_key,
+                IndexOperationReceipt {
+                    operation_digest,
+                    entry,
+                },
+            );
+            Ok(())
+        })
     }
 
     pub fn create(
@@ -516,6 +589,30 @@ impl<'a, E: Engine> IndexCatalogueRepository<'a, E> {
         })?;
         Ok(catalogue)
     }
+}
+
+fn validate_index_entry(id: &ProjectionId, entry: &IndexEntry) -> Result<()> {
+    entry.definition.validate()?;
+    entry
+        .stamp
+        .validate()
+        .map_err(|error| Error::Integrity(format!("invalid index stamp for {id}: {error}")))?;
+    if id != &entry.definition.id
+        || id != &entry.stamp.id
+        || entry.stamp.config_digest != entry.definition.config_digest()?
+    {
+        return Err(Error::Integrity(format!(
+            "index identity or configuration digest disagrees for {id}"
+        )));
+    }
+    if entry.stamp.state == ProjectionState::Ready
+        && (entry.built_valid_at.is_none() || entry.artifact_rows.is_none())
+    {
+        return Err(Error::Integrity(format!(
+            "ready index {id} is missing artifact coverage"
+        )));
+    }
+    Ok(())
 }
 
 pub(crate) fn index_artifact_name(

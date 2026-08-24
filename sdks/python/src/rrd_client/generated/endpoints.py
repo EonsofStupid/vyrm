@@ -14,6 +14,8 @@ OperationId = Literal[
     "health-ready",
     "openapi-read",
     "query-execute",
+    "query-index-ensure",
+    "query-index-list",
     "query-live-poll",
     "restore-create",
     "session-close",
@@ -106,6 +108,18 @@ ENDPOINTS: Final[dict[OperationId, Endpoint]] = {
         "method": "POST",
         "mutation": False,
         "path": "/v1/query",
+    },
+    "query-index-ensure": {
+        "authentication": "session_bearer",
+        "method": "POST",
+        "mutation": True,
+        "path": "/v1/query/indexes/ensure",
+    },
+    "query-index-list": {
+        "authentication": "session_bearer",
+        "method": "POST",
+        "mutation": False,
+        "path": "/v1/query/indexes/list",
     },
     "query-live-poll": {
         "authentication": "session_bearer",

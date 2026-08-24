@@ -15,6 +15,8 @@ public enum OperationId
     HealthReady,
     OpenapiRead,
     QueryExecute,
+    QueryIndexEnsure,
+    QueryIndexList,
     QueryLivePoll,
     RestoreCreate,
     SessionClose,
@@ -43,7 +45,7 @@ public sealed record Endpoint(
 
 public static class EndpointCatalog
 {
-    public const int Count = 22;
+    public const int Count = 24;
 
     public static Endpoint Get(OperationId operation) => operation switch
     {
@@ -59,6 +61,8 @@ public static class EndpointCatalog
         OperationId.HealthReady => new("health-ready", "GET", "/v1/health/ready", Authentication.Public, false),
         OperationId.OpenapiRead => new("openapi-read", "GET", "/v1/schema/openapi", Authentication.Public, false),
         OperationId.QueryExecute => new("query-execute", "POST", "/v1/query", Authentication.SessionBearer, false),
+        OperationId.QueryIndexEnsure => new("query-index-ensure", "POST", "/v1/query/indexes/ensure", Authentication.SessionBearer, true),
+        OperationId.QueryIndexList => new("query-index-list", "POST", "/v1/query/indexes/list", Authentication.SessionBearer, false),
         OperationId.QueryLivePoll => new("query-live-poll", "POST", "/v1/query/live/poll", Authentication.SessionBearer, false),
         OperationId.RestoreCreate => new("restore-create", "POST", "/v1/restores", Authentication.SessionBearer, true),
         OperationId.SessionClose => new("session-close", "DELETE", "/v1/sessions/{session}", Authentication.SessionBearer, true),

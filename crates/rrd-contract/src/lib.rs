@@ -14,7 +14,7 @@ use std::fmt;
 pub const PROTOCOL: &str = "rrd";
 pub const PROTOCOL_VERSION: u16 = 1;
 pub const OPENAPI_DOCUMENT_SHA256: &str =
-    "9433b9def5ae25e34e4e0dc384a2af8a95cafe938e47bee79f2e2e59753c314f";
+    "a09f34b834a8f1d238f34fd48b29baa5e7b907537f5b9d9478f856571b804c29";
 pub const MAX_ID_BYTES: usize = 128;
 pub const MAX_MESSAGE_BYTES: usize = 4_096;
 pub const MAX_CAPABILITIES: usize = 512;
@@ -246,6 +246,87 @@ pub struct LiveQueryDeltaResult {
     pub added: Vec<QueryRowSnapshot>,
     pub updated: Vec<LiveQueryRowChange>,
     pub removed: Vec<QueryRowSnapshot>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct EnsureQueryIndex {
+    pub scope: String,
+    pub index_id: CanonicalId,
+    pub definition_query: String,
+    #[serde(default)]
+    pub unique: bool,
+    #[serde(default)]
+    pub budget: QueryBudget,
+}
+
+impl EnsureQueryIndex {
+    pub fn validate(&self) -> Result<()> {
+        ExecuteQuery {
+            scope: self.scope.clone(),
+            query: self.definition_query.clone(),
+            parameters: BTreeMap::new(),
+            budget: self.budget.clone(),
+        }
+        .validate()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ListQueryIndexes {
+    pub scope: String,
+}
+
+impl ListQueryIndexes {
+    pub fn validate(&self) -> Result<()> {
+        if self.scope.is_empty() || self.scope.len() > MAX_ID_BYTES || self.scope.contains('\0') {
+            return invalid(format!(
+                "query index scope length must be in 1..={MAX_ID_BYTES} bytes and contain no NUL"
+            ));
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum QueryIndexState {
+    Building,
+    Ready,
+    Quarantined,
+    Retiring,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct QueryIndexSnapshot {
+    pub index_id: CanonicalId,
+    pub definition_query: String,
+    pub unique: bool,
+    pub generation: u64,
+    pub source_cursor: u64,
+    pub built_valid_at: Option<u64>,
+    pub artifact_rows: Option<u64>,
+    pub configuration_sha256: String,
+    pub artifact_sha256: String,
+    pub state: QueryIndexState,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct QueryIndexCatalogueSnapshot {
+    pub scope: String,
+    pub revision: u64,
+    pub indexes: Vec<QueryIndexSnapshot>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct EnsureQueryIndexResult {
+    pub index: QueryIndexSnapshot,
+    pub catalogue_revision: u64,
+    pub idempotent_replay: bool,
 }
 
 #[derive(
@@ -647,6 +728,8 @@ pub enum SecurityAction {
     SessionClose,
     QueryExecute,
     QueryLivePoll,
+    QueryIndexEnsure,
+    QueryIndexList,
     TransactionBegin,
     TransactionPreview,
     TransactionCommit,
@@ -921,6 +1004,26 @@ pub fn endpoint_catalogue() -> EndpointCatalogue {
             SecurityAction::QueryExecute,
             "ExecuteQuery",
             "QueryResult",
+        ),
+        endpoint(
+            "query-index-ensure",
+            HttpMethod::Post,
+            "/v1/query/indexes/ensure",
+            EndpointAuthentication::SessionBearer,
+            true,
+            SecurityAction::QueryIndexEnsure,
+            "EnsureQueryIndex",
+            "EnsureQueryIndexResult",
+        ),
+        endpoint(
+            "query-index-list",
+            HttpMethod::Post,
+            "/v1/query/indexes/list",
+            EndpointAuthentication::SessionBearer,
+            false,
+            SecurityAction::QueryIndexList,
+            "ListQueryIndexes",
+            "QueryIndexCatalogueSnapshot",
         ),
         endpoint(
             "query-live-poll",
@@ -1273,6 +1376,8 @@ fn request_envelope_schema(name: &str) -> Result<serde_json::Value> {
         "CreateInstanceBackup" => schema_json::<RequestEnvelope<CreateInstanceBackup>>(),
         "CreateSession" => schema_json::<RequestEnvelope<CreateSession>>(),
         "ExecuteQuery" => schema_json::<RequestEnvelope<ExecuteQuery>>(),
+        "EnsureQueryIndex" => schema_json::<RequestEnvelope<EnsureQueryIndex>>(),
+        "ListQueryIndexes" => schema_json::<RequestEnvelope<ListQueryIndexes>>(),
         "PollLiveQuery" => schema_json::<RequestEnvelope<PollLiveQuery>>(),
         "FollowChangefeed" => schema_json::<RequestEnvelope<FollowChangefeed>>(),
         "ListInstanceBackups" => schema_json::<RequestEnvelope<ListInstanceBackups>>(),
@@ -1306,6 +1411,10 @@ fn response_envelope_schema(name: &str) -> Result<serde_json::Value> {
         "LiveQueryDeltaResult" => schema_json::<ResponseEnvelope<LiveQueryDeltaResult>>(),
         "OpenApiDocument" => schema_json::<ResponseEnvelope<serde_json::Value>>(),
         "QueryResult" => schema_json::<ResponseEnvelope<QueryResult>>(),
+        "EnsureQueryIndexResult" => schema_json::<ResponseEnvelope<EnsureQueryIndexResult>>(),
+        "QueryIndexCatalogueSnapshot" => {
+            schema_json::<ResponseEnvelope<QueryIndexCatalogueSnapshot>>()
+        }
         "Readiness" => schema_json::<ResponseEnvelope<Readiness>>(),
         "RestoreInstanceBackupResult" => {
             schema_json::<ResponseEnvelope<RestoreInstanceBackupResult>>()

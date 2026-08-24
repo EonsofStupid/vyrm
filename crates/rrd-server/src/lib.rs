@@ -13,15 +13,16 @@ use rrd_contract::{
     CreateInstanceBackupResult, CreateSession, DataEventSchema, DataGeoPoint, DataGeoValue,
     DataObjectReceipt, DataProperties, DataPropertySchema, DataRecordSchema, DataReference,
     DataRelationSchema, DataSchemaRegistry, DataSeriesValue, DataValueType,
-    DataVectorNormalization, DataVectorValue, ExecuteQuery, FollowChangefeed,
-    InstanceBackupCatalogueSnapshot, InstanceBackupSnapshot, ListInstanceBackups,
-    LiveQueryDeltaResult, LiveQueryRowChange, LogicalArchiveSnapshot, PollLiveQuery,
-    PreviewTransaction, QueryExecutionSnapshot, QueryPlanCandidate, QueryPlanSnapshot, QueryResult,
-    QueryRowSnapshot, QueryValue, ReadAudit, ReadChangefeed, RenewSession, RestoreInstanceBackup,
-    RestoreInstanceBackupResult, RuntimeChangeSnapshot, SearchVectors, SessionEndState,
-    SessionLease, SessionLimits, SessionTermination, TransactionLease, TransactionMutation,
-    TransactionPreview, TransactionState, VectorSearchHit, VectorSearchMetric, VectorSearchQuery,
-    VectorSearchResult,
+    DataVectorNormalization, DataVectorValue, EnsureQueryIndex, EnsureQueryIndexResult,
+    ExecuteQuery, FollowChangefeed, InstanceBackupCatalogueSnapshot, InstanceBackupSnapshot,
+    ListInstanceBackups, ListQueryIndexes, LiveQueryDeltaResult, LiveQueryRowChange,
+    LogicalArchiveSnapshot, PollLiveQuery, PreviewTransaction, QueryExecutionSnapshot,
+    QueryIndexCatalogueSnapshot, QueryIndexSnapshot, QueryIndexState, QueryPlanCandidate,
+    QueryPlanSnapshot, QueryResult, QueryRowSnapshot, QueryValue, ReadAudit, ReadChangefeed,
+    RenewSession, RestoreInstanceBackup, RestoreInstanceBackupResult, RuntimeChangeSnapshot,
+    SearchVectors, SessionEndState, SessionLease, SessionLimits, SessionTermination,
+    TransactionLease, TransactionMutation, TransactionPreview, TransactionState, VectorSearchHit,
+    VectorSearchMetric, VectorSearchQuery, VectorSearchResult,
 };
 use serde::{Deserialize, Serialize};
 use sha2::Sha256;
@@ -31,12 +32,14 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 use vyrm_core::{
     digest, Claim, EmbeddingProvenance, GeoPoint, GeoValue, ObjectReceipt, ObjectReference,
-    Predicate, Producer, PromotionState, RuntimeCommit, RuntimeEvent, RuntimeEventSchema,
-    RuntimeGeo, RuntimeMutation, RuntimeProperties, RuntimePropertySchema, RuntimeRecord,
-    RuntimeRecordSchema, RuntimeRef, RuntimeRelation, RuntimeRelationSchema, RuntimeSchemaRegistry,
-    RuntimeSeriesSample, RuntimeType, RuntimeValue, RuntimeValueType, RuntimeVector, ScopeId,
-    SeriesValue, Subject, Tier, VectorNormalization, VectorValue,
+    Predicate, Producer, ProjectionId, ProjectionState, PromotionState, RuntimeCommit,
+    RuntimeEvent, RuntimeEventSchema, RuntimeGeo, RuntimeMutation, RuntimeProperties,
+    RuntimePropertySchema, RuntimeRecord, RuntimeRecordSchema, RuntimeRef, RuntimeRelation,
+    RuntimeRelationSchema, RuntimeSchemaRegistry, RuntimeSeriesSample, RuntimeType, RuntimeValue,
+    RuntimeValueType, RuntimeVector, ScopeId, SeriesValue, Subject, Tier, VectorNormalization,
+    VectorValue,
 };
+use vyrm_ql::{CursorExpr, Projection, TimeExpr};
 use vyrm_store::{ControlTransition, Engine};
 
 const SESSION_STATE_FORMAT: u16 = 1;
@@ -194,6 +197,14 @@ pub struct RrdService<E> {
 }
 
 impl<E: Engine> RrdService<E> {
+    fn query_scope(&self, requested: &str) -> Result<ScopeId> {
+        let expected_scope = format!("instance:{}", self.instance);
+        if requested != expected_scope {
+            return Err(ServiceError::WrongScope);
+        }
+        ScopeId::new(requested.to_owned()).map_err(|error| ServiceError::Query(error.to_string()))
+    }
+
     pub fn new(engine: E, instance: CanonicalId, token_key: [u8; 32]) -> Self {
         Self {
             engine,
@@ -441,6 +452,161 @@ impl<E: Engine> RrdService<E> {
                 .removed
                 .iter()
                 .map(public_query_row)
+                .collect::<Result<_>>()?,
+        })
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn ensure_query_index(
+        &self,
+        session_id: &CorrelationId,
+        token: &CorrelationId,
+        idempotency_key: &CorrelationId,
+        request: &EnsureQueryIndex,
+        now: u64,
+        request_id: &str,
+        operation_id: &str,
+    ) -> Result<EnsureQueryIndexResult> {
+        request
+            .validate()
+            .map_err(|error| ServiceError::Query(error.to_string()))?;
+        self.authorize(session_id, token, now, request_id, operation_id)?;
+        let scope = self.query_scope(&request.scope)?;
+        let operation_digest = digest::sha256_hex(
+            &serde_json::to_vec(request).map_err(|error| ServiceError::Query(error.to_string()))?,
+        );
+        let repository = vyrm_mx::IndexCatalogueRepository::new(&self.engine, scope.clone());
+        if let Some(receipt) = repository
+            .operation_receipt(idempotency_key.as_str(), &operation_digest)
+            .map_err(query_index_error)?
+        {
+            let catalogue = repository
+                .load()
+                .map_err(|error| ServiceError::Query(error.to_string()))?;
+            return Ok(EnsureQueryIndexResult {
+                index: public_query_index(&receipt.entry)?,
+                catalogue_revision: catalogue.revision,
+                idempotent_replay: true,
+            });
+        }
+        let (definition, valid_at) = query_index_definition(request)?;
+        let mutation = vyrm_mx::IndexMutationContext {
+            at: now,
+            actor: format!("session:{}", session_id.as_str()),
+            request_id: request_id.into(),
+            operation_id: operation_id.into(),
+        };
+        let current = repository
+            .load()
+            .map_err(|error| ServiceError::Query(error.to_string()))?;
+        if let Some(existing) = current.entries.get(&definition.id) {
+            if existing.definition != definition {
+                return Err(ServiceError::Query(format!(
+                    "index {} already exists with a different definition",
+                    definition.id
+                )));
+            }
+            match existing.stamp.state {
+                ProjectionState::Building => {}
+                ProjectionState::Ready
+                    if existing.built_valid_at == Some(valid_at)
+                        && existing.stamp.source_cursor
+                            == self
+                                .engine
+                                .runtime_read_stamp(&scope)
+                                .map_err(ServiceError::Store)?
+                                .commit_cursor => {}
+                ProjectionState::Ready => {
+                    repository
+                        .begin_rebuild(&mutation, &definition.id)
+                        .map_err(|error| ServiceError::Query(error.to_string()))?;
+                }
+                ProjectionState::Quarantined | ProjectionState::Retiring => {
+                    return Err(ServiceError::Query(format!(
+                        "index {} must be explicitly recovered before ensure",
+                        definition.id
+                    )));
+                }
+            }
+        } else {
+            let query_catalogue = vyrm_mx::Catalog::capture(&self.engine, &scope)
+                .map_err(|error| ServiceError::Query(error.to_string()))?;
+            repository
+                .create(&mutation, &query_catalogue, definition.clone())
+                .map_err(|error| ServiceError::Query(error.to_string()))?;
+        }
+        let catalogue = repository
+            .load()
+            .map_err(|error| ServiceError::Query(error.to_string()))?;
+        let entry = catalogue
+            .entries
+            .get(&definition.id)
+            .ok_or_else(|| ServiceError::Query("created index disappeared".into()))?;
+        let ready = if entry.stamp.state == ProjectionState::Ready
+            && entry.built_valid_at == Some(valid_at)
+            && entry.stamp.source_cursor
+                == self
+                    .engine
+                    .runtime_read_stamp(&scope)
+                    .map_err(ServiceError::Store)?
+                    .commit_cursor
+        {
+            catalogue
+        } else {
+            repository
+                .build(
+                    &mutation,
+                    &definition.id,
+                    valid_at,
+                    &query_execution_budget(&request.budget)?,
+                )
+                .map_err(|error| ServiceError::Query(error.to_string()))?
+        };
+        let entry = ready
+            .entries
+            .get(&definition.id)
+            .cloned()
+            .ok_or_else(|| ServiceError::Query("ready index disappeared".into()))?;
+        let recorded = repository
+            .record_operation(
+                &mutation,
+                idempotency_key.as_str().into(),
+                operation_digest,
+                entry.clone(),
+            )
+            .map_err(query_index_error)?;
+        Ok(EnsureQueryIndexResult {
+            index: public_query_index(&entry)?,
+            catalogue_revision: recorded.revision,
+            idempotent_replay: false,
+        })
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn list_query_indexes(
+        &self,
+        session_id: &CorrelationId,
+        token: &CorrelationId,
+        request: &ListQueryIndexes,
+        now: u64,
+        request_id: &str,
+        operation_id: &str,
+    ) -> Result<QueryIndexCatalogueSnapshot> {
+        request
+            .validate()
+            .map_err(|error| ServiceError::Query(error.to_string()))?;
+        self.authorize(session_id, token, now, request_id, operation_id)?;
+        let scope = self.query_scope(&request.scope)?;
+        let catalogue = vyrm_mx::IndexCatalogueRepository::new(&self.engine, scope)
+            .load()
+            .map_err(|error| ServiceError::Query(error.to_string()))?;
+        Ok(QueryIndexCatalogueSnapshot {
+            scope: request.scope.clone(),
+            revision: catalogue.revision,
+            indexes: catalogue
+                .entries
+                .values()
+                .map(public_query_index)
                 .collect::<Result<_>>()?,
         })
     }
@@ -1816,6 +1982,97 @@ fn public_query_row(row: &vyrm_mx::QueryRow) -> Result<QueryRowSnapshot> {
             .map(|(name, value)| Ok((name.clone(), query_value(value)?)))
             .collect::<Result<_>>()?,
     })
+}
+
+fn query_execution_budget(budget: &rrd_contract::QueryBudget) -> Result<vyrm_mx::ExecutionBudget> {
+    Ok(vyrm_mx::ExecutionBudget {
+        max_scanned_changes: usize::try_from(budget.max_scanned_changes)
+            .map_err(|_| ServiceError::Query("query scan budget exceeds usize".into()))?,
+        max_rows: usize::try_from(budget.max_rows)
+            .map_err(|_| ServiceError::Query("query row budget exceeds usize".into()))?,
+        max_output_bytes: usize::try_from(budget.max_output_bytes)
+            .map_err(|_| ServiceError::Query("query output budget exceeds usize".into()))?,
+        max_batch_rows: usize::try_from(budget.max_batch_rows)
+            .map_err(|_| ServiceError::Query("query batch budget exceeds usize".into()))?,
+    })
+}
+
+fn query_index_definition(request: &EnsureQueryIndex) -> Result<(vyrm_mx::IndexDefinition, u64)> {
+    if request.unique {
+        return Err(ServiceError::Query(
+            "unique index enforcement is not implemented".into(),
+        ));
+    }
+    let query = vyrm_ql::parse(&request.definition_query)
+        .map_err(|error| ServiceError::Query(error.to_string()))?;
+    if !query.filters.is_empty()
+        || query.limit.is_some()
+        || query.explain_contract
+        || !matches!(query.temporal.known_at, CursorExpr::Head)
+    {
+        return Err(ServiceError::Query(
+            "index definition query requires KNOWN HEAD and cannot contain filters, limits, or EXPLAIN"
+                .into(),
+        ));
+    }
+    let TimeExpr::Literal(valid_at) = query.temporal.valid_at else {
+        return Err(ServiceError::Query(
+            "index definition valid-time must be a literal".into(),
+        ));
+    };
+    let Projection::Fields(fields) = query.projection else {
+        return Err(ServiceError::Query(
+            "index definition must project one or more named fields".into(),
+        ));
+    };
+    Ok((
+        vyrm_mx::IndexDefinition {
+            id: ProjectionId::new(request.index_id.as_str())
+                .map_err(|error| ServiceError::Query(error.to_string()))?,
+            source: query.source,
+            fields,
+            unique: false,
+        },
+        valid_at,
+    ))
+}
+
+fn public_query_index(entry: &vyrm_mx::IndexEntry) -> Result<QueryIndexSnapshot> {
+    let valid_at = entry.built_valid_at.unwrap_or(0);
+    let mut definition = vyrm_ql::Query::new(
+        entry.definition.source.clone(),
+        vyrm_ql::TemporalSelector {
+            valid_at: TimeExpr::Literal(valid_at),
+            known_at: CursorExpr::Head,
+        },
+    );
+    definition.projection = Projection::Fields(entry.definition.fields.clone());
+    Ok(QueryIndexSnapshot {
+        index_id: CanonicalId::new(entry.definition.id.to_string())
+            .map_err(|error| ServiceError::Query(error.to_string()))?,
+        definition_query: definition.canonical(),
+        unique: entry.definition.unique,
+        generation: entry.stamp.generation,
+        source_cursor: entry.stamp.source_cursor,
+        built_valid_at: entry.built_valid_at,
+        artifact_rows: entry.artifact_rows,
+        configuration_sha256: entry.stamp.config_digest.clone(),
+        artifact_sha256: entry.stamp.artifact_digest.clone(),
+        state: match entry.stamp.state {
+            ProjectionState::Building => QueryIndexState::Building,
+            ProjectionState::Ready => QueryIndexState::Ready,
+            ProjectionState::Quarantined => QueryIndexState::Quarantined,
+            ProjectionState::Retiring => QueryIndexState::Retiring,
+        },
+    })
+}
+
+fn query_index_error(error: vyrm_mx::Error) -> ServiceError {
+    if matches!(&error, vyrm_mx::Error::Catalog(message) if message.contains("idempotency key")) {
+        ServiceError::IdempotencyConflict
+    } else {
+        ServiceError::Query(error.to_string())
+    }
 }
 
 fn public_runtime_commit(

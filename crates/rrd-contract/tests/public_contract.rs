@@ -1,15 +1,16 @@
 use rrd_contract::{
     transaction_operation_sha256, BeginTransaction, CanonicalId, CapabilityDescriptor,
     CapabilityStatus, CloseSession, CommitReceipt, CommitTransaction, CorrelationId,
-    CreateInstanceBackup, DeploymentMode, ErrorBody, ErrorCode, EstateActivityPolicySnapshot,
-    EstateBackupJobSnapshot, EstateBackupJobState, EstateBackupJobsSnapshot, EstateMutationResult,
-    EstateSnapshot, ExecuteQuery, FollowChangefeed, IdempotencyBinding, Liveness, PollLiveQuery,
-    PreviewTransaction, QueryBudget, QueryExecutionSnapshot, QueryPlanCandidate, QueryPlanSnapshot,
-    QueryResult, QueryRowSnapshot, QueryValue, ReadAudit, ReadChangefeed, ReadEstate, Readiness,
-    RenewSession, RequestContext, RequestEnvelope, ResourceId, ResourceKind, ResourcePath,
-    ResponseEnvelope, ResponseOutcome, RestoreInstanceBackup, ServiceCapabilities, SessionEndState,
-    SessionLease, SessionLimits, SessionTermination, TransactionMutation, TransactionPreview,
-    TransactionState, PROTOCOL, PROTOCOL_VERSION,
+    CreateInstanceBackup, DeploymentMode, EnsureQueryIndex, ErrorBody, ErrorCode,
+    EstateActivityPolicySnapshot, EstateBackupJobSnapshot, EstateBackupJobState,
+    EstateBackupJobsSnapshot, EstateMutationResult, EstateSnapshot, ExecuteQuery, FollowChangefeed,
+    IdempotencyBinding, ListQueryIndexes, Liveness, PollLiveQuery, PreviewTransaction, QueryBudget,
+    QueryExecutionSnapshot, QueryPlanCandidate, QueryPlanSnapshot, QueryResult, QueryRowSnapshot,
+    QueryValue, ReadAudit, ReadChangefeed, ReadEstate, Readiness, RenewSession, RequestContext,
+    RequestEnvelope, ResourceId, ResourceKind, ResourcePath, ResponseEnvelope, ResponseOutcome,
+    RestoreInstanceBackup, ServiceCapabilities, SessionEndState, SessionLease, SessionLimits,
+    SessionTermination, TransactionMutation, TransactionPreview, TransactionState, PROTOCOL,
+    PROTOCOL_VERSION,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -343,6 +344,30 @@ fn live_query_contract_is_resumable_bounded_and_strict() {
 }
 
 #[test]
+fn query_index_administration_contract_is_bounded_and_strict() {
+    EnsureQueryIndex {
+        scope: "instance:project-alpha".into(),
+        index_id: CanonicalId::new("documents-by-status").unwrap(),
+        definition_query: "FROM record:document AT VALID 42 KNOWN HEAD PROJECT status, title"
+            .into(),
+        unique: false,
+        budget: QueryBudget::default(),
+    }
+    .validate()
+    .unwrap();
+    ListQueryIndexes {
+        scope: "instance:project-alpha".into(),
+    }
+    .validate()
+    .unwrap();
+    assert!(ListQueryIndexes {
+        scope: String::new()
+    }
+    .validate()
+    .is_err());
+}
+
+#[test]
 fn changefeed_request_is_cursor_addressed_bounded_and_strict() {
     let request = ReadChangefeed {
         scope: "instance:project-alpha".into(),
@@ -427,7 +452,7 @@ fn audit_read_contract_is_bounded_and_strict() {
 fn endpoint_catalogue_is_complete_sorted_and_transport_neutral() {
     let catalogue = rrd_contract::endpoint_catalogue();
     catalogue.validate().unwrap();
-    assert_eq!(catalogue.endpoints.len(), 22);
+    assert_eq!(catalogue.endpoints.len(), 24);
     assert_eq!(catalogue.endpoints[0].operation.as_str(), "audit-read");
     let create = catalogue
         .endpoints

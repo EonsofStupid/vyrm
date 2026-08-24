@@ -1059,6 +1059,96 @@ fn data_transaction_atomically_commits_every_public_model_and_replays_after_rest
     assert_eq!(live["added"][0]["identity"], "series:series:latency:100:latency-100");
     assert!(live["updated"].as_array().unwrap().is_empty());
     assert!(live["removed"].as_array().unwrap().is_empty());
+    let ensure_index = envelope(
+        json!({
+            "scope": "instance:socket-test",
+            "index_id": "document-title",
+            "definition_query": "FROM record:document AT VALID 100 KNOWN HEAD PROJECT title",
+            "unique": false,
+            "budget": {
+                "max_scanned_changes": 100,
+                "max_rows": 10,
+                "max_output_bytes": 4096,
+                "max_batch_rows": 10
+            }
+        }),
+        Some("ensure-document-title"),
+        None,
+    );
+    let (status, denied) = post(&server, "/v1/query/indexes/ensure", &ensure_index, None);
+    assert_eq!(status, 401, "{denied}");
+    let (status, ensured) = post(
+        &server,
+        "/v1/query/indexes/ensure",
+        &ensure_index,
+        Some((&session_id, &token)),
+    );
+    assert_eq!(status, 200, "{ensured}");
+    assert_eq!(payload(&ensured)["idempotent_replay"], false);
+    assert_eq!(payload(&ensured)["index"]["state"], "ready");
+    assert_eq!(payload(&ensured)["index"]["source_cursor"], 11);
+    assert_eq!(payload(&ensured)["index"]["artifact_rows"], 2);
+    let (status, replayed) = post(
+        &server,
+        "/v1/query/indexes/ensure",
+        &ensure_index,
+        Some((&session_id, &token)),
+    );
+    assert_eq!(status, 200, "{replayed}");
+    assert_eq!(payload(&replayed)["idempotent_replay"], true);
+    let mut collision = ensure_index.clone();
+    collision["payload"]["definition_query"] =
+        json!("FROM record:document AT VALID 101 KNOWN HEAD PROJECT title");
+    let (status, collision) = post(
+        &server,
+        "/v1/query/indexes/ensure",
+        &collision,
+        Some((&session_id, &token)),
+    );
+    assert_eq!(status, 409, "{collision}");
+    let list_indexes = envelope(
+        json!({"scope": "instance:socket-test"}),
+        None,
+        None,
+    );
+    let (status, listed) = post(
+        &server,
+        "/v1/query/indexes/list",
+        &list_indexes,
+        Some((&session_id, &token)),
+    );
+    assert_eq!(status, 200, "{listed}");
+    assert_eq!(payload(&listed)["indexes"].as_array().unwrap().len(), 1);
+    assert_eq!(payload(&listed)["indexes"][0]["index_id"], "document-title");
+    let indexed_query = envelope(
+        json!({
+            "scope": "instance:socket-test",
+            "query": "FROM record:document AT VALID 100 KNOWN HEAD WHERE title = \"Alpha\" PROJECT title EXPLAIN CONTRACT",
+            "parameters": {},
+            "budget": {
+                "max_scanned_changes": 100,
+                "max_rows": 10,
+                "max_output_bytes": 4096,
+                "max_batch_rows": 10
+            }
+        }),
+        None,
+        None,
+    );
+    let (status, indexed) = post(
+        &server,
+        "/v1/query",
+        &indexed_query,
+        Some((&session_id, &token)),
+    );
+    assert_eq!(status, 200, "{indexed}");
+    assert!(payload(&indexed)["plan"]["candidates"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|candidate| candidate["name"] == "index:document-title"
+            && candidate["selected"] == true));
+    assert_eq!(payload(&indexed)["rows"][0]["identity"], "record:document:alpha");
     let first_feed = envelope(
         json!({
             "scope": "instance:socket-test",
@@ -1325,16 +1415,19 @@ fn real_socket_exercises_lifecycle_commit_and_restart_replay() {
     assert_eq!(payload(&catalogue)["protocol_version"], 1);
     assert_eq!(
         payload(&catalogue)["endpoints"].as_array().unwrap().len(),
-        22
+        24
     );
     let (status, openapi) = http(server.address, "GET", "/v1/schema/openapi", &[], &[]);
     assert_eq!(status, 200, "{openapi}");
     assert_eq!(payload(&openapi)["openapi"], "3.1.0");
-    assert_eq!(payload(&openapi)["x-rrd-endpoint-count"], 22);
+    assert_eq!(payload(&openapi)["x-rrd-endpoint-count"], 24);
     assert!(payload(&openapi)["paths"]["/v1/query"]["post"]["requestBody"]
         ["content"]["application/json"]["schema"]
         .is_object());
     assert!(payload(&openapi)["paths"]["/v1/query/live/poll"]["post"]["requestBody"]
+        ["content"]["application/json"]["schema"]
+        .is_object());
+    assert!(payload(&openapi)["paths"]["/v1/query/indexes/ensure"]["post"]["requestBody"]
         ["content"]["application/json"]["schema"]
         .is_object());
 

@@ -17,6 +17,8 @@ const (
 	OperationHealthReady        OperationID = "health-ready"
 	OperationOpenapiRead        OperationID = "openapi-read"
 	OperationQueryExecute       OperationID = "query-execute"
+	OperationQueryIndexEnsure   OperationID = "query-index-ensure"
+	OperationQueryIndexList     OperationID = "query-index-list"
 	OperationQueryLivePoll      OperationID = "query-live-poll"
 	OperationRestoreCreate      OperationID = "restore-create"
 	OperationSessionClose       OperationID = "session-close"
@@ -42,6 +44,8 @@ var endpoints = map[OperationID]Endpoint{
 	OperationHealthReady:        {Method: "GET", Path: "/v1/health/ready", Authentication: "public", Mutation: false},
 	OperationOpenapiRead:        {Method: "GET", Path: "/v1/schema/openapi", Authentication: "public", Mutation: false},
 	OperationQueryExecute:       {Method: "POST", Path: "/v1/query", Authentication: "session_bearer", Mutation: false},
+	OperationQueryIndexEnsure:   {Method: "POST", Path: "/v1/query/indexes/ensure", Authentication: "session_bearer", Mutation: true},
+	OperationQueryIndexList:     {Method: "POST", Path: "/v1/query/indexes/list", Authentication: "session_bearer", Mutation: false},
 	OperationQueryLivePoll:      {Method: "POST", Path: "/v1/query/live/poll", Authentication: "session_bearer", Mutation: false},
 	OperationRestoreCreate:      {Method: "POST", Path: "/v1/restores", Authentication: "session_bearer", Mutation: true},
 	OperationSessionClose:       {Method: "DELETE", Path: "/v1/sessions/{session}", Authentication: "session_bearer", Mutation: true},

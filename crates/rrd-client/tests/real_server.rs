@@ -142,9 +142,9 @@ async fn rust_client_negotiates_authenticates_queries_and_reads_audit() {
     let capabilities = client.capabilities().await.unwrap();
     assert_eq!(capabilities.protocol_version, 1);
     let catalogue = client.endpoint_catalogue().await.unwrap();
-    assert_eq!(catalogue.endpoints.len(), 22);
+    assert_eq!(catalogue.endpoints.len(), 24);
     let openapi = client.openapi_document().await.unwrap();
-    assert_eq!(openapi["x-rrd-endpoint-count"], 22);
+    assert_eq!(openapi["x-rrd-endpoint-count"], 24);
 
     let session_request = CreateSession {
         limits: SessionLimits {

@@ -1,7 +1,7 @@
 use rrd_contract::{CanonicalId, ResourceId, ResourceKind, ResourcePath};
 use rrd_security::{
     Action, AuditDecision, AuditPhase, AuditRecord, Error, Principal, PrincipalKind, ResourceGrant,
-    SECURITY_FORMAT, SecurityRepository, SecurityState,
+    SecurityRepository, SecurityState, SECURITY_FORMAT,
 };
 use std::collections::BTreeMap;
 use vyrm_core::digest;
@@ -89,6 +89,26 @@ fn policy_is_persistent_exact_scope_and_deny_by_default() {
         repository.authenticate_and_authorize(
             &CanonicalId::new("connectome-local").unwrap(),
             b"correct horse battery staple",
+            Action::QueryIndexEnsure,
+            &path("alpha"),
+            2_000,
+        ),
+        Err(Error::PermissionDenied)
+    ));
+    assert!(matches!(
+        repository.authenticate_and_authorize(
+            &CanonicalId::new("connectome-local").unwrap(),
+            b"correct horse battery staple",
+            Action::QueryIndexList,
+            &path("alpha"),
+            2_000,
+        ),
+        Err(Error::PermissionDenied)
+    ));
+    assert!(matches!(
+        repository.authenticate_and_authorize(
+            &CanonicalId::new("connectome-local").unwrap(),
+            b"correct horse battery staple",
             Action::QueryLivePoll,
             &path("alpha"),
             2_000,
@@ -100,17 +120,15 @@ fn policy_is_persistent_exact_scope_and_deny_by_default() {
     let engine = NativeEngine::open(&root).unwrap();
     let repository = SecurityRepository::new(&engine, CanonicalId::new("alpha").unwrap());
     assert_eq!(repository.load().unwrap().unwrap().revision, 1);
-    assert!(
-        repository
-            .authenticate_and_authorize(
-                &CanonicalId::new("connectome-local").unwrap(),
-                b"correct horse battery staple",
-                Action::QueryExecute,
-                &path("other"),
-                2_000,
-            )
-            .is_err()
-    );
+    assert!(repository
+        .authenticate_and_authorize(
+            &CanonicalId::new("connectome-local").unwrap(),
+            b"correct horse battery staple",
+            Action::QueryExecute,
+            &path("other"),
+            2_000,
+        )
+        .is_err());
 }
 
 #[test]

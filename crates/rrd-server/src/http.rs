@@ -8,11 +8,11 @@ use axum::Router;
 use rrd_contract::{
     AbortTransaction, AuditDecision, AuditPhase, BeginTransaction, CanonicalId,
     CapabilityDescriptor, CapabilityStatus, CloseSession, CommitTransaction, CorrelationId,
-    CreateInstanceBackup, CreateSession, DeploymentMode, ErrorBody, ErrorCode, ExecuteQuery,
-    FollowChangefeed, ListInstanceBackups, Liveness, PollLiveQuery, PreviewTransaction, ReadAudit,
-    ReadChangefeed, ReadEstate, Readiness, RenewSession, RequestContext, RequestEnvelope,
-    ResourceId, ResourceKind, ResponseEnvelope, ResponseOutcome, RestoreInstanceBackup,
-    SearchVectors, ServiceCapabilities, PROTOCOL, PROTOCOL_VERSION,
+    CreateInstanceBackup, CreateSession, DeploymentMode, EnsureQueryIndex, ErrorBody, ErrorCode,
+    ExecuteQuery, FollowChangefeed, ListInstanceBackups, ListQueryIndexes, Liveness, PollLiveQuery,
+    PreviewTransaction, ReadAudit, ReadChangefeed, ReadEstate, Readiness, RenewSession,
+    RequestContext, RequestEnvelope, ResourceId, ResourceKind, ResponseEnvelope, ResponseOutcome,
+    RestoreInstanceBackup, SearchVectors, ServiceCapabilities, PROTOCOL, PROTOCOL_VERSION,
 };
 use rrd_security::{Action as SecurityAction, AuditRecord, SecurityRepository};
 use serde::de::DeserializeOwned;
@@ -230,6 +230,12 @@ impl AppState {
             }
             (Method::POST, "/v1/transactions") => self.begin_transaction(&headers, &body, now),
             (Method::POST, "/v1/query") => self.execute_query(&headers, &body, now),
+            (Method::POST, "/v1/query/indexes/ensure") => {
+                self.ensure_query_index(&headers, &body, now)
+            }
+            (Method::POST, "/v1/query/indexes/list") => {
+                self.list_query_indexes(&headers, &body, now)
+            }
             (Method::POST, "/v1/query/live/poll") => self.poll_live_query(&headers, &body, now),
             (Method::POST, "/v1/backups") => self.create_instance_backup(&headers, &body, now),
             (Method::POST, "/v1/backups/list") => self.list_instance_backups(&headers, &body, now),
@@ -503,6 +509,58 @@ impl AppState {
             |envelope, session, token| {
                 self.service
                     .poll_live_query(
+                        session,
+                        token,
+                        &envelope.payload,
+                        now,
+                        envelope.context.request_id.as_str(),
+                        envelope.context.operation_id.as_str(),
+                    )
+                    .map_err(api_error)
+            },
+        )
+    }
+
+    fn ensure_query_index(&self, headers: &HeaderMap, body: &[u8], now: u64) -> HttpResponse {
+        self.with_authenticated_envelope::<EnsureQueryIndex, _, _>(
+            headers,
+            body,
+            now,
+            true,
+            SecurityAction::QueryIndexEnsure,
+            None,
+            |envelope, session, token| {
+                let idempotency_key = envelope
+                    .context
+                    .idempotency_key
+                    .as_ref()
+                    .expect("mutating envelopes require idempotency");
+                self.service
+                    .ensure_query_index(
+                        session,
+                        token,
+                        idempotency_key,
+                        &envelope.payload,
+                        now,
+                        envelope.context.request_id.as_str(),
+                        envelope.context.operation_id.as_str(),
+                    )
+                    .map_err(api_error)
+            },
+        )
+    }
+
+    fn list_query_indexes(&self, headers: &HeaderMap, body: &[u8], now: u64) -> HttpResponse {
+        self.with_authenticated_envelope::<ListQueryIndexes, _, _>(
+            headers,
+            body,
+            now,
+            false,
+            SecurityAction::QueryIndexList,
+            None,
+            |envelope, session, token| {
+                self.service
+                    .list_query_indexes(
                         session,
                         token,
                         &envelope.payload,
