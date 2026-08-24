@@ -435,3 +435,27 @@ index.
   and Automaton/LFG integration before returning to performance optimization.
   The next product slice is F4 identity, deny-by-default policy, secrets/TLS,
   and comprehensive public-operation audit.
+
+## 2026-08-24 — persistent F4 security authority core
+
+- Commit: `3bc71f9` (`feat(security): establish persistent policy authority`).
+- Ownership: introduced `rrd-security` as the RRD identity, authorization, and
+  audit owner instead of placing policy inside VyrmKV, query execution, RRO,
+  or Connectome.
+- Capability: persistent bounded user/service/node principals carry only
+  credential SHA-256 verifiers, validity/disable state, and exact closed-action
+  resource-prefix grants. Missing policy, unknown identity, bad credential,
+  expired/disabled identity, wrong action, and wrong resource deny by default.
+- Audit: typed records retain identity, action, resource, request/operation
+  coordinates, decision, status, and request/response digests while excluding
+  bodies, credentials, tokens, and arbitrary headers. Immutable audit IDs deny
+  rebinding and replay through the authenticated control journal.
+- Evidence: native reopen tests prove exact allow, every principal denial above,
+  wrong-instance denial after restart, audit idempotency/collision, journal
+  verification, and absence of the raw credential from serialized evidence.
+- Verification: package tests, strict all-target/all-feature clippy, and `git
+  diff --check` passed.
+- Limit: this is the persistent authority core, not completed F4. The next
+  slice binds session creation and every current HTTP route to it and records
+  allowed/denied/failed outcomes. TLS/mTLS, secret providers, row/field policy,
+  rate limits, and provisioning remain open; remote bind stays denied.
