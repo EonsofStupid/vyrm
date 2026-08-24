@@ -1010,24 +1010,38 @@ fn same_platform_file(observed: &Path, expected: &Path) -> bool {
 
 #[cfg(windows)]
 fn same_platform_file(observed: &Path, expected: &Path) -> bool {
-    use std::os::windows::fs::MetadataExt;
+    let Ok(observed) = windows_file_identity(observed) else {
+        return false;
+    };
+    let Ok(expected) = windows_file_identity(expected) else {
+        return false;
+    };
+    observed == expected
+}
 
-    let Ok(observed) = std::fs::metadata(observed) else {
-        return false;
+#[cfg(windows)]
+fn windows_file_identity(path: &Path) -> std::io::Result<(u32, u64)> {
+    use std::mem::MaybeUninit;
+    use std::os::windows::io::AsRawHandle;
+    use windows_sys::Win32::Storage::FileSystem::{
+        GetFileInformationByHandle, BY_HANDLE_FILE_INFORMATION,
     };
-    let Ok(expected) = std::fs::metadata(expected) else {
-        return false;
-    };
-    matches!(
-        (
-            observed.volume_serial_number(),
-            observed.file_index(),
-            expected.volume_serial_number(),
-            expected.file_index(),
-        ),
-        (Some(observed_volume), Some(observed_index), Some(expected_volume), Some(expected_index))
-            if observed_volume == expected_volume && observed_index == expected_index
-    )
+
+    let file = File::open(path)?;
+    let mut information = MaybeUninit::<BY_HANDLE_FILE_INFORMATION>::uninit();
+    // SAFETY: `file` owns a valid handle for the duration of the call and the
+    // API initializes the complete output structure when it returns nonzero.
+    let succeeded =
+        unsafe { GetFileInformationByHandle(file.as_raw_handle(), information.as_mut_ptr()) };
+    if succeeded == 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    // SAFETY: a nonzero return from GetFileInformationByHandle guarantees the
+    // output structure was initialized.
+    let information = unsafe { information.assume_init() };
+    let file_index =
+        (u64::from(information.nFileIndexHigh) << 32) | u64::from(information.nFileIndexLow);
+    Ok((information.dwVolumeSerialNumber, file_index))
 }
 
 #[cfg(not(any(unix, windows)))]

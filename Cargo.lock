@@ -2992,6 +2992,7 @@ dependencies = [
  "tempfile",
  "vyrm-core",
  "vyrm-store",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
