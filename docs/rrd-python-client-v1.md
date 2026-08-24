@@ -8,7 +8,7 @@ remain open.
 `sdks/python` derives its closed `OperationId` and endpoint map from
 `rrd-contract`'s deterministic OpenAPI 3.1 document. The generator executes the
 Rust contract exporter without a shell and records operation ID, method, path,
-authentication, and mutation classification for all 22 routes. A drift check
+authentication, and mutation classification for all 24 routes. A drift check
 fails when the checked-in projection differs from the contract.
 
 `RrdClient.call()` exposes the entire generated operation catalogue while

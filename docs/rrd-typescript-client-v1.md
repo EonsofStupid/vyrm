@@ -13,7 +13,7 @@ generate:check` fails when either artifact drifts.
 The package deliberately uses two boundaries:
 
 - OpenAPI-generated types provide compile-time request payload and successful
-  response payload types for all 22 operations.
+  response payload types for all 24 operations.
 - ArkType validates the untrusted response envelope, protocol version,
   success/error discrimination, and bounded error shape at runtime. Endpoint
   payload validation is still server-authoritative; generated per-payload

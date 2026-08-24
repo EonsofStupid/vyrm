@@ -2,8 +2,9 @@
 
 Status: authoritative persistent catalogue, content-addressed exact scalar
 artifacts, verified selection/execution, and fail-closed planner evidence are
-implemented. Public RRD administration routes, uniqueness enforcement,
-incremental maintenance, and broader index families remain open.
+implemented. Authenticated idempotent ensure/build and list operations are
+public through RRD. Uniqueness enforcement, incremental maintenance, and
+broader index families remain open.
 
 An index definition binds a stable projection ID to one non-recursive VyrmQL
 source, an ordered list of one to sixteen fields, and an optional uniqueness
@@ -49,3 +50,12 @@ native VyrmKV, prove stale fallback after a write, fence a stale generation,
 reject invalid definitions before control mutation, verify the journal chain,
 reopen the native artifact, and fail closed on corrupted artifact bytes. The
 full workspace test suite passes.
+
+`POST /v1/query/indexes/ensure` accepts a strict index-definition VyrmQL read,
+requires `KNOWN HEAD`, a literal valid-time, named projected fields, no filters,
+no limit, no `EXPLAIN`, and a mutation idempotency key. It creates or rebuilds
+the generation synchronously and records the accepted result in the catalogue;
+same-key replay returns that snapshot and a changed payload conflicts.
+`POST /v1/query/indexes/list` returns stable authoritative catalogue order. Both
+routes require live sessions and distinct deny-by-default security actions.
+Unique requests fail explicitly until uniqueness is enforced in the write path.

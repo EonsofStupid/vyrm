@@ -24,7 +24,7 @@ internal Rust API being mislabeled as an SDK. Its scope and limitations are in
 [`docs/rrd-public-contract.md`](docs/rrd-public-contract.md).
 
 The first F5 client is [`rrd-client`](crates/rrd-client), an asynchronous Rust
-consumer of that public contract. It negotiates capabilities, covers all 22
+consumer of that public contract. It negotiates capabilities, covers all 24
 currently published operations, bounds time and response bytes, preserves
 typed errors and request identity, and safely retries reads or
 idempotency-bound mutations after transport loss. It remains loopback-only
@@ -40,7 +40,7 @@ current route catalogue; shared real-server conformance and release packaging
 remain open.
 
 The Python F5 walking skeleton is in [`sdks/python`](sdks/python). It derives
-the closed 22-operation route surface from the same OpenAPI authority, validates
+the closed 24-operation route surface from the same OpenAPI authority, validates
 untrusted envelopes with Pydantic, and enforces the same bounded retry,
 identity, deadline, resource, idempotency, and loopback-cleartext rules. uv,
 Ruff, strict mypy, pytest, and package builds gate it; generated payload models,
@@ -83,8 +83,9 @@ lands. A persistent CAS-backed index catalogue now validates compound scalar
 definitions, fences build generations, tracks freshness/lifecycle state, and
 publishes content-addressed exact snapshot artifacts. VyrmMX selects and
 revalidates an artifact only at its exact known cursor and valid-time, falls
-back after new writes, and fails closed on corrupted bytes. Public index
-administration, uniqueness, and incremental maintenance remain open. See
+back after new writes, and fails closed on corrupted bytes. Authenticated,
+idempotent ensure/build and catalogue-list operations are now public through
+RRD and all SDK route maps. Uniqueness and incremental maintenance remain open. See
 [`docs/vyrmql-index-catalogue-v1.md`](docs/vyrmql-index-catalogue-v1.md).
 Full text, mutating statements, broader/incremental indexes, and push
 subscriptions remain open. VyrmMX now also computes deterministic resumable

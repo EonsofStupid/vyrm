@@ -411,7 +411,7 @@ every public mutation and prove denied actions do not partially apply.
 
 **Order:** Rust embedded/client → TypeScript → Python → Go → Java/.NET.
 
-**Status:** in progress. `rrd-contract::EndpointCatalogue` now freezes all 22
+**Status:** in progress. `rrd-contract::EndpointCatalogue` now freezes all 24
 current routes by canonical operation, method/path template, authentication,
 mutation rule, security action, and public request/response type. Every public
 wire type derives JSON Schema, and deterministic OpenAPI 3.1 is built from that
@@ -447,7 +447,7 @@ client at walking-skeleton status.
 The Python walking skeleton is implemented in `sdks/python` and specified by
 [`rrd-python-client-v1.md`](rrd-python-client-v1.md). Its shell-free generator
 derives the closed operation/route/auth/mutation map from the same OpenAPI
-authority. The synchronous HTTPX client covers all 22 operations and enforces
+authority. The synchronous HTTPX client covers all 24 operations and enforces
 bounded responses, correlation, resource identity, mutation idempotency,
 absolute/per-attempt deadlines, safe retry, API-key/session authentication,
 typed errors, and loopback-only cleartext. Pydantic validates response
@@ -457,7 +457,7 @@ real-server conformance, and publication remain open.
 
 The Go walking skeleton is implemented in `sdks/go` and specified by
 [`rrd-go-client-v1.md`](rrd-go-client-v1.md). Its shell-free generator emits a
-closed operation constant set and route/auth/mutation map for all 22 operations
+closed operation constant set and route/auth/mutation map for all 24 operations
 from the same OpenAPI authority. The standard-library client uses caller
 contexts, bounded response reads, strict envelopes, correlated identities,
 resource validation, mutation idempotency, combined deadlines, safe transport
@@ -468,7 +468,7 @@ conformance, and publication remain open.
 
 The Java walking skeleton is implemented in `sdks/java` and specified by
 [`rrd-java-client-v1.md`](rrd-java-client-v1.md). Its generator emits a closed
-operation enum with route/auth/mutation metadata for all 22 operations. Java's
+operation enum with route/auth/mutation metadata for all 24 operations. Java's
 HTTP client plus Jackson 3.2 enforce bounded reads, exact envelopes, correlation,
 resources, mutation idempotency, combined deadlines, safe I/O retry,
 authentication, redirect denial, and loopback-only cleartext. Maven/Java 21
@@ -479,7 +479,7 @@ dependency verification, shared conformance, and publication remain open.
 The asynchronous .NET walking skeleton is implemented in `sdks/dotnet` and
 specified by [`rrd-dotnet-client-v1.md`](rrd-dotnet-client-v1.md). Its generator
 emits a closed operation enum/switch with route/auth/mutation metadata for all
-22 operations. `HttpClient` and `System.Text.Json` provide a third-party-free
+24 operations. `HttpClient` and `System.Text.Json` provide a third-party-free
 runtime with caller cancellation, bounded streaming, exact envelopes,
 correlation, resources, mutation idempotency, combined deadlines, safe retry,
 authentication, redirect denial, and loopback-only cleartext. .NET 10 nullable
@@ -538,8 +538,9 @@ identity/digest revalidation; stale queries use the authoritative log. See
 - General document/record/edge CRUD and schemafull/schemaless policy.
 - Relational links, richer graph/path algebra, and spatial operators.
 - Materialized ordinary/compound/unique/count, spatial and full-text indexes;
-  exact scalar snapshot artifacts now execute, while uniqueness, incremental
-  maintenance, public administration, count, spatial, and full-text remain open.
+  exact scalar snapshot artifacts now execute and authenticated ensure/list
+  administration is public, while uniqueness, incremental maintenance, count,
+  spatial, and full-text remain open.
 - Full-text analyzers and a replacement lexical stack measured against the old
   BM25 path; this is where the later LFG/TurboQuant retrieval integration lands.
 - Planner cardinality/cost evidence, `EXPLAIN ANALYZE`, streaming batches and

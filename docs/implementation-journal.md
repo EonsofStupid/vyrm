@@ -857,3 +857,28 @@ index.
 - Limit: this is an exact snapshot artifact, not incremental maintenance.
   Uniqueness, public RRD administration, count/spatial/full-text index families,
   and historical-valid-time artifact policy remain open.
+
+## 2026-08-24 — authenticated query-index administration
+
+- Commit: `95be4ed` (`feat(rrd): add query index administration`).
+- Public surface: `POST /v1/query/indexes/ensure` parses a restricted VyrmQL
+  definition, synchronously creates/rebuilds the content-addressed exact
+  artifact, and returns its generation, source cursor, valid-time, row count,
+  configuration digest, artifact digest, and lifecycle state.
+  `POST /v1/query/indexes/list` returns the stable authoritative catalogue.
+- Lifecycle: accepted ensure operations persist a bounded operation-digest and
+  entry snapshot under the caller's idempotency key. Exact retry replays;
+  changed payload under the same key conflicts. Building work resumes, stale
+  ready work rebuilds, and quarantined/retiring state requires explicit
+  recovery. Unique requests are denied until the write path enforces them.
+- Security/SDKs: ensure and list have separate deny-by-default actions. The
+  frozen OpenAPI digest now describes 24 operations, and regenerated Rust,
+  TypeScript, Python, Go, Java, and .NET catalogues include both routes.
+- Evidence: a real RRD process denies unauthenticated ensure, builds over the
+  atomic multi-model fixture, replays the result, rejects collision, lists it,
+  and then returns a query plan selecting `index:document-title` with the exact
+  row. Contract/security/server/client/VyrmMX tests, strict Clippy, all five
+  non-Rust SDK gates, and workspace all-target compilation pass.
+- Limit: ensure is synchronous and exact-snapshot only. Incremental maintenance,
+  concurrent same-key convergence, uniqueness, background jobs, and broader
+  index families remain open.

@@ -115,7 +115,7 @@ Kubernetes operation, and authoritative Connectome management.
   advances through the authenticated control journal. Provisioning, TLS/mTLS,
   secret providers, row/field policy, rate limits, audit retention/archival,
   and application-mutation/audit-completion atomicity keep F4 open.
-- F5 publishes one validated catalogue for all 22 current RRD operations and
+- F5 publishes one validated catalogue for all 24 current RRD operations and
   serves it from the running process. JSON Schema for every public wire type
   and deterministic OpenAPI 3.1 are derived from the same authority, served by
   RRD, and protected by a frozen digest. The first supported `rrd-client` Rust
@@ -130,13 +130,13 @@ Kubernetes operation, and authoritative Connectome management.
   query/error tests. The Python walking skeleton derives the same closed route
   surface, validates envelopes with Pydantic, and passes uv lock/build,
   generation-drift, Ruff, strict mypy, retry/auth/query/error tests. The
-  generated Go walking skeleton covers all 22 operations with a
+  generated Go walking skeleton covers all 24 operations with a
   standard-library client and passes format, vet, drift, behavioral, and race
-  gates. The generated Java 21 walking skeleton covers all 22 operations,
+  gates. The generated Java 21 walking skeleton covers all 24 operations,
   compiles with warnings as errors, and passes real-loopback JUnit retry/auth/
   query/error tests. Shared conformance, packaging, generated payload models,
   async Python/Java. The generated asynchronous .NET 10 walking skeleton covers
-  all 22 operations and passes formatting, warnings-as-errors build, locked
+  all 24 operations and passes formatting, warnings-as-errors build, locked
   restore, three xUnit transport/auth/error tests, and NuGet packing. All six
   intended clients now exist; shared real-server/version conformance, complete
   generated payload models, and release publication keep F5 open.
@@ -161,8 +161,9 @@ Kubernetes operation, and authoritative Connectome management.
   Matching queries select an artifact only when generation, cursor, schema,
   valid-time, configuration, bytes, and digest agree; stale state falls back to
   the authoritative log and corrupted bytes fail closed. Uniqueness,
-  incremental maintenance, broader index families, and public administration
-  remain open.
+  incremental maintenance and broader index families remain open. Authenticated
+  RRD ensure/build and list routes have distinct deny-by-default actions,
+  durable idempotency receipts, and generated discovery in all six SDKs.
   Resumable semantic polling now evaluates one query at exact resume/head
   cursors and returns deterministic added/updated/removed rows with bounded,
   fail-closed execution on all three engines. An authenticated, separately
