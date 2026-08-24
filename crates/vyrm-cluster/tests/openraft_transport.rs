@@ -42,6 +42,34 @@ struct TestNode {
     state_machine: VyrmRaftStateMachine,
 }
 
+async fn write_through_current_leader(
+    running: &BTreeMap<u64, TestNode>,
+    initial_target: u64,
+    command: VyrmRaftCommand,
+) -> openraft::raft::ClientWriteResponse<vyrm_cluster::VyrmRaftTypeConfig> {
+    let mut target = initial_target;
+    let mut last_forward = String::from("no write attempt completed");
+    for _ in 0..32 {
+        let node = running.get(&target).unwrap_or_else(|| {
+            panic!("redirected leader {target} is absent from the test cluster")
+        });
+        match node.raft.client_write(command.clone()).await {
+            Ok(response) => return response,
+            Err(openraft::error::RaftError::APIError(
+                openraft::error::ClientWriteError::ForwardToLeader(forward),
+            )) => {
+                last_forward = forward.to_string();
+                if let Some(leader_id) = forward.leader_id {
+                    target = leader_id;
+                }
+                tokio::time::sleep(Duration::from_millis(25)).await;
+            }
+            Err(error) => panic!("leader-routed test write failed permanently: {error}"),
+        }
+    }
+    panic!("leader-routed test write did not converge: {last_forward}")
+}
+
 #[derive(Default)]
 struct RecordingArtifactObserver {
     observations: Mutex<Vec<ArtifactTransferObservation>>,
@@ -391,21 +419,21 @@ fn mutual_tls_transport_replicates_and_denies_identity_confusion() {
             ),
         );
         assert!(stale_generation.is_err());
-        let after_rotation = running[&1]
-            .raft
-            .client_write(
-                VyrmRaftCommand::new(
-                    "tls-probe-after-hot-rotation",
-                    ShardId(7),
-                    1,
-                    Some(routed.log_id.index),
-                    b"hot-rotation-without-raft-restart".to_vec(),
-                )
-                .unwrap(),
+        let after_rotation = write_through_current_leader(
+            &running,
+            1,
+            VyrmRaftCommand::new(
+                "tls-probe-after-hot-rotation",
+                ShardId(7),
+                1,
+                None,
+                b"hot-rotation-without-raft-restart".to_vec(),
             )
-            .await
-            .unwrap();
+            .unwrap(),
+        )
+        .await;
         assert!(after_rotation.data.accepted);
+        assert!(after_rotation.log_id.index > routed.log_id.index);
         running[&2]
             .raft
             .wait(Some(Duration::from_secs(5)))
@@ -507,21 +535,21 @@ fn mutual_tls_transport_replicates_and_denies_identity_confusion() {
                 .unwrap();
             generations.insert(id, expected + 1);
         }
-        let after_root_cutover = running[&1]
-            .raft
-            .client_write(
-                VyrmRaftCommand::new(
-                    "tls-probe-after-root-cutover",
-                    ShardId(7),
-                    1,
-                    Some(after_rotation.log_id.index),
-                    b"root-overlap-and-retirement".to_vec(),
-                )
-                .unwrap(),
+        let after_root_cutover = write_through_current_leader(
+            &running,
+            1,
+            VyrmRaftCommand::new(
+                "tls-probe-after-root-cutover",
+                ShardId(7),
+                1,
+                None,
+                b"root-overlap-and-retirement".to_vec(),
             )
-            .await
-            .unwrap();
+            .unwrap(),
+        )
+        .await;
         assert!(after_root_cutover.data.accepted);
+        assert!(after_root_cutover.log_id.index > after_rotation.log_id.index);
         for id in 1..=3 {
             running[&id]
                 .raft
