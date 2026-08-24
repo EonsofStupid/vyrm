@@ -91,6 +91,8 @@ impl From<rrd_estate::Error> for ServiceError {
 struct SessionState {
     format_version: u16,
     session_id: CorrelationId,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    principal_id: Option<CanonicalId>,
     status: SessionStatus,
     issued_at_unix_ms: u64,
     idle_expires_at_unix_ms: u64,
@@ -515,6 +517,26 @@ impl<E: Engine> RrdService<E> {
         request_id: &str,
         operation_id: &str,
     ) -> Result<SessionLease> {
+        self.create_session_as(
+            request,
+            idempotency_key,
+            None,
+            now,
+            request_id,
+            operation_id,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn create_session_as(
+        &self,
+        request: &CreateSession,
+        idempotency_key: &CorrelationId,
+        principal_id: Option<CanonicalId>,
+        now: u64,
+        request_id: &str,
+        operation_id: &str,
+    ) -> Result<SessionLease> {
         request
             .limits
             .validate()
@@ -525,6 +547,9 @@ impl<E: Engine> RrdService<E> {
         let key = session_key(&self.instance, &session_id);
         if let Some(bytes) = self.engine.control_record(&key)? {
             let state = decode_session(&bytes)?;
+            if state.principal_id != principal_id {
+                return Err(ServiceError::IdempotencyConflict);
+            }
             return self.replay_created_session(state, idempotency_key, &operation_sha256);
         }
         let idle_expires = now
@@ -544,6 +569,7 @@ impl<E: Engine> RrdService<E> {
         let state = SessionState {
             format_version: SESSION_STATE_FORMAT,
             session_id: session_id.clone(),
+            principal_id,
             status: SessionStatus::Active,
             issued_at_unix_ms: now,
             idle_expires_at_unix_ms: idle_expires,
@@ -569,6 +595,19 @@ impl<E: Engine> RrdService<E> {
             operation_id: operation_id.into(),
         })?;
         Ok(lease)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn session_principal(
+        &self,
+        session_id: &CorrelationId,
+        token: &CorrelationId,
+        now: u64,
+        request_id: &str,
+        operation_id: &str,
+    ) -> Result<Option<CanonicalId>> {
+        let (_, state) = self.authorize(session_id, token, now, request_id, operation_id)?;
+        Ok(state.principal_id)
     }
 
     #[allow(clippy::too_many_arguments)]

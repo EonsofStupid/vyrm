@@ -11,11 +11,13 @@ adapter. Both consume `rrd-contract`; neither owns persistence semantics.
 
 ## Initial deployment boundary
 
-Before F4 identity and authorization land, the server may bind only to an
-explicit loopback address. Non-loopback startup fails closed. F2 session tokens
-are unguessable transport leases, not user authentication, and the capability
-document must advertise that limitation. TLS, principals, roles, scopes,
-field/row policy, and enterprise audit are F4 gates before remote exposure.
+The server may bind only to an explicit loopback address. Non-loopback startup
+fails closed. With initialized `rrd-security` state, session creation requires a
+principal/API key, persists that principal on the lease, and every current
+authenticated route rechecks its closed action and exact resource policy. With
+no security state, sessions remain an explicitly advertised local development
+transport mode. TLS/mTLS, provisioning, field/row policy, and complete endpoint
+audit remain F4 gates before remote exposure.
 
 Start the local process with:
 
@@ -36,7 +38,9 @@ places that secret elsewhere. `X-RRD-Session` carries the session identifier;
   reads claim/runtime watermarks, and reports maintenance/cutover denial.
 - `GET /v1/capabilities` returns the frozen `ServiceCapabilities` envelope.
 - `POST /v1/sessions` creates a bounded lease with idle and absolute expiry,
-  maximum concurrent transactions, and a server-generated secret token.
+  maximum concurrent transactions, and a server-generated secret token. On a
+  secured instance it first requires `X-RRD-Principal` and
+  `Authorization: ApiKey …`; the resulting session cannot change principal.
 - `POST /v1/sessions/{session}/renew` rotates the token and never extends past
   absolute expiry.
 - `POST /v1/query` authenticates the session, requires the exact

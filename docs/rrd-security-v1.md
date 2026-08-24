@@ -1,8 +1,8 @@
 # RRD security authority v1
 
-Status: persistent F4 authority core implemented; HTTP enforcement, principal
-provisioning APIs, TLS/mTLS, secrets providers, row/field policy, rate limits,
-and complete endpoint audit integration remain open.
+Status: persistent F4 authority and HTTP action enforcement implemented;
+principal provisioning APIs, TLS/mTLS, secrets providers, row/field policy,
+rate limits, and complete endpoint audit integration remain open.
 
 `rrd-security` owns identity, deny-by-default action policy, and the durable
 audit vocabulary. It is deliberately separate from Vyrm physical storage,
@@ -47,8 +47,21 @@ ungranted-action denial, wrong-instance denial after restart, audit replay,
 audit identity collision denial, journal verification, and absence of the raw
 credential from serialized journal evidence.
 
-This authority core does not by itself complete F4. The next slice binds every
-RRD HTTP route to one action, authenticates session creation as a principal,
-persists the principal on each session, and records allowed, denied, and failed
-outcomes. Remote listening remains prohibited until TLS/mTLS and that endpoint
+When an instance has initialized security state, the RRD server requires
+`X-RRD-Principal` plus `Authorization: ApiKey …` for session creation. It
+persists the authenticated principal on the short-lived session. Every existing
+authenticated endpoint maps to one closed action and re-evaluates current
+policy, so disabling a principal or removing a grant affects existing sessions.
+The API key is used only to establish a session; subsequent calls use the
+rotatable bearer lease and cannot change its bound principal.
+
+An instance with no initialized authority continues in an explicitly
+advertised loopback development mode for compatibility. This never permits
+remote bind. The real-socket differential proves missing/bad API-key denial,
+authorized query execution, and ungranted backup denial without a runtime
+mutation.
+
+F4 is still open. The next slice records allowed, denied, and failed outcomes
+for every route and exposes a policy-protected bounded audit read. Remote
+listening remains prohibited until TLS/mTLS and the endpoint audit
 differential are complete.

@@ -1,4 +1,8 @@
 use rrd_contract::{CanonicalId, CorrelationId, TransactionMutation, transaction_operation_sha256};
+use rrd_security::{
+    Action as SecurityAction, Principal, PrincipalKind, ResourceGrant, SECURITY_FORMAT,
+    SecurityRepository, SecurityState,
+};
 use rrd_server::{HttpError, RRD_MAX_BODY_BYTES, RrdHttpServer, load_or_create_token_key};
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
@@ -152,6 +156,28 @@ fn post(
     http(server.address, "POST", path, &headers, &body)
 }
 
+fn post_with_api_key(
+    server: &RunningServer,
+    path: &str,
+    value: &Value,
+    principal: &str,
+    credential: &str,
+) -> (u16, Value) {
+    let body = serde_json::to_vec(value).unwrap();
+    let authorization = format!("ApiKey {credential}");
+    http(
+        server.address,
+        "POST",
+        path,
+        &[
+            ("Content-Type", "application/json"),
+            ("X-RRD-Principal", principal),
+            ("Authorization", &authorization),
+        ],
+        &body,
+    )
+}
+
 fn delete(
     server: &RunningServer,
     path: &str,
@@ -230,6 +256,121 @@ fn seed_query_fixture(root: &Path) {
             ],
         })
         .unwrap();
+}
+
+#[test]
+fn initialized_security_authority_binds_sessions_and_denies_ungranted_routes() {
+    let temporary = tempfile::tempdir().unwrap();
+    let root = temporary.path().join("instance");
+    seed_query_fixture(&root);
+    let engine = PersistentEngine::open(&root).unwrap();
+    let instance = CanonicalId::new("socket-test").unwrap();
+    let resource = rrd_contract::ResourcePath {
+        segments: vec![
+            rrd_contract::ResourceId::new(rrd_contract::ResourceKind::Instance, "socket-test")
+                .unwrap(),
+        ],
+    };
+    let principal = Principal {
+        id: CanonicalId::new("connectome-local").unwrap(),
+        kind: PrincipalKind::User,
+        credential_sha256: vyrm_core::digest::sha256_hex(b"local-api-key"),
+        not_before_unix_ms: 1,
+        expires_at_unix_ms: u64::MAX,
+        disabled: false,
+        grants: vec![
+            ResourceGrant {
+                action: SecurityAction::SessionCreate,
+                resource_prefix: resource.clone(),
+            },
+            ResourceGrant {
+                action: SecurityAction::QueryExecute,
+                resource_prefix: resource,
+            },
+        ],
+    };
+    SecurityRepository::new(&engine, instance)
+        .initialize(
+            SecurityState {
+                format_version: SECURITY_FORMAT,
+                revision: 1,
+                principals: BTreeMap::from([(principal.id.clone(), principal)]),
+            },
+            1,
+            "bootstrap",
+            "request-bootstrap",
+            "operation-bootstrap",
+        )
+        .unwrap();
+    drop(engine);
+
+    let server = start(&root);
+    let create = envelope(
+        json!({
+            "limits": {
+                "idle_timeout_ms": 60_000,
+                "absolute_timeout_ms": 300_000,
+                "max_open_transactions": 2
+            }
+        }),
+        Some("secured-session"),
+        None,
+    );
+    let (status, _) = post(&server, "/v1/sessions", &create, None);
+    assert_eq!(status, 401);
+    let (status, _) = post_with_api_key(
+        &server,
+        "/v1/sessions",
+        &create,
+        "connectome-local",
+        "wrong",
+    );
+    assert_eq!(status, 401);
+    let (status, created) = post_with_api_key(
+        &server,
+        "/v1/sessions",
+        &create,
+        "connectome-local",
+        "local-api-key",
+    );
+    assert_eq!(status, 200, "{created}");
+    let session = payload(&created)["session_id"].as_str().unwrap();
+    let token = payload(&created)["token"].as_str().unwrap();
+
+    let query = envelope(
+        json!({
+            "scope": "instance:socket-test",
+            "query": "FROM record:document AT VALID 100 KNOWN HEAD PROJECT id, title EXPLAIN CONTRACT",
+            "parameters": {},
+            "budget": {
+                "max_scanned_changes": 100,
+                "max_rows": 10,
+                "max_output_bytes": 4096,
+                "max_batch_rows": 10
+            }
+        }),
+        None,
+        None,
+    );
+    let (status, response) = post(&server, "/v1/query", &query, Some((session, token)));
+    assert_eq!(status, 200, "{response}");
+
+    let backup = envelope(
+        json!({"label": "denied", "created_at_unix_ms": 500}),
+        Some("denied-backup"),
+        None,
+    );
+    let (status, denied) = post(&server, "/v1/backups", &backup, Some((session, token)));
+    assert_eq!(status, 403, "{denied}");
+    assert_eq!(denied["outcome"]["error"]["code"], "permission_denied");
+    server.stop();
+    assert_eq!(
+        PersistentEngine::open(&root)
+            .unwrap()
+            .runtime_cursor()
+            .unwrap(),
+        2
+    );
 }
 
 #[test]

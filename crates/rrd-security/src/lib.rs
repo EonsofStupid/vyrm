@@ -274,27 +274,28 @@ impl<'a, E: Engine> SecurityRepository<'a, E> {
         if !constant_time_equal(supplied.as_bytes(), principal.credential_sha256.as_bytes()) {
             return Err(Error::Unauthenticated);
         }
-        if principal.disabled
-            || at < principal.not_before_unix_ms
-            || at >= principal.expires_at_unix_ms
-        {
-            return Err(Error::PermissionDenied);
-        }
-        resource
-            .validate()
-            .map_err(|error| Error::Invalid(error.to_string()))?;
-        if !principal.grants.iter().any(|grant| {
-            grant.action == action && resource_has_prefix(resource, &grant.resource_prefix)
-        }) {
-            return Err(Error::PermissionDenied);
-        }
-        Ok(Authorization {
-            principal_id: principal.id.clone(),
-            principal_kind: principal.kind,
-            action,
-            resource: resource.clone(),
-            policy_revision: state.revision,
-        })
+        authorize(&state, principal, action, resource, at)
+    }
+
+    /// Re-evaluates current policy for a principal whose credential was
+    /// authenticated when its short-lived RRD session was created.
+    pub fn authorize_principal(
+        &self,
+        principal_id: &CanonicalId,
+        action: Action,
+        resource: &ResourcePath,
+        at: u64,
+    ) -> Result<Authorization> {
+        let state = self.load()?.ok_or(Error::NotInitialized)?;
+        let principal = state
+            .principals
+            .get(principal_id)
+            .ok_or(Error::PrincipalNotFound)?;
+        authorize(&state, principal, action, resource, at)
+    }
+
+    pub fn is_initialized(&self) -> Result<bool> {
+        Ok(self.load()?.is_some())
     }
 
     pub fn append_audit(&self, record: &AuditRecord) -> Result<()> {
@@ -351,6 +352,34 @@ impl<'a, E: Engine> SecurityRepository<'a, E> {
         }
         Ok(records)
     }
+}
+
+fn authorize(
+    state: &SecurityState,
+    principal: &Principal,
+    action: Action,
+    resource: &ResourcePath,
+    at: u64,
+) -> Result<Authorization> {
+    if principal.disabled || at < principal.not_before_unix_ms || at >= principal.expires_at_unix_ms
+    {
+        return Err(Error::PermissionDenied);
+    }
+    resource
+        .validate()
+        .map_err(|error| Error::Invalid(error.to_string()))?;
+    if !principal.grants.iter().any(|grant| {
+        grant.action == action && resource_has_prefix(resource, &grant.resource_prefix)
+    }) {
+        return Err(Error::PermissionDenied);
+    }
+    Ok(Authorization {
+        principal_id: principal.id.clone(),
+        principal_kind: principal.kind,
+        action,
+        resource: resource.clone(),
+        policy_revision: state.revision,
+    })
 }
 
 fn resource_has_prefix(resource: &ResourcePath, prefix: &ResourcePath) -> bool {

@@ -13,6 +13,7 @@ use rrd_contract::{
     Readiness, RenewSession, RequestContext, RequestEnvelope, ResourceId, ResourceKind,
     ResponseEnvelope, ResponseOutcome, RestoreInstanceBackup, SearchVectors, ServiceCapabilities,
 };
+use rrd_security::{Action as SecurityAction, SecurityRepository};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use std::collections::BTreeMap;
@@ -70,6 +71,7 @@ pub struct RrdHttpServer {
 struct AppState {
     service: RrdService<PersistentEngine>,
     capabilities: ServiceCapabilities,
+    security_enforced: bool,
 }
 
 impl RrdHttpServer {
@@ -84,16 +86,20 @@ impl RrdHttpServer {
         }
         let backend = CanonicalId::new(engine.backend().as_str())
             .map_err(|error| HttpError::Contract(error.to_string()))?;
+        let security_enforced = SecurityRepository::new(&engine, instance.clone())
+            .is_initialized()
+            .map_err(|error| HttpError::Contract(error.to_string()))?;
         let listener =
             TcpListener::bind(bind).map_err(|error| HttpError::Bind(error.to_string()))?;
         listener.set_nonblocking(true)?;
-        let capabilities = capabilities(&instance, backend);
+        let capabilities = capabilities(&instance, backend, security_enforced);
         capabilities
             .validate()
             .map_err(|error| HttpError::Contract(error.to_string()))?;
         let state = Arc::new(AppState {
             service: RrdService::new(engine, instance, token_key),
             capabilities,
+            security_enforced,
         });
         let app = Router::new().fallback(any(dispatch)).with_state(state);
         Ok(Self { listener, app })
@@ -246,10 +252,26 @@ impl AppState {
     fn create_session(&self, headers: &HeaderMap, body: &[u8], now: u64) -> HttpResponse {
         self.with_envelope::<CreateSession, _, _>(headers, body, now, true, |envelope| {
             let idempotency_key = required_idempotency(&envelope.context)?;
+            let principal_id = if self.security_enforced {
+                let (principal, credential) = api_key_identity(headers)?;
+                SecurityRepository::new(self.service.engine(), self.service.instance.clone())
+                    .authenticate_and_authorize(
+                        &principal,
+                        credential.as_bytes(),
+                        SecurityAction::SessionCreate,
+                        &envelope.resource,
+                        now,
+                    )
+                    .map_err(security_error)?;
+                Some(principal)
+            } else {
+                None
+            };
             self.service
-                .create_session(
+                .create_session_as(
                     &envelope.payload,
                     idempotency_key,
+                    principal_id,
                     now,
                     envelope.context.request_id.as_str(),
                     envelope.context.operation_id.as_str(),
@@ -271,6 +293,7 @@ impl AppState {
             body,
             now,
             true,
+            SecurityAction::SessionRenew,
             Some(path_id),
             |envelope, session, token| {
                 let idempotency_key = required_idempotency(&envelope.context)?;
@@ -302,6 +325,7 @@ impl AppState {
             body,
             now,
             true,
+            SecurityAction::SessionClose,
             Some(path_id),
             |envelope, session, token| {
                 let idempotency_key = required_idempotency(&envelope.context)?;
@@ -326,6 +350,7 @@ impl AppState {
             body,
             now,
             true,
+            SecurityAction::TransactionBegin,
             None,
             |envelope, session, token| {
                 let idempotency_key = required_idempotency(&envelope.context)?;
@@ -351,6 +376,7 @@ impl AppState {
             body,
             now,
             false,
+            SecurityAction::EstateRead,
             None,
             |envelope, session, token| {
                 let estate = CanonicalId::new(estate).map_err(|error| {
@@ -393,6 +419,7 @@ impl AppState {
             body,
             now,
             false,
+            SecurityAction::QueryExecute,
             None,
             |envelope, session, token| {
                 self.service
@@ -415,6 +442,7 @@ impl AppState {
             body,
             now,
             true,
+            SecurityAction::BackupCreate,
             None,
             |envelope, session, token| {
                 self.service
@@ -438,6 +466,7 @@ impl AppState {
             body,
             now,
             false,
+            SecurityAction::BackupList,
             None,
             |envelope, session, token| {
                 self.service
@@ -460,6 +489,7 @@ impl AppState {
             body,
             now,
             true,
+            SecurityAction::RestoreCreate,
             None,
             |envelope, session, token| {
                 self.service
@@ -483,6 +513,7 @@ impl AppState {
             body,
             now,
             false,
+            SecurityAction::VectorSearch,
             None,
             |envelope, session, token| {
                 self.service
@@ -505,6 +536,7 @@ impl AppState {
             body,
             now,
             false,
+            SecurityAction::ChangefeedRead,
             None,
             |envelope, session, token| {
                 self.service
@@ -527,6 +559,7 @@ impl AppState {
             body,
             now,
             false,
+            SecurityAction::ChangefeedFollow,
             None,
             |envelope, session, token| {
                 if envelope.context.deadline_unix_ms.is_some_and(|deadline| {
@@ -566,6 +599,7 @@ impl AppState {
             body,
             now,
             false,
+            SecurityAction::TransactionPreview,
             None,
             |envelope, session, token| {
                 let transaction = parse_correlation(transaction)?;
@@ -597,6 +631,7 @@ impl AppState {
             body,
             now,
             true,
+            SecurityAction::TransactionCommit,
             None,
             |envelope, session, token| {
                 if envelope.context.deadline_unix_ms.is_none() {
@@ -637,6 +672,7 @@ impl AppState {
             body,
             now,
             true,
+            SecurityAction::TransactionAbort,
             None,
             |envelope, session, token| {
                 let transaction = parse_correlation(transaction)?;
@@ -684,12 +720,14 @@ impl AppState {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn with_authenticated_envelope<T, O, F>(
         &self,
         headers: &HeaderMap,
         body: &[u8],
         now: u64,
         mutation: bool,
+        action: SecurityAction,
         expected_session: Option<&str>,
         operation: F,
     ) -> HttpResponse
@@ -715,6 +753,34 @@ impl AppState {
                     return failure(&context, error);
                 }
             };
+        if self.security_enforced {
+            let principal = match self.service.session_principal(
+                &session.0,
+                &session.1,
+                now,
+                envelope.context.request_id.as_str(),
+                envelope.context.operation_id.as_str(),
+            ) {
+                Ok(Some(principal)) => principal,
+                Ok(None) => {
+                    return failure(
+                        &envelope.context,
+                        ApiError::new(
+                            ErrorCode::Unauthenticated,
+                            "session is not bound to a security principal",
+                            false,
+                        ),
+                    );
+                }
+                Err(error) => return failure(&envelope.context, api_error(error)),
+            };
+            if let Err(error) =
+                SecurityRepository::new(self.service.engine(), self.service.instance.clone())
+                    .authorize_principal(&principal, action, &envelope.resource, now)
+            {
+                return failure(&envelope.context, security_error(error));
+            }
+        }
         match operation(&envelope, &session.0, &session.1) {
             Ok(payload) => success(StatusCode::OK, &envelope.context, payload),
             Err(error) => failure(&envelope.context, error),
@@ -857,6 +923,49 @@ fn authenticated_session(
     Ok((parse_correlation(sessions[0])?, parse_correlation(token)?))
 }
 
+fn api_key_identity(headers: &HeaderMap) -> std::result::Result<(CanonicalId, String), ApiError> {
+    let principals = header_values(headers, "X-RRD-Principal").map_err(|_| {
+        ApiError::new(
+            ErrorCode::Unauthenticated,
+            "exactly one principal and API-key authorization header are required",
+            false,
+        )
+    })?;
+    let authorizations = header_values(headers, "Authorization").map_err(|_| {
+        ApiError::new(
+            ErrorCode::Unauthenticated,
+            "exactly one principal and API-key authorization header are required",
+            false,
+        )
+    })?;
+    if principals.len() != 1 || authorizations.len() != 1 {
+        return Err(ApiError::new(
+            ErrorCode::Unauthenticated,
+            "exactly one principal and API-key authorization header are required",
+            false,
+        ));
+    }
+    let credential = authorizations[0].strip_prefix("ApiKey ").ok_or_else(|| {
+        ApiError::new(
+            ErrorCode::Unauthenticated,
+            "session creation Authorization must use ApiKey",
+            false,
+        )
+    })?;
+    if credential.is_empty() || credential.len() > 4_096 {
+        return Err(ApiError::new(
+            ErrorCode::Unauthenticated,
+            "API key is empty or oversized",
+            false,
+        ));
+    }
+    Ok((
+        CanonicalId::new(principals[0])
+            .map_err(|error| ApiError::new(ErrorCode::Unauthenticated, error.to_string(), false))?,
+        credential.into(),
+    ))
+}
+
 fn header_values<'a>(
     headers: &'a HeaderMap,
     name: &'static str,
@@ -989,6 +1098,25 @@ fn api_error(error: ServiceError) -> ApiError {
     }
 }
 
+fn security_error(error: rrd_security::Error) -> ApiError {
+    let message = error.to_string();
+    match error {
+        rrd_security::Error::Unauthenticated | rrd_security::Error::PrincipalNotFound => {
+            ApiError::new(ErrorCode::Unauthenticated, message, false)
+        }
+        rrd_security::Error::PermissionDenied | rrd_security::Error::NotInitialized => {
+            ApiError::new(ErrorCode::PermissionDenied, message, false)
+        }
+        rrd_security::Error::Invalid(_) => {
+            ApiError::new(ErrorCode::InvalidArgument, message, false)
+        }
+        rrd_security::Error::IdempotencyConflict | rrd_security::Error::AlreadyInitialized => {
+            ApiError::new(ErrorCode::Conflict, message, false)
+        }
+        rrd_security::Error::Store(_) => ApiError::new(ErrorCode::Internal, message, false),
+    }
+}
+
 fn status_for(code: ErrorCode) -> StatusCode {
     match code {
         ErrorCode::InvalidArgument => StatusCode::BAD_REQUEST,
@@ -1034,7 +1162,11 @@ fn estate_action<'a>(path: &'a str, action: &str) -> Option<&'a str> {
         .filter(|id| !id.is_empty() && !id.contains('/'))
 }
 
-fn capabilities(instance: &CanonicalId, backend: CanonicalId) -> ServiceCapabilities {
+fn capabilities(
+    instance: &CanonicalId,
+    backend: CanonicalId,
+    security_enforced: bool,
+) -> ServiceCapabilities {
     let mut capabilities = vec![
         CapabilityDescriptor {
             name: CanonicalId::new("changefeed-follow").unwrap(),
@@ -1110,7 +1242,7 @@ fn capabilities(instance: &CanonicalId, backend: CanonicalId) -> ServiceCapabili
             status: CapabilityStatus::Experimental,
             limits: BTreeMap::new(),
             limitation: Some(
-                "session-authenticated read-only estate snapshots; F4 authorization and mutations remain unavailable"
+                "read-only estate snapshots; estate mutations remain unavailable"
                     .into(),
             ),
         },
@@ -1129,7 +1261,12 @@ fn capabilities(instance: &CanonicalId, backend: CanonicalId) -> ServiceCapabili
                 CanonicalId::new("max-body-bytes").unwrap(),
                 RRD_MAX_BODY_BYTES as u64,
             )]),
-            limitation: Some("availability leases are not F4 user authentication".into()),
+            limitation: Some(if security_enforced {
+                "principal-authenticated policy-bound local sessions; TLS remote transport remains unavailable"
+                    .into()
+            } else {
+                "development availability leases; no security authority is initialized".into()
+            }),
         },
         CapabilityDescriptor {
             name: CanonicalId::new("logical-backup-restore").unwrap(),
@@ -1147,6 +1284,22 @@ fn capabilities(instance: &CanonicalId, backend: CanonicalId) -> ServiceCapabili
             status: CapabilityStatus::Unavailable,
             limits: BTreeMap::new(),
             limitation: Some("non-loopback bind denied until F4 security".into()),
+        },
+        CapabilityDescriptor {
+            name: CanonicalId::new("security-policy").unwrap(),
+            contract_version: 1,
+            status: if security_enforced {
+                CapabilityStatus::Experimental
+            } else {
+                CapabilityStatus::Unavailable
+            },
+            limits: BTreeMap::new(),
+            limitation: Some(if security_enforced {
+                "persistent principals and exact deny-by-default endpoint policy; HTTP audit integration and TLS remain open"
+                    .into()
+            } else {
+                "no persistent security authority is initialized for this instance".into()
+            }),
         },
         CapabilityDescriptor {
             name: CanonicalId::new("vector-search").unwrap(),

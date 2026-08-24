@@ -2380,6 +2380,7 @@ dependencies = [
  "hmac",
  "rrd-contract",
  "rrd-estate",
+ "rrd-security",
  "serde",
  "serde_json",
  "sha2",

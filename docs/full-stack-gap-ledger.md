@@ -375,9 +375,14 @@ unknown or expired principals, wrong credentials, ungranted actions, and wrong
 resource prefixes deny by default. Typed redacted audit records are immutable,
 idempotent, and replayed through the authenticated Vyrm control journal.
 Native reopen tests prove policy and audit persistence without journaling the
-raw credential. HTTP enforcement/provisioning, TLS/mTLS, secret providers,
-row/field policy, rate limits, and the every-endpoint authorization/audit
-differential remain open; remote bind is still denied.
+raw credential. When security state exists, the real server now authenticates
+session creation with a principal/API key, durably binds that principal to the
+session, maps every current authenticated route to a closed action, and
+re-evaluates current exact resource policy on every request. A real-socket
+differential proves missing/wrong credential denial, allowed query, and denied
+ungranted backup with no data mutation. Provisioning APIs, TLS/mTLS, secret
+providers, row/field policy, rate limits, and complete endpoint audit
+integration remain open; remote bind is still denied.
 
 **Deliverables**
 
