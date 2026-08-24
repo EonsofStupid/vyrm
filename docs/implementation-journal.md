@@ -558,3 +558,24 @@ index.
 - Limit: F5 remains open. Shared generated schemas/conformance and TypeScript,
   Python, Go, Java, and .NET clients are next; TLS/distributed qualification and
   released-version compatibility remain later gates.
+
+## 2026-08-24 — authoritative OpenAPI and JSON Schema projection
+
+- Commit: `6a3727e` (`feat(contract): serve deterministic OpenAPI schemas`).
+- Single authority: every public RRD wire type now derives JSON Schema, while
+  `openapi_document()` combines those exact schemas with the sorted endpoint
+  catalogue. No route or payload is independently described by hand.
+- Runtime/export: `GET /v1/schema/openapi` serves the OpenAPI 3.1 document from
+  a real RRD process, `rrd-contract-export` emits the identical pretty JSON for
+  package generation, and the Rust client negotiates and validates it.
+- Drift gate: the canonical document SHA-256 is frozen; all 21 catalogue
+  operations must have request/response schemas and intentional wire drift
+  requires explicit review.
+- Evidence: contract tests traverse every catalogue operation and assert its
+  method, operation ID, request body where applicable, and response schema. The
+  real-socket server and fault-proxied Rust-client tests fetch the document.
+- Verification: contract/client/server tests and strict all-target/all-feature
+  Clippy passed; `git diff --check` passed.
+- Limit: the document is generator input, not completion of F5. The next slice
+  creates TypeScript/ArkType/Biome, Python, Go, Java, and .NET packages plus the
+  shared language-neutral black-box fixture.
