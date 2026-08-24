@@ -65,9 +65,10 @@ and a staged Fjall migration exist. That is substantial.
 It is not yet a complete persistent product because these surrounding gates
 remain open:
 
-- portable full-database logical export/import;
+- object-complete portable logical export/import (the current archive preserves
+  canonical runtime data but declares object payloads referenced-only);
 - version-to-version upgrade and resumable general data/schema migration;
-- operator-scheduled backups, retention, restore and restore verification;
+- retention policy, active-root cutover and recovery-objective enforcement;
 - long-duration, disk-full and independent-host qualification;
 - estate-owned backup identities and recovery objectives;
 - authenticated remote client/session transaction boundaries;
@@ -263,6 +264,17 @@ SSE/WebSocket transport, durable subscription ownership, server-driven
 heartbeats, cancellation on disconnect, and fan-out backpressure remain open;
 the capability is advertised as experimental follow rather than complete live
 queries.
+
+Managed logical recovery is now also operable through the public server:
+`POST /v1/backups`, `POST /v1/backups/list`, and `POST /v1/restores` use
+authenticated catalogues, generated per-instance roots, durable idempotent
+operation records, restore-to-absent-root, reopen verification, and explicit
+partial-coverage declarations. Real-socket tests prove authentication and
+scope denial, collision denial, create/list/restore, watermark preservation,
+and restart replay. Public callers cannot supply filesystem paths. Object
+payload closure, retention/RPO policy, active deployment switch, and exact
+process-kill qualification at the filesystem-effect/control-record gap remain
+open.
 
 **Deliverables**
 
@@ -478,18 +490,25 @@ idempotency contracts as SDK clients.
 - “Beats SurrealDB/Qdrant” is prohibited unless an explicitly published matrix
   defines the bounded scope. A single fixture never becomes a blanket claim.
 
-## Next executable slice
+## Next executable sequence: breadth before optimization
 
-The next implementation slice is **F0 → F1**, not another benchmark tweak:
+F0 is frozen, F1 has an operable partial-coverage archive/recovery path, F2 has
+a real loopback process, and F3 has persistent authority/reconciliation plus a
+local driver. Work now establishes one runnable, tested vertical baseline for
+each remaining product layer before returning to engine benchmark tuning:
 
-1. ~~freeze the public resource/error/idempotency vocabulary~~ — complete;
-2. ~~finish verification of the current manifest/application-format migration~~ — complete;
-3. ~~introduce the logical archive and backup catalogue contracts~~ — initial
-   operable v1 complete with explicit partial-coverage declaration;
-4. restore-to-new-root, same-version reopen, exact-successor native migration,
-   and the first TextV1→current logical-recovery row are proven; expand the
-   released-version matrix next;
-5. then establish the first out-of-process RRD server boundary.
+1. close only correctness gaps that prevent safe use of the existing F0-F3
+   paths; do not expand them into optimization campaigns;
+2. implement F4 identity, deny-by-default authorization, secret/TLS boundaries,
+   and comprehensive audit over every currently public operation;
+3. generate and qualify the F5 Rust, TypeScript, Python, Go, Java, and .NET
+   clients against one schema and conformance corpus;
+4. complete the baseline F6/F7 administrative, live, filtered-index,
+   TurboQuant/inference, and memory-tier paths;
+5. establish F8 packaging and deployment modes, then make Connectome the F9
+   authoritative local/enterprise client;
+6. integrate Automaton → LFG → Connectome/RRD lifecycle contracts and run the
+   firm-alpha recovery/security/capability matrix;
+7. only then resume bounded performance optimization and comparative claims.
 
-Estate types may be designed during F0, but remote provisioning is prohibited
-until F2 authentication, idempotency, audit and recovery semantics exist.
+Remote provisioning remains prohibited until the F4 baseline is executable.

@@ -1,14 +1,15 @@
 use rrd_contract::{
     BeginTransaction, CanonicalId, CapabilityDescriptor, CapabilityStatus, CloseSession,
-    CommitReceipt, CommitTransaction, CorrelationId, DeploymentMode, ErrorBody, ErrorCode,
-    EstateActivityPolicySnapshot, EstateBackupJobSnapshot, EstateBackupJobState,
-    EstateBackupJobsSnapshot, EstateMutationResult, EstateSnapshot, ExecuteQuery, FollowChangefeed,
-    IdempotencyBinding, Liveness, PROTOCOL, PROTOCOL_VERSION, PreviewTransaction, QueryBudget,
-    QueryExecutionSnapshot, QueryPlanCandidate, QueryPlanSnapshot, QueryResult, QueryRowSnapshot,
-    QueryValue, ReadChangefeed, ReadEstate, Readiness, RenewSession, RequestContext,
-    RequestEnvelope, ResourceId, ResourceKind, ResourcePath, ResponseEnvelope, ResponseOutcome,
-    ServiceCapabilities, SessionEndState, SessionLease, SessionLimits, SessionTermination,
-    TransactionMutation, TransactionPreview, TransactionState, transaction_operation_sha256,
+    CommitReceipt, CommitTransaction, CorrelationId, CreateInstanceBackup, DeploymentMode,
+    ErrorBody, ErrorCode, EstateActivityPolicySnapshot, EstateBackupJobSnapshot,
+    EstateBackupJobState, EstateBackupJobsSnapshot, EstateMutationResult, EstateSnapshot,
+    ExecuteQuery, FollowChangefeed, IdempotencyBinding, Liveness, PROTOCOL, PROTOCOL_VERSION,
+    PreviewTransaction, QueryBudget, QueryExecutionSnapshot, QueryPlanCandidate, QueryPlanSnapshot,
+    QueryResult, QueryRowSnapshot, QueryValue, ReadChangefeed, ReadEstate, Readiness, RenewSession,
+    RequestContext, RequestEnvelope, ResourceId, ResourceKind, ResourcePath, ResponseEnvelope,
+    ResponseOutcome, RestoreInstanceBackup, ServiceCapabilities, SessionEndState, SessionLease,
+    SessionLimits, SessionTermination, TransactionMutation, TransactionPreview, TransactionState,
+    transaction_operation_sha256,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -347,6 +348,38 @@ fn changefeed_request_is_cursor_addressed_bounded_and_strict() {
     follow.validate().unwrap();
     follow.wait_timeout_ms = rrd_contract::MAX_CHANGEFEED_WAIT_MS + 1;
     assert!(follow.validate().is_err());
+}
+
+#[test]
+fn managed_backup_contract_accepts_no_filesystem_paths() {
+    CreateInstanceBackup {
+        label: "before-upgrade".into(),
+        created_at_unix_ms: 500,
+    }
+    .validate()
+    .unwrap();
+
+    RestoreInstanceBackup {
+        backup_sha256: "a".repeat(64),
+        restore_id: CanonicalId::new("restore-a").unwrap(),
+        restored_at_unix_ms: 600,
+    }
+    .validate()
+    .unwrap();
+
+    let with_path = serde_json::json!({
+        "label": "before-upgrade",
+        "created_at_unix_ms": 500,
+        "target": "/tmp/escape"
+    });
+    assert!(serde_json::from_value::<CreateInstanceBackup>(with_path).is_err());
+
+    let invalid = RestoreInstanceBackup {
+        backup_sha256: "not-a-digest".into(),
+        restore_id: CanonicalId::new("restore-a").unwrap(),
+        restored_at_unix_ms: 600,
+    };
+    assert!(invalid.validate().is_err());
 }
 
 #[test]

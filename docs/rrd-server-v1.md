@@ -64,6 +64,16 @@ places that secret elsewhere. `X-RRD-Session` carries the session identifier;
   timeout at the newest observed `through_cursor`. It uses the same typed replay
   contract, so reconnect never depends on transient server memory. Streaming
   transport and durable subscription leases remain open.
+- `POST /v1/backups` creates and verifies a logical archive in the server's
+  generated per-instance backup root. The operation is durably prepared before
+  the archive effect, bound to its idempotency key and operation digest, and
+  replayed without creating a second archive after restart.
+- `POST /v1/backups/list` authenticates the backup catalogue and optionally
+  verifies every retained archive before returning its explicit coverage.
+- `POST /v1/restores` verifies a selected content-addressed archive and restores
+  it into a generated, absent `restore_id` root. It reopens and checks the
+  restored claim/runtime watermarks before completing. It never overwrites or
+  switches the active instance root.
 - `POST /v1/estates/{estate}/read` returns the typed public `EstateSnapshot`
   for a resource path containing that estate and this server instance. It
   requires a live session token, exposes no raw idempotency keys, and performs
@@ -182,6 +192,16 @@ cursor three from another connection, observes the waiting request wake with
 that typed event, then proves a subsequent follow times out cleanly at cursor
 three with no fabricated change.
 
+The managed-recovery fixture denies an unauthenticated backup, creates and
+verifies a logical archive, proves key/digest collision denial, lists the
+authenticated catalogue, restores to a generated new root, reopens that root,
+and replays both operations after a server restart without duplicating either
+effect. Public requests contain no filesystem path. The server derives
+`rrd-service/<instance>/backups` and
+`rrd-service/<instance>/restores/<restore-id>` beneath the configured database
+parent. Archive labels are operation-qualified internally so an effect can be
+found after an acknowledgement gap.
+
 It also commits all nine runtime mutation families through one `data`
 transaction, verifies the single eleven-change cursor interval and one-claim
 receipt, restarts the server, replays the same runtime commit identity, and
@@ -193,4 +213,7 @@ multi-model read-your-writes, lost-ack process interruption for the data scope,
 mutating VyrmQL, live subscriptions,
 CRUD/schema/vector/snapshot administration, generalized result/time limits,
 durable query-span export, metrics export, and released-version negotiation
-clients.
+clients. Backup object payloads remain referenced-only and the service does not
+deploy or switch a restored root. A process-kill matrix at the exact
+filesystem-effect/control-record gap remains a qualification gate even though
+restart recovery is implemented for that gap.

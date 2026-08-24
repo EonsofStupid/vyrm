@@ -7,11 +7,11 @@ use axum::response::Response;
 use axum::routing::any;
 use rrd_contract::{
     AbortTransaction, BeginTransaction, CanonicalId, CapabilityDescriptor, CapabilityStatus,
-    CloseSession, CommitTransaction, CorrelationId, CreateSession, DeploymentMode, ErrorBody,
-    ErrorCode, ExecuteQuery, FollowChangefeed, Liveness, PROTOCOL, PROTOCOL_VERSION,
-    PreviewTransaction, ReadChangefeed, ReadEstate, Readiness, RenewSession, RequestContext,
-    RequestEnvelope, ResourceId, ResourceKind, ResponseEnvelope, ResponseOutcome, SearchVectors,
-    ServiceCapabilities,
+    CloseSession, CommitTransaction, CorrelationId, CreateInstanceBackup, CreateSession,
+    DeploymentMode, ErrorBody, ErrorCode, ExecuteQuery, FollowChangefeed, ListInstanceBackups,
+    Liveness, PROTOCOL, PROTOCOL_VERSION, PreviewTransaction, ReadChangefeed, ReadEstate,
+    Readiness, RenewSession, RequestContext, RequestEnvelope, ResourceId, ResourceKind,
+    ResponseEnvelope, ResponseOutcome, RestoreInstanceBackup, SearchVectors, ServiceCapabilities,
 };
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -203,6 +203,9 @@ impl AppState {
             }
             (Method::POST, "/v1/transactions") => self.begin_transaction(&headers, &body, now),
             (Method::POST, "/v1/query") => self.execute_query(&headers, &body, now),
+            (Method::POST, "/v1/backups") => self.create_instance_backup(&headers, &body, now),
+            (Method::POST, "/v1/backups/list") => self.list_instance_backups(&headers, &body, now),
+            (Method::POST, "/v1/restores") => self.restore_instance_backup(&headers, &body, now),
             (Method::POST, "/v1/changes/read") => self.read_changefeed(&headers, &body, now),
             (Method::POST, "/v1/changes/follow") => self.follow_changefeed(&headers, &body, now),
             (Method::POST, "/v1/vector/search") => self.search_vectors(&headers, &body, now),
@@ -396,6 +399,74 @@ impl AppState {
                     .execute_query(
                         session,
                         token,
+                        &envelope.payload,
+                        now,
+                        envelope.context.request_id.as_str(),
+                        envelope.context.operation_id.as_str(),
+                    )
+                    .map_err(api_error)
+            },
+        )
+    }
+
+    fn create_instance_backup(&self, headers: &HeaderMap, body: &[u8], now: u64) -> HttpResponse {
+        self.with_authenticated_envelope::<CreateInstanceBackup, _, _>(
+            headers,
+            body,
+            now,
+            true,
+            None,
+            |envelope, session, token| {
+                self.service
+                    .create_instance_backup(
+                        session,
+                        token,
+                        required_idempotency(&envelope.context)?,
+                        &envelope.payload,
+                        now,
+                        envelope.context.request_id.as_str(),
+                        envelope.context.operation_id.as_str(),
+                    )
+                    .map_err(api_error)
+            },
+        )
+    }
+
+    fn list_instance_backups(&self, headers: &HeaderMap, body: &[u8], now: u64) -> HttpResponse {
+        self.with_authenticated_envelope::<ListInstanceBackups, _, _>(
+            headers,
+            body,
+            now,
+            false,
+            None,
+            |envelope, session, token| {
+                self.service
+                    .list_instance_backups(
+                        session,
+                        token,
+                        &envelope.payload,
+                        now,
+                        envelope.context.request_id.as_str(),
+                        envelope.context.operation_id.as_str(),
+                    )
+                    .map_err(api_error)
+            },
+        )
+    }
+
+    fn restore_instance_backup(&self, headers: &HeaderMap, body: &[u8], now: u64) -> HttpResponse {
+        self.with_authenticated_envelope::<RestoreInstanceBackup, _, _>(
+            headers,
+            body,
+            now,
+            true,
+            None,
+            |envelope, session, token| {
+                self.service
+                    .restore_instance_backup(
+                        session,
+                        token,
+                        required_idempotency(&envelope.context)?,
                         &envelope.payload,
                         now,
                         envelope.context.request_id.as_str(),
@@ -913,6 +984,7 @@ fn api_error(error: ServiceError) -> ApiError {
             ApiError::new(ErrorCode::Conflict, message, true)
         }
         ServiceError::Store(_) => ApiError::new(ErrorCode::Internal, message, false),
+        ServiceError::Backup(_) => ApiError::new(ErrorCode::Internal, message, false),
         ServiceError::Estate(_) => ApiError::new(ErrorCode::Internal, message, false),
     }
 }
@@ -1058,6 +1130,16 @@ fn capabilities(instance: &CanonicalId, backend: CanonicalId) -> ServiceCapabili
                 RRD_MAX_BODY_BYTES as u64,
             )]),
             limitation: Some("availability leases are not F4 user authentication".into()),
+        },
+        CapabilityDescriptor {
+            name: CanonicalId::new("logical-backup-restore").unwrap(),
+            contract_version: 1,
+            status: CapabilityStatus::Experimental,
+            limits: BTreeMap::new(),
+            limitation: Some(
+                "content-authenticated logical backup and restore-to-generated-new-root; object payloads are referenced-only and restore never switches the active instance"
+                    .into(),
+            ),
         },
         CapabilityDescriptor {
             name: CanonicalId::new("remote-listen").unwrap(),

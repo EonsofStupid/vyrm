@@ -46,6 +46,14 @@ five-second wait. Its result distinguishes a timeout from delivered data and
 always returns a normal replay page, keeping disconnect/reconnect behavior
 independent of server-local subscription state.
 
+Managed backup/restore is path-closed at the public boundary. A create request
+contains only a bounded safe label and event time; a restore request contains a
+content-addressed backup digest, canonical restore identity, and event time.
+Catalogue responses expose authenticated archive identity, watermarks and an
+explicit coverage matrix. No request accepts a source, catalogue, target, or
+active-instance filesystem path. The server owns generated locations and a
+restore always targets a new root.
+
 The frozen JSON fixture is
 [`public-contract-v1.json`](../crates/rrd-contract/fixtures/public-contract-v1.json).
 Malformed identifiers, duplicate/unsorted capabilities, unsupported protocol

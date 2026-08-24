@@ -426,6 +426,134 @@ fn bounded_changefeed_follow_wakes_on_a_commit_and_times_out_at_the_same_cursor(
 }
 
 #[test]
+fn managed_backup_and_restore_are_authenticated_replay_safe_and_path_closed() {
+    let temporary = tempfile::tempdir().unwrap();
+    let root = temporary.path().join("instance");
+    seed_query_fixture(&root);
+    let server = start(&root);
+    let create_session = envelope(
+        json!({
+            "limits": {
+                "idle_timeout_ms": 60_000,
+                "absolute_timeout_ms": 300_000,
+                "max_open_transactions": 2
+            }
+        }),
+        Some("backup-session"),
+        None,
+    );
+    let (status, created) = post(&server, "/v1/sessions", &create_session, None);
+    assert_eq!(status, 200, "{created}");
+    let session_id = payload(&created)["session_id"].as_str().unwrap().to_owned();
+    let token = payload(&created)["token"].as_str().unwrap().to_owned();
+    let backup = envelope(
+        json!({"label": "before-upgrade", "created_at_unix_ms": 500}),
+        Some("backup-create"),
+        None,
+    );
+    let (status, denied) = post(&server, "/v1/backups", &backup, None);
+    assert_eq!(status, 401, "{denied}");
+    let (status, backed_up) = post(&server, "/v1/backups", &backup, Some((&session_id, &token)));
+    assert_eq!(status, 200, "{backed_up}");
+    assert_eq!(payload(&backed_up)["idempotent_replay"], false);
+    assert_eq!(
+        payload(&backed_up)["backup"]["archive"]["runtime_cursor"],
+        2
+    );
+    assert_eq!(
+        payload(&backed_up)["backup"]["object_payloads"],
+        "referenced_only"
+    );
+    assert_eq!(payload(&backed_up)["backup"]["application_complete"], false);
+    let backup_id = payload(&backed_up)["backup"]["backup_sha256"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let (status, backup_replay) =
+        post(&server, "/v1/backups", &backup, Some((&session_id, &token)));
+    assert_eq!(status, 200, "{backup_replay}");
+    assert_eq!(payload(&backup_replay)["idempotent_replay"], true);
+    assert_eq!(
+        payload(&backup_replay)["backup"]["backup_sha256"],
+        backup_id
+    );
+    let mut backup_collision = backup.clone();
+    backup_collision["payload"]["label"] = json!("different");
+    let (status, collision) = post(
+        &server,
+        "/v1/backups",
+        &backup_collision,
+        Some((&session_id, &token)),
+    );
+    assert_eq!(status, 409, "{collision}");
+
+    let list = envelope(json!({"verify_archives": true}), None, None);
+    let (status, listed) = post(
+        &server,
+        "/v1/backups/list",
+        &list,
+        Some((&session_id, &token)),
+    );
+    assert_eq!(status, 200, "{listed}");
+    assert_eq!(payload(&listed)["archives_verified"], true);
+    assert_eq!(payload(&listed)["revision"], 1);
+    assert_eq!(payload(&listed)["backups"].as_array().unwrap().len(), 1);
+    assert_eq!(payload(&listed)["backups"][0]["backup_sha256"], backup_id);
+
+    let restore = envelope(
+        json!({
+            "backup_sha256": backup_id,
+            "restore_id": "restore-a",
+            "restored_at_unix_ms": 600
+        }),
+        Some("restore-create"),
+        None,
+    );
+    let (status, restored) = post(
+        &server,
+        "/v1/restores",
+        &restore,
+        Some((&session_id, &token)),
+    );
+    assert_eq!(status, 200, "{restored}");
+    assert_eq!(payload(&restored)["restore_id"], "restore-a");
+    assert_eq!(payload(&restored)["reopened"], true);
+    assert_eq!(payload(&restored)["idempotent_replay"], false);
+    let (status, restore_replay) = post(
+        &server,
+        "/v1/restores",
+        &restore,
+        Some((&session_id, &token)),
+    );
+    assert_eq!(status, 200, "{restore_replay}");
+    assert_eq!(payload(&restore_replay)["idempotent_replay"], true);
+    server.stop();
+
+    let restored_root = temporary
+        .path()
+        .join("rrd-service/socket-test/restores/restore-a");
+    assert!(restored_root.join("CURRENT").is_file());
+    let restored_engine = PersistentEngine::open(&restored_root).unwrap();
+    assert_eq!(restored_engine.sequence().unwrap(), 0);
+    assert_eq!(restored_engine.runtime_cursor().unwrap(), 2);
+    drop(restored_engine);
+
+    let server = start(&root);
+    let (status, restart_backup) =
+        post(&server, "/v1/backups", &backup, Some((&session_id, &token)));
+    assert_eq!(status, 200, "{restart_backup}");
+    assert_eq!(payload(&restart_backup)["idempotent_replay"], true);
+    let (status, restart_restore) = post(
+        &server,
+        "/v1/restores",
+        &restore,
+        Some((&session_id, &token)),
+    );
+    assert_eq!(status, 200, "{restart_restore}");
+    assert_eq!(payload(&restart_restore)["idempotent_replay"], true);
+}
+
+#[test]
 fn data_transaction_atomically_commits_every_public_model_and_replays_after_restart() {
     let (_temporary, root, server) = start_root();
     let create = envelope(
