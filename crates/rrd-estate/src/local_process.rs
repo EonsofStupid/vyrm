@@ -427,16 +427,26 @@ impl LocalProcessDriver {
                                 spawned_exit_message(status, &stderr_path),
                             ));
                         }
-                        let _ = child.kill();
-                        let _ = child.wait();
-                        return Err(permanent(
-                            request,
-                            format!(
-                                "live spawned process executable does not match the trusted catalogue: expected {}, observed {}",
-                                deployment.executable.display(),
-                                executable.display()
-                            ),
-                        ));
+                        // Some Linux process observers can briefly expose the
+                        // pre-exec parent image for a newly spawned PID. Never
+                        // authenticate or persist that image, but allow the
+                        // bounded discovery window to observe the trusted
+                        // executable after exec completes. A stable mismatch
+                        // still fails closed and the child is reaped below.
+                        if Instant::now() >= discovery_deadline {
+                            let _ = child.kill();
+                            let _ = child.wait();
+                            return Err(permanent(
+                                request,
+                                format!(
+                                    "live spawned process executable does not match the trusted catalogue: expected {}, observed {}",
+                                    deployment.executable.display(),
+                                    executable.display()
+                                ),
+                            ));
+                        }
+                        thread::sleep(Duration::from_millis(10));
+                        continue;
                     }
                     break (process.start_time(), executable);
                 }
