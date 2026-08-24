@@ -513,6 +513,12 @@ and scan/row/output/batch budgets. Memory, Fjall compatibility, native VyrmKV,
 and secured real-RRD tests prove typed results and time cutoffs. Details and
 current built-in-field limits are in
 [`vyrmql-multimodel-v1.md`](vyrmql-multimodel-v1.md).
+The next slice adds a `traverse:<relation>` source with a mandatory canonical
+start reference, outgoing/incoming/both direction, and depth in `1..=32`.
+Binding proves the types against the stamped schema; execution walks only the
+visible bitemporal graph snapshot, orders edges canonically, suppresses cycles,
+and emits one deterministic shortest-path row per reached node. Memory, Fjall
+compatibility, native VyrmKV, and secured RRD tests cover it.
 
 **Deliverables**
 

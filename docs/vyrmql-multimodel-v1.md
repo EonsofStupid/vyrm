@@ -1,8 +1,9 @@
 # VyrmQL multi-model read foundation
 
 Status: executable stamped reads for records, relations, events, claims,
-time-series samples, and geospatial values. General operators, graph traversal,
-indexes, full text, mutating statements, and push subscriptions remain open.
+time-series samples, geospatial values, and bounded recursive graph traversal.
+General operators, indexes, full text, mutating statements, and push
+subscriptions remain open.
 
 VyrmQL sources now include:
 
@@ -12,6 +13,8 @@ VyrmQL sources now include:
 - `claim` or `claim:<predicate>` for resolved bitemporal claims;
 - `series:<kind>` where `<kind>` is the referenced series-record kind;
 - `geo:<kind>` where `<kind>` is the geospatial value's reference kind.
+- `traverse:<relation> START <kind>:<id> DIRECTION <OUTGOING|INCOMING|BOTH>
+  DEPTH <1..32>` for bounded recursive graph expansion.
 
 All six families use explicit `AT VALID` and `KNOWN` coordinates, bind against
 the captured schema/read stamp, receive a content-addressed plan, enforce scan/
@@ -31,6 +34,14 @@ secured real RRD process accepts the same transaction and returns the exact
 typed rows through `/v1/query` before and after persistence replay.
 
 This is the first F6 breadth slice, not completion of the query surface.
-Recursive traversal, numeric/spatial operators, index catalogues and lifecycle,
-planner statistics, full text, mutating VyrmQL, streaming responses, and push
-live subscriptions remain explicit gaps.
+Traversal validates the start and relation types against the captured schema,
+uses only the bitemporal graph snapshot visible at the requested coordinates,
+orders relations canonically, returns the first deterministic shortest path to
+each reached node, and suppresses cycles with a visited set. Direction and a
+hard maximum depth are mandatory; every row exposes depth, reached node, edge,
+endpoints, and the complete node path. Three-engine and secured RRD tests prove
+outgoing/incoming semantics and cycle termination.
+
+Numeric/spatial operators, index catalogues and lifecycle, planner statistics,
+full text, mutating VyrmQL, streaming responses, and push live subscriptions
+remain explicit gaps.

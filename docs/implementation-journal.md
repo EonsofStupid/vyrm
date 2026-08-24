@@ -726,3 +726,22 @@ index.
 - Limit: recursive traversal, general numeric/spatial operators, indexes and
   statistics, full text, mutating/multi-statement VyrmQL, streaming batches,
   and push live subscriptions remain open F6 breadth.
+
+## 2026-08-24 — bounded recursive graph traversal
+
+- Commit: `4740d7f` (`feat(query): add bounded graph traversal`).
+- Grammar: added `traverse:<relation> START <kind>:<id> DIRECTION
+  <OUTGOING|INCOMING|BOTH> DEPTH <1..32>` as a typed VyrmQL source. Canonical
+  rendering round-trips and malformed direction/depth inputs fail with offsets.
+- Binding: the relation and start record kinds must exist at the captured schema
+  revision and the start kind must be an allowed relation endpoint.
+- Execution: breadth-first traversal reads the same explicit valid/known graph
+  snapshot, processes relations in canonical identity order, tracks visited
+  nodes to terminate cycles, and emits the deterministic first shortest path
+  with depth, node, edge, endpoint, and complete path fields.
+- Evidence: nine VyrmMX tests, parser corpus/mutation tests, strict Clippy, a
+  cyclic graph fixture, outgoing/incoming three-engine differentials, and the
+  secured real-RRD atomic-data/query test pass.
+- Limit: traversal currently returns nodes/paths for one relation type and does
+  not yet implement path predicates, weighted paths, all-path enumeration, or
+  index-assisted expansion. Index/realtime breadth remains next.

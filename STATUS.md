@@ -146,9 +146,12 @@ Kubernetes operation, and authoritative Connectome management.
   stamped exact plans, deterministic rows, and bounded execution. Memory,
   Fjall compatibility, and native VyrmKV return identical series/geo results;
   a secured real-RRD transaction/query test proves the same public typed rows.
-  Only frozen series/geo built-ins are bindable today. Traversal, general
-  operators, index lifecycle, full text, mutating VyrmQL, streaming, and push
-  subscriptions keep F6 open.
+  Bounded recursive traversal now validates its start/relation against the
+  stamped schema, requires direction and depth, returns deterministic shortest
+  paths, and terminates cycles; three-engine and secured-RRD tests pass. Only
+  frozen series/geo built-ins are bindable today. General operators, index
+  lifecycle, full text, mutating VyrmQL, streaming, and push subscriptions keep
+  F6 open.
 
 - The bi-temporal claim kernel has immutable supersession corrections,
   canonical SHA-256 identities covering provenance and validity, and atomic

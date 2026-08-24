@@ -74,8 +74,10 @@ VyrmQL/VyrmMX now read records, relations, events, claims, time-series samples,
 and geospatial values through the same explicit valid/known time, stamped plan,
 budget, and authoritative-log execution path. Three-engine differential tests
 and a secured real-RRD test prove series/geo results and persistence. See
-[`docs/vyrmql-multimodel-v1.md`](docs/vyrmql-multimodel-v1.md); traversal,
-indexes, full text, mutating statements, and push subscriptions remain open.
+[`docs/vyrmql-multimodel-v1.md`](docs/vyrmql-multimodel-v1.md). VyrmQL now also
+has schema-bound, direction-explicit, depth-capped recursive graph expansion
+with deterministic shortest paths and cycle suppression. Indexes, full text,
+mutating statements, and push subscriptions remain open.
 
 F3 now has its first authority artifact in
 [`rrd-estate`](crates/rrd-estate): a bounded, versioned estate document whose
