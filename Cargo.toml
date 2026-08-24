@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "crates/rrd-contract",
     "crates/rrd-estate",
+    "crates/rrd-security",
     "crates/rrd-server",
     "crates/vyrm-core",
     "crates/vyrm-ql",

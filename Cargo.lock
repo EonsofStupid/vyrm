@@ -2360,6 +2360,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "rrd-security"
+version = "0.1.0"
+dependencies = [
+ "rrd-contract",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "vyrm-core",
+ "vyrm-store",
+]
+
+[[package]]
 name = "rrd-server"
 version = "0.1.0"
 dependencies = [

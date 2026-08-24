@@ -367,6 +367,18 @@ authentication, or organization-wide authorization.
 
 ### F4 — establish security and governance before remote management
 
+**Status:** in progress. The persistent authority core is implemented in
+`rrd-security` and specified by [`rrd-security-v1.md`](rrd-security-v1.md).
+It stores bounded user/service/node principals with credential verifiers,
+validity/disable state, and exact action/resource-prefix grants. Missing policy,
+unknown or expired principals, wrong credentials, ungranted actions, and wrong
+resource prefixes deny by default. Typed redacted audit records are immutable,
+idempotent, and replayed through the authenticated Vyrm control journal.
+Native reopen tests prove policy and audit persistence without journaling the
+raw credential. HTTP enforcement/provisioning, TLS/mTLS, secret providers,
+row/field policy, rate limits, and the every-endpoint authorization/audit
+differential remain open; remote bind is still denied.
+
 **Deliverables**
 
 - Local users/service principals, password/key handling and short-lived tokens.
