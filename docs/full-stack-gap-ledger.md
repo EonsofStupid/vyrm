@@ -386,10 +386,13 @@ available through a policy-protected bounded public read whose cursor advances
 over unrelated control history. The socket/reopen test proves all three
 decision classes and absence of API-key material from public and journal
 evidence. Pre-effect audit reservation is now implemented for authorized
-routed work. Provisioning APIs, TLS/mTLS, secret providers, row/field policy,
-rate limits, application-mutation/audit-completion atomicity, oversized-body/
-handler-failure coverage, retention/rotation, and external archival remain
-open; remote bind is still denied.
+routed work. An experimental TLS 1.3 mTLS listener/client now admits remote
+binding only with initialized application security, requires a trusted client
+certificate, verifies the exact server name, and advertises its transport mode;
+plain HTTP remains loopback-only. Provisioning APIs, certificate reload/
+revocation, secret providers, row/field policy, rate limits, application-
+mutation/audit-completion atomicity, oversized-body/handler-failure coverage,
+retention/rotation, and external archival remain open.
 
 **Deliverables**
 
@@ -430,7 +433,8 @@ retries reads/idempotency-bound mutations only after transport loss or timeout.
 Its methods cover the entire current endpoint catalogue. A hermetic real-server
 test drops the first TCP connection, proves bounded recovery and negotiation,
 then exercises authentication, exact query, deadline denial, transaction
-begin/preview/abort, changefeed and protected audit. Broader method rows,
+begin/preview/abort, changefeed and protected audit. A second real-server test
+proves mTLS success plus anonymous-client and wrong-server-name denial. Broader method rows,
 released-version compatibility, packaging/reference generation, and the other
 language clients keep F5 open.
 

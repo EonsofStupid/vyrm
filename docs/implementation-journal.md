@@ -1067,3 +1067,22 @@ index.
   strict Clippy pass.
 - Limit: no public build/lifecycle route, SIMD/mmap kernel, physical tier
   placement, or production-scale recall/bias/latency/recovery matrix is claimed.
+
+## 2026-08-24 — remote RRD TLS 1.3 mutual-auth boundary
+
+- Commit: `6286ee4` (`feat(rrd): add remote mutual TLS transport`).
+- Server: plain HTTP remains loopback-only. The separate mTLS constructor and
+  CLI mode require a server chain/key/client CA together, require an initialized
+  `rrd-security` authority before opening the listener, and restrict Rustls to
+  TLS 1.3. The capability handshake distinguishes unavailable cleartext remote
+  listen from the experimental authenticated mode.
+- Client: `rrd-client` now has a distinct HTTPS transport accepting explicit
+  Rustls identity/trust configuration. It retains the same bounds, retry rules,
+  envelope validation, and exact instance negotiation as local HTTP.
+- Evidence: a real TLS socket accepts the trusted client, denies a client with
+  no certificate, denies a valid client certificate when the server name is
+  wrong, and reports `remote-listen` as experimental. Complete RRD server/client
+  suites, strict Clippy, and full-workspace compilation pass.
+- Limit: certificates are startup-loaded. Live rotation, CRL/OCSP, secret-
+  provider/Kubernetes integration, certificate-to-principal binding, HTTP/2,
+  and distributed qualification remain open.

@@ -27,8 +27,9 @@ The first F5 client is [`rrd-client`](crates/rrd-client), an asynchronous Rust
 consumer of that public contract. It negotiates capabilities, covers all 28
 currently published operations, bounds time and response bytes, preserves
 typed errors and request identity, and safely retries reads or
-idempotency-bound mutations after transport loss. It remains loopback-only
-until the remote TLS gate is qualified. All six intended language clients now
+idempotency-bound mutations after transport loss. Local HTTP is loopback-only;
+the Rust client and server now also have an experimental TLS 1.3 mutual-auth
+path with exact server-name verification. All six intended language clients now
 have executable walking skeletons; shared conformance and release qualification
 remain open.
 
@@ -480,8 +481,10 @@ cargo run -p rrd-server -- \
   --bind 127.0.0.1:9477
 ```
 
-It refuses non-loopback binding until the remaining F4 TLS/mTLS and remote
-deployment gates are qualified. `GET
+Plain HTTP refuses non-loopback binding. Remote binding is admitted only when
+the server has both TLS 1.3 mutual-auth material and initialized `rrd-security`
+policy; certificate reload/revocation and distributed qualification remain
+open. `GET
 /v1/capabilities` reports the exact shipped/limited surface; session bearer
 values are derived from an owner-private OS-random key and only their hashes
 enter the lifecycle journal. See

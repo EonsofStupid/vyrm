@@ -1,9 +1,9 @@
 # RRD Rust client v1
 
-Status: asynchronous loopback client walking skeleton implemented against the
-entire currently published RRD operation catalogue. TLS/distributed endpoints,
-streaming subscriptions, generated API reference, and released-version matrix
-remain open.
+Status: asynchronous loopback plus experimental mTLS client walking skeleton
+implemented against the entire currently published RRD operation catalogue.
+Distributed qualification, streaming subscriptions, generated API reference,
+and released-version matrix remain open.
 
 `rrd-client` is the first supported-client boundary. It depends on
 `rrd-contract` and HTTP transport crates, never on Vyrm storage, VyrmQL/VyrmMX,
@@ -12,8 +12,10 @@ dev-only black-box fixtures.
 
 ## Transport and protocol invariants
 
-- Construction accepts only an explicit loopback socket until F4 TLS
-  qualification permits remote endpoints.
+- Plain HTTP construction accepts only an explicit loopback socket. Remote
+  construction requires an HTTPS origin and caller-supplied Rustls client
+  identity/trust configuration; the server still requires mTLS and application
+  authorization.
 - Capability and endpoint-catalogue calls validate protocol identity/version,
   capability ordering, and exact instance identity.
 - Every envelope is constructed from public resource and correlation types and
@@ -44,8 +46,10 @@ front of it, drops the first connection, and proves capability negotiation
 recovers within the configured attempt bound. It then proves endpoint-catalogue
 decoding, typed wrong-key error mapping, principal session creation, exact query
 results, client-side expired-deadline denial, transaction begin/preview/abort,
-retained changefeed decoding, protected audit decoding, and pre-TLS remote
-endpoint denial.
+retained changefeed decoding, protected audit decoding, and cleartext remote
+endpoint denial. A second live fixture proves valid mTLS negotiation and exact
+remote-listen capability reporting, missing-client-certificate denial, and
+wrong-server-name denial.
 
 This is not the F5 exit gate. Commit and vector mutations, renewal/closure,
 backup/restore, estate projection, follow timeout/reconnect, response-limit

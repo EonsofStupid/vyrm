@@ -112,7 +112,10 @@ Kubernetes operation, and authoritative Connectome management.
   exact action/resource-prefix grants, principal-bound sessions, per-request
   policy re-evaluation, and redacted authorization/outcome audit survive
   reopen. Missing policy or permission denies by default. Protected audit read
-  advances through the authenticated control journal. Provisioning, TLS/mTLS,
+  advances through the authenticated control journal. An experimental TLS 1.3
+  mTLS server/client path now permits remote bind only with initialized security,
+  requires a trusted client certificate, verifies the exact server name, and
+  keeps cleartext loopback-only. Provisioning, certificate reload/revocation,
   secret providers, row/field policy, rate limits, audit retention/archival,
   and application-mutation/audit-completion atomicity keep F4 open.
 - F5 publishes one validated catalogue for all 28 current RRD operations and
@@ -414,8 +417,9 @@ Kubernetes operation, and authoritative Connectome management.
   public protocol and exact-instance capability handshake before CAS/journal
   persistence; retries are idempotent, key rebinding fails, non-loopback
   cleartext fails, and only credential references are retained. This is the F9
-  connection authority baseline, not authenticated source switching or remote
-  TLS data access.
+  connection authority baseline, not authenticated source switching. The Rust
+  RRD client now supports mTLS, but Connectome still lacks credential-provider
+  resolution and active remote-source switching.
 - `vyrmQL` and `vyrmMX` now form a separate read-only query layer above the
   frozen engine port. The language requires explicit valid and known time;
   catalog binding rejects unknown types/fields and missing parameters; the

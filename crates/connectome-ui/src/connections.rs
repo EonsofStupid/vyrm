@@ -60,7 +60,8 @@ pub struct ConnectionProfile {
     pub label: String,
     pub mode: ConnectionMode,
     /// `host:port` for the currently qualified local transport. Remote profiles
-    /// retain an HTTPS endpoint but remain unprobeable until the TLS client lands.
+    /// retain an HTTPS endpoint but remain unprobeable until Connectome can
+    /// resolve credential references into mTLS client material.
     pub endpoint: String,
     pub instance_id: CanonicalId,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -302,7 +303,7 @@ pub fn probe_connection(
     profile.validate()?;
     match profile.mode {
         ConnectionMode::RemoteRrd => Err(Error::Invalid(
-            "remote RRD probing is unavailable until the F4 TLS client is qualified".into(),
+            "remote RRD probing requires a Connectome mTLS credential provider".into(),
         )),
         ConnectionMode::LocalRrd => {
             let address = profile

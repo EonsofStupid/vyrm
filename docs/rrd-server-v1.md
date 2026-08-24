@@ -1,7 +1,7 @@
 # RRD server v1 implementation contract
 
-Status: F2 alpha process implemented. The async loopback HTTP boundary and
-persistent coordinator are shipped; the broader F2 administration,
+Status: F2 alpha process implemented. The async loopback HTTP and experimental
+TLS 1.3 mTLS boundaries plus persistent coordinator are shipped; the broader F2 administration,
 cancellation, metrics, read-your-writes, and mutating-query exit gate remains
 open.
 
@@ -11,19 +11,34 @@ adapter. Both consume `rrd-contract`; neither owns persistence semantics.
 
 ## Initial deployment boundary
 
-The server may bind only to an explicit loopback address. Non-loopback startup
-fails closed. With initialized `rrd-security` state, session creation requires a
+Plain HTTP may bind only to an explicit loopback address. Non-loopback
+cleartext startup fails closed. A TLS listener may bind remotely only when it
+requires a client certificate rooted in the configured CA and the target
+instance already has initialized `rrd-security` state. Session creation then requires a
 principal/API key, persists that principal on the lease, and every current
 authenticated route rechecks its closed action and exact resource policy. With
-no security state, sessions remain an explicitly advertised local development
-transport mode. TLS/mTLS, provisioning, field/row policy, and complete endpoint
-audit remain F4 gates before remote exposure.
+no security state, sessions remain an explicitly advertised loopback development
+transport mode and TLS startup is denied. Certificate reload/revocation,
+credential-provider integration, provisioning, field/row policy, and complete
+endpoint audit remain F4 gates.
 
 Start the local process with:
 
 ```text
 cargo run -p rrd-server -- --db PATH --instance INSTANCE --bind 127.0.0.1:9477
 ```
+
+The experimental remote path requires all three PEM inputs together:
+
+```text
+rrd-server --db PATH --instance INSTANCE --bind 0.0.0.0:9477 \
+  --tls-cert SERVER_CHAIN.pem --tls-key SERVER_KEY.pem \
+  --tls-client-ca CLIENT_CA.pem
+```
+
+Rustls is restricted to TLS 1.3 for this listener. HTTP/1.1 connections are
+currently one request per connection; connection pooling, live certificate
+rotation, CRLs/OCSP, and Kubernetes Secret integration remain open.
 
 The database-local `RRD.SERVER.SECRET` is generated from OS entropy, requires
 owner-only permissions on Unix, and makes lease-token derivation stable across
@@ -195,7 +210,10 @@ deadline denial before mutation, token rotation and replay, idle expiry,
 transaction quota, claim-scope preview, explicit abort and close, same-process
 and post-restart commit replay, idempotency collision, disconnect/retry,
 concurrent same-operation convergence, graceful shutdown, and refusal by both
-the library and real binary to bind remotely before F4.
+the library and real binary to bind cleartext remotely. The mTLS matrix proves
+trusted-client success, missing-client-certificate denial, wrong-server-name
+denial, exact capability advertisement, and the requirement for initialized
+application security.
 
 The matrix also proves that an unauthenticated estate read is denied, URL and
 resource-estate identities must agree, and the response is the public snapshot
