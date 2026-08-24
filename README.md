@@ -105,11 +105,16 @@ routes have distinct deny-by-default actions, and collection-addressed search
 resolves and validates that contract before executing the exact oracle. Atomic
 `put_vector` point writes can bind collection plus vector name; commit validates
 field, kind, dimensions, and model provenance while retaining payload
-properties in the unified multi-model transaction. Dedicated point lifecycle/
-scroll APIs remain open. Search now exposes the same bounded typed equals,
-inequality, membership, range, existence, all/any/not payload-filter algebra as
-the exact oracle. Payload indexes, persisted one-stage filtered ANN serving,
-inference, and TurboQuant remain open.
+properties in the unified multi-model transaction. First-class point deletion
+and batch-mutation APIs remain open. Search now exposes the same bounded typed
+equals, inequality, membership, range, existence, all/any/not payload-filter
+algebra as the exact oracle. Vyrm now also has a deterministic MSE TurboQuant codec for
+4/2/1.5/1-bit packed vectors, seeded rotation, asymmetric scoring, and norm
+correction. Its authenticated binary artifact is catalogued as a planner-visible
+approximate path and proposes candidates for authoritative exact-f32 reranking.
+Public build/lifecycle administration, SIMD qualification, large-corpus quality
+matrices, payload indexes, persisted one-stage filtered ANN serving, and
+physical memory-tier enforcement remain open.
 Authenticated deterministic point scrolling is also public. It resolves a
 collection/name, captures one exact read stamp, reuses the search visibility
 primitive, applies valid-time/model/payload rules, orders by point reference,

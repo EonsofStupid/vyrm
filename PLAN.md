@@ -237,10 +237,12 @@ disagree, `SPEC.md` is authoritative and this document is wrong.
 > baseline, not a Qdrant superiority claim. Compact binary/mmap, SIMD/GPU,
 > sparse/multivector ANN, embeddings, and external comparison remain gated.
 > See `docs/vyrm-vector-search.md`.
-> The existing symmetric-int8 experiment is explicitly not TurboQuant. A real
-> planner-visible TurboQuant codec remains gated on the primary paper's seeded
-> rotation, distribution-matched packed scalar codes, residual QJL estimator,
-> frozen vectors, exact-oracle recall/bias evidence, and scalar/SIMD parity.
+> The existing symmetric-int8 experiment remains separate from TurboQuant. A
+> deterministic MSE TurboQuant path now supplies seeded randomized Hadamard
+> rotation, fixed distribution-matched 4/2/1.5/1-bit codes, packed authenticated
+> artifacts, asymmetric scoring, planner selection, and exact-f32 reranking.
+> Public build/lifecycle administration, the paper's residual QJL variant,
+> broad recall/bias/latency evidence, mmap, and scalar/SIMD parity remain gated.
 
 > **M6 embedding/edge overlay (2026-08-19).** The local kernel gate is closed.
 > `vyrm-embed` now provides source-digest/model/read-stamp-bound jobs, two-read

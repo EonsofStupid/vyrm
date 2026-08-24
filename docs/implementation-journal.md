@@ -1032,3 +1032,38 @@ index.
 - Limit: remote HTTPS profiles validate structurally but are not probed until
   the F4 TLS client exists. Profiles do not yet establish authenticated data
   sessions or select a remote RRD as the panel's active data source.
+
+## 2026-08-24 — deterministic MSE TurboQuant codec
+
+- Commit: `ff02cbc` (`feat(vector): add deterministic TurboQuant codec`).
+- Codec: `TurboQuantVector` supports fixed standard-normal Lloyd-Max 4/2/1/1.5
+  bit modes, deterministic seeded randomized Hadamard rotation, bit packing,
+  original/centroid norm correction, reconstruction, and asymmetric dot,
+  cosine, Euclidean, and Manhattan scoring. The 1.5-bit mode rotates a 1.5x
+  padded coordinate space before one-bit coding.
+- Evidence: frozen determinism/packing/size tests cover all modes; irregular
+  dimensions prove norm-preserving invertibility; malformed/non-finite inputs
+  fail closed; a fixed exact-oracle Recall@10 gate covers the four-bit path.
+- Limit: this is the practical MSE variant, not the paper's residual QJL
+  estimator. SIMD and broad production-corpus quality/latency evidence remain
+  open.
+
+## 2026-08-24 — authenticated planner-visible TurboQuant artifacts
+
+- Commit: `6308362` (`feat(vector): serve authenticated TurboQuant artifacts`).
+- Artifact: the custom bounded binary format separates canonical JSON metadata
+  from packed vector bytes, authenticates both under one SHA-256 identity, and
+  retains temporal identity, payload-filter properties, cursors, model binding,
+  and norm corrections without storing full-f32 vector payloads in the
+  artifact.
+- Serving: TurboQuant is a typed approximate access path in the shared
+  catalogue/planner/runtime. It revalidates scope, field, metric, dimensions,
+  model, filter coverage, generation, source cursor, and artifact kind before
+  proposing candidates; the authoritative exact-f32 oracle performs final
+  reranking.
+- Evidence: binary reopen, byte accounting, payload filtering, corruption and
+  stale-read denial, every-artifact codec roundtrip, planner selection, exact
+  reranking, affected server/node/vector tests, full-workspace compilation, and
+  strict Clippy pass.
+- Limit: no public build/lifecycle route, SIMD/mmap kernel, physical tier
+  placement, or production-scale recall/bias/latency/recovery matrix is claimed.

@@ -35,7 +35,7 @@ fn diagnostics_handshake_is_replayable_and_truthfully_matured() {
         maturity("multivector_late_interaction"),
         CapabilityMaturity::Partial
     );
-    assert_eq!(maturity("turboquant"), CapabilityMaturity::Planned);
+    assert_eq!(maturity("turboquant"), CapabilityMaturity::Partial);
     assert_eq!(
         maturity("kubernetes_hybrid_cloud"),
         CapabilityMaturity::Planned

@@ -107,7 +107,7 @@ test('capability handshake separates executable evidence from roadmap claims', a
     reversible: true,
   });
   expect(capabilities.engine.find((item) => item.id === 'filtered_hnsw').maturity).toBe('alpha');
-  expect(capabilities.engine.find((item) => item.id === 'turboquant').maturity).toBe('planned');
+  expect(capabilities.engine.find((item) => item.id === 'turboquant').maturity).toBe('partial');
   expect(capabilities.engine.find((item) => item.id === 'kubernetes_hybrid_cloud').maturity).toBe('planned');
 
   await page.goto(`${baseURL}/#capabilities`);

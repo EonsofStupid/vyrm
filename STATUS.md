@@ -182,16 +182,19 @@ Kubernetes operation, and authoritative Connectome management.
   drift. Atomic vector point writes can bind the same coordinates and validate
   field, kind, dimensions, and model provenance before commit while preserving
   payload properties. Native reopen, replay, collision, list, denial, bound
-  point commit, and real-process exact search pass. Dedicated point lifecycle/
-  scroll APIs remain open. The public search contract now includes a bounded
-  recursive payload-filter algebra and real-process matching/non-matching
-  evidence over committed point properties. Payload indexes, persisted
-  one-stage filtered ANN serving, inference, physical tier enforcement, and
-  TurboQuant remain F7 work.
+  point commit, and real-process exact search pass. First-class point deletion
+  and batch-mutation APIs remain open. The public search contract now includes
+  a bounded recursive payload-filter algebra and real-process matching/non-matching
+  evidence over committed point properties. A deterministic MSE TurboQuant
+  codec now supports seeded rotation, 4/2/1.5/1-bit packing, norm-corrected
+  asymmetric scoring, authenticated binary reopen, planner selection, and
+  exact-f32 reranking. Public artifact build/lifecycle administration, SIMD and
+  large-corpus quality qualification, payload indexes, persisted one-stage
+  filtered ANN serving, and physical tier enforcement remain F7 work.
   Authenticated point scroll now returns deterministic reference-ordered pages
   at one exact read/valid-time coordinate through the same shared visibility
-  primitive as search, including model and payload-filter enforcement. Retrieve
-  Direct authenticated batch retrieval preserves request order and explicitly
+  primitive as search, including model and payload-filter enforcement. Direct
+  authenticated batch retrieval preserves request order and explicitly
   returns missing identities at the same snapshot. First-class delete remains
   open.
 
@@ -638,9 +641,13 @@ remote repetition remains required before compatibility retirement.
   `docs/vyrmds-architecture-research.md`,
   `docs/vyrm-vector-search.md`, `docs/vyrm-embedding-edge.md`, and
   `docs/vyrm-cluster-m7.md`.
-  The current symmetric-int8 experiment is not TurboQuant. A primary-paper
-  implementation with seeded rotation, packed distribution-matched scalar
-  codes, residual QJL, and exact-oracle quality evidence remains open.
+  The older symmetric-int8 experiment remains separate from TurboQuant. The
+  new MSE TurboQuant path uses deterministic seeded rotation, fixed
+  distribution-matched 4/2/1.5/1-bit scalar codes, bit packing, norm correction,
+  asymmetric query scoring, authenticated reopen, and exact-oracle reranking.
+  It does not claim the paper's residual QJL estimator or full production
+  qualification; SIMD, broad recall/bias/latency evidence, and public lifecycle
+  administration remain open.
 
 - JavaScript application-run claims use script-sensitive canonical event
   subjects such as `package:bun:test`, `package:pnpm:run:typecheck`, and

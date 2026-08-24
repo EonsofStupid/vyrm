@@ -571,15 +571,20 @@ exact search enforces the definition. Atomic vector writes can bind the same
 collection/name and validate field, kind, dimensions, and model provenance
 before committing payload properties with the unified transaction. Native
 reopen plus real-process denial, replay, collision, list, bound point commit,
-mismatch, and search tests pass. Dedicated point lifecycle/scroll APIs, payload
-indexes, physical tier enforcement, filtered persisted ANN, inference, and
-TurboQuant remain open. Public exact search now includes bounded equality,
-inequality, membership, range, existence, and recursive all/any/not payload
-  filters with matching/non-matching real-process evidence.
-  Authenticated point scroll now shares exact visibility semantics with search
-  and returns bounded reference-ordered vector/provenance/payload pages with
-  resume evidence. Direct batch retrieve returns found points in request order
-  plus explicit missing identities. First-class delete remains open.
+mismatch, and search tests pass. First-class point deletion and batch-mutation
+APIs, payload indexes, physical tier enforcement, filtered persisted ANN, and public
+inference administration remain open. A deterministic MSE TurboQuant codec and
+authenticated binary artifact now implement seeded rotation, fixed
+distribution-matched 4/2/1.5/1-bit packing, norm-corrected asymmetric scoring,
+catalogue/planner selection, corruption denial, and exact-f32 reranking. Public
+artifact build/lifecycle routes, SIMD, mmap, and broad quality/recovery evidence
+remain open. Public exact search now includes bounded equality, inequality,
+membership, range, existence, and recursive all/any/not payload filters with
+matching/non-matching real-process evidence. Authenticated point scroll now
+shares exact visibility semantics with search and returns bounded
+reference-ordered vector/provenance/payload pages with resume evidence. Direct
+batch retrieve returns found points in request order plus explicit missing
+identities. First-class delete remains open.
 
 **Deliverables**
 
@@ -593,9 +598,11 @@ inequality, membership, range, existence, and recursive all/any/not payload
 - Unified nearest/id/recommend/discover/context/scroll/group/facet/matrix,
   hybrid/prefetch/multistage/formula query algebra.
 - Dense+sparse rank fusion and ColBERT late interaction without middleware.
-- Actual TurboQuant: seeded rotation, global distribution-aware mapping,
-  4/2/1.5/1-bit packing, asymmetric query scoring, SIMD, lifecycle and recall
-  evidence. Keep scalar/binary/product methods separate.
+- Complete TurboQuant promotion: the landed MSE path has seeded rotation,
+  fixed distribution-aware mapping, 4/2/1.5/1-bit packing, asymmetric scoring,
+  authenticated artifact lifecycle, planner selection, and exact reranking.
+  Add public lifecycle administration, SIMD/mmap, broad recall/bias/latency and
+  recovery evidence; keep scalar/binary/product methods separate.
 - Per-structure pinned/cached/cold memory policy.
 - Physical GPU indexing with CPU byte/semantic differential and fallback.
 - Server/client inference for local and provider models with digest provenance.
