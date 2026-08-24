@@ -483,3 +483,34 @@ index.
 - Limit: endpoint audit completion is the next F4 slice. Provisioning, TLS/
   mTLS, secret providers, row/field policy, rate limits, and remote exposure
   remain open.
+
+## 2026-08-24 — secured HTTP authorization and outcome audit
+
+- Commit: `e7541d9` (`feat(rrd): audit secured request outcomes`).
+- Public contract: froze closed security actions, authorization/completion
+  phases, allow/deny/fail decisions, bounded `ReadAudit`, and redacted public
+  audit snapshots. The resume coordinate advances through unrelated global
+  control-journal history rather than stalling at the last matching record.
+- Pre-effect evidence: after policy allows a routed operation, RRD durably
+  appends an `authorized/allowed` reservation before execution. Denied requests
+  receive a terminal completion only; accepted work receives a final allowed
+  or failed completion after the response is known. Missing completion remains
+  observable after a process/audit-writer gap.
+- Coverage: secured session creation and every authenticated handler now emit
+  redacted records. Public health/capability inspection, unknown routes,
+  malformed envelopes, missing bearer headers, authorization denials, success,
+  and execution failure are covered at the routed boundary.
+- Read path: `POST /v1/audit/read` is itself protected by the exact `audit_read`
+  grant and returns request/response digests rather than bodies, credentials,
+  tokens, or arbitrary headers.
+- Evidence: the real socket test observes public inspection, unknown route,
+  missing/wrong API keys, allowed query, ungranted backup, missing bearer, and
+  failed query. It reads thirteen authorization/completion records spanning all
+  decision classes, reopens the journal, and proves API-key material and the
+  authorization scheme were not persisted.
+- Verification: all `rrd-contract`, `rrd-security`, and `rrd-server` tests
+  passed; strict all-target/all-feature clippy and `git diff --check` passed.
+- Limit: oversized-body and handler-join failures, retention/rotation, external
+  archival, and atomic application-mutation/audit-completion publication remain
+  open. F4 also still requires provisioning, TLS/mTLS, secret providers, row/
+  field policy, and rate limits.
