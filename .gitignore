@@ -1,5 +1,6 @@
 # Build artifacts (workspace also builds into CARGO_TARGET_DIR when set)
 /target
+**/node_modules/
 
 # Session transcripts and hooks — operator-local, never part of the product
 /.chat
