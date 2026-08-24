@@ -579,3 +579,33 @@ index.
 - Limit: the document is generator input, not completion of F5. The next slice
   creates TypeScript/ArkType/Biome, Python, Go, Java, and .NET packages plus the
   shared language-neutral black-box fixture.
+
+## 2026-08-24 — generated TypeScript RRD client foundation
+
+- Commit: `d82ee13` (`feat(sdk): add generated TypeScript RRD client`).
+- Contract correction: SDK generation exposed schema-local recursive `$defs`
+  that ordinary OpenAPI tooling could not resolve. `QueryValue` is now one
+  canonical OpenAPI component, all references resolve, and the frozen document
+  digest covers the corrected generator-compatible shape.
+- Generated surface: OpenAPI TypeScript emits exact `paths`/`operations` for
+  all 21 routes; the generator separately derives the closed runtime endpoint
+  map from operation, method, path, auth, and mutation metadata. Drift checking
+  regenerates both from `rrd-contract` without a shell.
+- Runtime: `RrdClient.call()` is strongly keyed by generated operation ID and
+  payload/result types. It enforces loopback cleartext, canonical identities,
+  resource shape, idempotent mutations, bounded streamed responses, deadlines,
+  cancellation, safe retries, API-key/session headers, response identity, and
+  typed API errors without including credentials in errors.
+- Validation/tooling: ArkType rejects malformed outer response envelopes and
+  Biome 2 is the only formatter/linter. pnpm locks exact tool versions and
+  explicitly permits only the reviewed `esbuild` dependency build.
+- Evidence: generation drift, Biome, strict TypeScript, and three Node tests
+  pass, covering transport retry, session/query envelope and auth construction,
+  remote-cleartext/deadline denial, and typed permission errors. Rust contract,
+  real-client, and full real-server suites plus strict Clippy also pass.
+- Repository correction: commit `a28574b` removed accidentally staged
+  `node_modules` from the Git index and added a nested dependency ignore rule;
+  only source, generated types, configuration, and the lockfile remain tracked.
+- Limit: per-payload ArkType generation, browser/released-package matrices, and
+  shared real-server conformance remain open. Python, Go, Java, and .NET are the
+  next breadth slices.
