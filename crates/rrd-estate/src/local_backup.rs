@@ -2,7 +2,7 @@ use crate::{BackupDriverRequest, BackupResult, DriverError, EstateBackupDriver};
 use std::fs;
 use std::path::{Path, PathBuf};
 use vyrm_core::digest;
-use vyrm_store::{
+use rrd_store::{
     create_logical_backup, verify_backup_catalogue, Error as StoreError, PersistentEngine,
 };
 

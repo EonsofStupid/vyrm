@@ -9,7 +9,7 @@
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use vyrm_graph::{Index, Profile, Refresh};
-use vyrm_store::Engine;
+use rrd_store::Engine;
 
 pub const ROUTING_PROJECTION: &str = "routing-index-v1";
 const ROUTING_FORMAT: u32 = 1;

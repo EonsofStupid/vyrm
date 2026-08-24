@@ -1,9 +1,9 @@
 use crate::{EmbeddingModelBinding, ScoreMetric};
+use rrd_store::{ControlTransition, Engine};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use vyrm_core::{digest, ProjectionId, ScopeId};
-use vyrm_store::{ControlTransition, Engine};
 
 pub const VECTOR_COLLECTION_CATALOGUE_VERSION: u16 = 1;
 const MAX_COLLECTIONS: usize = 4_096;
@@ -14,7 +14,7 @@ pub type CollectionResult<T> = std::result::Result<T, CollectionError>;
 
 #[derive(Debug)]
 pub enum CollectionError {
-    Store(vyrm_store::Error),
+    Store(rrd_store::Error),
     Invalid(String),
     Integrity(String),
     IdempotencyConflict,
@@ -40,8 +40,8 @@ impl fmt::Display for CollectionError {
 
 impl std::error::Error for CollectionError {}
 
-impl From<vyrm_store::Error> for CollectionError {
-    fn from(value: vyrm_store::Error) -> Self {
+impl From<rrd_store::Error> for CollectionError {
+    fn from(value: rrd_store::Error) -> Self {
         Self::Store(value)
     }
 }
@@ -340,25 +340,28 @@ impl<'a, E: Engine> VectorCollectionRepository<'a, E> {
         catalogue.validate()?;
         let replacement = serde_json::to_vec(&catalogue)
             .map_err(|error| CollectionError::Integrity(error.to_string()))?;
-        match self.engine.commit_control_transition(&ControlTransition {
-            key: self.key.clone(),
-            expected,
-            replacement: Some(replacement),
-            at: context.at,
-            actor: context.actor.clone(),
-            action: "vector_collection.ensured".into(),
-            request_id: context.request_id.clone(),
-            operation_id: context.operation_id.clone(),
-        }) {
+        match self.engine.commit_catalog_transition(
+            &self.scope,
+            &ControlTransition {
+                key: self.key.clone(),
+                expected,
+                replacement: Some(replacement),
+                at: context.at,
+                actor: context.actor.clone(),
+                action: "vector_collection.ensured".into(),
+                request_id: context.request_id.clone(),
+                operation_id: context.operation_id.clone(),
+            },
+        ) {
             Ok(_) => Ok((catalogue, false)),
-            Err(vyrm_store::Error::ControlConflict(_)) => {
+            Err(rrd_store::Error::ControlConflict(_)) => {
                 if self
                     .operation_receipt(&idempotency_key, &operation_digest)?
                     .is_some()
                 {
                     Ok((self.load()?, true))
                 } else {
-                    Err(CollectionError::Store(vyrm_store::Error::ControlConflict(
+                    Err(CollectionError::Store(rrd_store::Error::ControlConflict(
                         self.key.clone(),
                     )))
                 }

@@ -1,5 +1,6 @@
 use rrd_contract::CanonicalId;
 use rrd_server::{load_or_create_token_key, RrdHttpServer, RrdMutualTlsServerConfig};
+use rrflow_engine::RrflowEngine;
 use rustls::RootCertStore;
 use std::fs::File;
 use std::io;
@@ -9,7 +10,6 @@ use std::path::Path;
 use std::path::PathBuf;
 use std::time::Duration;
 use tracing_subscriber::EnvFilter;
-use vyrm_store::PersistentEngine;
 
 struct Args {
     db: PathBuf,
@@ -40,19 +40,19 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     }
     let args = parse_args(std::env::args().skip(1))
         .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error))?;
-    let engine = PersistentEngine::open(&args.db)?;
     let key_path = args
         .token_key_file
         .unwrap_or_else(|| args.db.join("RRD.SERVER.SECRET"));
     let token_key = load_or_create_token_key(&key_path)?;
+    let engine = RrflowEngine::open(&args.db, args.instance, token_key)?;
     let tls = load_mtls(
         args.tls_certificate_file,
         args.tls_private_key_file,
         args.tls_client_ca_file,
     )?;
     let server = match tls {
-        Some(tls) => RrdHttpServer::bind_mtls(engine, args.instance, token_key, args.bind, tls)?,
-        None => RrdHttpServer::bind(engine, args.instance, token_key, args.bind)?,
+        Some(tls) => RrdHttpServer::bind_mtls(engine, args.bind, tls)?,
+        None => RrdHttpServer::bind(engine, args.bind)?,
     };
     eprintln!(
         "rrd-server: {}://{}",
@@ -152,16 +152,12 @@ fn parse_args(arguments: impl Iterator<Item = String>) -> Result<Args, String> {
                 )?));
             }
             "--tls-cert" => {
-                tls_certificate_file = Some(PathBuf::from(required_value(
-                    &mut arguments,
-                    "--tls-cert",
-                )?));
+                tls_certificate_file =
+                    Some(PathBuf::from(required_value(&mut arguments, "--tls-cert")?));
             }
             "--tls-key" => {
-                tls_private_key_file = Some(PathBuf::from(required_value(
-                    &mut arguments,
-                    "--tls-key",
-                )?));
+                tls_private_key_file =
+                    Some(PathBuf::from(required_value(&mut arguments, "--tls-key")?));
             }
             "--tls-client-ca" => {
                 tls_client_ca_file = Some(PathBuf::from(required_value(
@@ -216,29 +212,26 @@ fn load_mtls(
     private_key_file: Option<PathBuf>,
     client_ca_file: Option<PathBuf>,
 ) -> Result<Option<RrdMutualTlsServerConfig>, Box<dyn std::error::Error + Send + Sync>> {
-    let (certificate_file, private_key_file, client_ca_file) = match (
-        certificate_file,
-        private_key_file,
-        client_ca_file,
-    ) {
-        (None, None, None) => return Ok(None),
-        (Some(certificate), Some(key), Some(ca)) => (certificate, key, ca),
-        _ => {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "--tls-cert, --tls-key, and --tls-client-ca are required together",
-            )
-            .into());
-        }
-    };
-    let certificate_chain = rustls_pemfile::certs(&mut BufReader::new(File::open(
-        certificate_file,
-    )?))
-    .collect::<std::result::Result<Vec<_>, _>>()?;
-    let private_key = rustls_pemfile::private_key(&mut BufReader::new(File::open(
-        private_key_file,
-    )?))?
-    .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "TLS private key is absent"))?;
+    let (certificate_file, private_key_file, client_ca_file) =
+        match (certificate_file, private_key_file, client_ca_file) {
+            (None, None, None) => return Ok(None),
+            (Some(certificate), Some(key), Some(ca)) => (certificate, key, ca),
+            _ => {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "--tls-cert, --tls-key, and --tls-client-ca are required together",
+                )
+                .into());
+            }
+        };
+    let certificate_chain =
+        rustls_pemfile::certs(&mut BufReader::new(File::open(certificate_file)?))
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+    let private_key =
+        rustls_pemfile::private_key(&mut BufReader::new(File::open(private_key_file)?))?
+            .ok_or_else(|| {
+                io::Error::new(io::ErrorKind::InvalidData, "TLS private key is absent")
+            })?;
     let mut client_roots = RootCertStore::empty();
     for certificate in rustls_pemfile::certs(&mut BufReader::new(File::open(client_ca_file)?)) {
         client_roots

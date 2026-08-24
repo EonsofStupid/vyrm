@@ -76,7 +76,7 @@ authoritative.
 > **Native-engine decision (2026-08-18).** Fjall is transitional and will be
 > removed in favor of a Vyrm-native substrate. Existing Fjall measurements and
 > tests remain comparison evidence, not an architectural veto. The
-> `vyrm_store::Engine` differential is now the migration harness: the native
+> `rrd_store::Engine` differential is now the migration harness: the native
 > engine must preserve wire/temporal/runtime semantics and meet or beat the
 > compatibility adapter on latency, throughput, durability, recovery, and
 > memory. Licensing is not the optimization boundary; measured behavior is.
@@ -395,7 +395,7 @@ absence, not recollection.
 | §3 | `promote`, `gate` | **Missing** | no `vyrm-gate` |
 | §4 | In-process linkage | Implemented | `vyrm-core` is a library crate |
 | §4.1 | napi-rs adapter | **Missing** | no `vyrm-node` |
-| §5 | `vyrm-core`, `vyrm-store` | Implemented | `crates/` |
+| §5 | `vyrm-core`, `rrd-store` | Implemented | `crates/` |
 | §5 | `vyrm-cli` | Implemented | `crates/vyrm-cli` |
 | §5 | `vyrm-graph` | Implemented | `crates/vyrm-graph`: attunement, tree-sitter extraction, routing, freshness, grounding |
 | §5 | `vyrm-gate`, `vyrm-node`, `vyrmd` | **Missing** | absent |
@@ -610,11 +610,11 @@ but wrong (615 lines, no definer); routing the actual definition site costs
 465 more lines, and the ratio metric cannot see correctness. Budget fill:
 13.87x → 13.88x, unchanged.
 
-- Index persistence through `vyrm-store`: a `projections` keyspace
+- Index persistence through `rrd-store`: a `projections` keyspace
   (Buffered durability — a projection is derivable, so a crash-lost write
   costs a rebuild, never truth) holding the index whole as one blob via
   `Index::to_bytes`/`from_bytes`. Persistence wiring lives in vyrm-graph
-  tests and `examples/route_persisted.rs` with vyrm-store as a
+  tests and `examples/route_persisted.rs` with rrd-store as a
   dev-dependency: the library stays substrate-free until vyrm-node exists
   to own the composition. `tests/persistence.rs` (3 tests): a reloaded
   index answers identically with zero re-extraction, an offline change is
@@ -652,7 +652,7 @@ default and free when off. Design decision, recorded before implementation:
   baselines before it merges; an unmeasured "zero-cost" claim is still a
   claim.
 
-**Landed (2026-08-14):** `tracing` in vyrm-store (`append_batch`,
+**Landed (2026-08-14):** `tracing` in rrd-store (`append_batch`,
 `record_invocation`, `rebuild_current`, `ground_current` — divergence is a
 `warn`), vyrm-graph (`refresh`, `ground`, `route`, `from_bytes`, each event
 carrying the counts its report computes), and vyrm-node (`hook.handle` with
@@ -1027,7 +1027,7 @@ experiment, not a rewrite.
 
 **Landed (2026-08-14): the storage port.**
 
-- **`vyrm_store::Engine`** — the fold-in seam. Eight required primitives
+- **`rrd_store::Engine`** — the fold-in seam. Eight required primitives
   (append_batch, sequence, claims_in_range, subjects, observe,
   projection get/put-with-durability, plus the `ClaimSource` reads);
   everything else is **provided by the trait**: assert, current-state
@@ -1070,7 +1070,7 @@ experiment, not a rewrite.
   its fsync, and a cache tier that could disagree with the log would be
   the divergence §8.3 exists to catch.
 
-Two-sided notes: the trait fixes `Error = vyrm_store::Error`, which is
+Two-sided notes: the trait fixes `Error = rrd_store::Error`, which is
 pragmatic and slightly wrong for a pure port (a Go engine obviously
 doesn't share the type; the *contract* is the differential + vectors, the
 Rust trait is one binding of it); invocation recording and gc are not yet
@@ -1135,7 +1135,7 @@ repairing.
   projection emits `grounded` with a digest; a crash mid-rebuild replays the
   interval rather than skipping it.
 
-**Landed (2026-08-14, `vyrm-store/src/projection.rs`):** the current-state
+**Landed (2026-08-14, `rrd-store/src/projection.rs`):** the current-state
 projection — newest version per (subject, predicate) — as the first §8.2/§8.3
 projection over the claim log. The watermark lives in the same serialized
 blob as the entries, so §8.2's atomicity requirement holds by construction:

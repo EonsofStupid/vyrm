@@ -11,7 +11,7 @@ use vyrm_embed::{
 use vyrm_node::{
     execute_traced_embedding, execute_traced_vector_search, publish_traced_vector_artifact,
 };
-use vyrm_store::{DataRuntime, Engine, LocalObjectStore, MemoryEngine, NativeEngine, Store};
+use rrd_store::{DataRuntime, Engine, LocalObjectStore, MemoryEngine, NativeEngine, Store};
 use vyrm_vector::{
     HnswConfig, HnswIndex, ScoreMetric, SearchMode, SearchRequest, VectorCandidate, VectorQuery,
     VectorRuntime,

@@ -7,7 +7,7 @@ use vyrm_core::{
 use vyrm_node::{
     publish_traced_vector_artifact, reopen_vector_runtime, vector_artifact_catalog_entries,
 };
-use vyrm_store::{DataRuntime, Engine, LocalObjectStore, MemoryEngine, NativeEngine, Store};
+use rrd_store::{DataRuntime, Engine, LocalObjectStore, MemoryEngine, NativeEngine, Store};
 use vyrm_vector::{
     HnswConfig, HnswIndex, ScoreMetric, VectorCandidate, VectorRuntime, VECTOR_ARTIFACT_RECORD_TYPE,
 };

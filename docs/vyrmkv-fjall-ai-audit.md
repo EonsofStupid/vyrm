@@ -10,7 +10,7 @@ Fjall is a compatibility oracle and engineering reference, not Vyrm's physical
 backend. `vyrm-kv` already owns its WAL, MVCC sequence allocation, memtable,
 content-addressed immutable segments, manifest/CURRENT protocol, checkpoints,
 snapshot bundles, compaction, block cache, failure injection, and recovery. The
-Fjall dependency is pinned to 3.1.8 inside `vyrm-store`; new stores select native
+Fjall dependency is pinned to 3.1.8 inside `rrd-store`; new stores select native
 VyrmKV and old Fjall directories move only through the verified migration path.
 
 That does **not** mean the native engine is mature enough to dismiss Fjall.
@@ -111,7 +111,7 @@ actions differ.
 Run it with:
 
 ```console
-cargo run --release --locked -p vyrm-store --example ai_hotset_benchmark -- \
+cargo run --release --locked -p rrd-store --example ai_hotset_benchmark -- \
   --workload metadata-fanout --trials 5 --cold-keys 8192 --hot-keys 128 \
   --payload-profile embedding-f32 --reads 8192 --batch-size 128 \
   --value-bytes 128 --fanout-width 32 \

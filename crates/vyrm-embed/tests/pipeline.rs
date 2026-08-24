@@ -8,7 +8,7 @@ use vyrm_embed::{
     EmbeddingSourceSnapshot, ExecutionTarget, FeatureHashBackend, NetworkPolicy,
     NetworkRequirement, EMBEDDING_CONTRACT_VERSION,
 };
-use vyrm_store::{Engine, MemoryEngine};
+use rrd_store::{Engine, MemoryEngine};
 
 struct SequenceReader {
     snapshots: Vec<EmbeddingSourceSnapshot>,

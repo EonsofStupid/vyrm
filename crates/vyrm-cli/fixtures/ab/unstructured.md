@@ -23,7 +23,7 @@ absence, not recollection.
 | §3 | `promote`, `gate` | **Missing** | no `vyrm-gate` |
 | §4 | In-process linkage | Implemented | `vyrm-core` is a library crate |
 | §4.1 | napi-rs adapter | **Missing** | no `vyrm-node` |
-| §5 | `vyrm-core`, `vyrm-store` | Implemented | `crates/` |
+| §5 | `vyrm-core`, `rrd-store` | Implemented | `crates/` |
 | §5 | `vyrm-cli` | Implemented | `crates/vyrm-cli` |
 | §5 | `vyrm-graph` | Implemented | `crates/vyrm-graph`: attunement, tree-sitter extraction, routing, freshness, grounding |
 | §5 | `vyrm-gate`, `vyrm-node`, `vyrmd` | **Missing** | absent |
@@ -57,7 +57,7 @@ flake, observed once on 2026-08-11: `durability.rs::
 an_unflushed_index_is_as_empty_as_the_claims_it_indexes` found 37 recovered
 claims where it expects 0 — the test presumes an unflushed write is absent
 after a clean reopen, but a clean close can land journal bytes via the page
-cache, so the premise is not guaranteed. To be tightened when `vyrm-store` is
+cache, so the premise is not guaranteed. To be tightened when `rrd-store` is
 next touched (Step R item: index persistence).
 
 ## 2 · Findings from this audit
@@ -238,11 +238,11 @@ but wrong (615 lines, no definer); routing the actual definition site costs
 465 more lines, and the ratio metric cannot see correctness. Budget fill:
 13.87x → 13.88x, unchanged.
 
-- Index persistence through `vyrm-store`: a `projections` keyspace
+- Index persistence through `rrd-store`: a `projections` keyspace
   (Buffered durability — a projection is derivable, so a crash-lost write
   costs a rebuild, never truth) holding the index whole as one blob via
   `Index::to_bytes`/`from_bytes`. Persistence wiring lives in vyrm-graph
-  tests and `examples/route_persisted.rs` with vyrm-store as a
+  tests and `examples/route_persisted.rs` with rrd-store as a
   dev-dependency: the library stays substrate-free until vyrm-node exists
   to own the composition. `tests/persistence.rs` (3 tests): a reloaded
   index answers identically with zero re-extraction, an offline change is

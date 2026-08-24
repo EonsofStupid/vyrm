@@ -14,7 +14,7 @@
 //! point the same key, so a later correction silently destroys the claim it
 //! corrects while the sequence watermark still counts both. That contradicts the
 //! retirement guarantee in `SPEC.md` §6 and is covered by
-//! `vyrm-store/tests/bitemporal.rs`.
+//! `rrd-store/tests/bitemporal.rs`.
 //!
 //! Verified against Fjall 3.1.8 on 2026-08-09 (`SPEC.md` §6.1): prefix scan
 //! returned newest-first ordering, all valid-time boundary cases resolved

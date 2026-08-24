@@ -9,7 +9,7 @@ use vyrm_cluster::{
 use vyrm_core::{
     Millis, RuntimeProperties, RuntimeValue, TraceDataClass, TraceDomain, TraceLink, TraceOutcome,
 };
-use vyrm_store::{Engine, ImmutableObjectStore};
+use rrd_store::{Engine, ImmutableObjectStore};
 
 /// Fail-closed adapter from transport observations into Vyrm's authoritative
 /// project trace log. Clustered deployments should supply an `Engine` whose

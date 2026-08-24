@@ -19,10 +19,11 @@ rustls = { version = "0.23", default-features = false, features = ["ring", "std"
 tokio = { version = "1", features = ["net", "rt", "sync", "time"] }
 
 [dev-dependencies]
+rrflow-engine = { path = "../rrflow-engine" }
 rrd-security = { path = "../rrd-security" }
 rrd-server = { path = "../rrd-server" }
 vyrm-core = { path = "../vyrm-core" }
-vyrm-store = { path = "../vyrm-store" }
+rrd-store = { path = "../rrd-store" }
 tempfile = "3"
 rcgen = "0.14"
 tokio = { version = "1", features = ["io-util", "macros", "net", "rt-multi-thread", "sync", "time"] }

@@ -33,7 +33,7 @@ use vyrm_core::{
 use vyrm_mx::{BoundQuery, Catalog, ExecutionBudget, Parameters, PhysicalPlan, QueryExecution};
 use vyrm_node::{InstanceBinding, InstanceMode};
 use vyrm_ql::Query;
-use vyrm_store::{Engine, Invocation, PersistentEngine, ProjectionStatus};
+use rrd_store::{Engine, Invocation, PersistentEngine, ProjectionStatus};
 use vyrm_vector::VectorArtifactCatalogEntry;
 
 const INDEX: &str = include_str!("../static/index.html");
@@ -1642,8 +1642,8 @@ fn build_graph(
                 .clone()
                 .unwrap_or_else(|| format!("{} ms", invocation.duration_ms)),
             state: match invocation.outcome {
-                vyrm_store::Outcome::Ok => "ok",
-                vyrm_store::Outcome::Error => "error",
+                rrd_store::Outcome::Ok => "ok",
+                rrd_store::Outcome::Error => "error",
             },
         });
         graph.edges.push(GraphEdge {

@@ -5,7 +5,7 @@ use vyrm_core::{
     RuntimeValueType, ScopeId,
 };
 use vyrm_node::{execute_traced_query, query_parameters_from_json, ExecutionBudget, Parameters};
-use vyrm_store::{Engine, MemoryEngine, NativeEngine, Store};
+use rrd_store::{Engine, MemoryEngine, NativeEngine, Store};
 
 fn scope() -> ScopeId {
     ScopeId::new("instance:query-trace").unwrap()

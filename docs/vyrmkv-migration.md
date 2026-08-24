@@ -18,7 +18,7 @@ were recorded at cutover; otherwise it refuses to discard divergent writes.
 ## Canonical inventory
 
 The migration format owns the ordered keyspace list in
-`vyrm_store::keyspaces::ALL`. A source containing any other keyspace is denied.
+`rrd_store::keyspaces::ALL`. A source containing any other keyspace is denied.
 An empty canonical keyspace remains part of the inventory. This converts a new
 keyspace from an easy-to-miss loop edit into an explicit migration-format
 change.
@@ -43,7 +43,7 @@ one-byte native tag. Existing manifest-v1 native stores remain readable through
 the legacy `keyspace + NUL` codec; this migration never silently rewrites them.
 
 The empty archive is frozen by
-`crates/vyrm-store/tests/fixtures/migration-v1-empty.hex`; an incompatible byte
+`crates/rrd-store/tests/fixtures/migration-v1-empty.hex`; an incompatible byte
 change requires a new format version and golden vector.
 
 ## Native TextV1 to TagV2 exact-successor migration

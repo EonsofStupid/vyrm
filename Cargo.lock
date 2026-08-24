@@ -633,7 +633,7 @@ dependencies = [
  "vyrm-mx",
  "vyrm-node",
  "vyrm-ql",
- "vyrm-store",
+ "rrd-store",
  "vyrm-vector",
 ]
 
@@ -2961,13 +2961,14 @@ dependencies = [
  "rrd-contract",
  "rrd-security",
  "rrd-server",
+ "rrflow-engine",
  "rustls",
  "serde",
  "serde_json",
  "tempfile",
  "tokio",
  "vyrm-core",
- "vyrm-store",
+ "rrd-store",
 ]
 
 [[package]]
@@ -2991,7 +2992,7 @@ dependencies = [
  "sysinfo",
  "tempfile",
  "vyrm-core",
- "vyrm-store",
+ "rrd-store",
  "windows-sys 0.61.2",
 ]
 
@@ -3023,7 +3024,7 @@ dependencies = [
  "serde_json",
  "tempfile",
  "vyrm-core",
- "vyrm-store",
+ "rrd-store",
 ]
 
 [[package]]
@@ -3039,6 +3040,7 @@ dependencies = [
  "rrd-contract",
  "rrd-estate",
  "rrd-security",
+ "rrflow-engine",
  "rustls",
  "rustls-pemfile",
  "serde",
@@ -3051,9 +3053,25 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "vyrm-core",
+ "rrd-store",
+]
+
+[[package]]
+name = "rrflow-engine"
+version = "0.1.0"
+dependencies = [
+ "hmac",
+ "rrd-contract",
+ "rrd-estate",
+ "rrd-security",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tempfile",
+ "vyrm-core",
  "vyrm-mx",
  "vyrm-ql",
- "vyrm-store",
+ "rrd-store",
  "vyrm-vector",
 ]
 
@@ -4338,7 +4356,7 @@ dependencies = [
  "vyrm-core",
  "vyrm-kv",
  "vyrm-node",
- "vyrm-store",
+ "rrd-store",
 ]
 
 [[package]]
@@ -4355,7 +4373,7 @@ dependencies = [
  "tokio-rustls",
  "vyrm-core",
  "vyrm-kv",
- "vyrm-store",
+ "rrd-store",
  "x509-parser",
 ]
 
@@ -4387,7 +4405,7 @@ dependencies = [
  "serde",
  "serde_json",
  "vyrm-core",
- "vyrm-store",
+ "rrd-store",
 ]
 
 [[package]]
@@ -4414,7 +4432,7 @@ dependencies = [
  "tree-sitter-svelte-ng",
  "tree-sitter-typescript",
  "vyrm-core",
- "vyrm-store",
+ "rrd-store",
 ]
 
 [[package]]
@@ -4441,7 +4459,7 @@ dependencies = [
  "tempfile",
  "vyrm-core",
  "vyrm-ql",
- "vyrm-store",
+ "rrd-store",
 ]
 
 [[package]]
@@ -4460,7 +4478,7 @@ dependencies = [
  "vyrm-mx",
  "vyrm-operator",
  "vyrm-ql",
- "vyrm-store",
+ "rrd-store",
  "vyrm-vector",
 ]
 
@@ -4488,7 +4506,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "vyrm-store"
+name = "rrd-store"
 version = "0.1.0"
 dependencies = [
  "fjall",
@@ -4509,7 +4527,7 @@ dependencies = [
  "serde_json",
  "tempfile",
  "vyrm-core",
- "vyrm-store",
+ "rrd-store",
 ]
 
 [[package]]
@@ -4521,7 +4539,7 @@ dependencies = [
  "tempfile",
  "vyrm-core",
  "vyrm-node",
- "vyrm-store",
+ "rrd-store",
 ]
 
 [[package]]

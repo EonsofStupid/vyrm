@@ -1,6 +1,6 @@
 use std::net::SocketAddr;
 use std::path::PathBuf;
-use vyrm_store::PersistentEngine;
+use rrd_store::PersistentEngine;
 
 fn main() {
     if let Err(error) = run() {

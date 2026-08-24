@@ -17,4 +17,4 @@ serde_json = { workspace = true }
 fastembed = { version = "5.17.4", default-features = false, features = ["ort-load-dynamic"], optional = true }
 
 [dev-dependencies]
-vyrm-store = { path = "../vyrm-store" }
+rrd-store = { path = "../rrd-store" }

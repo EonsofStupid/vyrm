@@ -11,7 +11,7 @@ use vyrm_operator::{
     OperatorKnowledgeWriter, OperatorSearchRequest, OperatorSearchResult, OperatorSyncOperation,
     OperatorSyncReceipt, OperatorSyncWork,
 };
-use vyrm_store::Engine;
+use rrd_store::Engine;
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize)]
 pub struct TracedOperatorSearch {

@@ -26,8 +26,8 @@ impl fmt::Display for Error {
 
 impl std::error::Error for Error {}
 
-impl From<vyrm_store::Error> for Error {
-    fn from(value: vyrm_store::Error) -> Self {
+impl From<rrd_store::Error> for Error {
+    fn from(value: rrd_store::Error) -> Self {
         Self::Execution(value.to_string())
     }
 }

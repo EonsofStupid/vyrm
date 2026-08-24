@@ -3,7 +3,7 @@ use vyrm_core::{
     RuntimeMutation, RuntimeProperties, RuntimeSchemaRegistry, RuntimeTraceEvent, RuntimeType,
     ScopeId, Subject, TraceDataClass, TraceDomain, TraceOutcome,
 };
-use vyrm_store::Engine;
+use rrd_store::Engine;
 
 #[test]
 fn snapshot_exposes_runtime_objects_without_mutating_the_store() {
@@ -11,7 +11,7 @@ fn snapshot_exposes_runtime_objects_without_mutating_the_store() {
     std::fs::write(root.path().join("lib.rs"), "pub fn connectome() {}\n").unwrap();
     vyrm_node::InstanceManifest::ensure_dedicated(root.path()).unwrap();
     let db = root.path().join(vyrm_node::STORE_DIR);
-    let store = vyrm_store::PersistentEngine::open(&db).unwrap();
+    let store = rrd_store::PersistentEngine::open(&db).unwrap();
     Engine::assert(
         &store,
         &Claim::new(
@@ -381,7 +381,7 @@ fn trace_export_is_causal_bounded_and_deny_by_default_for_content() {
     let root = tempfile::tempdir().unwrap();
     vyrm_node::InstanceManifest::ensure_dedicated(root.path()).unwrap();
     let binding = vyrm_node::InstanceBinding::discover(root.path()).unwrap();
-    let store = vyrm_store::PersistentEngine::open(&binding.expected_store()).unwrap();
+    let store = rrd_store::PersistentEngine::open(&binding.expected_store()).unwrap();
     let scope = ScopeId::new(vyrm_node::REASONING_SCOPE).unwrap();
     let root_identity = vyrm_node::TraceIdentity::derive(&[b"trace-export-root"]).unwrap();
     let child_identity = root_identity.child(&[b"tool"]).unwrap();

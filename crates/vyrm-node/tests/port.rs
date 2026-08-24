@@ -3,7 +3,7 @@
 //! consumes the storage port, not Fjall.
 
 use vyrm_core::{Claim, Predicate, Producer, Subject};
-use vyrm_store::{Engine, MemoryEngine};
+use rrd_store::{Engine, MemoryEngine};
 
 fn claim(subject: &str, predicate: &str, object: &str, from: u64) -> Claim {
     Claim::new(

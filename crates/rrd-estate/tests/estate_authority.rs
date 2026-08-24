@@ -3,7 +3,7 @@ use rrd_estate::{
     ActivityClass, ActivityEvidence, DesiredPhase, DesiredTarget, Error, EstateRepository,
     LeaseRequest, MutationContext, OperationState, ReceiptBoundary, ReceiptRequest, SetDesired,
 };
-use vyrm_store::{Engine, MemoryEngine, NativeEngine};
+use rrd_store::{Engine, MemoryEngine, NativeEngine};
 
 fn id(value: &str) -> CanonicalId {
     CanonicalId::new(value).unwrap()

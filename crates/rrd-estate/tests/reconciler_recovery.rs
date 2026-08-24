@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use vyrm_core::digest;
-use vyrm_store::{Engine, NativeEngine};
+use rrd_store::{Engine, NativeEngine};
 
 fn id(value: &str) -> CanonicalId {
     CanonicalId::new(value).unwrap()

@@ -9,7 +9,7 @@ const CLAIMS_JSON: &str = include_str!("../fixtures/ab/claims.json");
 
 /// Mirrors the subjects used by `examples/recall_ab.rs`.
 const SUBJECTS: &[&str] = &[
-    "ranking", "persistence", "vyrm-store", "vyrm-graph", "step-r",
+    "ranking", "persistence", "rrd-store", "vyrm-graph", "step-r",
     "panel", "observatory", "tiers", "extraction", "entities",
 ];
 

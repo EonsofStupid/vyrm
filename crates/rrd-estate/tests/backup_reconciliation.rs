@@ -9,7 +9,7 @@ use rrd_estate::{
 use std::fs;
 use std::path::{Path, PathBuf};
 use vyrm_core::digest;
-use vyrm_store::{verify_backup_catalogue, Engine, NativeEngine, PersistentEngine};
+use rrd_store::{verify_backup_catalogue, Engine, NativeEngine, PersistentEngine};
 
 fn id(value: &str) -> CanonicalId {
     CanonicalId::new(value).unwrap()
@@ -209,7 +209,7 @@ fn prepared_job_replays_one_durable_effect_after_reopen() {
 
 #[test]
 fn expired_prepared_lease_is_taken_over_and_stale_worker_is_fenced() {
-    let engine = vyrm_store::MemoryEngine::new();
+    let engine = rrd_store::MemoryEngine::new();
     prepare_backup_job(&engine);
     let repository = EstateRepository::new(&engine, id("estate-a"));
     repository

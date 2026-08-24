@@ -1,11 +1,11 @@
 use crate::{bind, execute, plan, Catalog, Error, ExecutionBudget, Parameters, QueryRow, Result};
+use rrd_store::{ControlTransition, Durability, Engine};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use vyrm_core::{
     digest, ProjectionId, ProjectionStamp, ProjectionState, ScopeId, DATA_RUNTIME_CONTRACT_VERSION,
 };
 use vyrm_ql::{CursorExpr, Projection, Query, Source, TemporalSelector, TimeExpr};
-use vyrm_store::{ControlTransition, Durability, Engine};
 
 pub const INDEX_CATALOGUE_CONTRACT_VERSION: u16 = 1;
 pub const INDEX_ARTIFACT_CONTRACT_VERSION: u16 = 1;
@@ -577,16 +577,19 @@ impl<'a, E: Engine> IndexCatalogueRepository<'a, E> {
             .ok_or_else(|| Error::Integrity("index catalogue revision overflow".into()))?;
         catalogue.validate()?;
         let replacement = serde_json::to_vec(&catalogue)?;
-        self.engine.commit_control_transition(&ControlTransition {
-            key: self.key.clone(),
-            expected,
-            replacement: Some(replacement),
-            at: context.at,
-            actor: context.actor.clone(),
-            action: action.into(),
-            request_id: context.request_id.clone(),
-            operation_id: context.operation_id.clone(),
-        })?;
+        self.engine.commit_catalog_transition(
+            &self.scope,
+            &ControlTransition {
+                key: self.key.clone(),
+                expected,
+                replacement: Some(replacement),
+                at: context.at,
+                actor: context.actor.clone(),
+                action: action.into(),
+                request_id: context.request_id.clone(),
+                operation_id: context.operation_id.clone(),
+            },
+        )?;
         Ok(catalogue)
     }
 }

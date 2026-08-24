@@ -3,7 +3,7 @@
 //! resolved instant past the interval, not a sleep.
 
 use vyrm_node::{Registry, Verification, VERIFICATION_TTL_MS};
-use vyrm_store::Store;
+use rrd_store::Store;
 
 #[test]
 fn verification_is_a_bitemporal_claim_that_expires_and_makes_noise() {

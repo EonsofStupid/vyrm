@@ -11,7 +11,7 @@ use vyrm_core::{
     RuntimeSchemaRegistry, RuntimeTraceEvent, RuntimeValue, ScopeId, SpanId, TraceDataClass,
     TraceDomain, TraceId, TraceLink, TraceOutcome,
 };
-use vyrm_store::{Engine, Error};
+use rrd_store::{Engine, Error};
 
 const TRACE_COMMIT_RETRIES: usize = 16;
 

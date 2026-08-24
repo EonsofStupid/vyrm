@@ -1,10 +1,10 @@
+use rrd_store::{Engine, MemoryEngine, NativeEngine, Store};
 use tempfile::tempdir;
 use vyrm_core::{
     ReadStamp, RuntimeCommit, RuntimeMutation, RuntimeProperties, RuntimeRecord,
     RuntimeRecordSchema, RuntimeRef, RuntimeSchemaRegistry, RuntimeType, RuntimeValue,
     RuntimeVector, ScopeId, VectorValue,
 };
-use vyrm_store::{Engine, MemoryEngine, NativeEngine, Store};
 use vyrm_vector::{search_changes_exact, ScoreMetric, SearchMode, SearchRequest, VectorQuery};
 
 fn commit(engine: &dyn Engine, scope: &ScopeId) -> ReadStamp {

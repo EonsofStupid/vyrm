@@ -11,7 +11,7 @@ use vyrm_operator::{
     OperatorSearchControls, OperatorSearchRequest, OperatorSourceRevision, OperatorSyncWork,
     ReferenceOperatorAdapter, ReferenceOperatorWriter, OPERATOR_KNOWLEDGE_CONTRACT_VERSION,
 };
-use vyrm_store::{Engine, MemoryEngine, NativeEngine, Store};
+use rrd_store::{Engine, MemoryEngine, NativeEngine, Store};
 use vyrm_vector::{
     EmbeddingModelBinding, ScoreMetric, SearchMode, SearchRequest, VectorCandidate, VectorQuery,
     VectorRuntime,

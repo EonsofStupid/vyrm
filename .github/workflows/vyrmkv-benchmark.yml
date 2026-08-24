@@ -47,7 +47,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Run isolated Fjall/native matrix
         run: >-
-          cargo run --release --locked -p vyrm-store --example engine_benchmark --
+          cargo run --release --locked -p rrd-store --example engine_benchmark --
           --trials 9 --operations ${{ matrix.operations }}
           --batch-size ${{ matrix.batch_size }} --reads ${{ matrix.reads }}
           --read-width ${{ matrix.read_width }}
@@ -89,7 +89,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Run isolated AI-read profile
         run: >-
-          cargo run --release --locked -p vyrm-store --example ai_hotset_benchmark --
+          cargo run --release --locked -p rrd-store --example ai_hotset_benchmark --
           --workload ${{ matrix.workload }} --payload-profile ${{ matrix.payload }}
           --trials 5 --cold-keys 8192
           --hot-keys 128 --reads 8192 --batch-size 128 --value-bytes 128

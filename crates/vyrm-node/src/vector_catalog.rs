@@ -13,7 +13,7 @@ use vyrm_core::{
     RuntimeSchemaRegistry, RuntimeType, RuntimeValue, RuntimeValueType, ScopeId, TraceDataClass,
     TraceDomain, TraceLink, TraceOutcome,
 };
-use vyrm_store::{DataRuntime, Engine, Error as StoreError, ImmutableObjectStore};
+use rrd_store::{DataRuntime, Engine, Error as StoreError, ImmutableObjectStore};
 use vyrm_vector::{
     VectorArtifact, VectorArtifactCatalogEntry, VectorCandidate, VectorRuntime,
     VECTOR_ARTIFACT_RECORD_TYPE,

@@ -8,7 +8,7 @@ use clap::{Parser, Subcommand};
 use vyrm_core::{
     digest, Claim, ClaimReader, Millis, Predicate, Producer, Reader, RecallQuery, ScopeId, Subject,
 };
-use vyrm_store::{
+use rrd_store::{
     Effectiveness, Engine, GroundingReport, Outcome, PersistentEngine, RecallOutcome, Trigger,
 };
 
@@ -502,9 +502,9 @@ pub fn execute_offline(
     Some((|| match action {
         StorageAction::Migrate | StorageAction::Status | StorageAction::Rollback => {
             let report = match action {
-                StorageAction::Migrate => Some(vyrm_store::migrate_fjall_to_native(db, now)?),
-                StorageAction::Status => vyrm_store::migration_status(db)?,
-                StorageAction::Rollback => Some(vyrm_store::rollback_fjall_migration(db)?),
+                StorageAction::Migrate => Some(rrd_store::migrate_fjall_to_native(db, now)?),
+                StorageAction::Status => rrd_store::migration_status(db)?,
+                StorageAction::Rollback => Some(rrd_store::rollback_fjall_migration(db)?),
                 _ => unreachable!("matched migration action"),
             };
             let text = if json {
@@ -526,7 +526,7 @@ pub fn execute_offline(
         }
         StorageAction::ArchiveExport { archive } => {
             let engine = PersistentEngine::open(db)?;
-            let inventory = vyrm_store::export_logical_archive(&engine, archive)?;
+            let inventory = rrd_store::export_logical_archive(&engine, archive)?;
             let text = if json {
                 serde_json::to_string_pretty(&inventory)?
             } else {
@@ -539,7 +539,7 @@ pub fn execute_offline(
             Ok(text.into())
         }
         StorageAction::ArchiveInspect { archive } => {
-            let inventory = vyrm_store::inspect_logical_archive(archive)?;
+            let inventory = rrd_store::inspect_logical_archive(archive)?;
             let text = if json {
                 serde_json::to_string_pretty(&inventory)?
             } else {
@@ -552,7 +552,7 @@ pub fn execute_offline(
             Ok(text.into())
         }
         StorageAction::ArchiveRestore { archive } => {
-            let report = vyrm_store::restore_logical_archive_to_new_root(archive, db, now)?;
+            let report = rrd_store::restore_logical_archive_to_new_root(archive, db, now)?;
             let text = if json {
                 serde_json::to_string_pretty(&report)?
             } else {
@@ -565,7 +565,7 @@ pub fn execute_offline(
         }
         StorageAction::BackupCreate { catalogue, label } => {
             let engine = PersistentEngine::open(db)?;
-            let entry = vyrm_store::create_logical_backup(&engine, catalogue, label, now)?;
+            let entry = rrd_store::create_logical_backup(&engine, catalogue, label, now)?;
             let text = if json {
                 serde_json::to_string_pretty(&entry)?
             } else {
@@ -577,7 +577,7 @@ pub fn execute_offline(
             Ok(text.into())
         }
         StorageAction::BackupList { catalogue } => {
-            let verified = vyrm_store::verify_backup_catalogue(catalogue)?;
+            let verified = rrd_store::verify_backup_catalogue(catalogue)?;
             let text = if json {
                 serde_json::to_string_pretty(&verified)?
             } else if verified.backups.is_empty() {
@@ -593,7 +593,7 @@ pub fn execute_offline(
             Ok(text.into())
         }
         StorageAction::BackupRestore { catalogue, backup_id } => {
-            let report = vyrm_store::restore_catalogued_backup(catalogue, backup_id, db, now)?;
+            let report = rrd_store::restore_catalogued_backup(catalogue, backup_id, db, now)?;
             let text = if json {
                 serde_json::to_string_pretty(&report)?
             } else {
@@ -605,7 +605,7 @@ pub fn execute_offline(
             Ok(text.into())
         }
         StorageAction::FormatUpgrade => {
-            let ledger = vyrm_store::migrate_native_format(db, now)?;
+            let ledger = rrd_store::migrate_native_format(db, now)?;
             let text = if json {
                 serde_json::to_string_pretty(&ledger)?
             } else {
@@ -619,7 +619,7 @@ pub fn execute_offline(
             Ok(text.into())
         }
         StorageAction::FormatStatus => {
-            let ledger = vyrm_store::native_format_migration_status(db)?;
+            let ledger = rrd_store::native_format_migration_status(db)?;
             let text = if json {
                 serde_json::to_string_pretty(&ledger)?
             } else if let Some(ledger) = ledger {

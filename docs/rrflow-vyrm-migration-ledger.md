@@ -53,7 +53,7 @@ may remain an `RrdClient` where that clearly denotes the internal daemon.
 | aggregate Vyrm/RRD composition | `rrflow-engine` | One catalogue/transaction/query/event/recovery authority used by embedded and daemon faces |
 | `vyrm-core` | `rrflow-core` | Golden domain types, key ordering, temporal resolution, runtime/event digests |
 | `vyrm-kv` | `rrflow-storage-lsm` | WAL/segment/manifest reopen, crash matrix, snapshots, compaction, platform I/O |
-| `vyrm-store` | `rrflow-storage` | Memory/native/legacy differential, archive/restore, migrations, atomic runtime commits |
+| `rrd-store` | `rrflow-storage` | Memory/native/legacy differential, archive/restore, migrations, atomic runtime commits |
 | `vyrm-ql` + `vyrm-mx` | one public `rrflow-query` contract | Parser golden corpus, plan digest, exact read-stamp results, old/new executor differential |
 | `vyrm-graph` | `rrflow-graph` | Persisted projection and freshness/routing fixtures |
 | `vyrm-vector` | `rrflow-vector` | Artifact readers, exact oracle, ANN recall, filter, compression, lifecycle |

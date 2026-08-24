@@ -13,7 +13,7 @@ use vyrm_core::{
     DataTransaction, RuntimeCommit, RuntimeMutation, RuntimeProperties, RuntimeRecord,
     RuntimeRecordSchema, RuntimeRef, RuntimeSchemaRegistry, RuntimeType, ScopeId,
 };
-use vyrm_store::{DataRuntime, Engine, LocalObjectStore, MemoryEngine};
+use rrd_store::{DataRuntime, Engine, LocalObjectStore, MemoryEngine};
 
 fn scope() -> ScopeId {
     ScopeId::new("instance:artifact-transfer").unwrap()

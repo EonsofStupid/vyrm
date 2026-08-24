@@ -9,7 +9,7 @@ use vyrm_core::{
     Millis, RuntimeProperties, RuntimeTraceEvent, RuntimeValue, ScopeId, TraceDataClass,
     TraceDomain, TraceLink, TraceOutcome,
 };
-use vyrm_store::Engine;
+use rrd_store::Engine;
 
 const AGENTS_BEGIN: &str = "<!-- vyrm:begin -->";
 const AGENTS_END: &str = "<!-- vyrm:end -->";

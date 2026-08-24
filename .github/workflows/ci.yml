@@ -27,10 +27,12 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: estate-process-${{ matrix.os }}
-      - name: Test persistent estate authority
-        run: cargo test -p rrd-estate --locked
-      - name: Test RRD process contracts
-        run: cargo test -p rrd-server --bin rrd-server --bin rrd-estate-controller --bin rrd-backup-controller --bin rrd-deployment-catalog --bin rrd-estate-admin --test deployment_catalog --test estate_admin --test backup_controller --locked
+      - name: Test persistent estate authority and commands
+        run: cargo test -p rrd-estate --all-targets --locked
+      - name: Test RRD daemon process contract
+        run: cargo test -p rrd-server --bin rrd-server --locked
+      - name: Build cross-package controller fixture
+        run: cargo build -p rrd-estate --bin rrd-estate-controller --locked
       - name: Test real child and controller recovery
         run: cargo test -p rrd-server --test local_estate_driver --locked -- --nocapture
       - name: Deny process-boundary warnings
@@ -58,6 +60,10 @@ jobs:
         with:
           components: clippy
       - uses: Swatinem/rust-cache@v2
+      - name: Enforce RRFlow engine ownership
+        run: cargo test -p rrflow-engine --test workspace_architecture --locked
+      - name: Build cross-package controller fixture
+        run: cargo build -p rrd-estate --bin rrd-estate-controller --locked
       - name: Test workspace
         env:
           VYRM_PGVECTOR_TEST_URL: postgresql://vyrm_test:vyrm_test_password@127.0.0.1:5432/vyrm_operator_test?sslmode=disable

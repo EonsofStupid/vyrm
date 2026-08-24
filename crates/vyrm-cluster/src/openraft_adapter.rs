@@ -39,7 +39,7 @@ use vyrm_core::{
 use vyrm_kv::{
     Database, Durability, Mutation, SnapshotBundleFile, WriteBatch, SNAPSHOT_BUNDLE_MAX_BYTES,
 };
-use vyrm_store::{
+use rrd_store::{
     native_runtime_commit_context, native_runtime_commit_outcome,
     native_snapshot_all_object_references, native_snapshot_artifact_view,
     native_snapshot_object_references, prepare_native_runtime_commit, Error as StoreError,
@@ -1209,8 +1209,8 @@ impl VyrmRaftStateMachine {
         completed_at: u64,
     ) -> std::result::Result<ArtifactTransferReceipt, StorageError<u64>>
     where
-        S: vyrm_store::ImmutableObjectStore,
-        T: vyrm_store::ImmutableObjectStore,
+        S: rrd_store::ImmutableObjectStore,
+        T: rrd_store::ImmutableObjectStore,
     {
         let subject = ErrorSubject::Snapshot(Some(meta.signature()));
         snapshot

@@ -5,7 +5,7 @@ use std::io::{BufRead, Write};
 use std::path::{Path, PathBuf};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use vyrm_core::{digest, Millis, Reader, RecallQuery, ReasoningPayload, ScopeId, Subject};
-use vyrm_store::{Effectiveness, Engine, InvocationInput, Outcome, PersistentEngine, Trigger};
+use rrd_store::{Effectiveness, Engine, InvocationInput, Outcome, PersistentEngine, Trigger};
 
 struct Config {
     db: PathBuf,

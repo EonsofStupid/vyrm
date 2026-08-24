@@ -12,7 +12,7 @@ accelerator = []
 
 [dependencies]
 vyrm-core = { path = "../vyrm-core" }
-vyrm-store = { path = "../vyrm-store" }
+rrd-store = { path = "../rrd-store" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 memmap2 = "0.9"

@@ -7,7 +7,7 @@ use rrd_contract::CanonicalId;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use vyrm_core::digest;
-use vyrm_store::{ControlTransition, Engine};
+use rrd_store::{ControlTransition, Engine};
 
 pub const MAX_BACKUP_JOBS: usize = 4_096;
 pub const MAX_BACKUP_IDEMPOTENCY_BINDINGS: usize = 4_096;

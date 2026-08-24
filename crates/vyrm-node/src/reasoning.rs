@@ -11,7 +11,7 @@ use vyrm_core::{
     RuntimeRecordSchema, RuntimeRef, RuntimeSchemaRegistry, RuntimeType, RuntimeValue,
     RuntimeValueType, ScopeId,
 };
-use vyrm_store::Engine;
+use rrd_store::Engine;
 
 /// Legacy projection name. Kept for a read-once migration path only.
 pub const REASONING_LEDGER: &str = "reasoning-ledger-v1";

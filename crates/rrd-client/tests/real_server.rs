@@ -1,29 +1,30 @@
-use rrd_client::{ClientConfig, Error, RequestOptions, RrdClient, is_unauthenticated};
+use rcgen::{
+    BasicConstraints, Certificate, CertificateParams, ExtendedKeyUsagePurpose, IsCa, Issuer,
+    KeyPair, KeyUsagePurpose,
+};
+use rrd_client::{is_unauthenticated, ClientConfig, Error, RequestOptions, RrdClient};
 use rrd_contract::{
     AbortTransaction, BeginTransaction, CanonicalId, CreateSession, ExecuteQuery,
     PreviewTransaction, QueryBudget, ReadAudit, ReadChangefeed, ResourceId, ResourceKind,
     ResourcePath, SessionLimits, TransactionMutation,
 };
 use rrd_security::{
-    Action, Principal, PrincipalKind, ResourceGrant, SECURITY_FORMAT, SecurityRepository,
-    SecurityState,
+    Action, Principal, PrincipalKind, ResourceGrant, SecurityRepository, SecurityState,
+    SECURITY_FORMAT,
 };
-use rrd_server::{RrdHttpServer, load_or_create_token_key};
 use rrd_server::RrdMutualTlsServerConfig;
-use rcgen::{
-    BasicConstraints, Certificate, CertificateParams, ExtendedKeyUsagePurpose, IsCa, Issuer,
-    KeyPair, KeyUsagePurpose,
-};
+use rrd_server::{load_or_create_token_key, RrdHttpServer};
+use rrflow_engine::RrflowEngine;
 use rustls::pki_types::{PrivateKeyDer, PrivatePkcs8KeyDer};
 use rustls::{ClientConfig as RustlsClientConfig, RootCertStore};
 use std::collections::BTreeMap;
 use std::time::Duration;
 use vyrm_core::{
-    RuntimeCommit, RuntimeProperties, RuntimePropertySchema, RuntimeRecord, RuntimeRecordSchema,
-    RuntimeRef, RuntimeSchemaRegistry, RuntimeType, RuntimeValue, RuntimeValueType, ScopeId,
-    digest,
+    digest, RuntimeCommit, RuntimeProperties, RuntimePropertySchema, RuntimeRecord,
+    RuntimeRecordSchema, RuntimeRef, RuntimeSchemaRegistry, RuntimeType, RuntimeValue,
+    RuntimeValueType, ScopeId,
 };
-use vyrm_store::{Engine, PersistentEngine};
+use rrd_store::{Engine, PersistentEngine};
 
 fn test_ca() -> (Certificate, Issuer<'static, KeyPair>) {
     let mut params = CertificateParams::new(Vec::<String>::new()).unwrap();
@@ -41,7 +42,10 @@ fn test_identity(
     issuer: &Issuer<'static, KeyPair>,
     dns_names: Vec<String>,
     usage: ExtendedKeyUsagePurpose,
-) -> (Vec<rustls::pki_types::CertificateDer<'static>>, PrivateKeyDer<'static>) {
+) -> (
+    Vec<rustls::pki_types::CertificateDer<'static>>,
+    PrivateKeyDer<'static>,
+) {
     let mut params = CertificateParams::new(dns_names).unwrap();
     params.extended_key_usages = vec![usage];
     params.key_usages = vec![KeyUsagePurpose::DigitalSignature];
@@ -105,8 +109,8 @@ fn seed(engine: &PersistentEngine) {
 async fn rust_client_negotiates_authenticates_queries_and_reads_audit() {
     let temporary = tempfile::tempdir().unwrap();
     let root = temporary.path().join("instance");
-    let engine = PersistentEngine::open(&root).unwrap();
-    seed(&engine);
+    let storage = PersistentEngine::open(&root).unwrap();
+    seed(&storage);
     let instance = CanonicalId::new("sdk-test").unwrap();
     let resource = instance_resource();
     let principal = Principal {
@@ -132,7 +136,7 @@ async fn rust_client_negotiates_authenticates_queries_and_reads_audit() {
         })
         .collect(),
     };
-    SecurityRepository::new(&engine, instance.clone())
+    SecurityRepository::new(&storage, instance.clone())
         .initialize(
             SecurityState {
                 format_version: SECURITY_FORMAT,
@@ -145,14 +149,10 @@ async fn rust_client_negotiates_authenticates_queries_and_reads_audit() {
             "operation-bootstrap",
         )
         .unwrap();
+    drop(storage);
     let token_key = load_or_create_token_key(&root.join("RRD.SERVER.SECRET")).unwrap();
-    let server = RrdHttpServer::bind(
-        engine,
-        instance.clone(),
-        token_key,
-        "127.0.0.1:0".parse().unwrap(),
-    )
-    .unwrap();
+    let engine = RrflowEngine::open(&root, instance.clone(), token_key).unwrap();
+    let server = RrdHttpServer::bind(engine, "127.0.0.1:0".parse().unwrap()).unwrap();
     let address = server.local_addr();
     let (shutdown, receiver) = tokio::sync::oneshot::channel();
     let task = tokio::spawn(server.serve_until(async move {
@@ -340,7 +340,7 @@ async fn rust_client_negotiates_authenticates_queries_and_reads_audit() {
 async fn remote_transport_requires_mutual_tls_and_exact_server_identity() {
     let temporary = tempfile::tempdir().unwrap();
     let root = temporary.path().join("mtls-instance");
-    let engine = PersistentEngine::open(&root).unwrap();
+    let storage = PersistentEngine::open(&root).unwrap();
     let instance = CanonicalId::new("mtls-sdk-test").unwrap();
     let principal = Principal {
         id: CanonicalId::new("mtls-client").unwrap(),
@@ -352,13 +352,11 @@ async fn remote_transport_requires_mutual_tls_and_exact_server_identity() {
         grants: vec![ResourceGrant {
             action: Action::SessionCreate,
             resource_prefix: ResourcePath {
-                segments: vec![
-                    ResourceId::new(ResourceKind::Instance, instance.as_str()).unwrap(),
-                ],
+                segments: vec![ResourceId::new(ResourceKind::Instance, instance.as_str()).unwrap()],
             },
         }],
     };
-    SecurityRepository::new(&engine, instance.clone())
+    SecurityRepository::new(&storage, instance.clone())
         .initialize(
             SecurityState {
                 format_version: SECURITY_FORMAT,
@@ -371,6 +369,7 @@ async fn remote_transport_requires_mutual_tls_and_exact_server_identity() {
             "operation-bootstrap-mtls",
         )
         .unwrap();
+    drop(storage);
 
     let (ca, issuer) = test_ca();
     let (server_chain, server_key) = test_identity(
@@ -378,22 +377,13 @@ async fn remote_transport_requires_mutual_tls_and_exact_server_identity() {
         vec!["localhost".into()],
         ExtendedKeyUsagePurpose::ServerAuth,
     );
-    let (client_chain, client_key) = test_identity(
-        &issuer,
-        Vec::new(),
-        ExtendedKeyUsagePurpose::ClientAuth,
-    );
-    let server_tls =
-        RrdMutualTlsServerConfig::new(server_chain, server_key, roots(&ca)).unwrap();
+    let (client_chain, client_key) =
+        test_identity(&issuer, Vec::new(), ExtendedKeyUsagePurpose::ClientAuth);
+    let server_tls = RrdMutualTlsServerConfig::new(server_chain, server_key, roots(&ca)).unwrap();
     let token_key = load_or_create_token_key(&root.join("RRD.SERVER.SECRET")).unwrap();
-    let server = RrdHttpServer::bind_mtls(
-        engine,
-        instance.clone(),
-        token_key,
-        "127.0.0.1:0".parse().unwrap(),
-        server_tls,
-    )
-    .unwrap();
+    let engine = RrflowEngine::open(&root, instance.clone(), token_key).unwrap();
+    let server =
+        RrdHttpServer::bind_mtls(engine, "127.0.0.1:0".parse().unwrap(), server_tls).unwrap();
     let endpoint = format!("https://localhost:{}", server.local_addr().port());
     let (shutdown, receiver) = tokio::sync::oneshot::channel();
     let task = tokio::spawn(server.serve_until(async move {
@@ -415,11 +405,8 @@ async fn remote_transport_requires_mutual_tls_and_exact_server_identity() {
         Err(Error::Transport(_))
     ));
 
-    let (wrong_name_chain, wrong_name_key) = test_identity(
-        &issuer,
-        Vec::new(),
-        ExtendedKeyUsagePurpose::ClientAuth,
-    );
+    let (wrong_name_chain, wrong_name_key) =
+        test_identity(&issuer, Vec::new(), ExtendedKeyUsagePurpose::ClientAuth);
     let wrong_name_tls = RustlsClientConfig::builder()
         .with_root_certificates(roots(&ca))
         .with_client_auth_cert(wrong_name_chain, wrong_name_key)
@@ -440,13 +427,8 @@ async fn remote_transport_requires_mutual_tls_and_exact_server_identity() {
         .with_root_certificates(roots(&ca))
         .with_client_auth_cert(client_chain, client_key)
         .unwrap();
-    let client = RrdClient::connect_mtls(
-        endpoint,
-        instance,
-        client_tls,
-        ClientConfig::default(),
-    )
-    .unwrap();
+    let client =
+        RrdClient::connect_mtls(endpoint, instance, client_tls, ClientConfig::default()).unwrap();
     let capabilities = client.capabilities().await.unwrap();
     assert_eq!(capabilities.protocol_version, 1);
     assert_eq!(

@@ -1,3 +1,4 @@
+use rrd_store::{Engine, MemoryEngine, NativeEngine, Store};
 use std::collections::{BTreeMap, BTreeSet};
 use vyrm_core::{
     Claim, GeoPoint, GeoValue, Predicate, Producer, RuntimeCommit, RuntimeEvent,
@@ -10,7 +11,6 @@ use vyrm_mx::{bind, execute, plan, Catalog, Error, ExecutionBudget, Parameters, 
 use vyrm_ql::{
     parse, ComparisonOperator, CursorExpr, Projection, Query, Source, TemporalSelector, TimeExpr,
 };
-use vyrm_store::{Engine, MemoryEngine, NativeEngine, Store};
 
 fn value(value: &str) -> RuntimeValue {
     RuntimeValue::String(value.into())

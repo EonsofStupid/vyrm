@@ -26,7 +26,7 @@ use vyrm_core::{
     ObjectReference, RuntimeChange, RuntimeCommit, RuntimeMutation, RuntimeRecordSchema,
     RuntimeSchemaRegistry, RuntimeType, RuntimeValue, ScopeId,
 };
-use vyrm_store::{Engine, LocalObjectStore, NativeEngine};
+use rrd_store::{Engine, LocalObjectStore, NativeEngine};
 
 const SHARD: ShardId = ShardId(11);
 

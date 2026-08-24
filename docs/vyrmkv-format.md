@@ -113,7 +113,7 @@ only its own `digest` field.
 
 Version 2 also authenticates an optional non-zero `application_format`. The
 physical KV layer treats that identity as opaque and preserves it through every
-flush, compaction, and snapshot install. Native `vyrm-store` databases bind the
+flush, compaction, and snapshot install. Native `rrd-store` databases bind the
 identity `VYRSK002` and encode each of the 18 frozen logical keyspaces as one
 stable non-zero byte before the logical key. This replaces repeated
 `keyspace-name + NUL` prefixes without making key interpretation heuristic.

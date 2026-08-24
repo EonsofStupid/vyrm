@@ -17,7 +17,7 @@
 
 use serde::Deserialize;
 use vyrm_core::{Claim, ClaimReader, Millis, Predicate, Producer, Subject};
-use vyrm_store::Engine;
+use rrd_store::Engine;
 
 /// How long a verification claim stays in force: 21 days, in milliseconds.
 /// Expiry is the alarm interval the operator asked for ("make noise every
@@ -128,10 +128,10 @@ impl Registry {
         now: Millis,
         evidence: &str,
         actor: &str,
-    ) -> Result<Claim, vyrm_store::Error> {
+    ) -> Result<Claim, rrd_store::Error> {
         let harness = self
             .get(name)
-            .ok_or_else(|| vyrm_store::Error::Substrate(format!("no harness named {name:?} in the registry")))?;
+            .ok_or_else(|| rrd_store::Error::Substrate(format!("no harness named {name:?} in the registry")))?;
         let mut claim = Claim::new(
             harness.subject(),
             Predicate::new(VERIFIED_PREDICATE).expect("static predicate"),
@@ -152,7 +152,7 @@ impl Registry {
         store: &E,
         harness: &Harness,
         now: Millis,
-    ) -> Result<Verification, vyrm_store::Error> {
+    ) -> Result<Verification, rrd_store::Error> {
         let subject = harness.subject();
         let predicate = Predicate::new(VERIFIED_PREDICATE).expect("static predicate");
         if let Some(claim) = store.as_of(&subject, &predicate, now)? {

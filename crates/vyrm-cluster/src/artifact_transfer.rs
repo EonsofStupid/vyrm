@@ -13,7 +13,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, RwLock, Weak};
 use std::time::{SystemTime, UNIX_EPOCH};
 use vyrm_core::{RuntimeMutation, ScopeId};
-use vyrm_store::{Engine, Error as StoreError, ImmutableObjectStore, LocalObjectStore};
+use rrd_store::{Engine, Error as StoreError, ImmutableObjectStore, LocalObjectStore};
 
 const REPLAY_PAGE: usize = 4_096;
 const TRANSFER_SESSION_DIRECTORY: &str = "transfer-sessions-v1";

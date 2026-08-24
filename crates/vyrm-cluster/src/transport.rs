@@ -42,7 +42,7 @@ use tokio::sync::Semaphore;
 use tokio_rustls::{TlsAcceptor, TlsConnector};
 use vyrm_core::digest::sha256_hex;
 use vyrm_core::ScopeId;
-use vyrm_store::LocalObjectStore;
+use rrd_store::LocalObjectStore;
 use x509_parser::extensions::GeneralName;
 use x509_parser::prelude::{FromDer, X509Certificate};
 

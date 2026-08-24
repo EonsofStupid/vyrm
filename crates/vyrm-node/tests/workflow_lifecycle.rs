@@ -6,7 +6,7 @@ use vyrm_node::{
     handle, preflight, record_reasoning, HookContext, HookEvent, InstanceManifest,
     WorkflowObservation, WorkflowStatus, WORKFLOW_FILE,
 };
-use vyrm_store::{Engine, MemoryEngine, NativeEngine, Store};
+use rrd_store::{Engine, MemoryEngine, NativeEngine, Store};
 
 #[derive(Debug, PartialEq)]
 struct Evidence {

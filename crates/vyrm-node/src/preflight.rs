@@ -15,7 +15,7 @@ use crate::stack;
 use crate::workflow::{WorkflowCatalog, WorkflowPreflight, WORKFLOW_FILE};
 use crate::InstanceBinding;
 use vyrm_core::{recall, Millis, Reader, RecallQuery};
-use vyrm_store::{Effectiveness, Engine, ProjectionStatus, RecallOutcome};
+use rrd_store::{Effectiveness, Engine, ProjectionStatus, RecallOutcome};
 
 /// What a preflight produced. `context` is the injectable text; everything
 /// else is the evidence behind it.

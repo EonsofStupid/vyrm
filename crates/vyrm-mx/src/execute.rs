@@ -2,6 +2,7 @@ use crate::{
     index::index_artifact_name, BoundFilter, Error, IndexArtifact, LogicalOperator,
     PhysicalOperator, PhysicalPlan, Result,
 };
+use rrd_store::Engine;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use vyrm_core::{
@@ -9,7 +10,6 @@ use vyrm_core::{
     RuntimeMutation, RuntimeReadValidation, RuntimeValue, SeriesValue,
 };
 use vyrm_ql::{ComparisonOperator, Projection, Source, TraversalDirection};
-use vyrm_store::Engine;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ExecutionBudget {

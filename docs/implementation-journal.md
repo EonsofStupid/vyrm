@@ -143,7 +143,7 @@ index.
   plan lowers canonical staged keys to the target database's authenticated
   application format. The raw staged-parts method is no longer public.
 - Verification:
-  `CARGO_BUILD_JOBS=1 CARGO_INCREMENTAL=0 cargo test -p vyrm-store -p vyrm-cluster --all-features --locked`
+  `CARGO_BUILD_JOBS=1 CARGO_INCREMENTAL=0 cargo test -p rrd-store -p vyrm-cluster --all-features --locked`
   passed; strict all-target/all-feature clippy passed. GitHub Actions run
   [`32667681611`](https://github.com/EonsofStupid/vyrm/actions/runs/32667681611)
   is green across the full workspace verification job and the Ubuntu, Windows,
@@ -1154,3 +1154,41 @@ index.
 - Limit: `cargo fmt --all -- --check` remains blocked by unrelated existing and
   concurrent formatting differences, including the unfinished maintenance
   slice; those files were not reformatted or staged with this fix.
+
+## 2026-08-24 — RRD engine ownership and catalogue-stamped transactions
+
+- Commit: `pending` (this checkpoint).
+- Identity: the physical persistence package and Rust namespace moved from
+  `vyrm-store`/`vyrm_store` to `rrd-store`/`rrd_store`. No alias package or
+  forwarding namespace remains. Existing durable byte magics and digest
+  domains were deliberately not rewritten without a versioned recovery plan.
+- Composition: `rrflow-engine` is the concrete embedded composition root and
+  `rrd-server` now depends in production only on that engine and the public RRD
+  contract. Server HTTP and command implementations were split into bounded
+  responsibility modules; estate and security commands moved to their owning
+  packages.
+- Transaction authority: session transactions retain the complete persisted
+  `ReadStamp` and commit through `DataTransaction`. Query-index and vector-
+  collection mutations now update a per-scope catalogue revision atomically
+  with their materialized control record and hash-chained journal entry.
+  Catalogue changes alter the semantic manifest without advancing the data
+  cursor, and stale transactions fail closed on every backend.
+- Security: embedded engine operations re-evaluate persistent grants, and a
+  regression test proves a session-create-only principal cannot invoke backup
+  creation through the embedded API. Public engine errors no longer expose an
+  `rrd-store` error type.
+- Evidence: `cargo test --workspace --all-features --exclude rrd-maintenance
+  --locked` passed after catching and correcting an integration fixture that
+  opened a transaction before installing its vector catalogue. `cargo clippy
+  --workspace --all-targets --all-features --exclude rrd-maintenance --locked
+  -- -D warnings` passed. Differential catalogue tests cover memory, Fjall
+  compatibility, native persistence, reopen, unrelated scopes, stable data
+  cursors, changed manifests, and stale-read rejection.
+- Limits: HTTP still duplicates parts of security policy and completion-audit
+  orchestration; Connectome, CLI, and MCP still have frozen direct-component
+  dependency debt; remaining Vyrm-named packages and durable format identities
+  require dependency-ordered migration. The postponed `rrd-maintenance` work
+  was excluded from this checkpoint and was not staged.
+- Next gate: introduce the transport-neutral invocation boundary using the
+  existing RRD `RequestContext`, then move policy decisions and durable audit
+  completion wholly into `rrflow-engine` before removing HTTP authority.

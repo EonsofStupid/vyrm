@@ -21,5 +21,5 @@ tree-sitter-svelte-ng = "1.0"
 [dev-dependencies]
 # Persistence wiring is exercised from tests and examples only: the library
 # stays substrate-free until vyrm-node exists to own the composition.
-vyrm-store = { path = "../vyrm-store" }
+rrd-store = { path = "../rrd-store" }
 tempfile = "3"

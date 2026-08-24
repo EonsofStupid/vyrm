@@ -6,7 +6,7 @@ use vyrm_core::{
 use vyrm_node::{
     install_runtime_trace_contract, record_runtime_trace, TraceIdentity, REASONING_SCOPE,
 };
-use vyrm_store::{Engine, MemoryEngine, NativeEngine, Store};
+use rrd_store::{Engine, MemoryEngine, NativeEngine, Store};
 
 fn scope() -> ScopeId {
     ScopeId::new(REASONING_SCOPE).unwrap()

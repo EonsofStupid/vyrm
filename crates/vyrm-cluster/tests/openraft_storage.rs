@@ -22,7 +22,7 @@ use vyrm_core::{
     RuntimeType, ScopeId,
 };
 use vyrm_kv::{recover, Database, Durability, Mutation, SnapshotBundle, WriteBatch};
-use vyrm_store::{Engine, LocalObjectStore, NativeEngine};
+use rrd_store::{Engine, LocalObjectStore, NativeEngine};
 
 struct VyrmStoreBuilder;
 

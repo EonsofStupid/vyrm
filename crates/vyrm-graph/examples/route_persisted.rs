@@ -11,7 +11,7 @@
 //! ```
 
 use vyrm_graph::{Index, Profile};
-use vyrm_store::Store;
+use rrd_store::Store;
 
 fn main() {
     let mut args = std::env::args().skip(1);

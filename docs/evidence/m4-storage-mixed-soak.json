@@ -1,7 +1,7 @@
 {
   "contract": "vyrmkv-fjall-mixed-storage-soak-v1",
   "generated_at": "2026-08-20",
-  "command": "cargo test -p vyrm-store --test mixed_storage_soak -- --nocapture",
+  "command": "cargo test -p rrd-store --test mixed_storage_soak -- --nocapture",
   "seed": "0x6a09e667f3bcc909",
   "operations": 20000,
   "inserts": 4558,

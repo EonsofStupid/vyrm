@@ -5,7 +5,7 @@ use rrd_security::{
 };
 use std::collections::BTreeMap;
 use vyrm_core::digest;
-use vyrm_store::{Engine, NativeEngine};
+use rrd_store::{Engine, NativeEngine};
 
 fn path(instance: &str) -> ResourcePath {
     ResourcePath {

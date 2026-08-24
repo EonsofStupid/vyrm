@@ -21,7 +21,7 @@ use vyrm_core::{
     RuntimeEventSchema, RuntimeMutation, RuntimeProperties, RuntimeSchemaRegistry, RuntimeType,
     RuntimeValue, ScopeId, Subject, TraceDataClass, TraceDomain, TraceLink, TraceOutcome,
 };
-use vyrm_store::{Effectiveness, Engine, ProjectionStatus, RecallOutcome};
+use rrd_store::{Effectiveness, Engine, ProjectionStatus, RecallOutcome};
 
 /// Lifecycle events the dispatcher answers. Kebab-case names match the CLI
 /// (`vyrm hook session-start`).

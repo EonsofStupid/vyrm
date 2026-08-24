@@ -1,10 +1,13 @@
-use rrd_contract::{CanonicalId, CorrelationId, TransactionMutation, transaction_operation_sha256};
+use rrd_contract::{transaction_operation_sha256, CanonicalId, CorrelationId, TransactionMutation};
 use rrd_security::{
-    Action as SecurityAction, Principal, PrincipalKind, ResourceGrant, SECURITY_FORMAT,
-    SecurityRepository, SecurityState,
+    Action as SecurityAction, Principal, PrincipalKind, ResourceGrant, SecurityRepository,
+    SecurityState, SECURITY_FORMAT,
 };
-use rrd_server::{HttpError, RRD_MAX_BODY_BYTES, RrdHttpServer, load_or_create_token_key};
-use serde_json::{Value, json};
+use rrd_server::{load_or_create_token_key, HttpError, RrdHttpServer, RRD_MAX_BODY_BYTES};
+use rrd_store::Engine;
+use rrd_store::PersistentEngine;
+use rrflow_engine::RrflowEngine;
+use serde_json::{json, Value};
 use std::collections::BTreeMap;
 use std::io::{Read, Write};
 use std::net::{Shutdown, SocketAddr, TcpStream};
@@ -17,8 +20,6 @@ use vyrm_core::{
     RuntimeRecord, RuntimeRecordSchema, RuntimeRef, RuntimeSchemaRegistry, RuntimeType,
     RuntimeValue, RuntimeValueType, ScopeId,
 };
-use vyrm_store::Engine;
-use vyrm_store::PersistentEngine;
 
 fn estate_context(at: u64, operation: &str) -> rrd_estate::MutationContext {
     rrd_estate::MutationContext {
@@ -54,15 +55,10 @@ impl Drop for RunningServer {
 }
 
 fn start(root: &Path) -> RunningServer {
-    let engine = PersistentEngine::open(root).unwrap();
     let token_key = load_or_create_token_key(&root.join("RRD.SERVER.SECRET")).unwrap();
-    let server = RrdHttpServer::bind(
-        engine,
-        CanonicalId::new("socket-test").unwrap(),
-        token_key,
-        "127.0.0.1:0".parse().unwrap(),
-    )
-    .unwrap();
+    let engine =
+        RrflowEngine::open(root, CanonicalId::new("socket-test").unwrap(), token_key).unwrap();
+    let server = RrdHttpServer::bind(engine, "127.0.0.1:0".parse().unwrap()).unwrap();
     let address = server.local_addr();
     let (shutdown, receiver) = tokio::sync::oneshot::channel();
     let thread = std::thread::spawn(move || {
@@ -266,10 +262,11 @@ fn initialized_security_authority_binds_sessions_and_denies_ungranted_routes() {
     let engine = PersistentEngine::open(&root).unwrap();
     let instance = CanonicalId::new("socket-test").unwrap();
     let resource = rrd_contract::ResourcePath {
-        segments: vec![
-            rrd_contract::ResourceId::new(rrd_contract::ResourceKind::Instance, "socket-test")
-                .unwrap(),
-        ],
+        segments: vec![rrd_contract::ResourceId::new(
+            rrd_contract::ResourceKind::Instance,
+            "socket-test",
+        )
+        .unwrap()],
     };
     let principal = Principal {
         id: CanonicalId::new("connectome-local").unwrap(),
@@ -290,13 +287,11 @@ fn initialized_security_authority_binds_sessions_and_denies_ungranted_routes() {
             ResourceGrant {
                 action: SecurityAction::AuditRead,
                 resource_prefix: rrd_contract::ResourcePath {
-                    segments: vec![
-                        rrd_contract::ResourceId::new(
-                            rrd_contract::ResourceKind::Instance,
-                            "socket-test",
-                        )
-                        .unwrap(),
-                    ],
+                    segments: vec![rrd_contract::ResourceId::new(
+                        rrd_contract::ResourceKind::Instance,
+                        "socket-test",
+                    )
+                    .unwrap()],
                 },
             },
         ],
@@ -405,11 +400,9 @@ fn initialized_security_authority_binds_sessions_and_denies_ungranted_routes() {
             .count(),
         2
     );
-    assert!(
-        records.iter().any(|record| {
-            record["action"] == "session_create" && record["phase"] == "authorized"
-        })
-    );
+    assert!(records
+        .iter()
+        .any(|record| { record["action"] == "session_create" && record["phase"] == "authorized" }));
     assert!(records.iter().any(|record| {
         record["action"] == "query_execute"
             && record["phase"] == "completed"
@@ -429,11 +422,9 @@ fn initialized_security_authority_binds_sessions_and_denies_ungranted_routes() {
             .count(),
         2
     );
-    assert!(
-        records
-            .iter()
-            .any(|record| { record["action"] == "audit_read" && record["phase"] == "authorized" })
-    );
+    assert!(records
+        .iter()
+        .any(|record| { record["action"] == "audit_read" && record["phase"] == "authorized" }));
     let encoded = serde_json::to_string(records).unwrap();
     assert!(!encoded.contains("local-api-key"));
     assert!(!encoded.contains("wrong"));
@@ -631,12 +622,10 @@ fn bounded_changefeed_follow_wakes_on_a_commit_and_times_out_at_the_same_cursor(
     assert_eq!(status, 200, "{timed_out}");
     assert_eq!(payload(&timed_out)["timed_out"], true);
     assert_eq!(payload(&timed_out)["page"]["through_cursor"], 3);
-    assert!(
-        payload(&timed_out)["page"]["changes"]
-            .as_array()
-            .unwrap()
-            .is_empty()
-    );
+    assert!(payload(&timed_out)["page"]["changes"]
+        .as_array()
+        .unwrap()
+        .is_empty());
 
     let live = envelope(
         json!({
@@ -897,22 +886,6 @@ fn data_transaction_atomically_commits_every_public_model_and_replays_after_rest
     assert_eq!(status, 200, "{created}");
     let session_id = payload(&created)["session_id"].as_str().unwrap().to_owned();
     let token = payload(&created)["token"].as_str().unwrap().to_owned();
-    let begin = envelope(
-        json!({"scope": "data", "timeout_ms": 60_000}),
-        Some("begin-data"),
-        None,
-    );
-    let (status, began) = post(
-        &server,
-        "/v1/transactions",
-        &begin,
-        Some((&session_id, &token)),
-    );
-    assert_eq!(status, 200, "{began}");
-    let transaction_id = payload(&began)["transaction_id"]
-        .as_str()
-        .unwrap()
-        .to_owned();
     let ensure_collection = envelope(
         json!({
             "scope": "instance:socket-test",
@@ -943,9 +916,31 @@ fn data_transaction_atomically_commits_every_public_model_and_replays_after_rest
         Some((&session_id, &token)),
     );
     assert_eq!(status, 200, "{ensured}");
-    assert_eq!(payload(&ensured)["collection"]["collection_id"], "documents");
+    assert_eq!(
+        payload(&ensured)["collection"]["collection_id"],
+        "documents"
+    );
     assert_eq!(payload(&ensured)["collection"]["generation"], 1);
     assert_eq!(payload(&ensured)["idempotent_replay"], false);
+    // Catalogue configuration is part of the transaction read stamp. Install
+    // it before opening the transaction so the commit is bound to the exact
+    // vector contract it validates against.
+    let begin = envelope(
+        json!({"scope": "data", "timeout_ms": 60_000}),
+        Some("begin-data"),
+        None,
+    );
+    let (status, began) = post(
+        &server,
+        "/v1/transactions",
+        &begin,
+        Some((&session_id, &token)),
+    );
+    assert_eq!(status, 200, "{began}");
+    let transaction_id = payload(&began)["transaction_id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
     let zero_digest = "0".repeat(64);
     let mutations = json!([
         {
@@ -1121,11 +1116,7 @@ fn data_transaction_atomically_commits_every_public_model_and_replays_after_rest
         Some((&session_id, &token)),
     );
     assert_eq!(status, 409, "{collision}");
-    let list_collections = envelope(
-        json!({"scope": "instance:socket-test"}),
-        None,
-        None,
-    );
+    let list_collections = envelope(json!({"scope": "instance:socket-test"}), None, None);
     let (status, listed) = post(
         &server,
         "/v1/vector/collections/list",
@@ -1134,7 +1125,10 @@ fn data_transaction_atomically_commits_every_public_model_and_replays_after_rest
     );
     assert_eq!(status, 200, "{listed}");
     assert_eq!(payload(&listed)["revision"], 1);
-    assert_eq!(payload(&listed)["collections"][0]["collection_id"], "documents");
+    assert_eq!(
+        payload(&listed)["collections"][0]["collection_id"],
+        "documents"
+    );
     let vector_search = envelope(
         json!({
             "scope": "instance:socket-test",
@@ -1233,7 +1227,10 @@ fn data_transaction_atomically_commits_every_public_model_and_replays_after_rest
     let point_page = payload(&scrolled);
     assert_eq!(point_page["known_at_cursor"], 11);
     assert_eq!(point_page["points"][0]["reference"]["id"], "alpha-title");
-    assert_eq!(point_page["points"][0]["payload"]["tenant"]["value"], "alpha");
+    assert_eq!(
+        point_page["points"][0]["payload"]["tenant"]["value"],
+        "alpha"
+    );
     assert_eq!(point_page["truncated"], false);
     assert!(point_page.get("next_after").is_none());
     let retrieve_points = envelope(
@@ -1371,7 +1368,10 @@ fn data_transaction_atomically_commits_every_public_model_and_replays_after_rest
     let live = payload(&live);
     assert_eq!(live["from_cursor"], 0);
     assert_eq!(live["through_cursor"], 11);
-    assert_eq!(live["added"][0]["identity"], "series:series:latency:100:latency-100");
+    assert_eq!(
+        live["added"][0]["identity"],
+        "series:series:latency:100:latency-100"
+    );
     assert!(live["updated"].as_array().unwrap().is_empty());
     assert!(live["removed"].as_array().unwrap().is_empty());
     let ensure_index = envelope(
@@ -1421,11 +1421,7 @@ fn data_transaction_atomically_commits_every_public_model_and_replays_after_rest
         Some((&session_id, &token)),
     );
     assert_eq!(status, 409, "{collision}");
-    let list_indexes = envelope(
-        json!({"scope": "instance:socket-test"}),
-        None,
-        None,
-    );
+    let list_indexes = envelope(json!({"scope": "instance:socket-test"}), None, None);
     let (status, listed) = post(
         &server,
         "/v1/query/indexes/list",
@@ -1463,7 +1459,10 @@ fn data_transaction_atomically_commits_every_public_model_and_replays_after_rest
         .iter()
         .any(|candidate| candidate["name"] == "index:document-title"
             && candidate["selected"] == true));
-    assert_eq!(payload(&indexed)["rows"][0]["identity"], "record:document:alpha");
+    assert_eq!(
+        payload(&indexed)["rows"][0]["identity"],
+        "record:document:alpha"
+    );
     let first_feed = envelope(
         json!({
             "scope": "instance:socket-test",
@@ -1655,13 +1654,13 @@ fn authenticated_estate_read_returns_the_public_snapshot_only() {
 #[test]
 fn server_denies_remote_bind_before_opening_a_listener() {
     let temporary = tempfile::tempdir().unwrap();
-    let engine = PersistentEngine::open(&temporary.path().join("instance")).unwrap();
-    let result = RrdHttpServer::bind(
-        engine,
+    let engine = RrflowEngine::open(
+        &temporary.path().join("instance"),
         CanonicalId::new("socket-test").unwrap(),
         [7; 32],
-        "0.0.0.0:0".parse().unwrap(),
-    );
+    )
+    .unwrap();
+    let result = RrdHttpServer::bind(engine, "0.0.0.0:0".parse().unwrap());
     assert!(matches!(result, Err(HttpError::RemoteBindDenied(_))));
 }
 
@@ -1716,15 +1715,13 @@ fn real_socket_exercises_lifecycle_commit_and_restart_replay() {
     let (status, capabilities) = http(server.address, "GET", "/v1/capabilities", &[], &[]);
     assert_eq!(status, 200);
     assert_eq!(payload(&capabilities)["deployment_mode"], "local_server");
-    assert!(
-        payload(&capabilities)["capabilities"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|capability| {
-                capability["name"] == "remote-listen" && capability["status"] == "unavailable"
-            })
-    );
+    assert!(payload(&capabilities)["capabilities"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|capability| {
+            capability["name"] == "remote-listen" && capability["status"] == "unavailable"
+        }));
     let (status, catalogue) = http(server.address, "GET", "/v1/schema/endpoints", &[], &[]);
     assert_eq!(status, 200, "{catalogue}");
     assert_eq!(payload(&catalogue)["protocol_version"], 1);
@@ -1736,15 +1733,21 @@ fn real_socket_exercises_lifecycle_commit_and_restart_replay() {
     assert_eq!(status, 200, "{openapi}");
     assert_eq!(payload(&openapi)["openapi"], "3.1.0");
     assert_eq!(payload(&openapi)["x-rrd-endpoint-count"], 28);
-    assert!(payload(&openapi)["paths"]["/v1/query"]["post"]["requestBody"]
-        ["content"]["application/json"]["schema"]
-        .is_object());
-    assert!(payload(&openapi)["paths"]["/v1/query/live/poll"]["post"]["requestBody"]
-        ["content"]["application/json"]["schema"]
-        .is_object());
-    assert!(payload(&openapi)["paths"]["/v1/query/indexes/ensure"]["post"]["requestBody"]
-        ["content"]["application/json"]["schema"]
-        .is_object());
+    assert!(
+        payload(&openapi)["paths"]["/v1/query"]["post"]["requestBody"]["content"]
+            ["application/json"]["schema"]
+            .is_object()
+    );
+    assert!(
+        payload(&openapi)["paths"]["/v1/query/live/poll"]["post"]["requestBody"]["content"]
+            ["application/json"]["schema"]
+            .is_object()
+    );
+    assert!(
+        payload(&openapi)["paths"]["/v1/query/indexes/ensure"]["post"]["requestBody"]["content"]
+            ["application/json"]["schema"]
+            .is_object()
+    );
 
     let create = envelope(
         json!({
@@ -2127,11 +2130,9 @@ fn concurrent_same_commit_is_single_acceptance_and_retry_converges() {
         .map(|worker| worker.join().unwrap())
         .collect::<Vec<_>>();
     assert!(results.iter().any(|(status, _)| *status == 200));
-    assert!(
-        results
-            .iter()
-            .all(|(status, _)| matches!(*status, 200 | 409))
-    );
+    assert!(results
+        .iter()
+        .all(|(status, _)| matches!(*status, 200 | 409)));
 
     let (status, converged) = post(&server, &path, &commit, Some((&session_id, &token)));
     assert_eq!(status, 200);

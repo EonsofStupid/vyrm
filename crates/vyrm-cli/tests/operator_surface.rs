@@ -7,7 +7,7 @@
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use vyrm_store::{Engine, NativeEngine, PersistentBackend, PersistentEngine, Store};
+use rrd_store::{Engine, NativeEngine, PersistentBackend, PersistentEngine, Store};
 
 fn vyrm(db: &Path, args: &[&str]) -> (bool, String, String) {
     let output = Command::new(env!("CARGO_BIN_EXE_vyrm"))
@@ -416,13 +416,13 @@ fn grounding_is_operable_and_divergence_halts_until_reset() {
     {
         let store = PersistentEngine::open(&db).expect("open store");
         let bytes = store
-            .get_projection(vyrm_store::CURRENT_PROJECTION)
+            .get_projection(rrd_store::CURRENT_PROJECTION)
             .unwrap()
             .expect("projection stored");
         let corrupted =
             String::from_utf8(bytes).unwrap().replacen("\"active\"", "\"drifted\"", 1);
         store
-            .put_projection(vyrm_store::CURRENT_PROJECTION, corrupted.as_bytes())
+            .put_projection(rrd_store::CURRENT_PROJECTION, corrupted.as_bytes())
             .unwrap();
     }
 

@@ -15,7 +15,7 @@ use vyrm_core::{
 use vyrm_mx::{BoundQuery, Catalog, PhysicalPlan, QueryExecution};
 pub use vyrm_mx::{ExecutionBudget, Parameters};
 use vyrm_ql::{Query, Source, QUERY_CONTRACT_VERSION};
-use vyrm_store::{Engine, PhysicalStoreEvidence};
+use rrd_store::{Engine, PhysicalStoreEvidence};
 
 const MAX_QUERY_BYTES: usize = 64 * 1024;
 const MAX_QUERY_PARAMETERS: usize = 128;
@@ -533,8 +533,8 @@ fn execution_links_for_storage(read: &vyrm_core::ReadStamp, plan: &PhysicalPlan)
 }
 
 fn physical_storage_attributes(
-    before: &Result<PhysicalStoreEvidence, vyrm_store::Error>,
-    after: &Result<PhysicalStoreEvidence, vyrm_store::Error>,
+    before: &Result<PhysicalStoreEvidence, rrd_store::Error>,
+    after: &Result<PhysicalStoreEvidence, rrd_store::Error>,
     execution: Option<&QueryExecution>,
 ) -> RuntimeProperties {
     let mut attributes = RuntimeProperties::new();

@@ -2,7 +2,7 @@ use vyrm_core::{
     Check, CheckStatus, DecisionKind, Evidence, ReasoningPayload, ReasoningState, RunOutcome,
 };
 use vyrm_node::{active_reasoning_run, reasoning_run, record_reasoning};
-use vyrm_store::MemoryEngine;
+use rrd_store::MemoryEngine;
 
 fn evidence(summary: &str) -> Evidence {
     Evidence {

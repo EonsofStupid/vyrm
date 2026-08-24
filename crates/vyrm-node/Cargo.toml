@@ -11,7 +11,7 @@ vyrm-core = { path = "../vyrm-core" }
 vyrm-graph = { path = "../vyrm-graph" }
 vyrm-ql = { path = "../vyrm-ql" }
 vyrm-mx = { path = "../vyrm-mx" }
-vyrm-store = { path = "../vyrm-store" }
+rrd-store = { path = "../rrd-store" }
 vyrm-vector = { path = "../vyrm-vector" }
 vyrm-embed = { path = "../vyrm-embed" }
 vyrm-operator = { path = "../vyrm-operator" }

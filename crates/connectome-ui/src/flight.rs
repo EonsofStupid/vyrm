@@ -19,7 +19,7 @@ use vyrm_core::{
 use vyrm_node::{
     record_runtime_trace, DurableTraceSpan, HookContext, HookEvent, InstanceBinding, TraceIdentity,
 };
-use vyrm_store::{Engine, PersistentEngine};
+use rrd_store::{Engine, PersistentEngine};
 
 const FLIGHT_LEDGER: &str = "connectome-flight-ledger-v1";
 const FLIGHT_SCOPE: &str = "instance:default";
@@ -1475,7 +1475,7 @@ fn now() -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use vyrm_store::Engine;
+    use rrd_store::Engine;
 
     #[test]
     fn token_metrics_are_found_inside_provider_envelopes() {

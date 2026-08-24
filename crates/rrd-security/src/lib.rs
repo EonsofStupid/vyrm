@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use vyrm_core::digest;
-use vyrm_store::{ControlJournalEntry, ControlTransition, Engine};
+use rrd_store::{ControlJournalEntry, ControlTransition, Engine};
 
 pub const SECURITY_FORMAT: u16 = 1;
 pub const MAX_PRINCIPALS: usize = 4_096;
@@ -19,7 +19,7 @@ pub type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Debug)]
 pub enum Error {
-    Store(vyrm_store::Error),
+    Store(rrd_store::Error),
     Invalid(String),
     AlreadyInitialized,
     NotInitialized,
@@ -46,8 +46,8 @@ impl fmt::Display for Error {
 
 impl std::error::Error for Error {}
 
-impl From<vyrm_store::Error> for Error {
-    fn from(value: vyrm_store::Error) -> Self {
+impl From<rrd_store::Error> for Error {
+    fn from(value: rrd_store::Error) -> Self {
         Self::Store(value)
     }
 }

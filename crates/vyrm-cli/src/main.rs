@@ -16,7 +16,7 @@ use clap::Parser;
 use command::Cli;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use vyrm_core::Reader;
-use vyrm_store::{InvocationInput, PersistentEngine};
+use rrd_store::{InvocationInput, PersistentEngine};
 
 fn now_millis() -> u64 {
     SystemTime::now()

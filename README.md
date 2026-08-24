@@ -475,7 +475,7 @@ measurement contract.
 | `rrd-estate` | Persistent estate desired/observed authority, one-boundary reconciler, fenced operation leases, idempotency bindings, receipts, and activity classification |
 | `rrd-server` | Async loopback RRD process, persistent transport leases, prepared claim commits, bounded HTTP, and restart-idempotent lifecycle coordination |
 | `vyrm-core` | Claim, reasoning, typed runtime graph, durable trace, traversal, and differential contracts; serde-only boundary |
-| `vyrm-store` | `vyrmDS` coordination plus native `vyrmKV`, transitional Fjall, and memory adapters; unified atomic commits, content-addressed objects, outbox/audit, sequences, projections |
+| `rrd-store` | `vyrmDS` coordination plus native `vyrmKV`, transitional Fjall, and memory adapters; unified atomic commits, content-addressed objects, outbox/audit, sequences, projections |
 | `vyrm-operator` | External operator-knowledge contracts, exact reference adapter, optional live pgvector transport, SQL planning, and idempotent upsert/delete synchronization |
 | `vyrm-graph` | Parsing, incremental freshness, grounding, source routing |
 | `vyrm-node` | Runtime lifecycle, instance binding, policy, append-only reasoning composition |
@@ -532,7 +532,7 @@ runtime change, outcome, and audit atomically. See
 [`docs/package-workflows.md`](docs/package-workflows.md).
 
 RRD owns the target storage contract. The current legacy
-`vyrm_store::NativeEngine` implements the same `Engine` port as the in-memory
+`rrd_store::NativeEngine` implements the same `Engine` port as the in-memory
 reference and transitional Fjall adapter;
 claim recall, projections, schema enforcement, hash-chained commits, snapshots,
 concurrent CAS, restart, and exact `vyrmQL` results run through a three-backend

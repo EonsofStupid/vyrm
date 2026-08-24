@@ -1,3 +1,4 @@
+use rrd_store::MemoryEngine;
 use serde::Serialize;
 use std::collections::BTreeMap;
 use vyrm_core::{
@@ -5,7 +6,6 @@ use vyrm_core::{
 };
 use vyrm_mx::{bind, plan, Catalog, IndexCatalogueRepository, Parameters, SchemaVersion};
 use vyrm_ql::parse;
-use vyrm_store::MemoryEngine;
 
 #[derive(Serialize)]
 struct Vector {

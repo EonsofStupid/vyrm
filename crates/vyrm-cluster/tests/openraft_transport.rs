@@ -29,7 +29,7 @@ use vyrm_core::{
     RuntimeTraceEvent, RuntimeType, ScopeId, SpanId, TraceDataClass, TraceDomain, TraceId,
     TraceOutcome,
 };
-use vyrm_store::LocalObjectStore;
+use rrd_store::LocalObjectStore;
 
 type VyrmRaft = Raft<vyrm_cluster::VyrmRaftTypeConfig>;
 

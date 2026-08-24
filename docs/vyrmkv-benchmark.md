@@ -20,7 +20,7 @@ backend order, reports medians, and retains every raw trial.
 Run the checked-in workload:
 
 ```console
-cargo run --release --locked -p vyrm-store --example engine_benchmark -- \
+cargo run --release --locked -p rrd-store --example engine_benchmark -- \
   --trials 9 --operations 2048 --batch-size 64 \
   --reads 1024 --read-width 32 \
   --output eval/results/2026-08-23-vyrmkv-standard-streaming-scan-v4.json

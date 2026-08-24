@@ -1,4 +1,4 @@
-//! Index persistence through `vyrm-store`, replacing per-process rebuild.
+//! Index persistence through `rrd-store`, replacing per-process rebuild.
 //!
 //! The index serializes whole into the store's `projections` keyspace. On
 //! load, `refresh` is the arbiter of staleness — the persisted mtime and
@@ -9,7 +9,7 @@
 
 use std::path::Path;
 use vyrm_graph::{Index, Profile};
-use vyrm_store::Store;
+use rrd_store::Store;
 
 const PROJECTION: &str = "graph_index";
 

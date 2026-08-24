@@ -1,3 +1,4 @@
+use rrd_store::{Durability, Engine, MemoryEngine, NativeEngine, Store};
 use std::collections::BTreeMap;
 use vyrm_core::{
     digest, ProjectionId, ProjectionState, RuntimeCommit, RuntimeMutation, RuntimePropertySchema,
@@ -9,7 +10,6 @@ use vyrm_mx::{
     IndexCatalogueRepository, IndexDefinition, IndexMutationContext, Parameters,
 };
 use vyrm_ql::{parse, Source};
-use vyrm_store::{Durability, Engine, MemoryEngine, NativeEngine, Store};
 
 fn scope() -> ScopeId {
     ScopeId::new("instance:index-test").unwrap()

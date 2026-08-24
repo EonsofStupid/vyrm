@@ -589,7 +589,7 @@ fn openapi_is_derived_from_every_catalogue_operation_and_wire_type() {
         }
     }
     let encoded = serde_json::to_string(&document).unwrap();
-    assert!(!encoded.contains("vyrm_store"));
+    assert!(!encoded.contains("rrd_store"));
     assert!(!encoded.contains("rrd_server"));
     let mut pretty = serde_json::to_vec_pretty(&document).unwrap();
     pretty.push(b'\n');

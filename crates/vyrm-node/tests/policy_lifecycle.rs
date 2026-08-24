@@ -1,6 +1,6 @@
 use vyrm_core::{DecisionKind, Reader, ReasoningPayload, ReasoningState};
 use vyrm_node::{active_reasoning_run, handle, record_reasoning, HookContext, HookEvent};
-use vyrm_store::MemoryEngine;
+use rrd_store::MemoryEngine;
 
 #[test]
 fn one_attempt_authorizes_one_tool_and_post_tool_closes_it_with_evidence() {

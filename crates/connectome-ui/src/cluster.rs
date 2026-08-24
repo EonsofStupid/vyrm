@@ -13,7 +13,7 @@ use vyrm_core::{
     RuntimeValue, RuntimeValueType, ScopeId,
 };
 use vyrm_node::InstanceBinding;
-use vyrm_store::{Engine, Error as StoreError, PersistentEngine};
+use rrd_store::{Engine, Error as StoreError, PersistentEngine};
 
 pub const CLUSTER_TELEMETRY_SAMPLE_VERSION: u16 = 1;
 const SAMPLE_TYPE: &str = "cluster_telemetry_sample";

@@ -1,6 +1,6 @@
+use rrd_store::{Engine, NativeEngine};
 use std::collections::BTreeMap;
 use vyrm_core::{digest, ProjectionId, ScopeId};
-use vyrm_store::{Engine, NativeEngine};
 use vyrm_vector::{
     CollectionError, CollectionMutationContext, NamedVectorConfig, ScoreMetric,
     VectorCollectionDefinition, VectorCollectionRepository, VectorMemoryTier, VectorValueKind,

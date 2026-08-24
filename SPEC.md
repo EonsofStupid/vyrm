@@ -164,7 +164,7 @@ excluded from this path.
 ```text
 vyrm-core     claims, key encoding, bi-temporal resolution, supersession
    ▲
-vyrm-store    substrate adapter: keyspaces, durability classes, batch commit
+rrd-store    substrate adapter: keyspaces, durability classes, batch commit
    ▲
 vyrm-graph    projection, incremental rebuild, grounding, differentials
    ▲

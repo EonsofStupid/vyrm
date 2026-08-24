@@ -10,7 +10,7 @@ use vyrm_core::{
     RuntimeType, RuntimeValue, ScopeId,
 };
 use vyrm_node::{execute_traced_artifact_transfer, DurableArtifactTransferObserver};
-use vyrm_store::{DataRuntime, Engine, LocalObjectStore, MemoryEngine, NativeEngine, Store};
+use rrd_store::{DataRuntime, Engine, LocalObjectStore, MemoryEngine, NativeEngine, Store};
 
 fn scope() -> ScopeId {
     ScopeId::new("instance:cluster-transfer-trace").unwrap()

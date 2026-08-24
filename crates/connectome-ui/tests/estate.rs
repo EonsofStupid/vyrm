@@ -22,7 +22,7 @@ fn connectome_projects_persisted_estate_authority_without_mutating_it() {
     let root = temporary.path().join("estate-a");
     std::fs::create_dir(&root).unwrap();
     vyrm_node::InstanceManifest::ensure_dedicated(&root).unwrap();
-    let store = vyrm_store::PersistentEngine::open(&root.join(vyrm_node::STORE_DIR)).unwrap();
+    let store = rrd_store::PersistentEngine::open(&root.join(vyrm_node::STORE_DIR)).unwrap();
     let repository = EstateRepository::new(&store, id("estate-a"));
     repository.create(&context(10, "create-estate")).unwrap();
     repository

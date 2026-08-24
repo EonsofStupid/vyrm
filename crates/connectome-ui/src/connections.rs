@@ -8,7 +8,7 @@ use std::fmt;
 use std::net::SocketAddr;
 use std::time::Duration;
 use vyrm_core::digest;
-use vyrm_store::{ControlTransition, Engine};
+use rrd_store::{ControlTransition, Engine};
 
 pub const CONNECTION_CATALOGUE_FORMAT: u16 = 1;
 pub const MAX_CONNECTION_PROFILES: usize = 64;
@@ -20,7 +20,7 @@ pub type Result<T> = std::result::Result<T, Error>;
 #[derive(Debug)]
 pub enum Error {
     Invalid(String),
-    Store(vyrm_store::Error),
+    Store(rrd_store::Error),
     Transport(String),
     Conflict(String),
 }
@@ -40,8 +40,8 @@ impl fmt::Display for Error {
 
 impl std::error::Error for Error {}
 
-impl From<vyrm_store::Error> for Error {
-    fn from(error: vyrm_store::Error) -> Self {
+impl From<rrd_store::Error> for Error {
+    fn from(error: rrd_store::Error) -> Self {
         Self::Store(error)
     }
 }
@@ -339,7 +339,7 @@ pub fn probe_connection(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use vyrm_store::MemoryEngine;
+    use rrd_store::MemoryEngine;
 
     fn request(key: &str) -> EnsureConnectionProfile {
         EnsureConnectionProfile {

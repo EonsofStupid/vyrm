@@ -8,7 +8,7 @@ use std::io::Write as _;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use vyrm_core::{RuntimeMutation, RuntimeValue, ScopeId};
-use vyrm_store::{Engine, PersistentEngine};
+use rrd_store::{Engine, PersistentEngine};
 
 fn vyrm(db: &Path, args: &[&str], stdin_json: Option<&str>) -> (bool, String, String) {
     let mut child = Command::new(env!("CARGO_BIN_EXE_vyrm"))
@@ -185,9 +185,9 @@ fn the_wait_gate_denies_mutation_while_quarantined_and_reset_reopens() {
     // Corrupt the stored projection, ground, quarantine.
     {
         let store = PersistentEngine::open(&db).unwrap();
-        let bytes = store.get_projection(vyrm_store::CURRENT_PROJECTION).unwrap().unwrap();
+        let bytes = store.get_projection(rrd_store::CURRENT_PROJECTION).unwrap().unwrap();
         let corrupted = String::from_utf8(bytes).unwrap().replacen("\"active\"", "\"drifted\"", 1);
-        store.put_projection(vyrm_store::CURRENT_PROJECTION, corrupted.as_bytes()).unwrap();
+        store.put_projection(rrd_store::CURRENT_PROJECTION, corrupted.as_bytes()).unwrap();
     }
     let (_, out, _) = vyrm(&db, &["ground"], None);
     assert!(out.contains("DIVERGENCE"), "grounding missed the corruption: {out}");
@@ -426,7 +426,7 @@ fn traces_are_enableable_off_by_default_and_never_touch_stdout() {
         .arg("--db").arg(&db)
         .args(["assert", "--subject", "wp3", "--predicate", "status",
                "--object", "traced", "--valid-from", "2000"])
-        .env("VYRM_TRACE", "vyrm_store=debug")
+        .env("VYRM_TRACE", "rrd_store=debug")
         .stdin(Stdio::null())
         .output()
         .expect("run vyrm traced");
@@ -443,7 +443,7 @@ fn traces_are_enableable_off_by_default_and_never_touch_stdout() {
     let output = Command::new(env!("CARGO_BIN_EXE_vyrm"))
         .arg("--db").arg(&db)
         .args(["rebuild"])
-        .env("VYRM_TRACE", "vyrm_store=debug")
+        .env("VYRM_TRACE", "rrd_store=debug")
         .env("VYRM_TRACE_FORMAT", "json")
         .stdin(Stdio::null())
         .output()

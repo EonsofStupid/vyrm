@@ -6,7 +6,7 @@ use crate::{
 use rrd_contract::CanonicalId;
 use serde::{Deserialize, Serialize};
 use vyrm_core::digest;
-use vyrm_store::Engine;
+use rrd_store::Engine;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

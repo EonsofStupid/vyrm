@@ -1,7 +1,7 @@
 use crate::{Error, IndexCatalogue, IndexCatalogueRepository, Result};
+use rrd_store::Engine;
 use serde::{Deserialize, Serialize};
 use vyrm_core::{ReadStamp, RuntimeMutation, RuntimeSchemaRegistry, ScopeId};
-use vyrm_store::Engine;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SchemaVersion {
@@ -56,6 +56,10 @@ impl Catalog {
             })
             .collect();
         let indexes = IndexCatalogueRepository::new(engine, read.scope.clone()).load()?;
+        // The catalogue is materialized outside the append-only runtime log.
+        // Revalidate the same stamp after loading it so a concurrent index or
+        // vector catalogue transition cannot produce a torn planning view.
+        engine.runtime_read_changes(&read, read.commit_cursor, 1)?;
         Ok(Self {
             read,
             schemas,

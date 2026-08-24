@@ -7,7 +7,7 @@ use vyrm_cluster::{
     VyrmTransportTelemetry, ARTIFACT_TRANSFER_TELEMETRY_VERSION,
 };
 use vyrm_core::ScopeId;
-use vyrm_store::{Engine, PersistentEngine};
+use rrd_store::{Engine, PersistentEngine};
 
 fn artifact_telemetry(started_at: u64, observed_at: u64) -> ArtifactTransferTelemetrySnapshot {
     ArtifactTransferTelemetrySnapshot {

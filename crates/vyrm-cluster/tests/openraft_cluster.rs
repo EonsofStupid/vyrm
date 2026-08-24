@@ -23,7 +23,7 @@ use vyrm_core::{
     RuntimeCommit, RuntimeMutation, RuntimeRecordSchema, RuntimeSchemaRegistry, RuntimeType,
     ScopeId,
 };
-use vyrm_store::{Engine, NativeEngine};
+use rrd_store::{Engine, NativeEngine};
 
 type VyrmRaft = Raft<VyrmRaftTypeConfig>;
 

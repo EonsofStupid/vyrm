@@ -1,10 +1,11 @@
 use rrd_contract::CanonicalId;
 use rrd_estate::{
     DesiredInstance, DesiredPhase, DesiredTarget, DriverErrorKind, DriverRequest, EstateDriver,
-    EstateRepository, LOCAL_DEPLOYMENT_FORMAT, LocalArgument, LocalDeployment,
-    LocalDeploymentCatalog, LocalProcessDriver, LocalShutdown, MutationContext, OperationKind,
-    OperationState, ReconcileBoundary, ReconcileOutcome, Reconciler, SetDesired,
+    EstateRepository, LocalArgument, LocalDeployment, LocalDeploymentCatalog, LocalProcessDriver,
+    LocalShutdown, MutationContext, OperationKind, OperationState, ReconcileBoundary,
+    ReconcileOutcome, Reconciler, SetDesired, LOCAL_DEPLOYMENT_FORMAT,
 };
+use rrd_store::PersistentEngine;
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -13,7 +14,6 @@ use std::sync::OnceLock;
 use std::thread;
 use std::time::{Duration, Instant};
 use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
-use vyrm_store::PersistentEngine;
 
 fn id(value: &str) -> CanonicalId {
     CanonicalId::new(value).unwrap()
@@ -47,6 +47,26 @@ fn file_sha256(path: &Path) -> String {
         encoded.push(HEX[usize::from(byte & 0x0f)] as char);
     }
     encoded
+}
+
+fn workspace_binary(name: &str) -> PathBuf {
+    let variable = format!("CARGO_BIN_EXE_{name}");
+    if let Some(path) = std::env::var_os(variable) {
+        return std::fs::canonicalize(path).unwrap();
+    }
+    let test_executable = std::env::current_exe().unwrap();
+    let profile_root = test_executable
+        .parent()
+        .and_then(Path::parent)
+        .expect("integration test executable must be under the Cargo profile directory");
+    let candidate = profile_root.join(format!("{name}{}", std::env::consts::EXE_SUFFIX));
+    std::fs::canonicalize(&candidate).unwrap_or_else(|error| {
+        panic!(
+            "required workspace binary {} is not built at {}: {error}",
+            name,
+            candidate.display()
+        )
+    })
 }
 
 fn catalog() -> LocalDeploymentCatalog {
@@ -159,7 +179,7 @@ fn run_controller_and_kill(
     'retry: loop {
         let _ = std::fs::remove_file(&marker);
         let _ = std::fs::remove_file(marker.with_extension("new"));
-        let mut child = Command::new(env!("CARGO_BIN_EXE_rrd-estate-controller"))
+        let mut child = Command::new(workspace_binary("rrd-estate-controller"))
             .args([
                 "--db",
                 database.to_str().unwrap(),

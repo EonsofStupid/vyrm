@@ -4,7 +4,7 @@ use rrd_estate::{
     EstateRepository, LeaseRequest, MutationContext, ObservationRequest, ObservedPhase,
     ReceiptBoundary, ReceiptRequest, ScheduleBackup, SetDesired,
 };
-use vyrm_store::{Engine, MemoryEngine, NativeEngine};
+use rrd_store::{Engine, MemoryEngine, NativeEngine};
 
 fn id(value: &str) -> CanonicalId {
     CanonicalId::new(value).unwrap()

@@ -65,7 +65,7 @@ backend, network client, GPU runtime, or object-store SDK.
 | Atomic canonical write | `RuntimeCommit` atomically writes schema, claims, typed records, relations, events, cursor, and hash chain | Generalize the mutation envelope without weakening current validation |
 | Temporal truth | Claim valid/known time and runtime graph `valid_at`/cursor snapshots exist | Make a reusable, leased `SnapshotHandle` rather than reopening an implicit snapshot per call |
 | Optimistic conflict detection | Exact expected runtime cursor is checked in the write transaction | Generalize to transaction read stamps and explicit conflict classes |
-| Storage abstraction | `vyrm_store::Engine` provides claim/runtime primitives | Split logical DS transactions from physical KV operations; the current trait remains the migration harness |
+| Storage abstraction | `rrd_store::Engine` provides claim/runtime primitives | Split logical DS transactions from physical KV operations; the current trait remains the migration harness |
 | Native storage | Absent; Fjall is the compatibility adapter | Build WAL, MVCC, manifests, recovery, checkpoint pinning, and compaction in `vyrmKV` |
 | Query language | Absent | Build typed `vyrmQL`; do not grow ad-hoc endpoint parameters into a language |
 | Planner/executor | Absent | Build `vyrmMX` with logical/physical plans and observable plan decisions |

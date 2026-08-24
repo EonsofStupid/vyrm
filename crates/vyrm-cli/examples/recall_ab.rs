@@ -29,7 +29,7 @@
 //! ```
 
 use vyrm_core::{recall, Claim, RecallQuery, Subject};
-use vyrm_store::{Effectiveness, InvocationInput, Outcome, RecallOutcome, Store, Trigger};
+use rrd_store::{Effectiveness, InvocationInput, Outcome, RecallOutcome, Store, Trigger};
 
 const UNSTRUCTURED: &str = include_str!("../fixtures/ab/unstructured.md");
 const CLAIMS_JSON: &str = include_str!("../fixtures/ab/claims.json");
@@ -44,7 +44,7 @@ const TOKEN_BUDGET: usize = 1_500;
 const QUERIES: &[(&str, &[&str])] = &[
     ("ranking state", &["ranking"]),
     ("persistence state", &["persistence"]),
-    ("store + flake", &["vyrm-store"]),
+    ("store + flake", &["rrd-store"]),
     ("routing projection", &["vyrm-graph", "step-r"]),
     ("panel + observatory", &["panel", "observatory", "tiers"]),
     ("extraction + entities", &["extraction", "entities"]),

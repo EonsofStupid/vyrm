@@ -17,7 +17,7 @@ use vyrm_embed::{
     EmbeddingRequest, EmbeddingSourceReader, ExecutionTarget, PreparedEmbedding,
 };
 use vyrm_mx::Catalog;
-use vyrm_store::Engine;
+use rrd_store::Engine;
 use vyrm_vector::{
     AccessPathKind, PreparedVectorSearch, ScoreMetric, SearchExecution, SearchMode, SearchRequest,
     VectorQuery, VectorRuntime,
@@ -183,7 +183,7 @@ where
     let commit = match store.commit_data_transaction(&transaction) {
         Ok(commit) => commit,
         Err(error) => {
-            let outcome = if matches!(error, vyrm_store::Error::RuntimeConflict { .. }) {
+            let outcome = if matches!(error, rrd_store::Error::RuntimeConflict { .. }) {
                 TraceOutcome::Denied
             } else {
                 TraceOutcome::Error

@@ -1,3 +1,4 @@
+use rrd_store::{Engine, MemoryEngine, NativeEngine, Store};
 use std::collections::BTreeMap;
 use vyrm_core::{
     RuntimeCommit, RuntimeMutation, RuntimeProperties, RuntimePropertySchema, RuntimeRecord,
@@ -6,7 +7,6 @@ use vyrm_core::{
 };
 use vyrm_mx::{poll_live_query, Error, LiveQueryBudget, LiveQueryDelta, Parameters};
 use vyrm_ql::parse;
-use vyrm_store::{Engine, MemoryEngine, NativeEngine, Store};
 
 fn scope() -> ScopeId {
     ScopeId::new("instance:live-test").unwrap()

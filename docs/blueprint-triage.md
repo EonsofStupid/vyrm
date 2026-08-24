@@ -22,8 +22,8 @@ shipped Fjall 3.x feature:
 |---|---|---|
 | "highly tuned byteview-based memory model", "German string" `Slice` | `fjall-rs/byteview`: thin immutable zero-copy byte slice, Umbra-style German strings, ≤20-byte inlining | [byteview repo](https://github.com/fjall-rs/byteview), [Fjall 2.6 announcement](https://fjall-rs.github.io/post/fjall-2-6-byteview/) |
 | "custom block format featuring sparse indexing, AI-native prefix truncation" | Fjall 3.0 block format: sparse indexing, prefix truncation, optional hash indexes | [Fjall 3.0 release](https://fjall-rs.github.io/post/fjall-3/), [block format post](https://fjall-rs.github.io/post/block-format/) |
-| "isolated keyspaces … as column families", "cross-keyspace atomic WriteBatch" | Fjall keyspaces (3.x rename of partitions); single database-level journal makes cross-keyspace writes atomic | Verified in-session 2026-08-09 (docs fetch); relied on by `vyrm-store` §7.1 |
-| "optimistic and single-writer concurrency models" | `OptimisticTxDatabase` / `SingleWriterTxDatabase` — the exact two types this project already chose between | In use in `vyrm-store/src/store.rs` |
+| "isolated keyspaces … as column families", "cross-keyspace atomic WriteBatch" | Fjall keyspaces (3.x rename of partitions); single database-level journal makes cross-keyspace writes atomic | Verified in-session 2026-08-09 (docs fetch); relied on by `rrd-store` §7.1 |
+| "optimistic and single-writer concurrency models" | `OptimisticTxDatabase` / `SingleWriterTxDatabase` — the exact two types this project already chose between | In use in `rrd-store/src/store.rs` |
 | "key-value separation" for blob payloads | Fjall 3.0 integrated key-value separation with GC | [Fjall 3.0 release](https://fjall-rs.github.io/post/fjall-3/) |
 
 Conclusion: the blueprint, read accurately, endorses the measured decision in

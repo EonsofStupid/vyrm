@@ -1,9 +1,9 @@
 use crate::{bind, execute, plan, Catalog, Error, ExecutionBudget, Parameters, QueryRow, Result};
+use rrd_store::Engine;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use vyrm_core::{digest, ScopeId};
 use vyrm_ql::{CursorExpr, Query};
-use vyrm_store::Engine;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LiveQueryBudget {

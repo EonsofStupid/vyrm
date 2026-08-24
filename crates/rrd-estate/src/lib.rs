@@ -41,7 +41,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fmt;
 use vyrm_core::digest;
-use vyrm_store::{ControlTransition, Engine};
+use rrd_store::{ControlTransition, Engine};
 
 pub const ESTATE_FORMAT: u16 = 1;
 pub const MAX_INSTANCES: usize = 1_024;
@@ -54,7 +54,7 @@ pub type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Debug)]
 pub enum Error {
-    Store(vyrm_store::Error),
+    Store(rrd_store::Error),
     Invalid(String),
     NotFound(String),
     AlreadyExists(String),
@@ -85,8 +85,8 @@ impl fmt::Display for Error {
 
 impl std::error::Error for Error {}
 
-impl From<vyrm_store::Error> for Error {
-    fn from(error: vyrm_store::Error) -> Self {
+impl From<rrd_store::Error> for Error {
+    fn from(error: rrd_store::Error) -> Self {
         Self::Store(error)
     }
 }
@@ -698,7 +698,7 @@ impl<'a, E: Engine + ?Sized> EstateRepository<'a, E> {
                 document,
                 idempotent_replay: false,
             }),
-            Err(vyrm_store::Error::ControlConflict(_)) => {
+            Err(rrd_store::Error::ControlConflict(_)) => {
                 let existing = self.load()?.ok_or_else(|| {
                     Error::Invalid("estate create conflicted without state".into())
                 })?;
