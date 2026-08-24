@@ -623,12 +623,12 @@ fn validate_decoded(metadata: &DenseMetadata, header: &Header, bytes: &[u8]) -> 
     Ok(())
 }
 
-fn score_row(query: &[f32], row: &[u8], metric: ScoreMetric, kernel: DenseKernel) -> Result<f64> {
+fn score_row(query: &[f32], row: &[u8], metric: ScoreMetric, _kernel: DenseKernel) -> Result<f64> {
     if row.len() != query.len() * 4 {
         return invalid("compact dense query and row dimensions differ");
     }
     #[cfg(target_arch = "x86_64")]
-    if kernel == DenseKernel::Auto && std::arch::is_x86_feature_detected!("avx2") {
+    if _kernel == DenseKernel::Auto && std::arch::is_x86_feature_detected!("avx2") {
         // SAFETY: AVX2 was checked at runtime; the implementation uses unaligned
         // loads and row/query lengths were proven equal above.
         return Ok(unsafe { score_avx2(query, row, metric) });
