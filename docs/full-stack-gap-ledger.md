@@ -245,6 +245,16 @@ the public data transaction. Public filter algebra, named model binding,
 persisted exact/HNSW/TurboQuant artifact serving, and vector administration
 remain F7 work.
 
+`POST /v1/changes/read` now exposes bounded retained runtime replay after an
+exact cursor. Its public entries preserve commit ordinal, scope, time, actor,
+lossless claim provenance, typed data mutation, and prior/current change
+digests; the page carries authenticated-read method/cost evidence and advances
+through unrelated global cursors safely. The socket fixture verifies
+authentication denial, `3 + 8` pagination of one eleven-change transaction,
+digest-chain continuity, and exact resume after server restart. Push/long-poll
+delivery, subscription leases, backpressure, and reconnect heartbeats remain
+open before calling this a real-time live-query surface.
+
 **Deliverables**
 
 - One async server with health/readiness/capability endpoints.

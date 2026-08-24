@@ -26,6 +26,7 @@ pub const MAX_QUERY_OUTPUT_BYTES: u64 = 768 * 1024;
 pub const MAX_QUERY_BATCH_ROWS: u64 = 1_024;
 pub const MAX_VECTOR_SEARCH_CHANGES: u64 = 1_000_000;
 pub const MAX_VECTOR_SEARCH_TOP_K: u64 = 100_000;
+pub const MAX_CHANGEFEED_PAGE: u64 = 4_096;
 pub const MIN_LEASE_MS: u64 = 1_000;
 pub const MAX_LEASE_MS: u64 = 3_600_000;
 
@@ -318,6 +319,114 @@ pub struct VectorSearchResult {
     pub access_path: CanonicalId,
     pub exact: bool,
     pub hits: Vec<VectorSearchHit>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ReadChangefeed {
+    pub scope: String,
+    pub after_cursor: u64,
+    pub limit: u64,
+}
+
+impl ReadChangefeed {
+    pub fn validate(&self) -> Result<()> {
+        if self.scope.is_empty()
+            || self.scope.len() > MAX_ID_BYTES
+            || self.scope.as_bytes().contains(&0)
+        {
+            return invalid("changefeed scope is invalid");
+        }
+        if self.limit == 0 || self.limit > MAX_CHANGEFEED_PAGE {
+            return invalid(format!(
+                "changefeed limit must be in 1..={MAX_CHANGEFEED_PAGE}"
+            ));
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ClaimTierSnapshot {
+    Local,
+    Primary,
+    Tenant,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ClaimPromotionSnapshot {
+    Unpromoted,
+    Pending,
+    Promoted,
+    Denied,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ClaimChangeSnapshot {
+    pub subject: String,
+    pub predicate: String,
+    pub object: String,
+    pub valid_from: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub valid_to: Option<u64>,
+    pub tx_time: u64,
+    pub producer: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub on_behalf_of: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub confidence: Option<f32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub supersedes_sha256: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub signature: Option<String>,
+    pub tier: ClaimTierSnapshot,
+    pub promotion: ClaimPromotionSnapshot,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "family", rename_all = "snake_case", deny_unknown_fields)]
+pub enum ChangeMutationSnapshot {
+    Claim { claim: ClaimChangeSnapshot },
+    Data { mutation: TransactionMutation },
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RuntimeChangeSnapshot {
+    pub cursor: u64,
+    pub commit_sha256: String,
+    pub commit_ordinal: u64,
+    pub scope: String,
+    pub at_unix_ms: u64,
+    pub actor: String,
+    pub mutation: ChangeMutationSnapshot,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub previous_change_sha256: Option<String>,
+    pub change_sha256: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ChangefeedValidation {
+    pub method: String,
+    pub change_reads: u64,
+    pub proof_nodes: u16,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ChangefeedPage {
+    pub requested_after_cursor: u64,
+    pub through_cursor: u64,
+    pub head_cursor: u64,
+    pub has_more: bool,
+    pub validation: ChangefeedValidation,
+    pub changes: Vec<RuntimeChangeSnapshot>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

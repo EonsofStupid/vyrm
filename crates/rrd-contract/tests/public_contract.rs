@@ -5,10 +5,10 @@ use rrd_contract::{
     EstateBackupJobsSnapshot, EstateMutationResult, EstateSnapshot, ExecuteQuery,
     IdempotencyBinding, Liveness, PROTOCOL, PROTOCOL_VERSION, PreviewTransaction, QueryBudget,
     QueryExecutionSnapshot, QueryPlanCandidate, QueryPlanSnapshot, QueryResult, QueryRowSnapshot,
-    QueryValue, ReadEstate, Readiness, RenewSession, RequestContext, RequestEnvelope, ResourceId,
-    ResourceKind, ResourcePath, ResponseEnvelope, ResponseOutcome, ServiceCapabilities,
-    SessionEndState, SessionLease, SessionLimits, SessionTermination, TransactionMutation,
-    TransactionPreview, TransactionState, transaction_operation_sha256,
+    QueryValue, ReadChangefeed, ReadEstate, Readiness, RenewSession, RequestContext,
+    RequestEnvelope, ResourceId, ResourceKind, ResourcePath, ResponseEnvelope, ResponseOutcome,
+    ServiceCapabilities, SessionEndState, SessionLease, SessionLimits, SessionTermination,
+    TransactionMutation, TransactionPreview, TransactionState, transaction_operation_sha256,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -320,6 +320,25 @@ fn query_contract_is_transport_neutral_bounded_and_strict() {
 
 fn request_budget_fixture() -> QueryBudget {
     QueryBudget::default()
+}
+
+#[test]
+fn changefeed_request_is_cursor_addressed_bounded_and_strict() {
+    let request = ReadChangefeed {
+        scope: "instance:project-alpha".into(),
+        after_cursor: 41,
+        limit: 256,
+    };
+    request.validate().unwrap();
+    let mut encoded = serde_json::to_value(&request).unwrap();
+    encoded["unknown"] = serde_json::json!(true);
+    assert!(serde_json::from_value::<ReadChangefeed>(encoded).is_err());
+
+    let mut invalid = request.clone();
+    invalid.limit = 0;
+    assert!(invalid.validate().is_err());
+    invalid.limit = rrd_contract::MAX_CHANGEFEED_PAGE + 1;
+    assert!(invalid.validate().is_err());
 }
 
 #[test]

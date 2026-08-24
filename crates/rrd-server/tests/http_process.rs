@@ -491,6 +491,76 @@ fn data_transaction_atomically_commits_every_public_model_and_replays_after_rest
     assert_eq!(search["hits"][0]["subject"]["id"], "alpha");
     assert_eq!(search["hits"][0]["source_cursor"], 8);
     assert!((search["hits"][0]["score"].as_f64().unwrap() - 1.0).abs() < 1e-9);
+    let first_feed = envelope(
+        json!({
+            "scope": "instance:socket-test",
+            "after_cursor": 0,
+            "limit": 3
+        }),
+        None,
+        None,
+    );
+    let (status, denied) = post(&server, "/v1/changes/read", &first_feed, None);
+    assert_eq!(status, 401, "{denied}");
+    let (status, first_page) = post(
+        &server,
+        "/v1/changes/read",
+        &first_feed,
+        Some((&session_id, &token)),
+    );
+    assert_eq!(status, 200, "{first_page}");
+    let first_page = payload(&first_page);
+    assert_eq!(first_page["requested_after_cursor"], 0);
+    assert_eq!(first_page["through_cursor"], 3);
+    assert_eq!(first_page["head_cursor"], 11);
+    assert_eq!(first_page["has_more"], true);
+    assert_eq!(first_page["changes"].as_array().unwrap().len(), 3);
+    assert_eq!(first_page["changes"][0]["mutation"]["family"], "data");
+    assert_eq!(
+        first_page["changes"][0]["mutation"]["mutation"]["mutation"],
+        "put_schema"
+    );
+    assert_eq!(first_page["changes"][1]["mutation"]["family"], "claim");
+    assert_eq!(
+        first_page["changes"][1]["mutation"]["claim"]["producer"],
+        "socket-test"
+    );
+    assert_eq!(
+        first_page["changes"][1]["mutation"]["claim"]["tier"],
+        "local"
+    );
+    let first_page_tail = first_page["changes"][2]["change_sha256"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let second_feed = envelope(
+        json!({
+            "scope": "instance:socket-test",
+            "after_cursor": 3,
+            "limit": 8
+        }),
+        None,
+        None,
+    );
+    let (status, second_page) = post(
+        &server,
+        "/v1/changes/read",
+        &second_feed,
+        Some((&session_id, &token)),
+    );
+    assert_eq!(status, 200, "{second_page}");
+    let second_page = payload(&second_page);
+    assert_eq!(second_page["through_cursor"], 11);
+    assert_eq!(second_page["has_more"], false);
+    assert_eq!(second_page["changes"].as_array().unwrap().len(), 8);
+    assert_eq!(
+        second_page["changes"][0]["previous_change_sha256"],
+        first_page_tail
+    );
+    assert_eq!(
+        second_page["changes"][7]["mutation"]["mutation"]["mutation"],
+        "publish_object_reference"
+    );
     server.stop();
 
     let server = start(&root);
@@ -500,6 +570,28 @@ fn data_transaction_atomically_commits_every_public_model_and_replays_after_rest
     assert_eq!(
         payload(&replayed)["runtime_commit_sha256"],
         receipt["runtime_commit_sha256"]
+    );
+    let resumed_feed = envelope(
+        json!({
+            "scope": "instance:socket-test",
+            "after_cursor": 10,
+            "limit": 1
+        }),
+        None,
+        None,
+    );
+    let (status, resumed) = post(
+        &server,
+        "/v1/changes/read",
+        &resumed_feed,
+        Some((&session_id, &token)),
+    );
+    assert_eq!(status, 200, "{resumed}");
+    assert_eq!(payload(&resumed)["through_cursor"], 11);
+    assert_eq!(payload(&resumed)["changes"][0]["cursor"], 11);
+    assert_eq!(
+        payload(&resumed)["changes"][0]["mutation"]["mutation"]["mutation"],
+        "publish_object_reference"
     );
     server.stop();
 

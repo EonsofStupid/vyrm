@@ -8,9 +8,10 @@ use axum::routing::any;
 use rrd_contract::{
     AbortTransaction, BeginTransaction, CanonicalId, CapabilityDescriptor, CapabilityStatus,
     CloseSession, CommitTransaction, CorrelationId, CreateSession, DeploymentMode, ErrorBody,
-    ErrorCode, ExecuteQuery, Liveness, PROTOCOL, PROTOCOL_VERSION, PreviewTransaction, ReadEstate,
-    Readiness, RenewSession, RequestContext, RequestEnvelope, ResourceId, ResourceKind,
-    ResponseEnvelope, ResponseOutcome, SearchVectors, ServiceCapabilities,
+    ErrorCode, ExecuteQuery, Liveness, PROTOCOL, PROTOCOL_VERSION, PreviewTransaction,
+    ReadChangefeed, ReadEstate, Readiness, RenewSession, RequestContext, RequestEnvelope,
+    ResourceId, ResourceKind, ResponseEnvelope, ResponseOutcome, SearchVectors,
+    ServiceCapabilities,
 };
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -202,6 +203,7 @@ impl AppState {
             }
             (Method::POST, "/v1/transactions") => self.begin_transaction(&headers, &body, now),
             (Method::POST, "/v1/query") => self.execute_query(&headers, &body, now),
+            (Method::POST, "/v1/changes/read") => self.read_changefeed(&headers, &body, now),
             (Method::POST, "/v1/vector/search") => self.search_vectors(&headers, &body, now),
             (Method::POST, path) if estate_action(path, "read").is_some() => {
                 self.read_estate(&headers, &body, path, now)
@@ -413,6 +415,28 @@ impl AppState {
             |envelope, session, token| {
                 self.service
                     .search_vectors(
+                        session,
+                        token,
+                        &envelope.payload,
+                        now,
+                        envelope.context.request_id.as_str(),
+                        envelope.context.operation_id.as_str(),
+                    )
+                    .map_err(api_error)
+            },
+        )
+    }
+
+    fn read_changefeed(&self, headers: &HeaderMap, body: &[u8], now: u64) -> HttpResponse {
+        self.with_authenticated_envelope::<ReadChangefeed, _, _>(
+            headers,
+            body,
+            now,
+            false,
+            None,
+            |envelope, session, token| {
+                self.service
+                    .read_changefeed(
                         session,
                         token,
                         &envelope.payload,
@@ -832,6 +856,7 @@ fn api_error(error: ServiceError) -> ApiError {
     let message = error.to_string();
     match error {
         ServiceError::Contract(_)
+        | ServiceError::Changefeed(_)
         | ServiceError::Query(_)
         | ServiceError::Vector(_)
         | ServiceError::OperationDigestMismatch
@@ -906,6 +931,19 @@ fn estate_action<'a>(path: &'a str, action: &str) -> Option<&'a str> {
 
 fn capabilities(instance: &CanonicalId, backend: CanonicalId) -> ServiceCapabilities {
     let mut capabilities = vec![
+        CapabilityDescriptor {
+            name: CanonicalId::new("changefeed-replay").unwrap(),
+            contract_version: 1,
+            status: CapabilityStatus::Experimental,
+            limits: BTreeMap::from([(
+                CanonicalId::new("max-page-changes").unwrap(),
+                rrd_contract::MAX_CHANGEFEED_PAGE,
+            )]),
+            limitation: Some(
+                "authenticated retained cursor replay with lossless claim and typed data snapshots; push/long-poll delivery remains open"
+                    .into(),
+            ),
+        },
         CapabilityDescriptor {
             name: CanonicalId::new("claim-transactions").unwrap(),
             contract_version: 1,

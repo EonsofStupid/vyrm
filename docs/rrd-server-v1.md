@@ -52,6 +52,13 @@ places that secret elsewhere. `X-RRD-Session` carries the session identifier;
   scan evidence, plan digest, selected access path, exactness, score, source
   cursor, and typed vector/subject identities. Public filters and persisted
   HNSW/TurboQuant artifact serving remain open.
+- `POST /v1/changes/read` returns one bounded retained page after an exact
+  global cursor. Sparse scoped feeds advance through the source cursor even
+  when no scoped change matches. Each entry carries commit/ordinal/scope/time/
+  actor coordinates, prior and current change SHA-256, a lossless claim
+  snapshot or typed public data mutation, and authenticated-read evidence.
+  Clients resume from `through_cursor`; push and long-poll delivery remain
+  open.
 - `POST /v1/estates/{estate}/read` returns the typed public `EstateSnapshot`
   for a resource path containing that estate and this server instance. It
   requires a live session token, exposes no raw idempotency keys, and performs
@@ -159,6 +166,11 @@ planner candidates, validation evidence, and cursor/schema coordinates.
 The multi-model socket fixture also searches its committed vector through the
 public service, proves unauthenticated denial, and observes an exact cosine hit
 bound to the same runtime cursor and source change.
+
+The fixture pages the same eleven-change commit as `3 + 8`, verifies
+hash-chain continuity across the page boundary, preserves full claim
+provenance and typed mutation bodies, restarts, and resumes exactly at cursor
+ten to retrieve cursor eleven without replaying earlier entries.
 
 It also commits all nine runtime mutation families through one `data`
 transaction, verifies the single eleven-change cursor interval and one-claim

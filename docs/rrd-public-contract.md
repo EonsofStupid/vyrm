@@ -34,6 +34,13 @@ multi-dense/MaxSim queries across cosine, dot, Euclidean, and Manhattan
 metrics. Its result carries the authoritative read manifest/cursor, scan count,
 plan digest, selected access path and exactness alongside typed scored hits.
 
+The retained changefeed contract is cursor-addressed and page bounded. It
+freezes lifecycle coordinates and the runtime digest chain, preserves complete
+claim provenance, and reuses the typed public multi-model vocabulary for every
+non-claim mutation. `through_cursor`, rather than the final matching change,
+is the sole resume coordinate so scoped feeds cannot stall on unrelated global
+activity.
+
 The frozen JSON fixture is
 [`public-contract-v1.json`](../crates/rrd-contract/fixtures/public-contract-v1.json).
 Malformed identifiers, duplicate/unsorted capabilities, unsupported protocol
