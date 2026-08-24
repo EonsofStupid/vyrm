@@ -403,6 +403,9 @@ impl LocalProcessDriver {
         let pid = child.id();
 
         let discovery_deadline = Instant::now() + PROCESS_DISCOVERY_TIMEOUT;
+        let mut candidate: Option<(u64, PathBuf)> = None;
+        let mut candidate_since = None;
+        let mut mismatched_executable = None;
         let (process_start_time_unix_s, executable) = loop {
             if let Some(status) = child.try_wait().map_err(|error| {
                 retryable(request, format!("cannot inspect spawned process: {error}"))
@@ -427,56 +430,48 @@ impl LocalProcessDriver {
                                 spawned_exit_message(status, &stderr_path),
                             ));
                         }
-                        // Some Linux process observers can briefly expose the
-                        // pre-exec parent image for a newly spawned PID. Never
-                        // authenticate or persist that image, but allow the
-                        // bounded discovery window to observe the trusted
-                        // executable after exec completes. A stable mismatch
-                        // still fails closed and the child is reaped below.
-                        if Instant::now() >= discovery_deadline {
-                            let _ = child.kill();
-                            let _ = child.wait();
-                            return Err(permanent(
-                                request,
-                                format!(
-                                    "live spawned process executable does not match the trusted catalogue: expected {}, observed {}",
-                                    deployment.executable.display(),
-                                    executable.display()
-                                ),
-                            ));
+                        // Process observers can briefly expose the pre-exec
+                        // parent image. Never authenticate or persist it.
+                        mismatched_executable = Some(executable);
+                        candidate = None;
+                        candidate_since = None;
+                    } else {
+                        mismatched_executable = None;
+                        let observed = (process.start_time(), executable);
+                        if candidate.as_ref() != Some(&observed) {
+                            candidate = Some(observed);
+                            candidate_since = Some(Instant::now());
+                        } else if candidate_since
+                            .is_some_and(|since| since.elapsed() >= PROCESS_START_STABILITY)
+                        {
+                            break candidate
+                                .take()
+                                .expect("a stable process identity is present");
                         }
-                        thread::sleep(Duration::from_millis(10));
-                        continue;
                     }
-                    break (process.start_time(), executable);
                 }
             }
             if Instant::now() >= discovery_deadline {
                 let _ = child.kill();
                 let _ = child.wait();
+                if let Some(executable) = mismatched_executable {
+                    return Err(permanent(
+                        request,
+                        format!(
+                            "live spawned process executable does not match the trusted catalogue: expected {}, observed {}",
+                            deployment.executable.display(),
+                            executable.display()
+                        ),
+                    ));
+                }
                 return Err(retryable(
                     request,
-                    "spawned process identity could not be established",
+                    "spawned process identity did not remain stable",
                 ));
             }
             thread::sleep(Duration::from_millis(10));
         };
         debug_assert!(same_executable_file(&executable, &deployment.executable));
-        let stability_deadline = Instant::now() + PROCESS_START_STABILITY;
-        loop {
-            if let Some(status) = child.try_wait().map_err(|error| {
-                retryable(request, format!("cannot inspect spawned process: {error}"))
-            })? {
-                return Err(retryable(
-                    request,
-                    spawned_exit_message(status, &stderr_path),
-                ));
-            }
-            if Instant::now() >= stability_deadline {
-                break;
-            }
-            thread::sleep(Duration::from_millis(10));
-        }
         let record = ProcessRecord {
             format: PROCESS_RECORD_FORMAT,
             instance_id: request.instance_id.clone(),
@@ -1013,7 +1008,29 @@ fn same_platform_file(observed: &Path, expected: &Path) -> bool {
     observed.dev() == expected.dev() && observed.ino() == expected.ino()
 }
 
-#[cfg(not(unix))]
+#[cfg(windows)]
+fn same_platform_file(observed: &Path, expected: &Path) -> bool {
+    use std::os::windows::fs::MetadataExt;
+
+    let Ok(observed) = std::fs::metadata(observed) else {
+        return false;
+    };
+    let Ok(expected) = std::fs::metadata(expected) else {
+        return false;
+    };
+    matches!(
+        (
+            observed.volume_serial_number(),
+            observed.file_index(),
+            expected.volume_serial_number(),
+            expected.file_index(),
+        ),
+        (Some(observed_volume), Some(observed_index), Some(expected_volume), Some(expected_index))
+            if observed_volume == expected_volume && observed_index == expected_index
+    )
+}
+
+#[cfg(not(any(unix, windows)))]
 fn same_platform_file(_observed: &Path, _expected: &Path) -> bool {
     false
 }
@@ -1082,7 +1099,7 @@ fn retryable(request: &DriverRequest, message: impl Into<String>) -> DriverError
     )
 }
 
-#[cfg(all(test, unix))]
+#[cfg(test)]
 mod tests {
     use super::same_executable_file;
 
