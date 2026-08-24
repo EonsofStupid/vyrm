@@ -829,6 +829,20 @@ fn source_identity(source: &Source) -> (&'static str, String) {
         Source::Record { kind } => ("record", kind.to_string()),
         Source::Relation { kind } => ("relation", kind.to_string()),
         Source::Event { kind } => ("event", kind.to_string()),
+        Source::Series { kind } => ("series", kind.to_string()),
+        Source::Geo { kind } => ("geo", kind.to_string()),
+        Source::Traversal {
+            relation,
+            start,
+            direction,
+            max_depth,
+        } => (
+            "traversal",
+            format!(
+                "{relation}:{}:{}:{direction:?}:{max_depth}",
+                start.kind, start.id
+            ),
+        ),
         Source::Claim { predicate } => (
             "claim",
             predicate

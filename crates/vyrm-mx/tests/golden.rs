@@ -3,8 +3,9 @@ use std::collections::BTreeMap;
 use vyrm_core::{
     ReadStamp, RuntimeEventSchema, RuntimeRecordSchema, RuntimeSchemaRegistry, RuntimeType, ScopeId,
 };
-use vyrm_mx::{bind, plan, Catalog, Parameters, SchemaVersion};
+use vyrm_mx::{bind, plan, Catalog, IndexCatalogueRepository, Parameters, SchemaVersion};
 use vyrm_ql::parse;
+use vyrm_store::MemoryEngine;
 
 #[derive(Serialize)]
 struct Vector {
@@ -29,12 +30,16 @@ fn physical_plan_matches_golden_vector() {
         RuntimeType::new("tool_result").unwrap(),
         RuntimeEventSchema::default(),
     );
+    let engine = MemoryEngine::new();
     let catalog = Catalog {
         read,
         schemas: vec![SchemaVersion {
             cursor: 1,
             registry: schema,
         }],
+        indexes: IndexCatalogueRepository::new(&engine, ScopeId::new("instance:golden").unwrap())
+            .load()
+            .unwrap(),
     };
     let vectors = [
         "FROM record:document AT VALID 100 KNOWN 4 PROJECT id LIMIT 5 EXPLAIN CONTRACT",

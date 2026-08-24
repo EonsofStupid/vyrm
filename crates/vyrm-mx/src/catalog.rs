@@ -1,4 +1,4 @@
-use crate::{Error, Result};
+use crate::{Error, IndexCatalogue, IndexCatalogueRepository, Result};
 use serde::{Deserialize, Serialize};
 use vyrm_core::{ReadStamp, RuntimeMutation, RuntimeSchemaRegistry, ScopeId};
 use vyrm_store::Engine;
@@ -14,6 +14,7 @@ pub struct SchemaVersion {
 pub struct Catalog {
     pub read: ReadStamp,
     pub schemas: Vec<SchemaVersion>,
+    pub indexes: IndexCatalogue,
 }
 
 impl Catalog {
@@ -54,7 +55,12 @@ impl Catalog {
                 _ => None,
             })
             .collect();
-        Ok(Self { read, schemas })
+        let indexes = IndexCatalogueRepository::new(engine, read.scope.clone()).load()?;
+        Ok(Self {
+            read,
+            schemas,
+            indexes,
+        })
     }
 
     pub fn schema_at(&self, cursor: u64) -> Option<&RuntimeSchemaRegistry> {

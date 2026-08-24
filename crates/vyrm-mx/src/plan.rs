@@ -1,7 +1,10 @@
 use crate::{Catalog, Error, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
-use vyrm_core::{digest, ReadStamp, RuntimeSchemaRegistry, RuntimeValue, RuntimeValueType};
+use vyrm_core::{
+    digest, ProjectionId, ProjectionState, ReadStamp, RuntimeSchemaRegistry, RuntimeValue,
+    RuntimeValueType,
+};
 use vyrm_ql::{
     ComparisonOperator, CursorExpr, Projection, Query, Source, TimeExpr, ValueExpr,
     QUERY_CONTRACT_VERSION,
@@ -32,6 +35,18 @@ pub struct BoundQuery {
     pub limit: Option<usize>,
     pub explain_contract: bool,
     pub schema_revision: u64,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub index_candidates: Vec<BoundIndexCandidate>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BoundIndexCandidate {
+    pub id: ProjectionId,
+    pub generation: u64,
+    pub source_cursor: u64,
+    pub state: ProjectionState,
+    pub fields: Vec<String>,
+    pub matched_prefix: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -166,6 +181,33 @@ pub fn bind(query: &Query, parameters: &Parameters, catalog: &Catalog) -> Result
             })
         })
         .collect::<Result<Vec<_>>>()?;
+    let filter_fields = query
+        .filters
+        .iter()
+        .map(|filter| filter.field.as_str())
+        .collect::<std::collections::BTreeSet<_>>();
+    let index_candidates = catalog
+        .indexes
+        .entries
+        .values()
+        .filter(|entry| entry.definition.source == query.source)
+        .filter_map(|entry| {
+            let matched_prefix = entry
+                .definition
+                .fields
+                .iter()
+                .take_while(|field| filter_fields.contains(field.as_str()))
+                .count();
+            (matched_prefix > 0).then(|| BoundIndexCandidate {
+                id: entry.definition.id.clone(),
+                generation: entry.stamp.generation,
+                source_cursor: entry.stamp.source_cursor,
+                state: entry.stamp.state,
+                fields: entry.definition.fields.clone(),
+                matched_prefix,
+            })
+        })
+        .collect();
     Ok(BoundQuery {
         contract_version: QUERY_CONTRACT_VERSION,
         read: catalog.read.clone(),
@@ -177,6 +219,7 @@ pub fn bind(query: &Query, parameters: &Parameters, catalog: &Catalog) -> Result
         limit: query.limit,
         explain_contract: query.explain_contract,
         schema_revision: schema.revision,
+        index_candidates,
     })
 }
 
@@ -208,7 +251,7 @@ pub fn plan(bound: &BoundQuery) -> Result<PhysicalPlan> {
         operators,
     };
     let event_cursor = event_cursor_filter(bound);
-    let candidates = if let Some(cursor) = event_cursor {
+    let mut candidates = if let Some(cursor) = event_cursor {
         vec![
             CandidatePath {
                 name: "authoritative_event_cursor_lookup".into(),
@@ -247,6 +290,26 @@ pub fn plan(bound: &BoundQuery) -> Result<PhysicalPlan> {
             },
         ]
     };
+    candidates.extend(bound.index_candidates.iter().map(|index| {
+        let state = format!("{:?}", index.state).to_ascii_lowercase();
+        let freshness = if index.source_cursor >= bound.known_at_cursor {
+            "fresh"
+        } else {
+            "stale"
+        };
+        CandidatePath {
+            name: format!("index:{}", index.id),
+            selected: false,
+            exact: false,
+            reason: format!(
+                "rejected: generation {} is {state} and {freshness} at cursor {}; matched prefix {}/{} but no verified artifact reader is installed",
+                index.generation,
+                index.source_cursor,
+                index.matched_prefix,
+                index.fields.len()
+            ),
+        }
+    }));
     let explanation = PlanExplanation {
         contract: ExecutionContract {
             read_manifest: bound.read.manifest_id.clone(),

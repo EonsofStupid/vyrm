@@ -8,12 +8,17 @@
 mod catalog;
 mod error;
 mod execute;
+mod index;
 mod plan;
 
 pub use catalog::{Catalog, SchemaVersion};
 pub use error::{Error, Result};
 pub use execute::{execute, ExecutionBudget, QueryBatch, QueryExecution, QueryRow};
+pub use index::{
+    IndexCatalogue, IndexCatalogueRepository, IndexDefinition, IndexEntry, IndexMutationContext,
+    INDEX_CATALOGUE_CONTRACT_VERSION,
+};
 pub use plan::{
-    bind, plan, BoundFilter, BoundQuery, CandidatePath, ExecutionContract, LogicalOperator,
-    LogicalPlan, Parameters, PhysicalOperator, PhysicalPlan, PlanExplanation,
+    bind, plan, BoundFilter, BoundIndexCandidate, BoundQuery, CandidatePath, ExecutionContract,
+    LogicalOperator, LogicalPlan, Parameters, PhysicalOperator, PhysicalPlan, PlanExplanation,
 };
