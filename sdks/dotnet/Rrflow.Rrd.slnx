@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="src/Rrflow.Rrd.Client/Rrflow.Rrd.Client.csproj" />
+  <Project Path="tests/Rrflow.Rrd.Client.Tests/Rrflow.Rrd.Client.Tests.csproj" />
+</Solution>

@@ -9,6 +9,8 @@
 **/dist/
 .tools/
 **/target/
+**/bin/
+**/obj/
 
 # Session transcripts and hooks — operator-local, never part of the product
 /.chat
