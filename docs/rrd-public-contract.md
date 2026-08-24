@@ -79,7 +79,7 @@ authenticated control-journal coordinate, so readers advance safely across
 unrelated control transitions.
 
 F5 begins from `EndpointCatalogue`, not handwritten per-language route lists.
-It currently freezes 26 sorted operation identities with HTTP method/path template,
+It currently freezes 27 sorted operation identities with HTTP method/path template,
 authentication mode, mutation/idempotency classification, security action, and
 public request/response type names. `GET /v1/schema/endpoints` serves the exact
 catalogue used by the server. Duplicate operations/routes, GET mutations,

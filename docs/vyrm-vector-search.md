@@ -60,6 +60,13 @@ matching tenant filter returns it and a non-matching filter returns no hit.
 This is exact one-stage semantic filtering; persisted payload indexes and
 persisted filter-aware HNSW serving remain separate open gates.
 
+`POST /v1/vector/points/scroll` adds the first dedicated point-read lifecycle
+operation. It resolves the named collection space, captures one authoritative
+read stamp, calls the same `materialize_visible` primitive as search, applies an
+optional payload filter, orders exact references, and returns bounded vector,
+provenance, payload, source-cursor, and resume evidence. The route has its own
+deny-by-default action. Dedicated point retrieval and deletion remain open.
+
 ## Rebuildable projections
 
 Two canonical JSON reference artifacts currently exist:

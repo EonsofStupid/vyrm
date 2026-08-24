@@ -974,3 +974,23 @@ index.
   and TypeScript generation/Biome/types/tests pass.
 - Limit: exact filtering is public, but payload-index administration and
   persisted filter-aware HNSW serving are not yet implemented.
+
+## 2026-08-24 — deterministic collection point scrolling
+
+- Commit: `6b86963` (`feat(vector): add deterministic point scrolling`).
+- Shared semantics: `vyrm-vector` now exposes one validated visibility request
+  and `materialize_visible` primitive. Exact search and point scroll both use
+  it for read-stamp scope, latest transaction-visible version, valid time,
+  field, model binding, retirement, and payload filtering.
+- Public route: authenticated `POST /v1/vector/points/scroll` has a distinct
+  deny-by-default action and returns bounded reference-ordered point pages with
+  vector value, provenance, payload, source cursor, read manifest, known cursor,
+  truncation, and resume reference. The reviewed OpenAPI digest is
+  `91a5681109cf45c4d544856733533acb3e44bb70630cb1ba03c048aaaf164da7`
+  across 27 operations; every generated SDK route catalogue includes it.
+- Evidence: the real server denies an unauthenticated scroll and, after
+  authentication, returns the collection-bound point and tenant payload at the
+  exact cursor. Vector tests, strict Clippy, Rust client, TypeScript, Python,
+  and Go quality gates pass; Java/.NET generation drift checks pass.
+- Limit: this slice does not yet add direct point retrieval or a first-class
+  deletion/tombstone mutation.
