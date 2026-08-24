@@ -8,6 +8,7 @@ description = "Local developer workbench and visualizer for vyrm/connectome inst
 
 [dependencies]
 rrd-contract = { path = "../rrd-contract" }
+rrd-client = { path = "../rrd-client" }
 rrd-estate = { path = "../rrd-estate" }
 vyrm-core = { path = "../vyrm-core" }
 vyrm-cluster = { path = "../vyrm-cluster", features = ["openraft-transport"] }
@@ -19,6 +20,7 @@ vyrm-vector = { path = "../vyrm-vector" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tiny_http = "0.12"
+tokio = { version = "1", features = ["net", "rt", "time"] }
 
 [dev-dependencies]
 tempfile = "3"

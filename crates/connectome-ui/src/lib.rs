@@ -1,12 +1,17 @@
 //! Local API and embedded frontend for the connectome workbench.
 
 mod cluster;
+mod connections;
 mod flight;
 
 pub use cluster::{
     cluster_history, ClusterAlert, ClusterAlertSeverity, ClusterHistoryView, ClusterNodeView,
     ClusterTelemetryDelta, ClusterTelemetryRecorder, ClusterTelemetrySample,
     ClusterTelemetrySampleView, RecordClusterTelemetry,
+};
+pub use connections::{
+    probe_connection, ConnectionCatalogue, ConnectionMode, ConnectionObservation,
+    ConnectionProfile, ConnectionRecord, ConnectionRepository, EnsureConnectionProfile,
 };
 pub use flight::{
     ContextMode, Flight, FlightEvent, FlightMetrics, FlightStatus, LaunchFlight, ReasoningProfile,
@@ -1708,6 +1713,7 @@ pub fn serve(
         Arc::clone(&store),
         binding.clone(),
     ));
+    let connection_repository = Arc::new(ConnectionRepository::new(store.as_ref()));
     eprintln!(
         "connectome: http://{bind} [{}] runners={}",
         binding.manifest.id,
@@ -1724,6 +1730,7 @@ pub fn serve(
             &binding,
             &recorder,
             &cluster_recorder,
+            &connection_repository,
         );
     }
     Ok(())
@@ -1735,6 +1742,7 @@ fn respond(
     binding: &InstanceBinding,
     recorder: &Arc<flight::FlightRecorder>,
     cluster_recorder: &Arc<cluster::ClusterTelemetryRecorder>,
+    connection_repository: &Arc<ConnectionRepository<'_, PersistentEngine>>,
 ) {
     let url = request.url().to_owned();
     let (path, query) = url.split_once('?').unwrap_or((&url, ""));
@@ -1796,6 +1804,36 @@ fn respond(
         let _ = request.respond(response);
         return;
     }
+    if request.method() == &Method::Post && path == "/api/connections" {
+        let parsed = serde_json::from_reader::<_, EnsureConnectionProfile>(
+            request.as_reader().take(32 * 1024),
+        );
+        let response = match parsed {
+            Ok(connect) => {
+                let observed_at = now();
+                match probe_connection(&connect.profile, observed_at).and_then(|observation| {
+                    connection_repository.ensure(
+                        &connect,
+                        observation,
+                        "connectome:local-operator",
+                        observed_at,
+                    )
+                }) {
+                    Ok(catalogue) => json_response(StatusCode(201), &catalogue),
+                    Err(error) => json_response(
+                        StatusCode(400),
+                        &serde_json::json!({"error": error.to_string()}),
+                    ),
+                }
+            }
+            Err(error) => json_response(
+                StatusCode(400),
+                &serde_json::json!({"error":format!("invalid connection request: {error}")}),
+            ),
+        };
+        let _ = request.respond(response);
+        return;
+    }
     if request.method() != &Method::Get && request.method() != &Method::Head {
         let _ = request.respond(json_response(
             StatusCode(405),
@@ -1842,6 +1880,13 @@ fn respond(
         "/api/runtime/capabilities" => {
             json_response(StatusCode(200), &capabilities(recorder.runners_enabled()))
         }
+        "/api/connections" => match connection_repository.load() {
+            Ok(catalogue) => json_response(StatusCode(200), &catalogue),
+            Err(error) => json_response(
+                StatusCode(500),
+                &serde_json::json!({"error":error.to_string()}),
+            ),
+        },
         "/api/cluster/history" => {
             let params = query_params(query);
             let limit = params

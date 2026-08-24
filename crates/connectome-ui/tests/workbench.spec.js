@@ -117,6 +117,19 @@ test('capability handshake separates executable evidence from roadmap claims', a
   await expect(page.locator('.capability-card.maturity-planned').filter({ hasText: 'TurboQuant compression' })).toHaveCount(1);
 });
 
+test('connection workspace exposes persisted profiles without pretending to switch data sources', async ({ page, request }) => {
+  const catalogueResponse = await request.get(`${baseURL}/api/connections`);
+  expect(catalogueResponse.ok()).toBeTruthy();
+  const catalogue = await catalogueResponse.json();
+  expect(catalogue).toMatchObject({ format_version: 1, revision: 0, records: {} });
+
+  await page.goto(`${baseURL}/#connections`);
+  await expect(page.getByRole('heading', { name: 'Connections' })).toBeVisible();
+  await expect(page.locator('.connection-record')).toContainText('EMBEDDED · CURRENT');
+  await expect(page.locator('#connection-form')).toContainText('Authenticated data access and source switching remain separate gates');
+  await expect(page.getByRole('button', { name: 'Negotiate connection' })).toBeVisible();
+});
+
 test('connectome panel exposes estates tables scoped models and faithful visuals', async ({ page, request }) => {
   const seeded = await request.post(`${baseURL}/api/flights`, {
     data: {

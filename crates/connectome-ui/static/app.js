@@ -1,7 +1,7 @@
 (() => {
   'use strict';
 
-  const views = new Set(['overview', 'estates', 'tables', 'models', 'visuals', 'flight', 'stream', 'traces', 'cluster', 'graph', 'schema', 'capabilities', 'query', 'runs', 'claims', 'routes', 'activity']);
+  const views = new Set(['overview', 'connections', 'estates', 'tables', 'models', 'visuals', 'flight', 'stream', 'traces', 'cluster', 'graph', 'schema', 'capabilities', 'query', 'runs', 'claims', 'routes', 'activity']);
   const visualViews = new Set(['visuals', 'flight', 'stream', 'traces', 'cluster', 'graph']);
   const initialView = location.hash.slice(1);
   const promptPresets = {
@@ -16,6 +16,7 @@
   };
   const state = {
     data: null,
+    connections: null,
     view: views.has(initialView) ? initialView : 'overview',
     selected: null,
     tableId: 'claims',
@@ -138,6 +139,7 @@
     $('#claim-count').textContent = data.claims.length;
     $('#file-count').textContent = data.files.length;
     $('#estate-count').textContent = (data.estates || []).length;
+    $('#connection-count').textContent = state.connections?.records ? Object.keys(state.connections.records).length + 1 : 1;
     $('#table-count').textContent = (data.tables || []).length;
     $('#model-count').textContent = (data.models || []).reduce((count, model) => count + Object.keys(model.registry.records || {}).length + Object.keys(model.registry.relations || {}).length + Object.keys(model.registry.events || {}).length, 0);
     $('#visual-count').textContent = 5;
@@ -148,7 +150,7 @@
   function render() {
     if (!state.data) return;
     updateChrome();
-    const renderers = { overview: renderOverview, estates: renderEstates, tables: renderTables, models: renderModels, visuals: renderVisuals, flight: renderFlight, stream: renderStream, traces: renderTraces, cluster: renderCluster, graph: renderGraph, schema: renderSchema, capabilities: renderCapabilities, query: renderQuery, runs: renderRuns, claims: renderClaims, routes: renderRoutes, activity: renderActivity };
+    const renderers = { overview: renderOverview, connections: renderConnections, estates: renderEstates, tables: renderTables, models: renderModels, visuals: renderVisuals, flight: renderFlight, stream: renderStream, traces: renderTraces, cluster: renderCluster, graph: renderGraph, schema: renderSchema, capabilities: renderCapabilities, query: renderQuery, runs: renderRuns, claims: renderClaims, routes: renderRoutes, activity: renderActivity };
     (renderers[state.view] || renderOverview)();
     renderInspector();
   }
@@ -183,6 +185,88 @@
         <article class="panel"><div class="panel-head"><h2>Recent activity</h2><span>${invocations.length} RECORDED</span></div><div class="panel-body signal-list">${invocations.slice(-6).reverse().map((item) => `<button class="signal-row lens-row object-link" data-object="invocation:${item.ordinal}"><span class="dot ${item.outcome === 'ok' ? 'mint' : 'red'}"></span><div><div class="name">${escapeHtml(item.command)}</div><div class="detail">${escapeHtml(item.detail || item.trigger)}</div></div><div class="value">${item.duration_ms} ms</div></button>`).join('') || empty('No activity', 'Every operator and lifecycle call will appear here.')}</div></article>
       </section>`;
     bindObjectLinks();
+  }
+
+  async function renderConnections() {
+    $('#main').innerHTML = pageHead('Connections', 'Attach this local Connectome client to embedded or independently running RRD instances. Profiles retain secret references only; live local connections are accepted only after protocol and instance negotiation.') + `
+      <section class="connection-layout">
+        <article class="panel connection-catalogue"><div class="panel-head"><h2>Connection catalogue</h2><span>LOADING</span></div><div class="panel-body">${empty('Reading connection authority', 'Loading the persisted local catalogue.')}</div></article>
+        ${connectionForm()}
+      </section>`;
+    bindConnectionForm();
+    try {
+      const response = await fetch('/api/connections', { cache: 'no-store' });
+      const catalogue = await response.json();
+      if (!response.ok) throw new Error(catalogue.error || `HTTP ${response.status}`);
+      state.connections = catalogue;
+      $('#connection-count').textContent = Object.keys(catalogue.records || {}).length + 1;
+      const records = Object.values(catalogue.records || {});
+      const embedded = state.data.instance;
+      $('.connection-catalogue').innerHTML = `<div class="panel-head"><h2>Connection catalogue</h2><span>REVISION ${human(catalogue.revision)}</span></div><div class="connection-list">
+        <article class="connection-record connected"><i></i><div><span>EMBEDDED · CURRENT</span><h3>${escapeHtml(embedded.id)}</h3><p>${escapeHtml(embedded.member)}</p></div><aside><b>connected</b><small>${escapeHtml(state.data.health.storage_backend)}</small></aside></article>
+        ${records.map(connectionRecord).join('') || '<div class="connection-empty">No independent RRD connection has been negotiated yet.</div>'}
+      </div>`;
+    } catch (error) {
+      $('.connection-catalogue .panel-body').innerHTML = empty('Connection catalogue unavailable', error.message);
+    }
+  }
+
+  function connectionRecord(record) {
+    const capability = record.observation.capabilities;
+    return `<article class="connection-record ${escapeHtml(record.observation.state)}"><i></i><div><span>${escapeHtml(record.profile.mode.replaceAll('_', ' '))} · GENERATION ${human(record.generation)}</span><h3>${escapeHtml(record.profile.label)}</h3><p>${escapeHtml(record.profile.endpoint)} · ${escapeHtml(record.profile.instance_id)}</p></div><aside><b>${escapeHtml(record.observation.state)}</b><small>${capability ? `${escapeHtml(capability.implementation)} ${escapeHtml(capability.implementation_version)} · ${human(capability.capabilities.length)} capabilities` : escapeHtml(record.observation.error || 'not negotiated')}</small></aside><footer><code>${escapeHtml(record.profile.id)}</code><span>${record.profile.credential_ref ? `credential ref ${escapeHtml(record.profile.credential_ref)}` : 'anonymous capability handshake'}</span></footer></article>`;
+  }
+
+  function connectionForm() {
+    return `<form id="connection-form" class="panel connection-form">
+      <div class="panel-head"><h2>Connect to RRD</h2><span>NEGOTIATE + RETAIN</span></div>
+      <div class="panel-body">
+        <label><span>Profile ID</span><input name="id" value="profile-local-rrd" required maxlength="128"></label>
+        <label><span>Label</span><input name="label" value="Local RRD" required maxlength="128"></label>
+        <label><span>Instance ID</span><input name="instance_id" placeholder="project-runtime" required maxlength="128"></label>
+        <label><span>Endpoint</span><input name="endpoint" value="127.0.0.1:4317" required maxlength="512"><small>Current alpha accepts loopback host:port. Remote profiles require the pending TLS client.</small></label>
+        <label><span>Credential reference</span><input name="credential_ref" placeholder="secret-rrd-local" maxlength="128"><small>The secret value is never stored in Connectome's catalogue.</small></label>
+        <button class="launch-button" type="submit">Negotiate connection</button>
+        <p class="connection-contract">Connectome first validates the profile, then requests RRD's public capability handshake, verifies protocol and exact instance identity, and only then commits the profile through the hash-chained local control journal. Authenticated data access and source switching remain separate gates.</p>
+      </div>
+    </form>`;
+  }
+
+  function bindConnectionForm() {
+    $('#connection-form')?.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const form = event.currentTarget;
+      const button = form.querySelector('button[type="submit"]');
+      const fields = new FormData(form);
+      button.disabled = true;
+      button.textContent = 'Negotiating…';
+      try {
+        const credentialRef = String(fields.get('credential_ref') || '').trim();
+        const response = await fetch('/api/connections', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            profile: {
+              id: String(fields.get('id') || '').trim(),
+              label: String(fields.get('label') || '').trim(),
+              mode: 'local_rrd',
+              endpoint: String(fields.get('endpoint') || '').trim(),
+              instance_id: String(fields.get('instance_id') || '').trim(),
+              ...(credentialRef ? { credential_ref: credentialRef } : {}),
+            },
+            idempotency_key: `connect-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+          }),
+        });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error || `HTTP ${response.status}`);
+        state.connections = result;
+        toast('RRD connection negotiated and retained');
+        renderConnections();
+      } catch (error) {
+        toast(error.message, true);
+        button.disabled = false;
+        button.textContent = 'Negotiate connection';
+      }
+    });
   }
 
   function renderCapabilities() {
