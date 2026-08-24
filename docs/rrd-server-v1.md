@@ -39,6 +39,8 @@ places that secret elsewhere. `X-RRD-Session` carries the session identifier;
 - `GET /v1/capabilities` returns the frozen `ServiceCapabilities` envelope.
 - `GET /v1/schema/endpoints` returns the machine-readable, sorted public
   operation catalogue used to generate and qualify SDK surfaces.
+- `GET /v1/schema/openapi` returns deterministic OpenAPI 3.1 derived from that
+  catalogue and every public Rust wire type; its canonical digest is frozen.
 - `POST /v1/sessions` creates a bounded lease with idle and absolute expiry,
   maximum concurrent transactions, and a server-generated secret token. On a
   secured instance it first requires `X-RRD-Principal` and

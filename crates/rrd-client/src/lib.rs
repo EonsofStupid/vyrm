@@ -215,6 +215,36 @@ impl RrdClient {
         Ok(catalogue)
     }
 
+    pub async fn openapi_document(&self) -> Result<serde_json::Value> {
+        let response: ResponseEnvelope<serde_json::Value> = self
+            .send_raw(
+                Method::GET,
+                "/v1/schema/openapi",
+                Vec::new(),
+                &[],
+                true,
+                None,
+            )
+            .await?;
+        let document = outcome(StatusCode::OK, response, None)?;
+        if document["openapi"] != "3.1.0"
+            || document["x-rrd-protocol"] != PROTOCOL
+            || document["x-rrd-protocol-version"] != PROTOCOL_VERSION
+        {
+            return Err(Error::UnsupportedProtocol {
+                protocol: document["x-rrd-protocol"]
+                    .as_str()
+                    .unwrap_or("missing")
+                    .into(),
+                version: document["x-rrd-protocol-version"]
+                    .as_u64()
+                    .and_then(|version| u16::try_from(version).ok())
+                    .unwrap_or_default(),
+            });
+        }
+        Ok(document)
+    }
+
     pub async fn create_session(
         &self,
         principal_id: CanonicalId,

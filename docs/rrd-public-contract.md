@@ -72,6 +72,13 @@ The first consumer is `rrd-client`; it imports these public types directly and
 has no dependency on storage, query, server, estate, or security implementation
 crates in its release dependency graph.
 
+Every public wire type also derives JSON Schema. `openapi_document()` projects
+those schemas and the endpoint catalogue into deterministic OpenAPI 3.1, and
+`rrd-contract-export` writes the same document to standard output for package
+generation. Its canonical pretty-JSON SHA-256 is frozen in the contract tests;
+intentional schema drift therefore requires an explicit version review. A
+running RRD serves the document from `GET /v1/schema/openapi`.
+
 The frozen JSON fixture is
 [`public-contract-v1.json`](../crates/rrd-contract/fixtures/public-contract-v1.json).
 Malformed identifiers, duplicate/unsorted capabilities, unsupported protocol

@@ -24,7 +24,7 @@ internal Rust API being mislabeled as an SDK. Its scope and limitations are in
 [`docs/rrd-public-contract.md`](docs/rrd-public-contract.md).
 
 The first F5 client is [`rrd-client`](crates/rrd-client), an asynchronous Rust
-consumer of that public contract. It negotiates capabilities, covers all 20
+consumer of that public contract. It negotiates capabilities, covers all 21
 currently published operations, bounds time and response bytes, preserves
 typed errors and request identity, and safely retries reads or
 idempotency-bound mutations after transport loss. It remains loopback-only

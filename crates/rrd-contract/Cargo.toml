@@ -10,5 +10,6 @@ description = "Versioned public wire contracts for the RRFlow durable runtime."
 serde = { workspace = true }
 serde_json = { workspace = true }
 sha2 = "0.11"
+schemars = "1.2"
 
 [dev-dependencies]

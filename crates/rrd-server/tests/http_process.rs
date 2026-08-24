@@ -1239,8 +1239,15 @@ fn real_socket_exercises_lifecycle_commit_and_restart_replay() {
     assert_eq!(payload(&catalogue)["protocol_version"], 1);
     assert_eq!(
         payload(&catalogue)["endpoints"].as_array().unwrap().len(),
-        20
+        21
     );
+    let (status, openapi) = http(server.address, "GET", "/v1/schema/openapi", &[], &[]);
+    assert_eq!(status, 200, "{openapi}");
+    assert_eq!(payload(&openapi)["openapi"], "3.1.0");
+    assert_eq!(payload(&openapi)["x-rrd-endpoint-count"], 21);
+    assert!(payload(&openapi)["paths"]["/v1/query"]["post"]["requestBody"]
+        ["content"]["application/json"]["schema"]
+        .is_object());
 
     let create = envelope(
         json!({

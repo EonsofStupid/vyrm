@@ -412,7 +412,7 @@ fn audit_read_contract_is_bounded_and_strict() {
 fn endpoint_catalogue_is_complete_sorted_and_transport_neutral() {
     let catalogue = rrd_contract::endpoint_catalogue();
     catalogue.validate().unwrap();
-    assert_eq!(catalogue.endpoints.len(), 20);
+    assert_eq!(catalogue.endpoints.len(), 21);
     assert_eq!(catalogue.endpoints[0].operation.as_str(), "audit-read");
     let create = catalogue
         .endpoints
@@ -433,6 +433,50 @@ fn endpoint_catalogue_is_complete_sorted_and_transport_neutral() {
         serde_json::from_value::<rrd_contract::EndpointCatalogue>(encoded).unwrap(),
         catalogue
     );
+}
+
+#[test]
+fn openapi_is_derived_from_every_catalogue_operation_and_wire_type() {
+    let catalogue = rrd_contract::endpoint_catalogue();
+    let document = rrd_contract::openapi_document().unwrap();
+    assert_eq!(document["openapi"], "3.1.0");
+    assert_eq!(document["x-rrd-protocol"], PROTOCOL);
+    assert_eq!(document["x-rrd-protocol-version"], PROTOCOL_VERSION);
+    assert_eq!(document["x-rrd-endpoint-count"], catalogue.endpoints.len());
+    for endpoint in catalogue.endpoints {
+        let method = match endpoint.method {
+            rrd_contract::HttpMethod::Get => "get",
+            rrd_contract::HttpMethod::Post => "post",
+            rrd_contract::HttpMethod::Delete => "delete",
+        };
+        let operation = &document["paths"][&endpoint.path][method];
+        assert_eq!(operation["operationId"], endpoint.operation.as_str());
+        assert!(operation["responses"]["200"]["content"]["application/json"]["schema"].is_object());
+        if endpoint.method != rrd_contract::HttpMethod::Get {
+            assert!(operation["requestBody"]["content"]["application/json"]["schema"].is_object());
+        }
+    }
+    let encoded = serde_json::to_string(&document).unwrap();
+    assert!(!encoded.contains("vyrm_store"));
+    assert!(!encoded.contains("rrd_server"));
+    let mut pretty = serde_json::to_vec_pretty(&document).unwrap();
+    pretty.push(b'\n');
+    assert_eq!(
+        sha256_for_test(&pretty),
+        rrd_contract::OPENAPI_DOCUMENT_SHA256,
+        "OpenAPI drift requires an intentional protocol/schema review"
+    );
+}
+
+fn sha256_for_test(bytes: &[u8]) -> String {
+    use sha2::{Digest, Sha256};
+    use std::fmt::Write;
+    Sha256::digest(bytes)
+        .iter()
+        .fold(String::with_capacity(64), |mut output, byte| {
+            write!(&mut output, "{byte:02x}").unwrap();
+            output
+        })
 }
 
 #[test]

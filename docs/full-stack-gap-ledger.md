@@ -411,14 +411,15 @@ every public mutation and prove denied actions do not partially apply.
 
 **Order:** Rust embedded/client → TypeScript → Python → Go → Java/.NET.
 
-**Status:** in progress. `rrd-contract::EndpointCatalogue` now freezes all 20
+**Status:** in progress. `rrd-contract::EndpointCatalogue` now freezes all 21
 current routes by canonical operation, method/path template, authentication,
-mutation rule, security action, and public request/response type. The server
-publishes that exact sorted catalogue at `GET /v1/schema/endpoints`, advertises
-it as a capability, and proves it over a real socket. This removes handwritten
-route discovery as an SDK source, but complete JSON Schema/OpenAPI components,
-the supported Rust client, the five additional language packages, and shared
-black-box conformance remain open.
+mutation rule, security action, and public request/response type. Every public
+wire type derives JSON Schema, and deterministic OpenAPI 3.1 is built from that
+catalogue rather than maintained separately. The server publishes both at
+`GET /v1/schema/endpoints` and `GET /v1/schema/openapi`; a frozen SHA-256 fails
+unreviewed schema drift. This removes handwritten route and payload discovery
+as SDK sources. The five additional language packages and shared black-box
+conformance remain open.
 
 The first Rust client is now implemented in `rrd-client` and specified by
 [`rrd-rust-client-v1.md`](rrd-rust-client-v1.md). It is async, depends only on

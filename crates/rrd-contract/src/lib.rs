@@ -5,6 +5,7 @@
 //! same serialized vocabulary. Version 1 intentionally freezes only the
 //! coordinates needed before those outward surfaces are implemented.
 
+use schemars::JsonSchema;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
@@ -12,6 +13,8 @@ use std::fmt;
 
 pub const PROTOCOL: &str = "rrd";
 pub const PROTOCOL_VERSION: u16 = 1;
+pub const OPENAPI_DOCUMENT_SHA256: &str =
+    "262e596a3fa92453d4c1c2220c69a60fcb7a5947596afeb3d8887c7228950d87";
 pub const MAX_ID_BYTES: usize = 128;
 pub const MAX_MESSAGE_BYTES: usize = 4_096;
 pub const MAX_CAPABILITIES: usize = 512;
@@ -31,7 +34,7 @@ pub const MAX_CHANGEFEED_WAIT_MS: u64 = 5_000;
 pub const MIN_LEASE_MS: u64 = 1_000;
 pub const MAX_LEASE_MS: u64 = 3_600_000;
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "type", content = "value", rename_all = "snake_case")]
 pub enum QueryValue {
     Null,
@@ -45,7 +48,7 @@ pub enum QueryValue {
     Map(BTreeMap<String, QueryValue>),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct QueryBudget {
     pub max_scanned_changes: u64,
@@ -89,7 +92,7 @@ impl QueryBudget {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ExecuteQuery {
     pub scope: String,
@@ -143,7 +146,7 @@ impl ExecuteQuery {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct QueryPlanCandidate {
     pub name: String,
@@ -152,7 +155,7 @@ pub struct QueryPlanCandidate {
     pub reason: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct QueryPlanSnapshot {
     pub plan_sha256: String,
@@ -162,14 +165,14 @@ pub struct QueryPlanSnapshot {
     pub candidates: Vec<QueryPlanCandidate>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct QueryRowSnapshot {
     pub identity: String,
     pub values: BTreeMap<String, QueryValue>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct QueryExecutionSnapshot {
     pub scanned_changes: u64,
@@ -181,7 +184,7 @@ pub struct QueryExecutionSnapshot {
     pub truncated: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct QueryResult {
     pub canonical_query: String,
@@ -194,7 +197,9 @@ pub struct QueryResult {
     pub rows: Vec<QueryRowSnapshot>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum VectorSearchMetric {
     Cosine,
@@ -203,13 +208,13 @@ pub enum VectorSearchMetric {
     Manhattan,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum MultiVectorComparator {
     MaxSim,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum VectorSearchQuery {
     Dense {
@@ -227,7 +232,7 @@ pub enum VectorSearchQuery {
     },
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct SearchVectors {
     pub scope: String,
@@ -300,7 +305,7 @@ impl SearchVectors {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct VectorSearchHit {
     pub reference: DataReference,
@@ -309,7 +314,7 @@ pub struct VectorSearchHit {
     pub score: f64,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct VectorSearchResult {
     pub scope: String,
@@ -322,7 +327,7 @@ pub struct VectorSearchResult {
     pub hits: Vec<VectorSearchHit>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ReadChangefeed {
     pub scope: String,
@@ -347,7 +352,7 @@ impl ReadChangefeed {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ClaimTierSnapshot {
     Local,
@@ -355,7 +360,7 @@ pub enum ClaimTierSnapshot {
     Tenant,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ClaimPromotionSnapshot {
     Unpromoted,
@@ -364,7 +369,7 @@ pub enum ClaimPromotionSnapshot {
     Denied,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ClaimChangeSnapshot {
     pub subject: String,
@@ -389,14 +394,14 @@ pub struct ClaimChangeSnapshot {
     pub promotion: ClaimPromotionSnapshot,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "family", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ChangeMutationSnapshot {
     Claim { claim: ClaimChangeSnapshot },
     Data { mutation: TransactionMutation },
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct RuntimeChangeSnapshot {
     pub cursor: u64,
@@ -411,7 +416,7 @@ pub struct RuntimeChangeSnapshot {
     pub change_sha256: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ChangefeedValidation {
     pub method: String,
@@ -419,7 +424,7 @@ pub struct ChangefeedValidation {
     pub proof_nodes: u16,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ChangefeedPage {
     pub requested_after_cursor: u64,
@@ -430,7 +435,7 @@ pub struct ChangefeedPage {
     pub changes: Vec<RuntimeChangeSnapshot>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct FollowChangefeed {
     pub read: ReadChangefeed,
@@ -449,7 +454,7 @@ impl FollowChangefeed {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ChangefeedFollowResult {
     pub timed_out: bool,
@@ -457,7 +462,7 @@ pub struct ChangefeedFollowResult {
     pub page: ChangefeedPage,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum BackupCoverageSnapshot {
     Included,
@@ -466,7 +471,7 @@ pub enum BackupCoverageSnapshot {
     Excluded,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct LogicalArchiveSnapshot {
     pub format_version: u16,
@@ -481,7 +486,7 @@ pub struct LogicalArchiveSnapshot {
     pub runtime_cursor: u64,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct InstanceBackupSnapshot {
     pub backup_sha256: String,
@@ -497,7 +502,7 @@ pub struct InstanceBackupSnapshot {
     pub application_complete: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct InstanceBackupCatalogueSnapshot {
     pub format_version: u16,
@@ -507,7 +512,7 @@ pub struct InstanceBackupCatalogueSnapshot {
     pub backups: Vec<InstanceBackupSnapshot>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct CreateInstanceBackup {
     pub label: String,
@@ -535,7 +540,7 @@ impl CreateInstanceBackup {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct CreateInstanceBackupResult {
     pub backup: InstanceBackupSnapshot,
@@ -544,14 +549,14 @@ pub struct CreateInstanceBackupResult {
     pub idempotent_replay: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ListInstanceBackups {
     #[serde(default)]
     pub verify_archives: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct RestoreInstanceBackup {
     pub backup_sha256: String,
@@ -569,7 +574,7 @@ impl RestoreInstanceBackup {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct RestoreInstanceBackupResult {
     pub backup_sha256: String,
@@ -579,7 +584,9 @@ pub struct RestoreInstanceBackupResult {
     pub idempotent_replay: bool,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum SecurityAction {
     ServiceInspect,
@@ -603,14 +610,14 @@ pub enum SecurityAction {
     SecurityAdmin,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum AuditPhase {
     Authorized,
     Completed,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum AuditDecision {
     Allowed,
@@ -618,7 +625,7 @@ pub enum AuditDecision {
     Failed,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ReadAudit {
     pub after_sequence: u64,
@@ -634,7 +641,7 @@ impl ReadAudit {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct AuditRecordSnapshot {
     pub sequence: u64,
@@ -652,7 +659,7 @@ pub struct AuditRecordSnapshot {
     pub response_sha256: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct AuditPage {
     pub requested_after_sequence: u64,
@@ -660,7 +667,9 @@ pub struct AuditPage {
     pub records: Vec<AuditRecordSnapshot>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum HttpMethod {
     Get,
@@ -668,7 +677,7 @@ pub enum HttpMethod {
     Delete,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum EndpointAuthentication {
     Public,
@@ -676,7 +685,7 @@ pub enum EndpointAuthentication {
     SessionBearer,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct EndpointDescriptor {
     pub operation: CanonicalId,
@@ -689,7 +698,7 @@ pub struct EndpointDescriptor {
     pub response_type: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct EndpointCatalogue {
     pub protocol: String,
@@ -842,6 +851,16 @@ pub fn endpoint_catalogue() -> EndpointCatalogue {
             "Readiness",
         ),
         endpoint(
+            "openapi-read",
+            HttpMethod::Get,
+            "/v1/schema/openapi",
+            EndpointAuthentication::Public,
+            false,
+            SecurityAction::ServiceInspect,
+            "Empty",
+            "OpenApiDocument",
+        ),
+        endpoint(
             "query-execute",
             HttpMethod::Post,
             "/v1/query",
@@ -952,6 +971,207 @@ pub fn endpoint_catalogue() -> EndpointCatalogue {
     catalogue
 }
 
+/// Deterministic OpenAPI 3.1 projection of the authoritative RRD v1 endpoint
+/// catalogue and Rust wire types.
+///
+/// This document is the language-neutral generator input for supported SDKs;
+/// it is not a separately maintained description of the protocol.
+pub fn openapi_document() -> Result<serde_json::Value> {
+    let catalogue = endpoint_catalogue();
+    catalogue.validate()?;
+    let mut paths = serde_json::Map::new();
+    for descriptor in &catalogue.endpoints {
+        let method = match descriptor.method {
+            HttpMethod::Get => "get",
+            HttpMethod::Post => "post",
+            HttpMethod::Delete => "delete",
+        };
+        let mut operation = serde_json::Map::new();
+        operation.insert(
+            "operationId".into(),
+            serde_json::Value::String(descriptor.operation.as_str().into()),
+        );
+        operation.insert(
+            "summary".into(),
+            serde_json::Value::String(format!("RRD {}", descriptor.operation)),
+        );
+        operation.insert(
+            "x-rrd-action".into(),
+            serde_json::to_value(descriptor.action)
+                .map_err(|error| ContractError(error.to_string()))?,
+        );
+        operation.insert(
+            "x-rrd-mutation".into(),
+            serde_json::Value::Bool(descriptor.mutation),
+        );
+        operation.insert(
+            "security".into(),
+            match descriptor.authentication {
+                EndpointAuthentication::Public => serde_json::json!([]),
+                EndpointAuthentication::ApiKey => serde_json::json!([{"rrdApiKey": []}]),
+                EndpointAuthentication::SessionBearer => {
+                    serde_json::json!([{"rrdBearer": []}])
+                }
+            },
+        );
+        let parameters = openapi_parameters(descriptor);
+        if !parameters.is_empty() {
+            operation.insert("parameters".into(), serde_json::Value::Array(parameters));
+        }
+        if descriptor.method != HttpMethod::Get {
+            operation.insert(
+                "requestBody".into(),
+                serde_json::json!({
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": request_envelope_schema(&descriptor.request_type)?
+                        }
+                    }
+                }),
+            );
+        }
+        let response_schema = response_envelope_schema(&descriptor.response_type)?;
+        operation.insert(
+            "responses".into(),
+            serde_json::json!({
+                "200": {
+                    "description": "Typed RRD response",
+                    "content": {"application/json": {"schema": response_schema}}
+                },
+                "default": {
+                    "description": "Typed RRD error response",
+                    "content": {"application/json": {"schema": response_schema}}
+                }
+            }),
+        );
+        let path = paths
+            .entry(descriptor.path.clone())
+            .or_insert_with(|| serde_json::Value::Object(serde_json::Map::new()));
+        path.as_object_mut()
+            .expect("OpenAPI path item is constructed as an object")
+            .insert(method.into(), serde_json::Value::Object(operation));
+    }
+
+    Ok(serde_json::json!({
+        "openapi": "3.1.0",
+        "info": {
+            "title": "RRFlow Durable Runtime API",
+            "version": format!("{PROTOCOL_VERSION}.0.0")
+        },
+        "servers": [{"url": "http://127.0.0.1:9477"}],
+        "paths": paths,
+        "components": {
+            "securitySchemes": {
+                "rrdApiKey": {
+                    "type": "apiKey",
+                    "in": "header",
+                    "name": "Authorization",
+                    "description": "Authorization: ApiKey <credential>; X-RRD-Principal is also required"
+                },
+                "rrdBearer": {
+                    "type": "http",
+                    "scheme": "bearer",
+                    "description": "Session bearer; X-RRD-Session is also required"
+                }
+            }
+        },
+        "x-rrd-protocol": PROTOCOL,
+        "x-rrd-protocol-version": PROTOCOL_VERSION,
+        "x-rrd-endpoint-count": catalogue.endpoints.len()
+    }))
+}
+
+fn openapi_parameters(descriptor: &EndpointDescriptor) -> Vec<serde_json::Value> {
+    let mut parameters = Vec::new();
+    for name in ["estate", "session", "transaction"] {
+        if descriptor.path.contains(&format!("{{{name}}}")) {
+            parameters.push(serde_json::json!({
+                "name": name,
+                "in": "path",
+                "required": true,
+                "schema": {"type": "string", "minLength": 1, "maxLength": MAX_ID_BYTES}
+            }));
+        }
+    }
+    match descriptor.authentication {
+        EndpointAuthentication::Public => {}
+        EndpointAuthentication::ApiKey => parameters.push(serde_json::json!({
+            "name": "X-RRD-Principal",
+            "in": "header",
+            "required": true,
+            "schema": {"type": "string", "minLength": 1, "maxLength": MAX_ID_BYTES}
+        })),
+        EndpointAuthentication::SessionBearer => parameters.push(serde_json::json!({
+            "name": "X-RRD-Session",
+            "in": "header",
+            "required": true,
+            "schema": {"type": "string", "minLength": 1, "maxLength": MAX_ID_BYTES}
+        })),
+    }
+    parameters
+}
+
+fn schema_json<T: JsonSchema>() -> serde_json::Value {
+    serde_json::to_value(schemars::schema_for!(T))
+        .expect("JsonSchema output must serialize as JSON")
+}
+
+fn request_envelope_schema(name: &str) -> Result<serde_json::Value> {
+    let schema = match name {
+        "AbortTransaction" => schema_json::<RequestEnvelope<AbortTransaction>>(),
+        "BeginTransaction" => schema_json::<RequestEnvelope<BeginTransaction>>(),
+        "CloseSession" => schema_json::<RequestEnvelope<CloseSession>>(),
+        "CommitTransaction" => schema_json::<RequestEnvelope<CommitTransaction>>(),
+        "CreateInstanceBackup" => schema_json::<RequestEnvelope<CreateInstanceBackup>>(),
+        "CreateSession" => schema_json::<RequestEnvelope<CreateSession>>(),
+        "ExecuteQuery" => schema_json::<RequestEnvelope<ExecuteQuery>>(),
+        "FollowChangefeed" => schema_json::<RequestEnvelope<FollowChangefeed>>(),
+        "ListInstanceBackups" => schema_json::<RequestEnvelope<ListInstanceBackups>>(),
+        "PreviewTransaction" => schema_json::<RequestEnvelope<PreviewTransaction>>(),
+        "ReadAudit" => schema_json::<RequestEnvelope<ReadAudit>>(),
+        "ReadChangefeed" => schema_json::<RequestEnvelope<ReadChangefeed>>(),
+        "ReadEstate" => schema_json::<RequestEnvelope<ReadEstate>>(),
+        "RenewSession" => schema_json::<RequestEnvelope<RenewSession>>(),
+        "RestoreInstanceBackup" => schema_json::<RequestEnvelope<RestoreInstanceBackup>>(),
+        "SearchVectors" => schema_json::<RequestEnvelope<SearchVectors>>(),
+        _ => return invalid(format!("no public request schema for {name}")),
+    };
+    Ok(schema)
+}
+
+fn response_envelope_schema(name: &str) -> Result<serde_json::Value> {
+    let schema = match name {
+        "AuditPage" => schema_json::<ResponseEnvelope<AuditPage>>(),
+        "ChangefeedFollowResult" => schema_json::<ResponseEnvelope<ChangefeedFollowResult>>(),
+        "ChangefeedPage" => schema_json::<ResponseEnvelope<ChangefeedPage>>(),
+        "CommitReceipt" => schema_json::<ResponseEnvelope<CommitReceipt>>(),
+        "CreateInstanceBackupResult" => {
+            schema_json::<ResponseEnvelope<CreateInstanceBackupResult>>()
+        }
+        "EndpointCatalogue" => schema_json::<ResponseEnvelope<EndpointCatalogue>>(),
+        "EstateSnapshot" => schema_json::<ResponseEnvelope<EstateSnapshot>>(),
+        "InstanceBackupCatalogueSnapshot" => {
+            schema_json::<ResponseEnvelope<InstanceBackupCatalogueSnapshot>>()
+        }
+        "Liveness" => schema_json::<ResponseEnvelope<Liveness>>(),
+        "OpenApiDocument" => schema_json::<ResponseEnvelope<serde_json::Value>>(),
+        "QueryResult" => schema_json::<ResponseEnvelope<QueryResult>>(),
+        "Readiness" => schema_json::<ResponseEnvelope<Readiness>>(),
+        "RestoreInstanceBackupResult" => {
+            schema_json::<ResponseEnvelope<RestoreInstanceBackupResult>>()
+        }
+        "ServiceCapabilities" => schema_json::<ResponseEnvelope<ServiceCapabilities>>(),
+        "SessionLease" => schema_json::<ResponseEnvelope<SessionLease>>(),
+        "SessionTermination" => schema_json::<ResponseEnvelope<SessionTermination>>(),
+        "TransactionLease" => schema_json::<ResponseEnvelope<TransactionLease>>(),
+        "TransactionPreview" => schema_json::<ResponseEnvelope<TransactionPreview>>(),
+        "VectorSearchResult" => schema_json::<ResponseEnvelope<VectorSearchResult>>(),
+        _ => return invalid(format!("no public response schema for {name}")),
+    };
+    Ok(schema)
+}
+
 #[allow(clippy::too_many_arguments)]
 fn endpoint(
     operation: &str,
@@ -975,11 +1195,11 @@ fn endpoint(
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ReadEstate {}
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum EstateDesiredPhase {
     Running,
@@ -987,7 +1207,7 @@ pub enum EstateDesiredPhase {
     Absent,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum EstateObservedPhase {
     Unknown,
@@ -1001,7 +1221,7 @@ pub enum EstateObservedPhase {
     Failed,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum EstateActivityClass {
     Unknown,
@@ -1011,7 +1231,7 @@ pub enum EstateActivityClass {
     Neglected,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum EstateOperationKind {
     Provision,
@@ -1022,7 +1242,7 @@ pub enum EstateOperationKind {
     Delete,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum EstateOperationState {
     Pending,
@@ -1034,7 +1254,7 @@ pub enum EstateOperationState {
     Superseded,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum EstateReceiptBoundary {
     Prepared,
@@ -1043,7 +1263,7 @@ pub enum EstateReceiptBoundary {
     Failed,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct EstateActivityPolicySnapshot {
     pub idle_after_ms: u64,
@@ -1051,7 +1271,7 @@ pub struct EstateActivityPolicySnapshot {
     pub neglected_after_ms: u64,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct EstateDesiredSnapshot {
     pub generation: u64,
@@ -1062,7 +1282,7 @@ pub struct EstateDesiredSnapshot {
     pub updated_at_unix_ms: u64,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct EstateObservedSnapshot {
     pub generation: u64,
@@ -1078,7 +1298,7 @@ pub struct EstateObservedSnapshot {
     pub error: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct EstateActivitySnapshot {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1089,7 +1309,7 @@ pub struct EstateActivitySnapshot {
     pub evaluated_at_unix_ms: u64,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct EstateInstanceSnapshot {
     pub id: CanonicalId,
@@ -1098,7 +1318,7 @@ pub struct EstateInstanceSnapshot {
     pub activity: EstateActivitySnapshot,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct EstateLeaseSnapshot {
     pub owner: CanonicalId,
@@ -1107,7 +1327,7 @@ pub struct EstateLeaseSnapshot {
     pub expires_at_unix_ms: u64,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct EstateReceiptSnapshot {
     pub boundary: EstateReceiptBoundary,
@@ -1116,7 +1336,7 @@ pub struct EstateReceiptSnapshot {
     pub evidence_sha256: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct EstateOperationSnapshot {
     pub id: CanonicalId,
@@ -1136,7 +1356,7 @@ pub struct EstateOperationSnapshot {
     pub error: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct EstateSnapshot {
     pub format_version: u16,
@@ -1150,14 +1370,14 @@ pub struct EstateSnapshot {
     pub idempotency_binding_count: u32,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct EstateMutationResult {
     pub estate: EstateSnapshot,
     pub idempotent_replay: bool,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum EstateBackupJobState {
     Pending,
@@ -1167,7 +1387,7 @@ pub enum EstateBackupJobState {
     Failed,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum EstateBackupReceiptBoundary {
     Prepared,
@@ -1175,7 +1395,7 @@ pub enum EstateBackupReceiptBoundary {
     Failed,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct EstateBackupReceiptSnapshot {
     pub boundary: EstateBackupReceiptBoundary,
@@ -1184,7 +1404,7 @@ pub struct EstateBackupReceiptSnapshot {
     pub evidence_sha256: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct EstateBackupJobSnapshot {
     pub id: CanonicalId,
@@ -1210,7 +1430,7 @@ pub struct EstateBackupJobSnapshot {
     pub error: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct EstateBackupJobsSnapshot {
     pub estate_id: CanonicalId,
@@ -1218,7 +1438,7 @@ pub struct EstateBackupJobsSnapshot {
     pub jobs: Vec<EstateBackupJobSnapshot>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct EstateBackupMutationResult {
     pub estate: EstateSnapshot,
@@ -1243,7 +1463,8 @@ impl std::error::Error for ContractError {}
 ///
 /// IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
 /// labels are separate data and may use arbitrary Unicode.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, JsonSchema)]
+#[schemars(transparent)]
 pub struct CanonicalId(String);
 
 impl CanonicalId {
@@ -1300,7 +1521,9 @@ impl<'de> Deserialize<'de> for CanonicalId {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum ResourceKind {
     Organization,
@@ -1318,7 +1541,7 @@ pub enum ResourceKind {
     Operation,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ResourceId {
     pub kind: ResourceKind,
@@ -1336,7 +1559,7 @@ impl ResourceId {
 
 /// A fully explicit hierarchical identity. No field is inferred from process
 /// cwd, connection state, or a human label.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ResourcePath {
     pub segments: Vec<ResourceId>,
@@ -1360,7 +1583,8 @@ impl ResourcePath {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, JsonSchema)]
+#[schemars(transparent)]
 pub struct CorrelationId(String);
 
 impl CorrelationId {
@@ -1406,7 +1630,7 @@ impl<'de> Deserialize<'de> for CorrelationId {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct RequestContext {
     pub request_id: CorrelationId,
@@ -1429,7 +1653,7 @@ impl RequestContext {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct IdempotencyBinding {
     pub key: CorrelationId,
@@ -1442,7 +1666,7 @@ impl IdempotencyBinding {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum DeploymentMode {
     Embedded,
@@ -1450,7 +1674,7 @@ pub enum DeploymentMode {
     Distributed,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum CapabilityStatus {
     Unavailable,
@@ -1458,7 +1682,7 @@ pub enum CapabilityStatus {
     Available,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct CapabilityDescriptor {
     pub name: CanonicalId,
@@ -1488,7 +1712,7 @@ impl CapabilityDescriptor {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ServiceCapabilities {
     pub protocol: String,
@@ -1537,7 +1761,7 @@ impl ServiceCapabilities {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct RequestEnvelope<T> {
     pub protocol: String,
@@ -1555,7 +1779,7 @@ impl<T> RequestEnvelope<T> {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ErrorCode {
     InvalidArgument,
@@ -1574,7 +1798,7 @@ pub enum ErrorCode {
     Internal,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ErrorBody {
     pub code: ErrorCode,
@@ -1604,14 +1828,14 @@ impl ErrorBody {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "status", rename_all = "snake_case")]
 pub enum ResponseOutcome<T> {
     Ok { payload: T },
     Error { error: ErrorBody },
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ResponseEnvelope<T> {
     pub protocol: String,
@@ -1633,7 +1857,7 @@ impl<T> ResponseEnvelope<T> {
 
 /// Resource limits requested for one loopback transport session. These are
 /// availability boundaries, not authentication or authorization policy.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct SessionLimits {
     pub idle_timeout_ms: u64,
@@ -1656,13 +1880,13 @@ impl SessionLimits {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct CreateSession {
     pub limits: SessionLimits,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct SessionLease {
     pub session_id: CorrelationId,
@@ -1673,26 +1897,26 @@ pub struct SessionLease {
     pub limits: SessionLimits,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct RenewSession {}
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct CloseSession {}
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct AbortTransaction {}
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum SessionEndState {
     Closed,
     Expired,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct SessionTermination {
     pub session_id: CorrelationId,
@@ -1724,7 +1948,7 @@ impl SessionLease {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct BeginTransaction {
     pub scope: CanonicalId,
@@ -1742,7 +1966,7 @@ impl BeginTransaction {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum TransactionState {
     Open,
@@ -1751,7 +1975,7 @@ pub enum TransactionState {
     Expired,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct TransactionLease {
     pub transaction_id: CorrelationId,
@@ -1774,14 +1998,14 @@ impl TransactionLease {
 pub type DataValue = QueryValue;
 pub type DataProperties = BTreeMap<String, DataValue>;
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct DataReference {
     pub kind: CanonicalId,
     pub id: CanonicalId,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum DataValueType {
     Null,
@@ -1795,7 +2019,7 @@ pub enum DataValueType {
     Map,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct DataPropertySchema {
     pub value_type: DataValueType,
@@ -1803,7 +2027,7 @@ pub struct DataPropertySchema {
     pub required: bool,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct DataRecordSchema {
     #[serde(default)]
@@ -1814,7 +2038,7 @@ pub struct DataRecordSchema {
     pub unique_properties: BTreeSet<String>,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct DataRelationSchema {
     #[serde(default)]
@@ -1833,7 +2057,7 @@ pub struct DataRelationSchema {
     pub max_incoming: Option<u64>,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct DataEventSchema {
     #[serde(default)]
@@ -1846,7 +2070,7 @@ pub struct DataEventSchema {
     pub allow_additional_properties: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct DataSchemaRegistry {
     pub revision: u64,
@@ -1859,7 +2083,7 @@ pub struct DataSchemaRegistry {
     pub events: BTreeMap<CanonicalId, DataEventSchema>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum DataVectorValue {
     Dense {
@@ -1876,14 +2100,14 @@ pub enum DataVectorValue {
     },
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum DataVectorNormalization {
     None,
     UnitL2,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct DataEmbeddingProvenance {
     pub source_sha256: String,
@@ -1895,7 +2119,7 @@ pub struct DataEmbeddingProvenance {
     pub generation_parameters: DataProperties,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "type", content = "value", rename_all = "snake_case")]
 pub enum DataSeriesValue {
     Integer(i64),
@@ -1905,14 +2129,14 @@ pub enum DataSeriesValue {
     String(String),
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct DataGeoPoint {
     pub longitude: f64,
     pub latitude: f64,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum DataGeoValue {
     Point {
@@ -1924,7 +2148,7 @@ pub enum DataGeoValue {
     },
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct DataObjectReceipt {
     pub backend: String,
@@ -1937,7 +2161,7 @@ pub struct DataObjectReceipt {
 
 /// Public multi-model mutation vocabulary. It is deliberately independent of
 /// `vyrm_core`; adapters lower these values into the authoritative runtime.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "mutation", rename_all = "snake_case", deny_unknown_fields)]
 pub enum TransactionMutation {
     AssertClaim {
@@ -2227,7 +2451,7 @@ fn validate_data_vector(value: &DataVectorValue) -> Result<usize> {
     Ok(dimensions)
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct CommitTransaction {
     pub operation_sha256: String,
@@ -2268,7 +2492,7 @@ pub fn transaction_operation_sha256(mutations: &[TransactionMutation]) -> String
     output
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct PreviewTransaction {
     pub mutations: Vec<TransactionMutation>,
@@ -2288,7 +2512,7 @@ impl PreviewTransaction {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct TransactionPreview {
     pub transaction_id: CorrelationId,
@@ -2307,7 +2531,7 @@ impl TransactionPreview {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct CommitReceipt {
     pub transaction_id: CorrelationId,
@@ -2364,7 +2588,7 @@ impl CommitReceipt {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Liveness {
     pub observed_at_unix_ms: u64,
@@ -2379,7 +2603,7 @@ impl Liveness {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Readiness {
     pub observed_at_unix_ms: u64,

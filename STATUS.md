@@ -115,8 +115,10 @@ Kubernetes operation, and authoritative Connectome management.
   advances through the authenticated control journal. Provisioning, TLS/mTLS,
   secret providers, row/field policy, rate limits, audit retention/archival,
   and application-mutation/audit-completion atomicity keep F4 open.
-- F5 publishes one validated catalogue for all 20 current RRD operations and
-  serves it from the running process. The first supported `rrd-client` Rust
+- F5 publishes one validated catalogue for all 21 current RRD operations and
+  serves it from the running process. JSON Schema for every public wire type
+  and deterministic OpenAPI 3.1 are derived from the same authority, served by
+  RRD, and protected by a frozen digest. The first supported `rrd-client` Rust
   boundary now negotiates that contract and covers session, transaction,
   VyrmQL, vector, changefeed, backup, estate, and audit calls with bounded
   async I/O, absolute deadlines, typed errors, response identity checks, and

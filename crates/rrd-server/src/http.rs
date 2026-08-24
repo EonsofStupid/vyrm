@@ -210,6 +210,17 @@ impl AppState {
                 public_audit = Some((SecurityAction::ServiceInspect, context.clone()));
                 success(StatusCode::OK, &context, rrd_contract::endpoint_catalogue())
             }
+            (Method::GET, "/v1/schema/openapi") => {
+                let context = generated_context(now, "openapi-read");
+                public_audit = Some((SecurityAction::ServiceInspect, context.clone()));
+                match rrd_contract::openapi_document() {
+                    Ok(document) => success(StatusCode::OK, &context, document),
+                    Err(error) => failure(
+                        &context,
+                        ApiError::new(ErrorCode::Internal, error.to_string(), false),
+                    ),
+                }
+            }
             (Method::POST, "/v1/sessions") => self.create_session(&headers, &body, now),
             (Method::POST, path) if session_action(path, "renew").is_some() => {
                 self.renew_session(&headers, &body, path, now)
@@ -1624,7 +1635,7 @@ fn capabilities(
                 rrd_contract::endpoint_catalogue().endpoints.len() as u64,
             )]),
             limitation: Some(
-                "machine-readable operation catalogue; complete generated JSON Schema/OpenAPI components remain F5 work"
+                "machine-readable operation catalogue and OpenAPI 3.1 schemas; generated language packages and shared conformance remain F5 work"
                     .into(),
             ),
         },

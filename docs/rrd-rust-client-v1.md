@@ -31,7 +31,7 @@ dev-only black-box fixtures.
 
 ## Current typed surface
 
-The client covers capability and endpoint negotiation; session create/renew/
+The client covers capability, endpoint, and OpenAPI negotiation; session create/renew/
 close; transaction begin/preview/commit/abort; VyrmQL query; vector search;
 changefeed read/follow; backup create/list/restore; estate read; and audit read.
 `RequestOptions` makes correlation, deadline, and mutation idempotency explicit.
