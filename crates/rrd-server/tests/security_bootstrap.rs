@@ -19,11 +19,23 @@ fn bootstrap_is_private_idempotent_restart_safe_and_drift_denying() {
     write_manifest(&manifest, &credential);
 
     let first = invoke(&database, &manifest);
-    assert!(first.status.success(), "{}", String::from_utf8_lossy(&first.stderr));
-    assert!(String::from_utf8(first.stdout).unwrap().contains("initialized"));
+    assert!(
+        first.status.success(),
+        "{}",
+        String::from_utf8_lossy(&first.stderr)
+    );
+    assert!(String::from_utf8(first.stdout)
+        .unwrap()
+        .contains("initialized"));
     let second = invoke(&database, &manifest);
-    assert!(second.status.success(), "{}", String::from_utf8_lossy(&second.stderr));
-    assert!(String::from_utf8(second.stdout).unwrap().contains("unchanged"));
+    assert!(
+        second.status.success(),
+        "{}",
+        String::from_utf8_lossy(&second.stderr)
+    );
+    assert!(String::from_utf8(second.stdout)
+        .unwrap()
+        .contains("unchanged"));
 
     let engine = PersistentEngine::open(&database).unwrap();
     let state = SecurityRepository::new(&engine, CanonicalId::new("kube-instance").unwrap())
@@ -36,6 +48,7 @@ fn bootstrap_is_private_idempotent_restart_safe_and_drift_denying() {
     assert!(!encoded.contains("operator-secret-value"));
     drop(engine);
 
+    make_owner_writable(&credential);
     fs::write(&credential, b"different-secret").unwrap();
     make_private(&credential);
     let drift = invoke(&database, &manifest);
@@ -84,8 +97,19 @@ fn write_manifest(path: &Path, credential: &PathBuf) {
 #[cfg(unix)]
 fn make_private(path: &Path) {
     use std::os::unix::fs::PermissionsExt;
+    // Kubernetes projected Secrets commonly become group-readable through
+    // `fsGroup`; prove that read-only group access remains admissible.
+    fs::set_permissions(path, fs::Permissions::from_mode(0o440)).unwrap();
+}
+
+#[cfg(unix)]
+fn make_owner_writable(path: &Path) {
+    use std::os::unix::fs::PermissionsExt;
     fs::set_permissions(path, fs::Permissions::from_mode(0o600)).unwrap();
 }
 
 #[cfg(not(unix))]
 fn make_private(_path: &Path) {}
+
+#[cfg(not(unix))]
+fn make_owner_writable(_path: &Path) {}

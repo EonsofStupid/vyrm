@@ -1,5 +1,7 @@
 use rrd_contract::CanonicalId;
-use rrd_security::{Principal, PrincipalKind, ResourceGrant, SecurityRepository, SecurityState, SECURITY_FORMAT};
+use rrd_security::{
+    Principal, PrincipalKind, ResourceGrant, SecurityRepository, SecurityState, SECURITY_FORMAT,
+};
 use serde::Deserialize;
 use std::collections::BTreeMap;
 use std::fs::File;
@@ -95,13 +97,11 @@ fn materialize(manifest: BootstrapManifest) -> Result<SecurityState, Box<dyn std
             )
             .into());
         }
-        let credential = read_bounded(
-            &provisioned.credential_file,
-            MAX_CREDENTIAL_BYTES,
-            true,
-        )?;
+        let credential = read_bounded(&provisioned.credential_file, MAX_CREDENTIAL_BYTES, true)?;
         if credential.is_empty() {
-            return Err(io::Error::new(io::ErrorKind::InvalidData, "credential file is empty").into());
+            return Err(
+                io::Error::new(io::ErrorKind::InvalidData, "credential file is empty").into(),
+            );
         }
         let principal = Principal {
             id: provisioned.id.clone(),
@@ -150,7 +150,9 @@ fn read_bounded(path: &Path, limit: u64, private: bool) -> io::Result<Vec<u8>> {
         ensure_private(&resolved, &metadata)?;
     }
     let mut bytes = Vec::with_capacity(metadata.len() as usize);
-    File::open(resolved)?.take(limit + 1).read_to_end(&mut bytes)?;
+    File::open(resolved)?
+        .take(limit + 1)
+        .read_to_end(&mut bytes)?;
     if bytes.len() as u64 > limit {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
@@ -165,12 +167,14 @@ fn ensure_private(path: &Path, metadata: &std::fs::Metadata) -> io::Result<()> {
     use std::os::unix::fs::MetadataExt;
     use std::os::unix::fs::PermissionsExt;
 
-    if metadata.permissions().mode() & 0o077 != 0
+    let mode = metadata.permissions().mode();
+    if mode & 0o007 != 0
+        || mode & 0o030 != 0
         || metadata.uid() != std::fs::metadata(path.parent().unwrap_or(Path::new("/")))?.uid()
     {
         return Err(io::Error::new(
             io::ErrorKind::PermissionDenied,
-            "credential file must be private and owned by the mounted directory owner",
+            "credential file must deny other access and group write/execute",
         ));
     }
     Ok(())

@@ -1,0 +1,163 @@
+{
+  "apiVersion": "v1",
+  "kind": "List",
+  "items": [
+    {
+      "apiVersion": "v1",
+      "kind": "Namespace",
+      "metadata": {
+        "name": "rrflow-system",
+        "labels": {
+          "rrflow.io/rrd-client": "true"
+        }
+      }
+    },
+    {
+      "apiVersion": "v1",
+      "kind": "ServiceAccount",
+      "metadata": {
+        "name": "rrd-kubernetes-operator",
+        "namespace": "rrflow-system"
+      }
+    },
+    {
+      "apiVersion": "rbac.authorization.k8s.io/v1",
+      "kind": "ClusterRole",
+      "metadata": {
+        "name": "rrd-kubernetes-operator"
+      },
+      "rules": [
+        {
+          "apiGroups": ["rrflow.io"],
+          "resources": ["rrdinstances"],
+          "verbs": ["get", "list", "watch", "patch"]
+        },
+        {
+          "apiGroups": ["rrflow.io"],
+          "resources": ["rrdinstances/status", "rrdinstances/finalizers"],
+          "verbs": ["get", "patch", "update"]
+        },
+        {
+          "apiGroups": [""],
+          "resources": ["services"],
+          "verbs": ["get", "list", "watch", "create", "patch", "delete"]
+        },
+        {
+          "apiGroups": ["apps"],
+          "resources": ["statefulsets"],
+          "verbs": ["get", "list", "watch", "create", "patch", "delete"]
+        },
+        {
+          "apiGroups": ["policy"],
+          "resources": ["poddisruptionbudgets"],
+          "verbs": ["get", "list", "watch", "create", "patch", "delete"]
+        },
+        {
+          "apiGroups": ["networking.k8s.io"],
+          "resources": ["networkpolicies"],
+          "verbs": ["get", "list", "watch", "create", "patch", "delete"]
+        }
+      ]
+    },
+    {
+      "apiVersion": "rbac.authorization.k8s.io/v1",
+      "kind": "ClusterRoleBinding",
+      "metadata": {
+        "name": "rrd-kubernetes-operator"
+      },
+      "roleRef": {
+        "apiGroup": "rbac.authorization.k8s.io",
+        "kind": "ClusterRole",
+        "name": "rrd-kubernetes-operator"
+      },
+      "subjects": [
+        {
+          "kind": "ServiceAccount",
+          "name": "rrd-kubernetes-operator",
+          "namespace": "rrflow-system"
+        }
+      ]
+    },
+    {
+      "apiVersion": "apps/v1",
+      "kind": "Deployment",
+      "metadata": {
+        "name": "rrd-kubernetes-operator",
+        "namespace": "rrflow-system"
+      },
+      "spec": {
+        "replicas": 1,
+        "selector": {
+          "matchLabels": {
+            "app.kubernetes.io/name": "rrd-kubernetes-operator"
+          }
+        },
+        "strategy": {
+          "type": "Recreate"
+        },
+        "template": {
+          "metadata": {
+            "labels": {
+              "app.kubernetes.io/name": "rrd-kubernetes-operator",
+              "app.kubernetes.io/part-of": "rrflow"
+            }
+          },
+          "spec": {
+            "serviceAccountName": "rrd-kubernetes-operator",
+            "automountServiceAccountToken": true,
+            "securityContext": {
+              "runAsNonRoot": true,
+              "runAsUser": 65532,
+              "runAsGroup": 65532,
+              "seccompProfile": {
+                "type": "RuntimeDefault"
+              }
+            },
+            "containers": [
+              {
+                "name": "operator",
+                "image": "registry.example/rrd@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "imagePullPolicy": "IfNotPresent",
+                "command": ["rrd-kubernetes"],
+                "resources": {
+                  "requests": {
+                    "cpu": "50m",
+                    "memory": "64Mi"
+                  },
+                  "limits": {
+                    "cpu": "500m",
+                    "memory": "256Mi"
+                  }
+                },
+                "securityContext": {
+                  "allowPrivilegeEscalation": false,
+                  "capabilities": {
+                    "drop": ["ALL"]
+                  },
+                  "readOnlyRootFilesystem": true,
+                  "runAsNonRoot": true
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "apiVersion": "policy/v1",
+      "kind": "PodDisruptionBudget",
+      "metadata": {
+        "name": "rrd-kubernetes-operator",
+        "namespace": "rrflow-system"
+      },
+      "spec": {
+        "maxUnavailable": 0,
+        "selector": {
+          "matchLabels": {
+            "app.kubernetes.io/name": "rrd-kubernetes-operator"
+          }
+        }
+      }
+    }
+  ]
+}

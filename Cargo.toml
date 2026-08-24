@@ -15,6 +15,7 @@ members = [
     "crates/vyrm-embed",
     "crates/vyrm-edge",
     "crates/vyrm-cluster",
+    "crates/rrd-kubernetes",
     "crates/vyrm-kv",
     "crates/vyrm-graph",
     "crates/vyrm-node",
