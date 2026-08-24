@@ -353,3 +353,29 @@ index.
   advertised as available.
 - Next gate: expose retained, cursor-addressed runtime changefeed replay so
   Connectome and SDKs can observe and reconstruct the same committed activity.
+
+## 2026-08-24 — RRD retained typed changefeed replay
+
+- Commit: `e4532c5` (`feat(rrd): expose retained changefeed replay`).
+- Capability: added the authenticated, page-bounded
+  `POST /v1/changes/read` contract over the authoritative runtime log. Clients
+  supply an exact global cursor and resume only from the returned
+  `through_cursor`, preventing sparse scoped feeds from stalling on unrelated
+  activity.
+- Fidelity: every entry preserves cursor, commit SHA-256 and ordinal, scope,
+  runtime time, actor, prior/current change SHA-256, complete claim provenance,
+  or the corresponding typed public schema/record/relation/event/vector/
+  series/geo/object mutation. The page also carries authenticated-read method,
+  change-read count, and proof-node count.
+- Evidence: the real HTTP fixture proves unauthenticated denial, pages one
+  eleven-change transaction as `3 + 8`, verifies digest-chain continuity at
+  the page boundary, restarts the server, and resumes from cursor ten to return
+  only cursor eleven. No secondary event store or projection is involved.
+- Verification: all `rrd-contract` and `rrd-server` tests passed, including the
+  new strict request contract and real-socket replay matrix; strict all-target/
+  all-feature clippy and `git diff --check` passed.
+- Limit: this is retained pull replay. Push/long-poll delivery, subscription
+  leases, backpressure, heartbeats, and disconnect/reconnect qualification
+  remain open before claiming real-time live queries.
+- Next gate: implement bounded authenticated live-follow over the same cursor
+  contract, retaining pull replay as the reconnect source of truth.
