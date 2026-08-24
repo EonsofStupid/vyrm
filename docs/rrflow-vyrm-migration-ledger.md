@@ -130,7 +130,7 @@ the HTTP server or Connectome.
 
 | Slice | State | Scope | Exit evidence |
 |---|---|---|---|
-| N0 | authored; verification pending | Freeze product architecture, target names, durable-identifier classes and dependency order | Documentation consistency checks; no code claim |
+| N0 | complete | Freeze product architecture, target names, durable-identifier classes and dependency order | Documentation consistency checks; no code claim |
 | N1 | pending | Rename/refactor `vyrm-core` to `rrflow-core` without semantic changes | Core golden/property tests and all direct dependants compile |
 | N2 | pending | Migrate native KV package to `rrflow-storage-lsm` while retaining legacy on-disk readers | WAL/manifest/segment/snapshot/crash/reopen matrix |
 | N3 | pending | Migrate storage facade and make RRD catalogue/transaction/snapshot ports explicit | Memory/native/Fjall compatibility differential plus archive/recovery |
@@ -141,6 +141,32 @@ the HTTP server or Connectome.
 | N8 | pending | Migrate protocol/security/daemon composition and SDK authority | Real-daemon conformance across supported clients |
 | N9 | pending | Migrate CLI/config/project paths and Connectome | Read-old/write-new fixtures, conflict denial, desktop/platform matrix |
 | N10 | pending | Remove obsolete shims and enforce naming gate | No unapproved Vyrm names outside legacy readers, immutable evidence and history |
+
+### N0 evidence — 2026-08-24
+
+- Commit: `c8df581` (`docs: define cohesive RRFlow RRD migration`).
+- Old names changed: current product headings and boundary statements in the
+  README, specification, plan, status, Clyffy handoff, instance topology, and
+  runtime foundation documents.
+- New names introduced: RRFlow product, RRD Reason Ready Daemon, RRFlowQL,
+  target RRFlow package map, and dependency-ordered N1–N10 migration slices.
+- Public contract impact: documentation only; the RRD v1 protocol and generated
+  SDK bytes were not changed.
+- Persisted-format impact: none. The ledger records known magic bytes, digest
+  domains, paths, environment variables, projection IDs, and artifact formats
+  as migration inputs instead of rewriting them.
+- Local evidence: `git diff --check` and relative Markdown-link validation
+  passed.
+- Remote evidence: [push CI 32750794610](https://github.com/EonsofStupid/vyrm/actions/runs/32750794610)
+  and [pull-request CI 32750798239](https://github.com/EonsofStupid/vyrm/actions/runs/32750798239)
+  passed the full workspace verification job and Linux, macOS, and Windows
+  estate/process matrix.
+- Remaining documentation debt: the concurrently modified
+  `full-stack-gap-ledger.md` retains an older Vyrm-under-RRD diagram. The target
+  architecture explicitly supersedes it; reconcile it after the concurrent
+  change lands rather than staging unrelated work.
+- Next dependency gate: N1, the semantic-neutral `vyrm-core` to `rrflow-core`
+  migration.
 
 ## First executable slice: N1
 
