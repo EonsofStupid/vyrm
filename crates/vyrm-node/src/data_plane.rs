@@ -857,7 +857,7 @@ fn vector_execution_attributes(
         (
             "fallback_to_exact".into(),
             RuntimeValue::Bool(
-                prepared.plan().approximation_requested && selected != AccessPathKind::Hnsw,
+                prepared.plan().approximation_requested && !selected.is_approximate(),
             ),
         ),
         (
@@ -893,6 +893,7 @@ fn access_path_name(kind: AccessPathKind) -> &'static str {
         AccessPathKind::ExactScan => "exact_scan",
         AccessPathKind::ExactSegment => "exact_segment",
         AccessPathKind::Hnsw => "hnsw",
+        AccessPathKind::TurboQuant => "turboquant",
     }
 }
 

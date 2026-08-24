@@ -12,11 +12,12 @@ pub enum AccessPathKind {
     ExactScan,
     ExactSegment,
     Hnsw,
+    TurboQuant,
 }
 
 impl AccessPathKind {
-    fn is_approximate(self) -> bool {
-        self == Self::Hnsw
+    pub const fn is_approximate(self) -> bool {
+        matches!(self, Self::Hnsw | Self::TurboQuant)
     }
 }
 

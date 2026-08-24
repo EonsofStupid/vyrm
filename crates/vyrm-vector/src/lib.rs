@@ -15,6 +15,7 @@ mod plan;
 mod quantization;
 mod runtime;
 mod segment;
+mod turbo_segment;
 mod turboquant;
 
 #[cfg(feature = "accelerator")]
@@ -59,5 +60,9 @@ pub use runtime::{
 };
 pub use segment::{
     ImmutableVectorSegment, SegmentDescriptor, VectorSegmentConfig, VECTOR_SEGMENT_FORMAT_VERSION,
+};
+pub use turbo_segment::{
+    TurboQuantDescriptor, TurboQuantSegment, TurboQuantSegmentConfig,
+    TURBOQUANT_SEGMENT_FORMAT_VERSION,
 };
 pub use turboquant::{TurboQuantBits, TurboQuantVector, TURBOQUANT_FORMAT_VERSION};

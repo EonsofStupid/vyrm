@@ -48,7 +48,7 @@ impl TurboQuantBits {
         }
     }
 
-    fn padded_dimensions(self, dimensions: usize) -> usize {
+    pub(crate) fn padded_dimensions(self, dimensions: usize) -> usize {
         match self {
             Self::Bits4 => dimensions.next_multiple_of(2),
             Self::Bits2 => dimensions.next_multiple_of(4),

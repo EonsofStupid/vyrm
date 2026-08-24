@@ -1,8 +1,8 @@
 use crate::contract::invalid;
 use crate::{
     search_exact_ref, AccessPathKind, CompactDenseSegment, HnswIndex, ImmutableVectorSegment,
-    SearchHit, SearchPlan, SearchRequest, VectorCandidate, VectorCatalog, VectorPlanner,
-    VectorProjectionDescriptor,
+    SearchHit, SearchPlan, SearchRequest, TurboQuantSegment, VectorCandidate, VectorCatalog,
+    VectorPlanner, VectorProjectionDescriptor,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
@@ -16,6 +16,7 @@ pub enum VectorArtifact {
     ExactSegment(ImmutableVectorSegment),
     CompactDense(CompactDenseSegment),
     Hnsw(HnswIndex),
+    TurboQuant(TurboQuantSegment),
 }
 
 /// Exact on-disk codec identity for a cataloged vector artifact. A projection
@@ -27,6 +28,7 @@ pub enum VectorArtifactKind {
     ExactSegment,
     CompactDense,
     Hnsw,
+    TurboQuant,
 }
 
 impl VectorArtifactKind {
@@ -35,6 +37,7 @@ impl VectorArtifactKind {
             Self::ExactSegment => "exact_segment",
             Self::CompactDense => "compact_dense",
             Self::Hnsw => "hnsw",
+            Self::TurboQuant => "turboquant",
         }
     }
 
@@ -43,6 +46,7 @@ impl VectorArtifactKind {
             Self::ExactSegment => "application/vnd.vyrm.vector-exact-segment+json",
             Self::CompactDense => "application/vnd.vyrm.vector-compact-dense",
             Self::Hnsw => "application/vnd.vyrm.vector-hnsw+json",
+            Self::TurboQuant => "application/vnd.vyrm.vector-turboquant",
         }
     }
 }
@@ -53,6 +57,7 @@ impl VectorArtifact {
             Self::ExactSegment(_) => VectorArtifactKind::ExactSegment,
             Self::CompactDense(_) => VectorArtifactKind::CompactDense,
             Self::Hnsw(_) => VectorArtifactKind::Hnsw,
+            Self::TurboQuant(_) => VectorArtifactKind::TurboQuant,
         }
     }
 
@@ -61,6 +66,7 @@ impl VectorArtifact {
             Self::ExactSegment(segment) => segment.as_bytes(),
             Self::CompactDense(segment) => segment.as_bytes(),
             Self::Hnsw(index) => index.as_bytes(),
+            Self::TurboQuant(segment) => segment.as_bytes(),
         }
     }
 
@@ -73,6 +79,9 @@ impl VectorArtifact {
                 CompactDenseSegment::from_bytes(bytes).map(Self::CompactDense)
             }
             VectorArtifactKind::Hnsw => HnswIndex::from_bytes(bytes).map(Self::Hnsw),
+            VectorArtifactKind::TurboQuant => {
+                TurboQuantSegment::from_bytes(bytes).map(Self::TurboQuant)
+            }
         }
     }
 
@@ -81,6 +90,7 @@ impl VectorArtifact {
             Self::ExactSegment(segment) => segment.descriptor().clone().into(),
             Self::CompactDense(segment) => segment.descriptor().clone().into(),
             Self::Hnsw(index) => index.descriptor().clone().into(),
+            Self::TurboQuant(segment) => segment.descriptor().clone().into(),
         }
     }
 }
@@ -100,6 +110,12 @@ impl From<HnswIndex> for VectorArtifact {
 impl From<CompactDenseSegment> for VectorArtifact {
     fn from(segment: CompactDenseSegment) -> Self {
         Self::CompactDense(segment)
+    }
+}
+
+impl From<TurboQuantSegment> for VectorArtifact {
+    fn from(segment: TurboQuantSegment) -> Self {
+        Self::TurboQuant(segment)
     }
 }
 
@@ -260,9 +276,14 @@ impl VectorRuntime {
                         VectorArtifact::Hnsw(index) => {
                             index.estimated_search_cost(request, ef_search).ok()
                         }
-                        VectorArtifact::ExactSegment(_) | VectorArtifact::CompactDense(_) => None,
+                        VectorArtifact::ExactSegment(_)
+                        | VectorArtifact::CompactDense(_)
+                        | VectorArtifact::TurboQuant(_) => None,
                     })
                     .unwrap_or(descriptor.nodes.max(1) as u64),
+                VectorProjectionDescriptor::TurboQuant { descriptor } => {
+                    descriptor.candidate_versions.max(1) as u64
+                }
             };
             paths.push(descriptor.candidate_path(estimated_cost));
         }
@@ -333,7 +354,7 @@ impl VectorRuntime {
         let plan = &prepared.plan;
         let hits = match plan.selected.kind {
             AccessPathKind::ExactScan => search_exact_ref(request, &self.canonical)?,
-            AccessPathKind::ExactSegment | AccessPathKind::Hnsw => {
+            AccessPathKind::ExactSegment | AccessPathKind::Hnsw | AccessPathKind::TurboQuant => {
                 let key = (plan.selected.id.clone(), plan.selected.generation);
                 let artifact =
                     self.artifacts
@@ -362,6 +383,23 @@ impl VectorRuntime {
                     }
                     (AccessPathKind::Hnsw, VectorArtifact::Hnsw(index)) => {
                         index.search_at(request, prepared.ef_search, plan.required_source_cursor)?
+                    }
+                    (AccessPathKind::TurboQuant, VectorArtifact::TurboQuant(segment)) => {
+                        let approximate = segment.search_candidates_at(
+                            request,
+                            plan.selected.exact_rerank,
+                            plan.required_source_cursor,
+                        )?;
+                        let references = approximate
+                            .into_iter()
+                            .map(|hit| hit.reference)
+                            .collect::<BTreeSet<_>>();
+                        search_exact_ref(
+                            request,
+                            self.canonical.iter().filter(|candidate| {
+                                references.contains(&candidate.vector.reference)
+                            }),
+                        )?
                     }
                     _ => return invalid("selected vector access path has the wrong artifact kind"),
                 }
@@ -404,7 +442,10 @@ fn prepared_plan_digest(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{HnswConfig, ScoreMetric, SearchMode, VectorQuery, VectorSegmentConfig};
+    use crate::{
+        HnswConfig, ScoreMetric, SearchMode, TurboQuantBits, TurboQuantSegmentConfig, VectorQuery,
+        VectorSegmentConfig,
+    };
     use vyrm_core::{
         ReadStamp, RuntimeProperties, RuntimeRef, RuntimeVector, ScopeId, VectorValue,
     };
@@ -543,7 +584,7 @@ mod tests {
             HnswIndex::build(
                 HnswConfig {
                     id: ProjectionId::new("vector:hnsw:codec").unwrap(),
-                    scope,
+                    scope: scope.clone(),
                     field: "body".into(),
                     dimensions: 2,
                     metric: ScoreMetric::Dot,
@@ -556,17 +597,74 @@ mod tests {
                 },
                 1,
                 2,
+                values.clone(),
+            )
+            .unwrap(),
+        );
+        let turboquant = VectorArtifact::from(
+            TurboQuantSegment::build(
+                TurboQuantSegmentConfig {
+                    id: ProjectionId::new("vector:turbo:codec").unwrap(),
+                    scope,
+                    field: "body".into(),
+                    dimensions: 2,
+                    metric: ScoreMetric::Dot,
+                    bits: TurboQuantBits::Bits4,
+                    seed: 11,
+                    embedding_model: None,
+                    filter_properties: BTreeSet::new(),
+                },
+                1,
+                2,
                 values,
             )
             .unwrap(),
         );
 
-        for artifact in [exact, compact, hnsw] {
+        for artifact in [exact, compact, hnsw, turboquant] {
             let reopened =
                 VectorArtifact::from_bytes(artifact.kind(), artifact.as_bytes()).unwrap();
             assert_eq!(reopened.kind(), artifact.kind());
             assert_eq!(reopened.descriptor(), artifact.descriptor());
             assert_eq!(reopened.as_bytes(), artifact.as_bytes());
         }
+    }
+
+    #[test]
+    fn turboquant_is_planner_selected_and_exactly_reranked() {
+        let scope = ScopeId::new("instance:turbo-runtime").unwrap();
+        let values = vec![
+            candidate(&scope, 1, "a", vec![1.0, 0.0]),
+            candidate(&scope, 2, "b", vec![0.0, 1.0]),
+            candidate(&scope, 3, "c", vec![0.5, 0.5]),
+        ];
+        let mut runtime = VectorRuntime::new(values.clone()).unwrap();
+        let artifact = TurboQuantSegment::build(
+            TurboQuantSegmentConfig {
+                id: ProjectionId::new("vector:turbo:runtime").unwrap(),
+                scope: scope.clone(),
+                field: "body".into(),
+                dimensions: 2,
+                metric: ScoreMetric::Dot,
+                bits: TurboQuantBits::Bits4,
+                seed: 77,
+                embedding_model: None,
+                filter_properties: BTreeSet::new(),
+            },
+            1,
+            3,
+            values,
+        )
+        .unwrap();
+        runtime.publish(0, artifact).unwrap();
+        let execution = runtime
+            .search(
+                &request(scope, SearchMode::RequireApproximate { exact_rerank: 2 }),
+                8,
+            )
+            .unwrap();
+        assert_eq!(execution.plan.selected.kind, AccessPathKind::TurboQuant);
+        assert_eq!(execution.hits[0].reference.id.as_str(), "a");
+        assert_eq!(execution.hits[0].score, 1.0);
     }
 }

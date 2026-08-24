@@ -1,7 +1,7 @@
 use crate::contract::invalid;
 use crate::{
-    CandidatePath, HnswDescriptor, SegmentDescriptor, VectorArtifact, VectorArtifactKind,
-    EXACT_SCAN_PROJECTION_ID,
+    CandidatePath, HnswDescriptor, SegmentDescriptor, TurboQuantDescriptor, VectorArtifact,
+    VectorArtifactKind, EXACT_SCAN_PROJECTION_ID,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
@@ -107,6 +107,9 @@ impl VectorArtifactCatalogEntry {
             ) | (
                 VectorProjectionDescriptor::Hnsw { .. },
                 VectorArtifactKind::Hnsw
+            ) | (
+                VectorProjectionDescriptor::TurboQuant { .. },
+                VectorArtifactKind::TurboQuant
             )
         );
         if !kind_matches {
@@ -142,6 +145,7 @@ impl VectorArtifactCatalogEntry {
 pub enum VectorProjectionDescriptor {
     ExactSegment { descriptor: SegmentDescriptor },
     Hnsw { descriptor: HnswDescriptor },
+    TurboQuant { descriptor: TurboQuantDescriptor },
 }
 
 impl VectorProjectionDescriptor {
@@ -149,6 +153,7 @@ impl VectorProjectionDescriptor {
         match self {
             Self::ExactSegment { descriptor } => &descriptor.stamp,
             Self::Hnsw { descriptor } => &descriptor.stamp,
+            Self::TurboQuant { descriptor } => &descriptor.stamp,
         }
     }
 
@@ -156,6 +161,7 @@ impl VectorProjectionDescriptor {
         match self {
             Self::ExactSegment { descriptor } => &descriptor.scope,
             Self::Hnsw { descriptor } => &descriptor.scope,
+            Self::TurboQuant { descriptor } => &descriptor.scope,
         }
     }
 
@@ -163,6 +169,7 @@ impl VectorProjectionDescriptor {
         match self {
             Self::ExactSegment { descriptor } => &mut descriptor.stamp,
             Self::Hnsw { descriptor } => &mut descriptor.stamp,
+            Self::TurboQuant { descriptor } => &mut descriptor.stamp,
         }
     }
 
@@ -170,6 +177,7 @@ impl VectorProjectionDescriptor {
         match self {
             Self::ExactSegment { descriptor } => descriptor.validate(),
             Self::Hnsw { descriptor } => descriptor.validate(),
+            Self::TurboQuant { descriptor } => descriptor.validate(),
         }
     }
 
@@ -177,6 +185,7 @@ impl VectorProjectionDescriptor {
         match self {
             Self::ExactSegment { descriptor } => descriptor.candidate_path(estimated_cost),
             Self::Hnsw { descriptor } => descriptor.candidate_path(estimated_cost),
+            Self::TurboQuant { descriptor } => descriptor.candidate_path(estimated_cost),
         }
     }
 
@@ -185,6 +194,7 @@ impl VectorProjectionDescriptor {
             (self, other),
             (Self::ExactSegment { .. }, Self::ExactSegment { .. })
                 | (Self::Hnsw { .. }, Self::Hnsw { .. })
+                | (Self::TurboQuant { .. }, Self::TurboQuant { .. })
         )
     }
 }
@@ -198,6 +208,12 @@ impl From<SegmentDescriptor> for VectorProjectionDescriptor {
 impl From<HnswDescriptor> for VectorProjectionDescriptor {
     fn from(descriptor: HnswDescriptor) -> Self {
         Self::Hnsw { descriptor }
+    }
+}
+
+impl From<TurboQuantDescriptor> for VectorProjectionDescriptor {
+    fn from(descriptor: TurboQuantDescriptor) -> Self {
+        Self::TurboQuant { descriptor }
     }
 }
 

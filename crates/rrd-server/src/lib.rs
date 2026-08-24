@@ -1017,6 +1017,7 @@ impl<E: Engine> RrdService<E> {
             vyrm_vector::AccessPathKind::ExactScan => "exact_scan",
             vyrm_vector::AccessPathKind::ExactSegment => "exact_segment",
             vyrm_vector::AccessPathKind::Hnsw => "hnsw",
+            vyrm_vector::AccessPathKind::TurboQuant => "turboquant",
         };
         Ok(VectorSearchResult {
             scope: request.scope.clone(),
@@ -1028,7 +1029,7 @@ impl<E: Engine> RrdService<E> {
             plan_sha256: prepared.plan_digest().into(),
             access_path: CanonicalId::new(access_path)
                 .map_err(|error| ServiceError::Vector(error.to_string()))?,
-            exact: execution.plan.selected.kind != vyrm_vector::AccessPathKind::Hnsw,
+            exact: !execution.plan.selected.kind.is_approximate(),
             hits: execution
                 .hits
                 .into_iter()
