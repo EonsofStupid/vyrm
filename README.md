@@ -28,8 +28,9 @@ consumer of that public contract. It negotiates capabilities, covers all 21
 currently published operations, bounds time and response bytes, preserves
 typed errors and request identity, and safely retries reads or
 idempotency-bound mutations after transport loss. It remains loopback-only
-until the remote TLS gate is qualified; the remaining .NET client and shared
-conformance matrix remain open.
+until the remote TLS gate is qualified. All six intended language clients now
+have executable walking skeletons; shared conformance and release qualification
+remain open.
 
 The TypeScript F5 walking skeleton is in [`sdks/typescript`](sdks/typescript).
 It generates exact operation/request/response types from the authoritative
@@ -59,6 +60,13 @@ and enforces exact envelopes, bounded reads, deadlines, safe retries,
 authentication, resources, idempotency, redirect denial, and loopback-only
 cleartext. Maven compiles with warnings as errors and runs real-loopback JUnit 6
 tests; async transport, generated payload models, shared conformance, and
+publication remain open.
+
+The asynchronous .NET 10 F5 walking skeleton is in
+[`sdks/dotnet`](sdks/dotnet). It generates a closed route enum from OpenAPI and
+uses only `HttpClient`/`System.Text.Json` at runtime. Nullable analysis,
+warnings-as-errors, formatting, locked restore, xUnit v3 transport/auth/error
+tests, and NuGet packing pass. Generated payload models, shared conformance, and
 publication remain open.
 
 F3 now has its first authority artifact in

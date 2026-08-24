@@ -680,3 +680,27 @@ index.
 - Limit: async/caller cancellation, generated per-payload models, dependency
   verification, shared real-server/version conformance, and Maven Central
   publication remain open. .NET is the final F5 breadth slice.
+
+## 2026-08-24 — generated .NET RRD client foundation
+
+- Commit: `e99786a` (`feat(sdk): add generated .NET RRD client`).
+- Generated surface: a shell-free generator emits a closed enum and endpoint
+  switch carrying method/path/authentication/mutation metadata for all 21
+  OpenAPI operations, with exact checked-in drift detection.
+- Runtime: the asynchronous .NET 10 client uses only `HttpClient` and
+  `System.Text.Json` at runtime. It covers every operation plus capability,
+  catalogue, OpenAPI, and session helpers; accepts cancellation; combines
+  absolute/per-attempt deadlines; rejects redirects and non-loopback cleartext;
+  validates identities/resources; requires mutation idempotency; bounds streamed
+  bodies; correlates response identity; applies API-key/session auth; and retries
+  only safe transport failures.
+- Validation/tooling: closed-field parsing rejects malformed envelope/outcome/
+  error shapes. Nullable analysis and all warnings fail the build; package
+  dependency graphs are locked.
+- Evidence: generator drift, locked restore, `dotnet format`, Release build,
+  three explicitly enumerated xUnit v3 transport/auth/error tests, and NuGet
+  packing pass with no package warning.
+- Limit: all six intended F5 language clients now have executable walking
+  skeletons. Generated payload completeness, shared real-server/released-version
+  conformance, examples/reference output, and publication remain open. The next
+  breadth slice moves to F6 multi-model/query/index/realtime foundations.

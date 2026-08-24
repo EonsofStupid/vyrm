@@ -418,8 +418,9 @@ wire type derives JSON Schema, and deterministic OpenAPI 3.1 is built from that
 catalogue rather than maintained separately. The server publishes both at
 `GET /v1/schema/endpoints` and `GET /v1/schema/openapi`; a frozen SHA-256 fails
 unreviewed schema drift. This removes handwritten route and payload discovery
-as SDK sources. TypeScript, Python, Go, and Java now have walking skeletons;
-the .NET package and shared black-box conformance remain open.
+as SDK sources. Rust, TypeScript, Python, Go, Java, and .NET now have executable
+walking skeletons; shared black-box conformance and release qualification
+remain open.
 
 The first Rust client is now implemented in `rrd-client` and specified by
 [`rrd-rust-client-v1.md`](rrd-rust-client-v1.md). It is async, depends only on
@@ -473,8 +474,18 @@ resources, mutation idempotency, combined deadlines, safe I/O retry,
 authentication, redirect denial, and loopback-only cleartext. Maven/Java 21
 warnings-as-errors compilation, generator drift, packaging, and real-loopback
 JUnit 6 tests gate it. Async/caller cancellation, generated payload types,
-dependency verification, shared conformance, and publication remain open. .NET
-remains absent.
+dependency verification, shared conformance, and publication remain open.
+
+The asynchronous .NET walking skeleton is implemented in `sdks/dotnet` and
+specified by [`rrd-dotnet-client-v1.md`](rrd-dotnet-client-v1.md). Its generator
+emits a closed operation enum/switch with route/auth/mutation metadata for all
+21 operations. `HttpClient` and `System.Text.Json` provide a third-party-free
+runtime with caller cancellation, bounded streaming, exact envelopes,
+correlation, resources, mutation idempotency, combined deadlines, safe retry,
+authentication, redirect denial, and loopback-only cleartext. .NET 10 nullable
+analysis/warnings-as-errors, formatting, locked restore, xUnit v3 behavioral
+tests, drift detection, and NuGet packing gate it. Generated payload types,
+shared real-server/version conformance, and publication remain open.
 
 **Deliverables**
 

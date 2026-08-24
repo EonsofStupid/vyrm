@@ -14,7 +14,7 @@ the complete product-capability inventories for
 [Qdrant](docs/qdrant-capability-inventory.md). Public loopback server/session/
 transaction, persistent estate, deny-by-default security/audit, and the first
 supported Rust client now have executable walking skeletons. The largest
-unfilled areas are the remaining .NET SDK, object-complete/signed backup
+unfilled areas are shared/released SDK conformance, object-complete/signed backup
 policy, live subscriptions, general multi-model query and indexes, the full
 vector query/payload-index/quantization lifecycle, production distributed/
 Kubernetes operation, and authoritative Connectome management.
@@ -135,7 +135,11 @@ Kubernetes operation, and authoritative Connectome management.
   gates. The generated Java 21 walking skeleton covers all 21 operations,
   compiles with warnings as errors, and passes real-loopback JUnit retry/auth/
   query/error tests. Shared conformance, packaging, generated payload models,
-  async Python/Java, and the .NET client keep F5 open.
+  async Python/Java. The generated asynchronous .NET 10 walking skeleton covers
+  all 21 operations and passes formatting, warnings-as-errors build, locked
+  restore, three xUnit transport/auth/error tests, and NuGet packing. All six
+  intended clients now exist; shared real-server/version conformance, complete
+  generated payload models, and release publication keep F5 open.
 
 - The bi-temporal claim kernel has immutable supersession corrections,
   canonical SHA-256 identities covering provenance and validity, and atomic
