@@ -534,3 +534,27 @@ index.
   JSON Schema bundle or a supported client. Next is the Rust network client and
   shared black-box fixture, followed by TypeScript, Python, Go, Java, and .NET
   packages generated from the same operation/type vocabulary.
+
+## 2026-08-24 — supported asynchronous Rust RRD client
+
+- Commit: `0e6f850` (`feat(sdk): add async Rust RRD client`).
+- Boundary: introduced `rrd-client` as the first supported SDK consumer of the
+  public `rrd-contract`; its release graph does not depend on storage, query,
+  server, estate, or security implementation crates.
+- Surface: typed async methods cover capability/catalogue negotiation, session
+  lifecycle, transactions, VyrmQL, vector search, changefeed, managed backup/
+  restore, estate projection, and protected audit.
+- Safety: the client rejects remote cleartext, validates request envelopes and
+  response identity, caps response accumulation at four MiB, applies per-attempt
+  and absolute deadlines, maps typed API errors, and bounds transport retries
+  to reads or mutations carrying contract-enforced idempotency keys.
+- Evidence: a real secured server behind a TCP fault proxy drops the first
+  connection and proves negotiation recovery, wrong-key classification,
+  session creation, exact query, expired-deadline denial, transaction preview/
+  abort, retained changefeed, protected audit, and non-loopback rejection.
+- Verification: `rrd-contract`, `rrd-client`, `rrd-security`, and `rrd-server`
+  tests passed, including the 16-case HTTP process suite and process-kill
+  matrices; strict all-target/all-feature Clippy and `git diff --check` passed.
+- Limit: F5 remains open. Shared generated schemas/conformance and TypeScript,
+  Python, Go, Java, and .NET clients are next; TLS/distributed qualification and
+  released-version compatibility remain later gates.
