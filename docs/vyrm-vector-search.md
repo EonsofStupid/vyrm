@@ -65,7 +65,13 @@ operation. It resolves the named collection space, captures one authoritative
 read stamp, calls the same `materialize_visible` primitive as search, applies an
 optional payload filter, orders exact references, and returns bounded vector,
 provenance, payload, source-cursor, and resume evidence. The route has its own
-deny-by-default action. Dedicated point retrieval and deletion remain open.
+deny-by-default action.
+
+`POST /v1/vector/points/retrieve` accepts a bounded unique identity batch,
+resolves the same collection visibility snapshot, returns found points in
+request order, and explicitly returns missing references. It has an independent
+authorization action and does not infer absence from an omitted result.
+First-class deletion remains open.
 
 ## Rebuildable projections
 

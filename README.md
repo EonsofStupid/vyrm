@@ -24,7 +24,7 @@ internal Rust API being mislabeled as an SDK. Its scope and limitations are in
 [`docs/rrd-public-contract.md`](docs/rrd-public-contract.md).
 
 The first F5 client is [`rrd-client`](crates/rrd-client), an asynchronous Rust
-consumer of that public contract. It negotiates capabilities, covers all 27
+consumer of that public contract. It negotiates capabilities, covers all 28
 currently published operations, bounds time and response bytes, preserves
 typed errors and request identity, and safely retries reads or
 idempotency-bound mutations after transport loss. It remains loopback-only
@@ -40,7 +40,7 @@ current route catalogue; shared real-server conformance and release packaging
 remain open.
 
 The Python F5 walking skeleton is in [`sdks/python`](sdks/python). It derives
-the closed 27-operation route surface from the same OpenAPI authority, validates
+the closed 28-operation route surface from the same OpenAPI authority, validates
 untrusted envelopes with Pydantic, and enforces the same bounded retry,
 identity, deadline, resource, idempotency, and loopback-cleartext rules. uv,
 Ruff, strict mypy, pytest, and package builds gate it; generated payload models,
@@ -114,7 +114,9 @@ Authenticated deterministic point scrolling is also public. It resolves a
 collection/name, captures one exact read stamp, reuses the search visibility
 primitive, applies valid-time/model/payload rules, orders by point reference,
 and returns bounded payload/vector pages with an explicit resume reference.
-Dedicated point retrieval and deletion remain open.
+Authenticated batch retrieval now returns requested points in request order and
+explicitly reports missing references at the same exact read coordinate.
+First-class point deletion remains open.
 
 F3 now has its first authority artifact in
 [`rrd-estate`](crates/rrd-estate): a bounded, versioned estate document whose

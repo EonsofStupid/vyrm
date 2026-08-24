@@ -994,3 +994,20 @@ index.
   and Go quality gates pass; Java/.NET generation drift checks pass.
 - Limit: this slice does not yet add direct point retrieval or a first-class
   deletion/tombstone mutation.
+
+## 2026-08-24 — exact collection point retrieval
+
+- Commit: `1709a12` (`feat(vector): add exact point retrieval`).
+- Contract: `POST /v1/vector/points/retrieve` accepts 1..=4,096 unique typed
+  references and one collection/vector/valid-time coordinate. It returns found
+  points in caller order and an explicit missing-reference list under one read
+  manifest/cursor, rather than making omission ambiguous.
+- Semantics/security: retrieval resolves the persistent named-vector contract,
+  scans within the declared bound, and uses the same shared visibility
+  primitive as search and scroll. It has its own deny-by-default action.
+- Evidence: the real process denies unauthenticated retrieval, then returns one
+  stored point and one explicit missing identity after authentication. Contract,
+  server, strict Clippy, TypeScript, Python, Go, and all route-generation gates
+  pass. The reviewed 28-operation OpenAPI digest is
+  `68d87505b85d7d99e6a58ce49404040d832295c6572f70f791db635dd45bbf64`.
+- Limit: first-class point deletion/tombstones remain open.
