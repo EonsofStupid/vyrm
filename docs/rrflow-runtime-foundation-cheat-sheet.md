@@ -1,32 +1,91 @@
 # RRFlow runtime foundation cheat sheet
 
-Status: architecture and implementation guardrail. This document freezes the
-provider-neutral runtime boundary that implementation work must satisfy. It is
-not a claim that the current repository already satisfies the contract.
+Status: authoritative pre-release architecture and implementation guardrail.
+This document freezes the provider-neutral runtime boundary that implementation
+work must satisfy. It is not a claim that the current repository already
+satisfies the contract.
+
+This decision supersedes older repository text that presents Vyrm as a
+permanent product or independently branded storage subsystem. Those references
+describe current code and migration debt, not the target architecture.
 
 ## Product boundary and naming
 
-RRFlow is one cohesive product and runtime. Its internal layers are modules of
-one system, not separately governed applications:
+**RRFlow is the whole product. RRD means Reason Ready Daemon.** RRD is RRFlow's
+durable runtime authority and is the replacement for the pre-release Vyrm
+identity. Storage, query, indexing, reasoning state, lifecycle enforcement, and
+diagnostics compose behind RRD; they are not separate products or independently
+persisted verticals.
+
+RRFlow remains one cohesive system:
 
 ```text
 RRFlow
-├─ RRD: authoritative data and event runtime
-├─ storage: WAL, MVCC, LSM, snapshots, recovery
-├─ query: RRFlowQL, Arrow batches, DataFusion planning/execution
-├─ indexes: record, relation, graph, scalar, vector, temporal, geo
-├─ AI runtime: attunement, preflight, recall, authorization, observation
-├─ rrflowd: embedded/remote transport and administration
+├─ RRD: Reason Ready Daemon
+│  ├─ storage: WAL, MVCC, LSM, columnar, snapshots, recovery
+│  ├─ query: RRFlowQL, Arrow batches, DataFusion planning/execution
+│  ├─ indexes: record, relation, graph, scalar, vector, temporal, geo
+│  ├─ knowledge: project, operator, provenance, recall, reasoning state
+│  ├─ lifecycle: attunement, preflight, authorization, observation, verification
+│  ├─ service: embedded, local-daemon, remote, and administrative faces
+│  └─ observability: authoritative replay plus derived traces and diagnostics
+├─ rrflow: project-facing CLI and command boundary
+├─ adapters and SDKs: provider/runtime/language integration surfaces
 └─ Connectome: local and enterprise operator client
 ```
 
 Use `RRFlow` in all new product, protocol, CLI, configuration, documentation,
-and module names. Existing `vyrm-*` package names and persisted identifiers are
-legacy migration inputs. Do not perform a blind text replacement: crate names,
-CLI/configuration compatibility, environment variables, protocol fields, and
-on-disk format identifiers require an explicit migration matrix. A legacy
-identifier may remain only where changing it would make existing data or
-clients unreadable.
+and module names. Use `RRD` only for the Reason Ready Daemon role and its public
+service contract. Do not use RRD as a second product brand.
+
+Existing `vyrm-*`, `vyrmd`, and VyrmQL names are pre-release implementation
+names awaiting migration; they do not define permanent architectural
+boundaries. The intended replacements are RRFlow-owned crates/modules,
+RRFlowQL, and the RRD service/runtime surface. Do not perform a blind text
+replacement: crate dependency order, CLI/configuration compatibility,
+environment variables, protocol fields, generated SDKs, and on-disk format
+identifiers require an explicit migration matrix. A legacy identifier may
+remain temporarily only as an isolated compatibility reader or forwarding shim
+with a removal gate. No new public surface may introduce a Vyrm name.
+
+### Cohesion invariant
+
+RRD must expose one logical engine contract over all supported models. It has:
+
+- one authoritative catalogue for schemas, collections/tables, relations,
+  indexes, vectors, temporal/geo models, reasoning state, and lifecycle data;
+- one transaction coordinator and one snapshot/read-stamp model for operations
+  that span those capabilities;
+- one query and execution plane, with specialized physical operators behind
+  the shared logical contract rather than separate user-facing engines;
+- one event/outbox boundary for durable mutations, live-query publication,
+  projection invalidation, index maintenance, audit, and reasoning events;
+- one security authority and policy-decision path;
+- identical logical behavior through embedded, local-daemon, and remote faces;
+- one Connectome control/diagnostic model derived from authoritative RRD state.
+
+Specialized LSM, columnar, graph, vector, and inference components may have
+their own physical data structures. They may not create competing catalogues,
+transaction truth, identity systems, authorization rules, or product
+lifecycle state. An adapter, SDK, UI, or provider hook never owns authoritative
+RRFlow state.
+
+### Pre-release rename rule
+
+Because the product has not reached a stable release, implementation should
+converge on RRFlow/RRD now instead of preserving Vyrm as a permanent layer.
+Compatibility is evidence-driven, not assumed:
+
+1. Inventory every Vyrm-named crate, binary, protocol field, environment
+   variable, generated client symbol, file path, and persisted format marker.
+2. Freeze a reviewed old-to-new mapping and dependency-ordered migration plan.
+3. Make all new public contracts use RRFlow/RRD names.
+4. Migrate one cohesive dependency slice at a time with compile, reopen,
+   recovery, SDK, and cross-version fixtures.
+5. Keep narrow readers/shims only where repository evidence proves they are
+   required; attach an explicit removal condition to each one.
+6. Remove the obsolete Vyrm vocabulary before the first stable release unless
+   a deliberately supported compatibility promise says otherwise.
 
 ## Non-negotiable architecture
 
@@ -405,3 +464,71 @@ other targets.
     real and restart-safe.
 
 No new adapter-specific feature may precede the neutral contract it consumes.
+
+## Pre-compaction continuation brief
+
+### Objective
+
+Build RRFlow as one cohesive, provider-neutral AI data/runtime system. RRD, the
+Reason Ready Daemon, is the durable runtime authority within RRFlow and replaces
+Vyrm as the target identity. Connectome visualizes and operates that authority;
+it does not reimplement it. Provider hooks, MCP, SDKs, command runners, and
+local/frontier models all bind to the same lifecycle and data contracts.
+
+### Current truth
+
+- The repository contains substantial working capabilities, but their current
+  crate names and vertical organization do not prove that the cohesive target
+  contract is complete.
+- Existing Vyrm names are migration inputs, not permission to retain Vyrm as a
+  second engine or product.
+- The provider-neutral event envelope, attunement `ProjectProfile`, persisted
+  `PreflightReceipt`, exact-argv authorization proxy, and adapter conformance
+  suite are required foundation work and are not declared complete here.
+- Older README, plan, status, and architecture statements that call Vyrm RRD's
+  permanent native engine must be reconciled through the controlled rename;
+  this document is authoritative when those statements conflict.
+- Maintenance/pruning work is postponed. It must not displace the cohesive
+  engine and runtime foundation.
+
+### Next implementation session
+
+1. Audit the worktree and preserve unrelated or concurrent changes.
+2. Turn this document's naming and cohesion rules into a reviewed migration and
+   dependency map; do not bulk-rename the repository.
+3. Freeze canonical lifecycle types, state transitions, decisions, and
+   conformance fixtures in an RRFlow-owned module.
+4. Implement deterministic project attunement and freshness as a persisted
+   `ProjectProfile` without provider assumptions.
+5. Implement the persisted preflight receipt and exact-argv, one-shot mutation
+   authorization boundary.
+6. Extract existing Claude-specific behavior behind the shared adapter
+   contract, then add other adapters only against that contract.
+7. Join lifecycle state to RRD's shared catalogue, transaction, snapshot,
+   graph, query, index, audit, and recovery authority; do not create another
+   sidecar store or parallel engine.
+8. Prove embedded/local/remote equivalence, restart safety, fail-closed
+   behavior, and the full required CI platform matrix before claiming the
+   foundation verified.
+
+### Explicit prohibitions
+
+- Do not treat a provider, package manager, MCP server, UI, or physical storage
+  backend as RRFlow's foundation.
+- Do not build provider-specific policy or persistence.
+- Do not split documents, graph, vector, reasoning, lifecycle, and audit into
+  independently authoritative products.
+- Do not use local CI success as proof of the remote platform matrix.
+- Do not optimize blanket benchmarks before the shared contract and recovery
+  invariants are real.
+- Do not claim SurrealDB-, Qdrant-, Fjall-, or frontier-runtime superiority
+  without controlled, reproducible, capability-appropriate evidence.
+
+### Resume instruction
+
+At the beginning of the next implementation session, read this document in
+full, inspect the current worktree and recent history, and restate the first
+dependency-critical slice before editing code. Treat the product/naming,
+cohesion, lifecycle, enforcement, and release-gate sections as acceptance
+criteria. Update this document when a decision changes; update the implementation
+journal only when executable evidence lands.
