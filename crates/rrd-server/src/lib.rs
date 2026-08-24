@@ -2,24 +2,26 @@
 
 mod http;
 
-pub use http::{HttpError, RRD_MAX_BODY_BYTES, RrdHttpServer, load_or_create_token_key};
+pub use http::{load_or_create_token_key, HttpError, RrdHttpServer, RRD_MAX_BODY_BYTES};
 
 use hmac::{Hmac, KeyInit, Mac};
 use rrd_contract::{
-    AbortTransaction, AuditPage, AuditRecordSnapshot, BeginTransaction, CanonicalId,
-    ChangeMutationSnapshot, ChangefeedFollowResult, ChangefeedPage, ChangefeedValidation,
-    ClaimChangeSnapshot, ClaimPromotionSnapshot, ClaimTierSnapshot, CloseSession, CommitReceipt,
-    CommitTransaction, CorrelationId, CreateInstanceBackup, CreateInstanceBackupResult,
-    CreateSession, DataEventSchema, DataGeoPoint, DataGeoValue, DataObjectReceipt, DataProperties,
-    DataPropertySchema, DataRecordSchema, DataReference, DataRelationSchema, DataSchemaRegistry,
-    DataSeriesValue, DataValueType, DataVectorNormalization, DataVectorValue, ExecuteQuery,
-    FollowChangefeed, InstanceBackupCatalogueSnapshot, InstanceBackupSnapshot, ListInstanceBackups,
-    LogicalArchiveSnapshot, PreviewTransaction, QueryExecutionSnapshot, QueryPlanCandidate,
-    QueryPlanSnapshot, QueryResult, QueryRowSnapshot, QueryValue, ReadAudit, ReadChangefeed,
-    RenewSession, RestoreInstanceBackup, RestoreInstanceBackupResult, RuntimeChangeSnapshot,
-    SearchVectors, SessionEndState, SessionLease, SessionLimits, SessionTermination,
-    TransactionLease, TransactionMutation, TransactionPreview, TransactionState, VectorSearchHit,
-    VectorSearchMetric, VectorSearchQuery, VectorSearchResult, transaction_operation_sha256,
+    transaction_operation_sha256, AbortTransaction, AuditPage, AuditRecordSnapshot,
+    BeginTransaction, CanonicalId, ChangeMutationSnapshot, ChangefeedFollowResult, ChangefeedPage,
+    ChangefeedValidation, ClaimChangeSnapshot, ClaimPromotionSnapshot, ClaimTierSnapshot,
+    CloseSession, CommitReceipt, CommitTransaction, CorrelationId, CreateInstanceBackup,
+    CreateInstanceBackupResult, CreateSession, DataEventSchema, DataGeoPoint, DataGeoValue,
+    DataObjectReceipt, DataProperties, DataPropertySchema, DataRecordSchema, DataReference,
+    DataRelationSchema, DataSchemaRegistry, DataSeriesValue, DataValueType,
+    DataVectorNormalization, DataVectorValue, ExecuteQuery, FollowChangefeed,
+    InstanceBackupCatalogueSnapshot, InstanceBackupSnapshot, ListInstanceBackups,
+    LiveQueryDeltaResult, LiveQueryRowChange, LogicalArchiveSnapshot, PollLiveQuery,
+    PreviewTransaction, QueryExecutionSnapshot, QueryPlanCandidate, QueryPlanSnapshot, QueryResult,
+    QueryRowSnapshot, QueryValue, ReadAudit, ReadChangefeed, RenewSession, RestoreInstanceBackup,
+    RestoreInstanceBackupResult, RuntimeChangeSnapshot, SearchVectors, SessionEndState,
+    SessionLease, SessionLimits, SessionTermination, TransactionLease, TransactionMutation,
+    TransactionPreview, TransactionState, VectorSearchHit, VectorSearchMetric, VectorSearchQuery,
+    VectorSearchResult,
 };
 use serde::{Deserialize, Serialize};
 use sha2::Sha256;
@@ -28,12 +30,12 @@ use std::fmt;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 use vyrm_core::{
-    Claim, EmbeddingProvenance, GeoPoint, GeoValue, ObjectReceipt, ObjectReference, Predicate,
-    Producer, PromotionState, RuntimeCommit, RuntimeEvent, RuntimeEventSchema, RuntimeGeo,
-    RuntimeMutation, RuntimeProperties, RuntimePropertySchema, RuntimeRecord, RuntimeRecordSchema,
-    RuntimeRef, RuntimeRelation, RuntimeRelationSchema, RuntimeSchemaRegistry, RuntimeSeriesSample,
-    RuntimeType, RuntimeValue, RuntimeValueType, RuntimeVector, ScopeId, SeriesValue, Subject,
-    Tier, VectorNormalization, VectorValue, digest,
+    digest, Claim, EmbeddingProvenance, GeoPoint, GeoValue, ObjectReceipt, ObjectReference,
+    Predicate, Producer, PromotionState, RuntimeCommit, RuntimeEvent, RuntimeEventSchema,
+    RuntimeGeo, RuntimeMutation, RuntimeProperties, RuntimePropertySchema, RuntimeRecord,
+    RuntimeRecordSchema, RuntimeRef, RuntimeRelation, RuntimeRelationSchema, RuntimeSchemaRegistry,
+    RuntimeSeriesSample, RuntimeType, RuntimeValue, RuntimeValueType, RuntimeVector, ScopeId,
+    SeriesValue, Subject, Tier, VectorNormalization, VectorValue,
 };
 use vyrm_store::{ControlTransition, Engine};
 
@@ -361,6 +363,85 @@ impl<E: Engine> RrdService<E> {
                 truncated: execution.truncated,
             },
             rows,
+        })
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn poll_live_query(
+        &self,
+        session_id: &CorrelationId,
+        token: &CorrelationId,
+        request: &PollLiveQuery,
+        now: u64,
+        request_id: &str,
+        operation_id: &str,
+    ) -> Result<LiveQueryDeltaResult> {
+        request
+            .validate()
+            .map_err(|error| ServiceError::Query(error.to_string()))?;
+        self.authorize(session_id, token, now, request_id, operation_id)?;
+        let expected_scope = format!("instance:{}", self.instance);
+        if request.scope != expected_scope {
+            return Err(ServiceError::WrongScope);
+        }
+        let scope = ScopeId::new(request.scope.clone())
+            .map_err(|error| ServiceError::Query(error.to_string()))?;
+        let query = vyrm_ql::parse(&request.query)
+            .map_err(|error| ServiceError::Query(error.to_string()))?;
+        let parameters = request
+            .parameters
+            .iter()
+            .map(|(name, value)| Ok((name.clone(), runtime_value(value)?)))
+            .collect::<Result<vyrm_mx::Parameters>>()?;
+        let execution = vyrm_mx::ExecutionBudget {
+            max_scanned_changes: usize::try_from(request.budget.max_scanned_changes)
+                .map_err(|_| ServiceError::Query("query scan budget exceeds usize".into()))?,
+            max_rows: usize::try_from(request.budget.max_rows)
+                .map_err(|_| ServiceError::Query("query row budget exceeds usize".into()))?,
+            max_output_bytes: usize::try_from(request.budget.max_output_bytes)
+                .map_err(|_| ServiceError::Query("query output budget exceeds usize".into()))?,
+            max_batch_rows: usize::try_from(request.budget.max_batch_rows)
+                .map_err(|_| ServiceError::Query("query batch budget exceeds usize".into()))?,
+        };
+        let delta = vyrm_mx::poll_live_query(
+            &self.engine,
+            &scope,
+            &query,
+            &parameters,
+            request.after_cursor,
+            &vyrm_mx::LiveQueryBudget {
+                execution,
+                max_delta_rows: usize::try_from(request.max_delta_rows).map_err(|_| {
+                    ServiceError::Query("live query delta budget exceeds usize".into())
+                })?,
+            },
+        )
+        .map_err(|error| ServiceError::Query(error.to_string()))?;
+        Ok(LiveQueryDeltaResult {
+            query_sha256: delta.query_digest,
+            from_cursor: delta.from_cursor,
+            through_cursor: delta.through_cursor,
+            head_cursor: delta.head_cursor,
+            added: delta
+                .added
+                .iter()
+                .map(public_query_row)
+                .collect::<Result<_>>()?,
+            updated: delta
+                .updated
+                .iter()
+                .map(|change| {
+                    Ok(LiveQueryRowChange {
+                        before: public_query_row(&change.before)?,
+                        after: public_query_row(&change.after)?,
+                    })
+                })
+                .collect::<Result<_>>()?,
+            removed: delta
+                .removed
+                .iter()
+                .map(public_query_row)
+                .collect::<Result<_>>()?,
         })
     }
 
@@ -1723,6 +1804,17 @@ fn query_value(value: &RuntimeValue) -> Result<QueryValue> {
                 .map(|(name, value)| Ok((name.clone(), query_value(value)?)))
                 .collect::<Result<_>>()?,
         ),
+    })
+}
+
+fn public_query_row(row: &vyrm_mx::QueryRow) -> Result<QueryRowSnapshot> {
+    Ok(QueryRowSnapshot {
+        identity: row.identity.clone(),
+        values: row
+            .values
+            .iter()
+            .map(|(name, value)| Ok((name.clone(), query_value(value)?)))
+            .collect::<Result<_>>()?,
     })
 }
 

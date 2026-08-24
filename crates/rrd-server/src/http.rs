@@ -1,22 +1,22 @@
 use crate::{RrdService, ServiceError};
-use axum::Router;
-use axum::body::{Body, Bytes, to_bytes};
+use axum::body::{to_bytes, Body, Bytes};
 use axum::extract::{Request, State};
-use axum::http::{HeaderMap, HeaderValue, Method, StatusCode, header};
+use axum::http::{header, HeaderMap, HeaderValue, Method, StatusCode};
 use axum::response::Response;
 use axum::routing::any;
+use axum::Router;
 use rrd_contract::{
     AbortTransaction, AuditDecision, AuditPhase, BeginTransaction, CanonicalId,
     CapabilityDescriptor, CapabilityStatus, CloseSession, CommitTransaction, CorrelationId,
     CreateInstanceBackup, CreateSession, DeploymentMode, ErrorBody, ErrorCode, ExecuteQuery,
-    FollowChangefeed, ListInstanceBackups, Liveness, PROTOCOL, PROTOCOL_VERSION,
-    PreviewTransaction, ReadAudit, ReadChangefeed, ReadEstate, Readiness, RenewSession,
-    RequestContext, RequestEnvelope, ResourceId, ResourceKind, ResponseEnvelope, ResponseOutcome,
-    RestoreInstanceBackup, SearchVectors, ServiceCapabilities,
+    FollowChangefeed, ListInstanceBackups, Liveness, PollLiveQuery, PreviewTransaction, ReadAudit,
+    ReadChangefeed, ReadEstate, Readiness, RenewSession, RequestContext, RequestEnvelope,
+    ResourceId, ResourceKind, ResponseEnvelope, ResponseOutcome, RestoreInstanceBackup,
+    SearchVectors, ServiceCapabilities, PROTOCOL, PROTOCOL_VERSION,
 };
 use rrd_security::{Action as SecurityAction, AuditRecord, SecurityRepository};
-use serde::Serialize;
 use serde::de::DeserializeOwned;
+use serde::Serialize;
 use std::collections::BTreeMap;
 use std::fmt;
 use std::fs::{File, OpenOptions};
@@ -24,8 +24,8 @@ use std::future::Future;
 use std::io::{self, Read, Write};
 use std::net::{SocketAddr, TcpListener};
 use std::path::Path;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 use vyrm_core::digest;
 use vyrm_store::{Engine, Error as StoreError, PersistentEngine};
@@ -230,6 +230,7 @@ impl AppState {
             }
             (Method::POST, "/v1/transactions") => self.begin_transaction(&headers, &body, now),
             (Method::POST, "/v1/query") => self.execute_query(&headers, &body, now),
+            (Method::POST, "/v1/query/live/poll") => self.poll_live_query(&headers, &body, now),
             (Method::POST, "/v1/backups") => self.create_instance_backup(&headers, &body, now),
             (Method::POST, "/v1/backups/list") => self.list_instance_backups(&headers, &body, now),
             (Method::POST, "/v1/restores") => self.restore_instance_backup(&headers, &body, now),
@@ -479,6 +480,29 @@ impl AppState {
             |envelope, session, token| {
                 self.service
                     .execute_query(
+                        session,
+                        token,
+                        &envelope.payload,
+                        now,
+                        envelope.context.request_id.as_str(),
+                        envelope.context.operation_id.as_str(),
+                    )
+                    .map_err(api_error)
+            },
+        )
+    }
+
+    fn poll_live_query(&self, headers: &HeaderMap, body: &[u8], now: u64) -> HttpResponse {
+        self.with_authenticated_envelope::<PollLiveQuery, _, _>(
+            headers,
+            body,
+            now,
+            false,
+            SecurityAction::QueryLivePoll,
+            None,
+            |envelope, session, token| {
+                self.service
+                    .poll_live_query(
                         session,
                         token,
                         &envelope.payload,

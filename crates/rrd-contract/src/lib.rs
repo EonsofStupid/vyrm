@@ -14,7 +14,7 @@ use std::fmt;
 pub const PROTOCOL: &str = "rrd";
 pub const PROTOCOL_VERSION: u16 = 1;
 pub const OPENAPI_DOCUMENT_SHA256: &str =
-    "b348cc057bf70e482f41d5967b9a75fdb156336794cf874ad373974af14b4941";
+    "9433b9def5ae25e34e4e0dc384a2af8a95cafe938e47bee79f2e2e59753c314f";
 pub const MAX_ID_BYTES: usize = 128;
 pub const MAX_MESSAGE_BYTES: usize = 4_096;
 pub const MAX_CAPABILITIES: usize = 512;
@@ -27,6 +27,7 @@ pub const MAX_QUERY_SCANNED_CHANGES: u64 = 1_000_000;
 pub const MAX_QUERY_ROWS: u64 = 100_000;
 pub const MAX_QUERY_OUTPUT_BYTES: u64 = 768 * 1024;
 pub const MAX_QUERY_BATCH_ROWS: u64 = 1_024;
+pub const MAX_LIVE_QUERY_DELTA_ROWS: u64 = 100_000;
 pub const MAX_VECTOR_SEARCH_CHANGES: u64 = 1_000_000;
 pub const MAX_VECTOR_SEARCH_TOP_K: u64 = 100_000;
 pub const MAX_CHANGEFEED_PAGE: u64 = 4_096;
@@ -195,6 +196,56 @@ pub struct QueryResult {
     pub plan: QueryPlanSnapshot,
     pub execution: QueryExecutionSnapshot,
     pub rows: Vec<QueryRowSnapshot>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct PollLiveQuery {
+    pub scope: String,
+    pub query: String,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub parameters: BTreeMap<String, QueryValue>,
+    pub after_cursor: u64,
+    #[serde(default)]
+    pub budget: QueryBudget,
+    pub max_delta_rows: u64,
+}
+
+impl PollLiveQuery {
+    pub fn validate(&self) -> Result<()> {
+        ExecuteQuery {
+            scope: self.scope.clone(),
+            query: self.query.clone(),
+            parameters: self.parameters.clone(),
+            budget: self.budget.clone(),
+        }
+        .validate()?;
+        if self.max_delta_rows == 0 || self.max_delta_rows > MAX_LIVE_QUERY_DELTA_ROWS {
+            return invalid(format!(
+                "live query max_delta_rows must be in 1..={MAX_LIVE_QUERY_DELTA_ROWS}"
+            ));
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct LiveQueryRowChange {
+    pub before: QueryRowSnapshot,
+    pub after: QueryRowSnapshot,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct LiveQueryDeltaResult {
+    pub query_sha256: String,
+    pub from_cursor: u64,
+    pub through_cursor: u64,
+    pub head_cursor: u64,
+    pub added: Vec<QueryRowSnapshot>,
+    pub updated: Vec<LiveQueryRowChange>,
+    pub removed: Vec<QueryRowSnapshot>,
 }
 
 #[derive(
@@ -595,6 +646,7 @@ pub enum SecurityAction {
     SessionRenew,
     SessionClose,
     QueryExecute,
+    QueryLivePoll,
     TransactionBegin,
     TransactionPreview,
     TransactionCommit,
@@ -869,6 +921,16 @@ pub fn endpoint_catalogue() -> EndpointCatalogue {
             SecurityAction::QueryExecute,
             "ExecuteQuery",
             "QueryResult",
+        ),
+        endpoint(
+            "query-live-poll",
+            HttpMethod::Post,
+            "/v1/query/live/poll",
+            EndpointAuthentication::SessionBearer,
+            false,
+            SecurityAction::QueryLivePoll,
+            "PollLiveQuery",
+            "LiveQueryDeltaResult",
         ),
         endpoint(
             "restore-create",
@@ -1211,6 +1273,7 @@ fn request_envelope_schema(name: &str) -> Result<serde_json::Value> {
         "CreateInstanceBackup" => schema_json::<RequestEnvelope<CreateInstanceBackup>>(),
         "CreateSession" => schema_json::<RequestEnvelope<CreateSession>>(),
         "ExecuteQuery" => schema_json::<RequestEnvelope<ExecuteQuery>>(),
+        "PollLiveQuery" => schema_json::<RequestEnvelope<PollLiveQuery>>(),
         "FollowChangefeed" => schema_json::<RequestEnvelope<FollowChangefeed>>(),
         "ListInstanceBackups" => schema_json::<RequestEnvelope<ListInstanceBackups>>(),
         "PreviewTransaction" => schema_json::<RequestEnvelope<PreviewTransaction>>(),
@@ -1240,6 +1303,7 @@ fn response_envelope_schema(name: &str) -> Result<serde_json::Value> {
             schema_json::<ResponseEnvelope<InstanceBackupCatalogueSnapshot>>()
         }
         "Liveness" => schema_json::<ResponseEnvelope<Liveness>>(),
+        "LiveQueryDeltaResult" => schema_json::<ResponseEnvelope<LiveQueryDeltaResult>>(),
         "OpenApiDocument" => schema_json::<ResponseEnvelope<serde_json::Value>>(),
         "QueryResult" => schema_json::<ResponseEnvelope<QueryResult>>(),
         "Readiness" => schema_json::<ResponseEnvelope<Readiness>>(),

@@ -85,6 +85,16 @@ fn policy_is_persistent_exact_scope_and_deny_by_default() {
         ),
         Err(Error::PermissionDenied)
     ));
+    assert!(matches!(
+        repository.authenticate_and_authorize(
+            &CanonicalId::new("connectome-local").unwrap(),
+            b"correct horse battery staple",
+            Action::QueryLivePoll,
+            &path("alpha"),
+            2_000,
+        ),
+        Err(Error::PermissionDenied)
+    ));
     drop(engine);
 
     let engine = NativeEngine::open(&root).unwrap();

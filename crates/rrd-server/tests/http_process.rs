@@ -1027,6 +1027,38 @@ fn data_transaction_atomically_commits_every_public_model_and_replays_after_rest
             expected.2
         );
     }
+    let live_query = envelope(
+        json!({
+            "scope": "instance:socket-test",
+            "query": "FROM series:series AT VALID 100 KNOWN HEAD WHERE series_id = \"latency\" PROJECT observed_at, value",
+            "parameters": {},
+            "after_cursor": 0,
+            "budget": {
+                "max_scanned_changes": 100,
+                "max_rows": 10,
+                "max_output_bytes": 4096,
+                "max_batch_rows": 10
+            },
+            "max_delta_rows": 10
+        }),
+        None,
+        None,
+    );
+    let (status, denied) = post(&server, "/v1/query/live/poll", &live_query, None);
+    assert_eq!(status, 401, "{denied}");
+    let (status, live) = post(
+        &server,
+        "/v1/query/live/poll",
+        &live_query,
+        Some((&session_id, &token)),
+    );
+    assert_eq!(status, 200, "{live}");
+    let live = payload(&live);
+    assert_eq!(live["from_cursor"], 0);
+    assert_eq!(live["through_cursor"], 11);
+    assert_eq!(live["added"][0]["identity"], "series:series:latency:100:latency-100");
+    assert!(live["updated"].as_array().unwrap().is_empty());
+    assert!(live["removed"].as_array().unwrap().is_empty());
     let first_feed = envelope(
         json!({
             "scope": "instance:socket-test",
@@ -1293,13 +1325,16 @@ fn real_socket_exercises_lifecycle_commit_and_restart_replay() {
     assert_eq!(payload(&catalogue)["protocol_version"], 1);
     assert_eq!(
         payload(&catalogue)["endpoints"].as_array().unwrap().len(),
-        21
+        22
     );
     let (status, openapi) = http(server.address, "GET", "/v1/schema/openapi", &[], &[]);
     assert_eq!(status, 200, "{openapi}");
     assert_eq!(payload(&openapi)["openapi"], "3.1.0");
-    assert_eq!(payload(&openapi)["x-rrd-endpoint-count"], 21);
+    assert_eq!(payload(&openapi)["x-rrd-endpoint-count"], 22);
     assert!(payload(&openapi)["paths"]["/v1/query"]["post"]["requestBody"]
+        ["content"]["application/json"]["schema"]
+        .is_object());
+    assert!(payload(&openapi)["paths"]["/v1/query/live/poll"]["post"]["requestBody"]
         ["content"]["application/json"]["schema"]
         .is_object());
 

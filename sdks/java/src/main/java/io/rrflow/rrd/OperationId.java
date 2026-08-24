@@ -14,6 +14,7 @@ public enum OperationId {
     HEALTH_READY("health-ready", "GET", "/v1/health/ready", Authentication.PUBLIC, false),
     OPENAPI_READ("openapi-read", "GET", "/v1/schema/openapi", Authentication.PUBLIC, false),
     QUERY_EXECUTE("query-execute", "POST", "/v1/query", Authentication.SESSION_BEARER, false),
+    QUERY_LIVE_POLL("query-live-poll", "POST", "/v1/query/live/poll", Authentication.SESSION_BEARER, false),
     RESTORE_CREATE("restore-create", "POST", "/v1/restores", Authentication.SESSION_BEARER, true),
     SESSION_CLOSE("session-close", "DELETE", "/v1/sessions/{session}", Authentication.SESSION_BEARER, true),
     SESSION_CREATE("session-create", "POST", "/v1/sessions", Authentication.API_KEY, true),

@@ -60,6 +60,12 @@ export const endpoints = {
     "authentication": "session_bearer",
     "mutation": false
   },
+  "query-live-poll": {
+    "method": "POST",
+    "path": "/v1/query/live/poll",
+    "authentication": "session_bearer",
+    "mutation": false
+  },
   "restore-create": {
     "method": "POST",
     "path": "/v1/restores",

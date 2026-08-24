@@ -1,15 +1,15 @@
 use rrd_contract::{
-    BeginTransaction, CanonicalId, CapabilityDescriptor, CapabilityStatus, CloseSession,
-    CommitReceipt, CommitTransaction, CorrelationId, CreateInstanceBackup, DeploymentMode,
-    ErrorBody, ErrorCode, EstateActivityPolicySnapshot, EstateBackupJobSnapshot,
-    EstateBackupJobState, EstateBackupJobsSnapshot, EstateMutationResult, EstateSnapshot,
-    ExecuteQuery, FollowChangefeed, IdempotencyBinding, Liveness, PROTOCOL, PROTOCOL_VERSION,
+    transaction_operation_sha256, BeginTransaction, CanonicalId, CapabilityDescriptor,
+    CapabilityStatus, CloseSession, CommitReceipt, CommitTransaction, CorrelationId,
+    CreateInstanceBackup, DeploymentMode, ErrorBody, ErrorCode, EstateActivityPolicySnapshot,
+    EstateBackupJobSnapshot, EstateBackupJobState, EstateBackupJobsSnapshot, EstateMutationResult,
+    EstateSnapshot, ExecuteQuery, FollowChangefeed, IdempotencyBinding, Liveness, PollLiveQuery,
     PreviewTransaction, QueryBudget, QueryExecutionSnapshot, QueryPlanCandidate, QueryPlanSnapshot,
     QueryResult, QueryRowSnapshot, QueryValue, ReadAudit, ReadChangefeed, ReadEstate, Readiness,
     RenewSession, RequestContext, RequestEnvelope, ResourceId, ResourceKind, ResourcePath,
     ResponseEnvelope, ResponseOutcome, RestoreInstanceBackup, ServiceCapabilities, SessionEndState,
     SessionLease, SessionLimits, SessionTermination, TransactionMutation, TransactionPreview,
-    TransactionState, transaction_operation_sha256,
+    TransactionState, PROTOCOL, PROTOCOL_VERSION,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -324,6 +324,25 @@ fn request_budget_fixture() -> QueryBudget {
 }
 
 #[test]
+fn live_query_contract_is_resumable_bounded_and_strict() {
+    let request = PollLiveQuery {
+        scope: "instance:project-alpha".into(),
+        query: "FROM record:document AT VALID 42 KNOWN HEAD PROJECT title".into(),
+        parameters: BTreeMap::new(),
+        after_cursor: 41,
+        budget: QueryBudget::default(),
+        max_delta_rows: 256,
+    };
+    request.validate().unwrap();
+    let mut encoded = serde_json::to_value(&request).unwrap();
+    encoded["stream"] = serde_json::json!(true);
+    assert!(serde_json::from_value::<PollLiveQuery>(encoded).is_err());
+    let mut invalid = request;
+    invalid.max_delta_rows = 0;
+    assert!(invalid.validate().is_err());
+}
+
+#[test]
 fn changefeed_request_is_cursor_addressed_bounded_and_strict() {
     let request = ReadChangefeed {
         scope: "instance:project-alpha".into(),
@@ -390,29 +409,25 @@ fn audit_read_contract_is_bounded_and_strict() {
     }
     .validate()
     .unwrap();
-    assert!(
-        ReadAudit {
-            after_sequence: 0,
-            limit: 0,
-        }
-        .validate()
-        .is_err()
-    );
-    assert!(
-        serde_json::from_value::<ReadAudit>(serde_json::json!({
-            "after_sequence": 0,
-            "limit": 1,
-            "include_bodies": true
-        }))
-        .is_err()
-    );
+    assert!(ReadAudit {
+        after_sequence: 0,
+        limit: 0,
+    }
+    .validate()
+    .is_err());
+    assert!(serde_json::from_value::<ReadAudit>(serde_json::json!({
+        "after_sequence": 0,
+        "limit": 1,
+        "include_bodies": true
+    }))
+    .is_err());
 }
 
 #[test]
 fn endpoint_catalogue_is_complete_sorted_and_transport_neutral() {
     let catalogue = rrd_contract::endpoint_catalogue();
     catalogue.validate().unwrap();
-    assert_eq!(catalogue.endpoints.len(), 21);
+    assert_eq!(catalogue.endpoints.len(), 22);
     assert_eq!(catalogue.endpoints[0].operation.as_str(), "audit-read");
     let create = catalogue
         .endpoints
