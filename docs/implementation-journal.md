@@ -379,3 +379,29 @@ index.
   remain open before claiming real-time live queries.
 - Next gate: implement bounded authenticated live-follow over the same cursor
   contract, retaining pull replay as the reconnect source of truth.
+
+## 2026-08-24 — RRD bounded changefeed follow
+
+- Commit: `6795151` (`feat(rrd): add bounded changefeed follow`).
+- Capability: added authenticated `POST /v1/changes/follow`, a maximum
+  five-second long-poll over the exact retained replay coordinate. It returns
+  either the first typed page after the cursor or an explicit timeout carrying
+  the newest observed `through_cursor`; reconnect remains stateless and uses
+  the retained feed.
+- Bounds: page and wait limits are frozen in `rrd-contract`; a declared request
+  deadline must cover the requested wait. The implementation polls in the
+  existing blocking worker pool in 25 ms bounded intervals and never holds an
+  engine transaction or snapshot across the wait.
+- Evidence: one real HTTP connection waits after cursor two while another
+  commits an event at cursor three. The waiter wakes with exactly that typed
+  event. A second follow after cursor three waits 50 ms and returns an explicit
+  empty timeout at the same cursor.
+- Verification: all `rrd-contract` and `rrd-server` tests passed, including 14
+  real-socket cases; strict all-target/all-feature clippy and `git diff
+  --check` passed.
+- Limit: this is bounded long-poll, not SSE/WebSocket push. Durable subscription
+  ownership, heartbeats, disconnect cancellation, fan-out backpressure, and
+  server-side live-query maintenance remain open and are not advertised.
+- Next gate: expose backup/restore and diagnostics through the canonical RRD
+  service, then begin F4 identity and policy rather than deepening transport
+  streaming first.
