@@ -550,8 +550,9 @@ identity/digest revalidation; stale queries use the authoritative log. See
 - Semantic live-query polling now has exact-cursor replay, deterministic row
   deltas, bounded three-engine differentials, a strict authenticated RRD route,
   a distinct deny-by-default security action, and generated route discovery in
-  all six SDKs. Wakeup/streaming, typed ergonomic SDK methods, retention, and
-  backpressure remain open.
+  all six SDKs. Bounded server-side waiting now wakes on authoritative cursor
+  advancement with deadline and timeout evidence. Streaming, typed ergonomic
+  SDK methods, retained subscription leases, and backpressure remain open.
 - User-defined triggers/functions only after capability and audit gates exist.
 
 **Exit gate:** multi-model and live-query differentials cover semantics,

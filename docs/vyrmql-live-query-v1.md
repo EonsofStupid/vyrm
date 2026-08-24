@@ -3,8 +3,10 @@
 Status: deterministic resumable polling exists inside VyrmMX and through the
 authenticated `POST /v1/query/live/poll` RRD route. The operation has its own
 deny-by-default security action and is present in all six generated SDK route
-catalogues. Long-poll wakeup, typed ergonomic SDK methods, streaming transport,
-backpressure, and a retained subscription registry remain open.
+catalogues. The request may now wait up to five seconds for the authoritative
+cursor to advance, with deadline preflight and explicit `timed_out`/`waited_ms`
+evidence. Typed ergonomic SDK methods, streaming transport, backpressure, and a
+retained subscription registry remain open.
 
 A live query is an ordinary typed VyrmQL read with explicit `AT VALID` and
 `KNOWN HEAD`. The caller separately supplies the last consumed runtime cursor.
@@ -22,5 +24,7 @@ empty idempotent poll until authoritative state advances.
 Three-engine differentials prove identical additions, updates, removals, empty
 replay, digest identity, and budget denial on memory, Fjall compatibility, and
 native VyrmKV. A real-process test proves unauthenticated denial and exact
-authenticated delivery. This is resumable network polling, not yet a streaming
-or push-subscription claim.
+authenticated delivery. A second real-process fixture proves an in-flight poll
+wakes on a committed record update, returns the before/after delta, and times
+out without cursor invention when no new commit arrives. This is bounded
+resumable long-polling, not yet a streaming or push-subscription claim.

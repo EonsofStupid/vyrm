@@ -91,8 +91,9 @@ Full text, mutating statements, broader/incremental indexes, and push
 subscriptions remain open. VyrmMX now also computes deterministic resumable
 semantic live-query deltas (added/updated/removed rows) between exact runtime
 cursors. Authenticated polling is exposed through RRD and the generated route
-catalogues for all six SDKs; wakeup, streaming/backpressure, and retained
-subscriptions remain open. See
+catalogues for all six SDKs. A bounded five-second server-side wait wakes when
+the authoritative cursor advances and returns explicit timeout/wait evidence;
+streaming/backpressure and retained subscriptions remain open. See
 [`docs/vyrmql-live-query-v1.md`](docs/vyrmql-live-query-v1.md).
 
 F3 now has its first authority artifact in

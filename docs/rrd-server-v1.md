@@ -56,9 +56,11 @@ places that secret elsewhere. `X-RRD-Session` carries the session identifier;
   open.
 - `POST /v1/query/live/poll` authenticates the session under a separate
   deny-by-default action and returns bounded added/updated/removed row deltas
-  from an exact resume cursor through one captured head. It is resumable
-  polling; wakeup, streaming/backpressure, and retained subscriptions remain
-  open.
+  from an exact resume cursor through one captured head. A caller may request a
+  bounded wait of up to five seconds; the server wakes when the authoritative
+  cursor advances, rejects waits beyond the request deadline, and reports
+  timeout/wait duration explicitly. Streaming/backpressure and retained
+  subscriptions remain open.
 - `POST /v1/query/indexes/ensure` requires a mutation idempotency key and a
   distinct index-administration grant. It validates a restricted definition
   query, creates or rebuilds the exact snapshot artifact synchronously, records

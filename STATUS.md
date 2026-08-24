@@ -168,8 +168,10 @@ Kubernetes operation, and authoritative Connectome management.
   cursors and returns deterministic added/updated/removed rows with bounded,
   fail-closed execution on all three engines. An authenticated, separately
   authorized RRD polling route exposes the strict public contract and all six
-  SDK route catalogues include it. Long-poll wakeup, streaming/backpressure,
-  retained subscriptions, and ergonomic typed SDK helpers remain open.
+  SDK route catalogues include it. Bounded waiting now wakes on authoritative
+  cursor advancement, respects request deadlines, and distinguishes timeout
+  from an empty delta. Streaming/backpressure, retained subscriptions, and
+  ergonomic typed SDK helpers remain open.
 
 - The bi-temporal claim kernel has immutable supersession corrections,
   canonical SHA-256 identities covering provenance and validity, and atomic

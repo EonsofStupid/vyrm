@@ -882,3 +882,24 @@ index.
 - Limit: ensure is synchronous and exact-snapshot only. Incremental maintenance,
   concurrent same-key convergence, uniqueness, background jobs, and broader
   index families remain open.
+
+## 2026-08-24 — bounded semantic live-query waiting
+
+- Commit: `bf6ec7b` (`feat(rrd): add bounded live query waiting`).
+- Delivery: the existing resumable live-query request now accepts an optional
+  wait bounded to five seconds. Immediate mode remains the zero default. A wait
+  returns as soon as the authoritative cursor advances—even when the semantic
+  delta is empty—or returns explicit `timed_out` and `waited_ms` evidence at the
+  same cursor.
+- Safety: HTTP preflight rejects a declared wait that can outlive the absolute
+  request deadline. Every retry still evaluates the exact query from the
+  caller's unchanged resume cursor to one newly captured head; no transient
+  server subscription state becomes authoritative.
+- Evidence: a real server holds a poll at cursor three, wakes after a separate
+  authenticated transaction updates the record at cursor four, and returns one
+  exact before/after row change. A second wait times out at cursor four without
+  inventing changes. Contract bounds, complete server/client suites, strict
+  Clippy, TypeScript generation/Biome/types/tests, and OpenAPI drift checks pass.
+- Limit: this is bounded long-poll delivery, not SSE/WebSocket streaming.
+  Retained subscription leases, per-subscriber backpressure, streaming
+  cancellation, and ergonomic helpers across every SDK remain open.
