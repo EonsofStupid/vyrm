@@ -1129,3 +1129,28 @@ index.
 - Limit: one RRD pod is intentional. Public RRD is not yet integrated with the
   separate Raft state machine, so no Multi-AZ, safe upgrade, CSI recovery,
   certificate rotation, or real-cluster qualification is claimed.
+
+## 2026-08-24 — local-process identity discovery hardening
+
+- Commit: `8c76532` (`fix(estate): tolerate bounded pre-exec identity observation`).
+- Failure: the Linux pull-request matrix intermittently observed the test
+  harness image for a newly spawned RRD PID before the target executable image
+  became visible, then rejected startup immediately. The identical push job
+  passed, proving the process-boundary test was nondeterministic rather than the
+  documentation-only commit being platform-verified.
+- Safety: a mismatched executable is still never authenticated, recorded, or
+  treated as owned. Discovery now waits only within the existing three-second
+  bounded window for the trusted executable identity. A child that exits is
+  reported immediately; a mismatch that remains at the deadline is killed,
+  reaped, and denied permanently.
+- Local evidence: the edited file passes `rustfmt --check`; the exact fallback
+  test passed four consecutive focused executions; all `rrd-estate` tests, the
+  complete four-test `local_estate_driver` suite, and strict Clippy for
+  `rrd-estate` plus `rrd-server` passed.
+- Remote evidence: [push CI 32752929744](https://github.com/EonsofStupid/vyrm/actions/runs/32752929744)
+  and [pull-request CI 32752934173](https://github.com/EonsofStupid/vyrm/actions/runs/32752934173)
+  passed the full verification job and Linux, macOS, and Windows process
+  matrix, including the formerly flaky child/controller recovery test.
+- Limit: `cargo fmt --all -- --check` remains blocked by unrelated existing and
+  concurrent formatting differences, including the unfinished maintenance
+  slice; those files were not reformatted or staged with this fix.
