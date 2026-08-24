@@ -51,6 +51,8 @@ than compared lexically or coerced. The exact event-cursor lookup is selected
 only for `cursor = <unsigned>`; other cursor comparisons keep the authoritative
 scan.
 
-Spatial operators, index catalogues and lifecycle, planner statistics, full
-text, mutating VyrmQL, streaming responses, and push live subscriptions remain
+The initial index catalogue/lifecycle and planner rejection evidence are
+documented in [`vyrmql-index-catalogue-v1.md`](vyrmql-index-catalogue-v1.md).
+Materialized index execution, spatial operators, planner statistics, full text,
+mutating VyrmQL, streaming responses, and push live subscriptions remain
 explicit gaps.

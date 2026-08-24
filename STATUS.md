@@ -151,9 +151,16 @@ Kubernetes operation, and authoritative Connectome management.
   paths, and terminates cycles; three-engine and secured-RRD tests pass. Only
   frozen series/geo built-ins are bindable today. Scalar equality, inequality,
   and ordering predicates are typed and deterministic; ordering currently
-  accepts only integer, unsigned, and string operands. Index lifecycle, spatial
-  operators, full text, mutating VyrmQL, streaming, and push subscriptions keep
-  F6 open.
+  accepts only integer, unsigned, and string operands. Materialized index
+  access, spatial operators, full text, mutating VyrmQL, streaming, and push
+  subscriptions keep F6 open.
+  The first index lifecycle foundation is also executable: schema-bound
+  compound definitions persist through authoritative control-state CAS,
+  generation fencing and ready/building/quarantined/retiring state survive
+  native reopen, and matching queries expose freshness/prefix evidence. The
+  planner refuses those candidates until a verified artifact reader exists;
+  materialization, selection, uniqueness enforcement, and public administration
+  remain open.
 
 - The bi-temporal claim kernel has immutable supersession corrections,
   canonical SHA-256 identities covering provenance and validity, and atomic

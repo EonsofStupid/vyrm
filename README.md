@@ -79,8 +79,13 @@ has schema-bound, direction-explicit, depth-capped recursive graph expansion
 with deterministic shortest paths and cycle suppression. Typed scalar predicates
 support `=`, `!=`, `<`, `<=`, `>`, and `>=`; ordering is deliberately limited to
 integers, unsigned integers, and strings until an exact decimal ordering contract
-lands. Indexes, full text, mutating statements, and push subscriptions remain
-open.
+lands. A persistent CAS-backed index catalogue now validates compound scalar
+definitions, fences build generations, tracks freshness/lifecycle state, and
+shows unselected candidates in plan evidence. It deliberately does not select
+an index until verified materialization and artifact reads exist. See
+[`docs/vyrmql-index-catalogue-v1.md`](docs/vyrmql-index-catalogue-v1.md).
+Full text, mutating statements, materialized scalar indexes, and push
+subscriptions remain open.
 
 F3 now has its first authority artifact in
 [`rrd-estate`](crates/rrd-estate): a bounded, versioned estate document whose

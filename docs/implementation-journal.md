@@ -766,3 +766,29 @@ index.
 - Limit: this is predicate algebra, not an index claim. Index catalogues,
   maintenance, selection evidence, statistics, spatial/full-text operators,
   and live subscriptions remain the next F6 foundation slices.
+
+## 2026-08-24 — persistent index catalogue and lifecycle
+
+- Commit: `3263075` (`feat(query): add persistent index catalogue`).
+- Authority: compound scalar index definitions are schema-bound before write
+  and stored through authoritative control-state compare-and-swap. Create,
+  rebuild, ready publication, quarantine, and retirement each enter the
+  authenticated control journal.
+- Freshness: the shared projection stamp binds definition/configuration,
+  generation, artifact digest, lifecycle state, and exact per-scope source
+  cursor. Rebuild increments the generation and stale publishers are fenced.
+- Planning: matching leading filter fields emit an `index:<id>` candidate with
+  generation, lifecycle, freshness, and matched-prefix evidence. It remains
+  explicitly unselected/non-exact until a verified artifact reader exists, so
+  the authoritative log stays the only answer path.
+- Integration correction: the full workspace run found that `vyrm-node` trace
+  identity had not been extended for the earlier series, geo, and traversal
+  sources. Those source identities are now explicit rather than hidden behind
+  a wildcard.
+- Evidence: lifecycle differentials pass on memory, Fjall compatibility, and
+  native VyrmKV; stale-generation/invalid-field denial, hash-chain verification,
+  planner rejection evidence, and native reopen pass. Strict Clippy passes for
+  VyrmMX/Vyrm Node, and the complete workspace test suite is green.
+- Limit: no scalar artifact is built or read yet, uniqueness is not enforced,
+  and no public RRD index route exists. Those are the next index slices before
+  live-query delivery.

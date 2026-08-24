@@ -523,13 +523,20 @@ Typed predicates now carry their comparison operator through the AST, bound
 plan, digest, and executor. `=`, `!=`, `<`, `<=`, `>`, and `>=` round-trip to a
 canonical query; ordering is fail-closed to integer, unsigned, and string
 operands. The event-cursor point path remains eligible only for equality.
+The first index lifecycle slice persists schema-bound compound definitions in
+CAS-protected control state, journals every lifecycle transition, fences stale
+builder generations, and binds readiness to configuration/artifact digests and
+an exact per-scope source cursor. VyrmMX emits matching prefix/freshness
+candidates but keeps them unselected until a verified materialized reader is
+implemented. See [`vyrmql-index-catalogue-v1.md`](vyrmql-index-catalogue-v1.md).
 
 **Deliverables**
 
 - Mutating VyrmQL and multi-statement transactions.
 - General document/record/edge CRUD and schemafull/schemaless policy.
 - Relational links, richer graph/path algebra, and spatial operators.
-- Ordinary/compound/unique/count, spatial and full-text indexes.
+- Materialized ordinary/compound/unique/count, spatial and full-text indexes;
+  scalar definition/lifecycle authority exists, but artifact execution does not.
 - Full-text analyzers and a replacement lexical stack measured against the old
   BM25 path; this is where the later LFG/TurboQuant retrieval integration lands.
 - Planner cardinality/cost evidence, `EXPLAIN ANALYZE`, streaming batches and
