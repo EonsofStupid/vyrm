@@ -14,7 +14,7 @@ use std::fmt;
 pub const PROTOCOL: &str = "rrd";
 pub const PROTOCOL_VERSION: u16 = 1;
 pub const OPENAPI_DOCUMENT_SHA256: &str =
-    "262e596a3fa92453d4c1c2220c69a60fcb7a5947596afeb3d8887c7228950d87";
+    "b348cc057bf70e482f41d5967b9a75fdb156336794cf874ad373974af14b4941";
 pub const MAX_ID_BYTES: usize = 128;
 pub const MAX_MESSAGE_BYTES: usize = 4_096;
 pub const MAX_CAPABILITIES: usize = 512;
@@ -979,6 +979,7 @@ pub fn endpoint_catalogue() -> EndpointCatalogue {
 pub fn openapi_document() -> Result<serde_json::Value> {
     let catalogue = endpoint_catalogue();
     catalogue.validate()?;
+    let query_value_schema = openapi_query_value_schema()?;
     let mut paths = serde_json::Map::new();
     for descriptor in &catalogue.endpoints {
         let method = match descriptor.method {
@@ -1019,29 +1020,56 @@ pub fn openapi_document() -> Result<serde_json::Value> {
             operation.insert("parameters".into(), serde_json::Value::Array(parameters));
         }
         if descriptor.method != HttpMethod::Get {
+            let mut request_schema = request_envelope_schema(&descriptor.request_type)?;
+            rebase_local_schema_refs(
+                &mut request_schema,
+                &openapi_schema_pointer(
+                    &descriptor.path,
+                    method,
+                    "requestBody/content/application~1json/schema",
+                ),
+            );
             operation.insert(
                 "requestBody".into(),
                 serde_json::json!({
                     "required": true,
                     "content": {
                         "application/json": {
-                            "schema": request_envelope_schema(&descriptor.request_type)?
+                            "schema": request_schema
                         }
                     }
                 }),
             );
         }
         let response_schema = response_envelope_schema(&descriptor.response_type)?;
+        let mut success_schema = response_schema.clone();
+        rebase_local_schema_refs(
+            &mut success_schema,
+            &openapi_schema_pointer(
+                &descriptor.path,
+                method,
+                "responses/200/content/application~1json/schema",
+            ),
+        );
+        let mut error_schema = response_schema;
+        rebase_local_schema_refs(
+            &mut error_schema,
+            &openapi_schema_pointer(
+                &descriptor.path,
+                method,
+                "responses/default/content/application~1json/schema",
+            ),
+        );
         operation.insert(
             "responses".into(),
             serde_json::json!({
                 "200": {
                     "description": "Typed RRD response",
-                    "content": {"application/json": {"schema": response_schema}}
+                    "content": {"application/json": {"schema": success_schema}}
                 },
                 "default": {
                     "description": "Typed RRD error response",
-                    "content": {"application/json": {"schema": response_schema}}
+                    "content": {"application/json": {"schema": error_schema}}
                 }
             }),
         );
@@ -1062,6 +1090,9 @@ pub fn openapi_document() -> Result<serde_json::Value> {
         "servers": [{"url": "http://127.0.0.1:9477"}],
         "paths": paths,
         "components": {
+            "schemas": {
+                "QueryValue": query_value_schema
+            },
             "securitySchemes": {
                 "rrdApiKey": {
                     "type": "apiKey",
@@ -1080,6 +1111,57 @@ pub fn openapi_document() -> Result<serde_json::Value> {
         "x-rrd-protocol-version": PROTOCOL_VERSION,
         "x-rrd-endpoint-count": catalogue.endpoints.len()
     }))
+}
+
+fn openapi_schema_pointer(path: &str, method: &str, suffix: &str) -> String {
+    let escaped = path.replace('~', "~0").replace('/', "~1");
+    format!("#/paths/{escaped}/{method}/{suffix}")
+}
+
+fn rebase_local_schema_refs(value: &mut serde_json::Value, schema_pointer: &str) {
+    match value {
+        serde_json::Value::Array(values) => {
+            for value in values {
+                rebase_local_schema_refs(value, schema_pointer);
+            }
+        }
+        serde_json::Value::Object(object) => {
+            if let Some(serde_json::Value::String(reference)) = object.get_mut("$ref") {
+                if reference == "#" || reference == "#/$defs/QueryValue" {
+                    *reference = "#/components/schemas/QueryValue".into();
+                } else if let Some(suffix) = reference.strip_prefix("#/") {
+                    *reference = format!("{schema_pointer}/{suffix}");
+                }
+            }
+            for value in object.values_mut() {
+                rebase_local_schema_refs(value, schema_pointer);
+            }
+            let remove_definitions =
+                if let Some(serde_json::Value::Object(definitions)) = object.get_mut("$defs") {
+                    definitions.remove("QueryValue");
+                    definitions.is_empty()
+                } else {
+                    false
+                };
+            if remove_definitions {
+                object.remove("$defs");
+            }
+        }
+        _ => {}
+    }
+}
+
+fn openapi_query_value_schema() -> Result<serde_json::Value> {
+    let generated = serde_json::to_value(schemars::schema_for!(QueryValue))
+        .map_err(|error| ContractError(error.to_string()))?;
+    let definition = generated
+        .get("$defs")
+        .and_then(serde_json::Value::as_object)
+        .and_then(|definitions| definitions.get("QueryValue"))
+        .cloned();
+    let mut schema = definition.unwrap_or(generated);
+    rebase_local_schema_refs(&mut schema, "#/components/schemas/QueryValue");
+    Ok(schema)
 }
 
 fn openapi_parameters(descriptor: &EndpointDescriptor) -> Vec<serde_json::Value> {
@@ -1113,8 +1195,11 @@ fn openapi_parameters(descriptor: &EndpointDescriptor) -> Vec<serde_json::Value>
 }
 
 fn schema_json<T: JsonSchema>() -> serde_json::Value {
-    serde_json::to_value(schemars::schema_for!(T))
-        .expect("JsonSchema output must serialize as JSON")
+    let schema = schemars::generate::SchemaSettings::draft2020_12()
+        .with(|settings| settings.inline_subschemas = true)
+        .into_generator()
+        .into_root_schema_for::<T>();
+    serde_json::to_value(schema).expect("JsonSchema output must serialize as JSON")
 }
 
 fn request_envelope_schema(name: &str) -> Result<serde_json::Value> {

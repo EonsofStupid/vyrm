@@ -78,6 +78,9 @@ those schemas and the endpoint catalogue into deterministic OpenAPI 3.1, and
 generation. Its canonical pretty-JSON SHA-256 is frozen in the contract tests;
 intentional schema drift therefore requires an explicit version review. A
 running RRD serves the document from `GET /v1/schema/openapi`.
+Self-recursive `QueryValue` is promoted to one canonical OpenAPI component;
+other definitions are inlined, so references resolve under ordinary OpenAPI
+generators rather than relying on schema-local `$defs` resolution.
 
 The frozen JSON fixture is
 [`public-contract-v1.json`](../crates/rrd-contract/fixtures/public-contract-v1.json).

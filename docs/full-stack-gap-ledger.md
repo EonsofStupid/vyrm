@@ -418,8 +418,8 @@ wire type derives JSON Schema, and deterministic OpenAPI 3.1 is built from that
 catalogue rather than maintained separately. The server publishes both at
 `GET /v1/schema/endpoints` and `GET /v1/schema/openapi`; a frozen SHA-256 fails
 unreviewed schema drift. This removes handwritten route and payload discovery
-as SDK sources. The five additional language packages and shared black-box
-conformance remain open.
+as SDK sources. TypeScript now has a walking skeleton; the four remaining
+language packages and shared black-box conformance remain open.
 
 The first Rust client is now implemented in `rrd-client` and specified by
 [`rrd-rust-client-v1.md`](rrd-rust-client-v1.md). It is async, depends only on
@@ -431,7 +431,17 @@ test drops the first TCP connection, proves bounded recovery and negotiation,
 then exercises authentication, exact query, deadline denial, transaction
 begin/preview/abort, changefeed and protected audit. Broader method rows,
 released-version compatibility, packaging/reference generation, and the other
-five language clients keep F5 open.
+language clients keep F5 open.
+
+The TypeScript walking skeleton is implemented in `sdks/typescript` and
+specified by [`rrd-typescript-client-v1.md`](rrd-typescript-client-v1.md).
+OpenAPI TypeScript generates the complete request/response surface and the
+closed runtime endpoint map, ArkType validates untrusted response envelopes,
+and Biome 2 plus strict TypeScript gate the package. Mock-transport tests cover
+bounded retry, API-key session creation, bearer query, identity, deadline,
+remote-cleartext and typed-error behavior. Shared real-server conformance,
+package publication, and generated per-payload runtime validators keep this
+client at walking-skeleton status. Python, Go, Java, and .NET remain absent.
 
 **Deliverables**
 

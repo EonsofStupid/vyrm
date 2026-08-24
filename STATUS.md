@@ -124,8 +124,11 @@ Kubernetes operation, and authoritative Connectome management.
   async I/O, absolute deadlines, typed errors, response identity checks, and
   safe transport retry. A real-server fault test proves negotiation recovery,
   auth, exact query, transaction preview/abort, changefeed, audit, and local-
-  only enforcement. Shared conformance plus TypeScript, Python, Go, Java, and
-  .NET clients keep F5 open.
+  only enforcement. The TypeScript walking skeleton now generates its
+  full operation surface from OpenAPI, validates network envelopes with
+  ArkType, and passes Biome, strict TypeScript, generation-drift, retry/auth/
+  query/error tests. Shared real-server conformance, packaging, and Python,
+  Go, Java, and .NET clients keep F5 open.
 
 - The bi-temporal claim kernel has immutable supersession corrections,
   canonical SHA-256 identities covering provenance and validity, and atomic

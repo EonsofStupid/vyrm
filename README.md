@@ -31,6 +31,13 @@ idempotency-bound mutations after transport loss. It remains loopback-only
 until the remote TLS gate is qualified; the other five supported-language
 clients and shared conformance matrix remain open.
 
+The TypeScript F5 walking skeleton is in [`sdks/typescript`](sdks/typescript).
+It generates exact operation/request/response types from the authoritative
+OpenAPI document, validates untrusted envelopes with ArkType, and uses Biome 2
+for formatting and linting. Its generated operation-keyed call covers the full
+current route catalogue; shared real-server conformance and release packaging
+remain open.
+
 F3 now has its first authority artifact in
 [`rrd-estate`](crates/rrd-estate): a bounded, versioned estate document whose
 desired state, observations, operation leases, idempotency bindings, receipts,
