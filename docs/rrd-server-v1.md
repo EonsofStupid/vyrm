@@ -37,6 +37,8 @@ places that secret elsewhere. `X-RRD-Session` carries the session identifier;
 - `GET /v1/health/ready` opens the configured instance, verifies its format,
   reads claim/runtime watermarks, and reports maintenance/cutover denial.
 - `GET /v1/capabilities` returns the frozen `ServiceCapabilities` envelope.
+- `GET /v1/schema/endpoints` returns the machine-readable, sorted public
+  operation catalogue used to generate and qualify SDK surfaces.
 - `POST /v1/sessions` creates a bounded lease with idle and absolute expiry,
   maximum concurrent transactions, and a server-generated secret token. On a
   secured instance it first requires `X-RRD-Principal` and

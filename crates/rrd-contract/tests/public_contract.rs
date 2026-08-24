@@ -409,6 +409,33 @@ fn audit_read_contract_is_bounded_and_strict() {
 }
 
 #[test]
+fn endpoint_catalogue_is_complete_sorted_and_transport_neutral() {
+    let catalogue = rrd_contract::endpoint_catalogue();
+    catalogue.validate().unwrap();
+    assert_eq!(catalogue.endpoints.len(), 20);
+    assert_eq!(catalogue.endpoints[0].operation.as_str(), "audit-read");
+    let create = catalogue
+        .endpoints
+        .iter()
+        .find(|endpoint| endpoint.operation.as_str() == "session-create")
+        .unwrap();
+    assert_eq!(create.path, "/v1/sessions");
+    assert!(create.mutation);
+    assert_eq!(
+        create.authentication,
+        rrd_contract::EndpointAuthentication::ApiKey
+    );
+    assert!(catalogue.endpoints.iter().all(|endpoint| {
+        !endpoint.request_type.contains("::") && !endpoint.response_type.contains("::")
+    }));
+    let encoded = serde_json::to_value(&catalogue).unwrap();
+    assert_eq!(
+        serde_json::from_value::<rrd_contract::EndpointCatalogue>(encoded).unwrap(),
+        catalogue
+    );
+}
+
+#[test]
 fn mutation_idempotency_protocol_and_capability_order_fail_closed() {
     let fixture = contract_fixture();
     let mut request = fixture.request;

@@ -194,7 +194,7 @@ pub struct QueryResult {
     pub rows: Vec<QueryRowSnapshot>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum VectorSearchMetric {
     Cosine,
@@ -658,6 +658,321 @@ pub struct AuditPage {
     pub requested_after_sequence: u64,
     pub through_sequence: u64,
     pub records: Vec<AuditRecordSnapshot>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum HttpMethod {
+    Get,
+    Post,
+    Delete,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EndpointAuthentication {
+    Public,
+    ApiKey,
+    SessionBearer,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct EndpointDescriptor {
+    pub operation: CanonicalId,
+    pub method: HttpMethod,
+    pub path: String,
+    pub authentication: EndpointAuthentication,
+    pub mutation: bool,
+    pub action: SecurityAction,
+    pub request_type: String,
+    pub response_type: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct EndpointCatalogue {
+    pub protocol: String,
+    pub protocol_version: u16,
+    pub endpoints: Vec<EndpointDescriptor>,
+}
+
+impl EndpointCatalogue {
+    pub fn validate(&self) -> Result<()> {
+        validate_protocol(&self.protocol, self.protocol_version)?;
+        if self.endpoints.is_empty() || self.endpoints.len() > 256 {
+            return invalid("endpoint catalogue must contain 1..=256 endpoints");
+        }
+        let mut operations = BTreeSet::new();
+        let mut routes = BTreeSet::new();
+        for endpoint in &self.endpoints {
+            if endpoint.path.is_empty()
+                || endpoint.path.len() > 256
+                || !endpoint.path.starts_with("/v1/")
+                || !endpoint.path.is_ascii()
+                || endpoint.request_type.is_empty()
+                || endpoint.request_type.len() > 128
+                || endpoint.response_type.is_empty()
+                || endpoint.response_type.len() > 128
+                || !endpoint.request_type.is_ascii()
+                || !endpoint.response_type.is_ascii()
+            {
+                return invalid("endpoint descriptor contains an invalid path or type name");
+            }
+            if !operations.insert(endpoint.operation.clone())
+                || !routes.insert((endpoint.method, endpoint.path.clone()))
+            {
+                return invalid("endpoint operations and method/path pairs must be unique");
+            }
+            if endpoint.mutation && endpoint.method == HttpMethod::Get {
+                return invalid("mutating endpoints may not use GET");
+            }
+        }
+        if self
+            .endpoints
+            .windows(2)
+            .any(|pair| pair[0].operation > pair[1].operation)
+        {
+            return invalid("endpoint descriptors must be sorted by operation");
+        }
+        Ok(())
+    }
+}
+
+pub fn endpoint_catalogue() -> EndpointCatalogue {
+    let mut endpoints = vec![
+        endpoint(
+            "audit-read",
+            HttpMethod::Post,
+            "/v1/audit/read",
+            EndpointAuthentication::SessionBearer,
+            false,
+            SecurityAction::AuditRead,
+            "ReadAudit",
+            "AuditPage",
+        ),
+        endpoint(
+            "backup-create",
+            HttpMethod::Post,
+            "/v1/backups",
+            EndpointAuthentication::SessionBearer,
+            true,
+            SecurityAction::BackupCreate,
+            "CreateInstanceBackup",
+            "CreateInstanceBackupResult",
+        ),
+        endpoint(
+            "backup-list",
+            HttpMethod::Post,
+            "/v1/backups/list",
+            EndpointAuthentication::SessionBearer,
+            false,
+            SecurityAction::BackupList,
+            "ListInstanceBackups",
+            "InstanceBackupCatalogueSnapshot",
+        ),
+        endpoint(
+            "capabilities-read",
+            HttpMethod::Get,
+            "/v1/capabilities",
+            EndpointAuthentication::Public,
+            false,
+            SecurityAction::ServiceInspect,
+            "Empty",
+            "ServiceCapabilities",
+        ),
+        endpoint(
+            "changefeed-follow",
+            HttpMethod::Post,
+            "/v1/changes/follow",
+            EndpointAuthentication::SessionBearer,
+            false,
+            SecurityAction::ChangefeedFollow,
+            "FollowChangefeed",
+            "ChangefeedFollowResult",
+        ),
+        endpoint(
+            "changefeed-read",
+            HttpMethod::Post,
+            "/v1/changes/read",
+            EndpointAuthentication::SessionBearer,
+            false,
+            SecurityAction::ChangefeedRead,
+            "ReadChangefeed",
+            "ChangefeedPage",
+        ),
+        endpoint(
+            "estate-read",
+            HttpMethod::Post,
+            "/v1/estates/{estate}/read",
+            EndpointAuthentication::SessionBearer,
+            false,
+            SecurityAction::EstateRead,
+            "ReadEstate",
+            "EstateSnapshot",
+        ),
+        endpoint(
+            "endpoint-catalogue",
+            HttpMethod::Get,
+            "/v1/schema/endpoints",
+            EndpointAuthentication::Public,
+            false,
+            SecurityAction::ServiceInspect,
+            "Empty",
+            "EndpointCatalogue",
+        ),
+        endpoint(
+            "health-live",
+            HttpMethod::Get,
+            "/v1/health/live",
+            EndpointAuthentication::Public,
+            false,
+            SecurityAction::ServiceInspect,
+            "Empty",
+            "Liveness",
+        ),
+        endpoint(
+            "health-ready",
+            HttpMethod::Get,
+            "/v1/health/ready",
+            EndpointAuthentication::Public,
+            false,
+            SecurityAction::ServiceInspect,
+            "Empty",
+            "Readiness",
+        ),
+        endpoint(
+            "query-execute",
+            HttpMethod::Post,
+            "/v1/query",
+            EndpointAuthentication::SessionBearer,
+            false,
+            SecurityAction::QueryExecute,
+            "ExecuteQuery",
+            "QueryResult",
+        ),
+        endpoint(
+            "restore-create",
+            HttpMethod::Post,
+            "/v1/restores",
+            EndpointAuthentication::SessionBearer,
+            true,
+            SecurityAction::RestoreCreate,
+            "RestoreInstanceBackup",
+            "RestoreInstanceBackupResult",
+        ),
+        endpoint(
+            "session-close",
+            HttpMethod::Delete,
+            "/v1/sessions/{session}",
+            EndpointAuthentication::SessionBearer,
+            true,
+            SecurityAction::SessionClose,
+            "CloseSession",
+            "SessionTermination",
+        ),
+        endpoint(
+            "session-create",
+            HttpMethod::Post,
+            "/v1/sessions",
+            EndpointAuthentication::ApiKey,
+            true,
+            SecurityAction::SessionCreate,
+            "CreateSession",
+            "SessionLease",
+        ),
+        endpoint(
+            "session-renew",
+            HttpMethod::Post,
+            "/v1/sessions/{session}/renew",
+            EndpointAuthentication::SessionBearer,
+            true,
+            SecurityAction::SessionRenew,
+            "RenewSession",
+            "SessionLease",
+        ),
+        endpoint(
+            "transaction-abort",
+            HttpMethod::Delete,
+            "/v1/transactions/{transaction}",
+            EndpointAuthentication::SessionBearer,
+            true,
+            SecurityAction::TransactionAbort,
+            "AbortTransaction",
+            "TransactionLease",
+        ),
+        endpoint(
+            "transaction-begin",
+            HttpMethod::Post,
+            "/v1/transactions",
+            EndpointAuthentication::SessionBearer,
+            true,
+            SecurityAction::TransactionBegin,
+            "BeginTransaction",
+            "TransactionLease",
+        ),
+        endpoint(
+            "transaction-commit",
+            HttpMethod::Post,
+            "/v1/transactions/{transaction}/commit",
+            EndpointAuthentication::SessionBearer,
+            true,
+            SecurityAction::TransactionCommit,
+            "CommitTransaction",
+            "CommitReceipt",
+        ),
+        endpoint(
+            "transaction-preview",
+            HttpMethod::Post,
+            "/v1/transactions/{transaction}/preview",
+            EndpointAuthentication::SessionBearer,
+            false,
+            SecurityAction::TransactionPreview,
+            "PreviewTransaction",
+            "TransactionPreview",
+        ),
+        endpoint(
+            "vector-search",
+            HttpMethod::Post,
+            "/v1/vector/search",
+            EndpointAuthentication::SessionBearer,
+            false,
+            SecurityAction::VectorSearch,
+            "SearchVectors",
+            "VectorSearchResult",
+        ),
+    ];
+    endpoints.sort_by(|left, right| left.operation.cmp(&right.operation));
+    let catalogue = EndpointCatalogue {
+        protocol: PROTOCOL.into(),
+        protocol_version: PROTOCOL_VERSION,
+        endpoints,
+    };
+    debug_assert!(catalogue.validate().is_ok());
+    catalogue
+}
+
+#[allow(clippy::too_many_arguments)]
+fn endpoint(
+    operation: &str,
+    method: HttpMethod,
+    path: &str,
+    authentication: EndpointAuthentication,
+    mutation: bool,
+    action: SecurityAction,
+    request_type: &str,
+    response_type: &str,
+) -> EndpointDescriptor {
+    EndpointDescriptor {
+        operation: CanonicalId::new(operation).expect("static endpoint operation is canonical"),
+        method,
+        path: path.into(),
+        authentication,
+        mutation,
+        action,
+        request_type: request_type.into(),
+        response_type: response_type.into(),
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

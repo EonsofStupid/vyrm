@@ -411,6 +411,15 @@ every public mutation and prove denied actions do not partially apply.
 
 **Order:** Rust embedded/client → TypeScript → Python → Go → Java/.NET.
 
+**Status:** in progress. `rrd-contract::EndpointCatalogue` now freezes all 20
+current routes by canonical operation, method/path template, authentication,
+mutation rule, security action, and public request/response type. The server
+publishes that exact sorted catalogue at `GET /v1/schema/endpoints`, advertises
+it as a capability, and proves it over a real socket. This removes handwritten
+route discovery as an SDK source, but complete JSON Schema/OpenAPI components,
+the supported Rust client, the five additional language packages, and shared
+black-box conformance remain open.
+
 **Deliverables**
 
 - Generated protocol types plus intentional ergonomic layers.

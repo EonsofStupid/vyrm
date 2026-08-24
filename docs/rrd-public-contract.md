@@ -62,6 +62,13 @@ tokens, and arbitrary headers are excluded. `through_sequence` is the scanned
 authenticated control-journal coordinate, so readers advance safely across
 unrelated control transitions.
 
+F5 begins from `EndpointCatalogue`, not handwritten per-language route lists.
+It freezes 20 sorted operation identities with HTTP method/path template,
+authentication mode, mutation/idempotency classification, security action, and
+public request/response type names. `GET /v1/schema/endpoints` serves the exact
+catalogue used by the server. Duplicate operations/routes, GET mutations,
+private Rust paths, invalid names, and ordering drift fail contract tests.
+
 The frozen JSON fixture is
 [`public-contract-v1.json`](../crates/rrd-contract/fixtures/public-contract-v1.json).
 Malformed identifiers, duplicate/unsorted capabilities, unsupported protocol

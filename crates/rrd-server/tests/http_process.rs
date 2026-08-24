@@ -1234,6 +1234,13 @@ fn real_socket_exercises_lifecycle_commit_and_restart_replay() {
                 capability["name"] == "remote-listen" && capability["status"] == "unavailable"
             })
     );
+    let (status, catalogue) = http(server.address, "GET", "/v1/schema/endpoints", &[], &[]);
+    assert_eq!(status, 200, "{catalogue}");
+    assert_eq!(payload(&catalogue)["protocol_version"], 1);
+    assert_eq!(
+        payload(&catalogue)["endpoints"].as_array().unwrap().len(),
+        20
+    );
 
     let create = envelope(
         json!({
