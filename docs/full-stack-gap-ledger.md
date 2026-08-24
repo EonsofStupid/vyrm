@@ -420,6 +420,18 @@ route discovery as an SDK source, but complete JSON Schema/OpenAPI components,
 the supported Rust client, the five additional language packages, and shared
 black-box conformance remain open.
 
+The first Rust client is now implemented in `rrd-client` and specified by
+[`rrd-rust-client-v1.md`](rrd-rust-client-v1.md). It is async, depends only on
+the public contract/HTTP stack, bounds response bytes and per-attempt time,
+honours absolute deadlines, maps typed errors, rejects remote cleartext, and
+retries reads/idempotency-bound mutations only after transport loss or timeout.
+Its methods cover the entire current endpoint catalogue. A hermetic real-server
+test drops the first TCP connection, proves bounded recovery and negotiation,
+then exercises authentication, exact query, deadline denial, transaction
+begin/preview/abort, changefeed and protected audit. Broader method rows,
+released-version compatibility, packaging/reference generation, and the other
+five language clients keep F5 open.
+
 **Deliverables**
 
 - Generated protocol types plus intentional ergonomic layers.

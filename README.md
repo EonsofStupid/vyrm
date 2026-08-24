@@ -23,6 +23,14 @@ transport-neutral, versioned public vocabulary with frozen JSON rather than an
 internal Rust API being mislabeled as an SDK. Its scope and limitations are in
 [`docs/rrd-public-contract.md`](docs/rrd-public-contract.md).
 
+The first F5 client is [`rrd-client`](crates/rrd-client), an asynchronous Rust
+consumer of that public contract. It negotiates capabilities, covers all 20
+currently published operations, bounds time and response bytes, preserves
+typed errors and request identity, and safely retries reads or
+idempotency-bound mutations after transport loss. It remains loopback-only
+until the remote TLS gate is qualified; the other five supported-language
+clients and shared conformance matrix remain open.
+
 F3 now has its first authority artifact in
 [`rrd-estate`](crates/rrd-estate): a bounded, versioned estate document whose
 desired state, observations, operation leases, idempotency bindings, receipts,
@@ -349,6 +357,7 @@ measurement contract.
 | Crate | Responsibility |
 |---|---|
 | `rrd-contract` | Stable versioned resource/envelope, lifecycle, health, capability, error, and canonical transaction-digest wire contracts |
+| `rrd-client` | Supported async Rust client for the public RRD protocol, including negotiation, auth/session, transaction, query, vector, changefeed, backup, estate, and audit operations |
 | `rrd-estate` | Persistent estate desired/observed authority, one-boundary reconciler, fenced operation leases, idempotency bindings, receipts, and activity classification |
 | `rrd-server` | Async loopback RRD process, persistent transport leases, prepared claim commits, bounded HTTP, and restart-idempotent lifecycle coordination |
 | `vyrm-core` | Claim, reasoning, typed runtime graph, durable trace, traversal, and differential contracts; serde-only boundary |
@@ -370,7 +379,8 @@ cargo run -p rrd-server -- \
   --bind 127.0.0.1:9477
 ```
 
-It refuses non-loopback binding until F4 security exists. `GET
+It refuses non-loopback binding until the remaining F4 TLS/mTLS and remote
+deployment gates are qualified. `GET
 /v1/capabilities` reports the exact shipped/limited surface; session bearer
 values are derived from an owner-private OS-random key and only their hashes
 enter the lifecycle journal. See

@@ -1,4 +1,4 @@
-# Runtime status — 2026-08-23
+# Runtime status — 2026-08-24
 
 Vyrm implements the complete **local reasoning-runtime loop** described by the
 earlier kernel plan. It does not implement the complete database/vector/cloud
@@ -11,12 +11,13 @@ The corrected baseline is now explicit in
 [`docs/full-stack-gap-ledger.md`](docs/full-stack-gap-ledger.md), preceded by
 the complete product-capability inventories for
 [SurrealDB](docs/surrealdb-capability-inventory.md) and
-[Qdrant](docs/qdrant-capability-inventory.md). The largest unfilled areas are a
-public database server/session/transaction surface, authoritative persistent
-estate reconciliation, supported SDKs, comprehensive authentication and audit,
-object-complete/signed backup policy, live subscriptions, general multi-model query
-and indexes, the full vector query/payload-index/quantization lifecycle,
-production distributed/Kubernetes operation, and cloud management.
+[Qdrant](docs/qdrant-capability-inventory.md). Public loopback server/session/
+transaction, persistent estate, deny-by-default security/audit, and the first
+supported Rust client now have executable walking skeletons. The largest
+unfilled areas are the other five supported SDKs, object-complete/signed backup
+policy, live subscriptions, general multi-model query and indexes, the full
+vector query/payload-index/quantization lifecycle, production distributed/
+Kubernetes operation, and authoritative Connectome management.
 
 ## Landed
 
@@ -105,6 +106,24 @@ production distributed/Kubernetes operation, and cloud management.
   retained archive is replayed into one authenticated catalogue entry when the
   controller dies before recording completion. Restore-to-absent-instance and
   retention pruning remain open.
+
+- F4 now has a persistent `rrd-security` authority and HTTP enforcement
+  walking skeleton. User/service/node principals, validity and disable state,
+  exact action/resource-prefix grants, principal-bound sessions, per-request
+  policy re-evaluation, and redacted authorization/outcome audit survive
+  reopen. Missing policy or permission denies by default. Protected audit read
+  advances through the authenticated control journal. Provisioning, TLS/mTLS,
+  secret providers, row/field policy, rate limits, audit retention/archival,
+  and application-mutation/audit-completion atomicity keep F4 open.
+- F5 publishes one validated catalogue for all 20 current RRD operations and
+  serves it from the running process. The first supported `rrd-client` Rust
+  boundary now negotiates that contract and covers session, transaction,
+  VyrmQL, vector, changefeed, backup, estate, and audit calls with bounded
+  async I/O, absolute deadlines, typed errors, response identity checks, and
+  safe transport retry. A real-server fault test proves negotiation recovery,
+  auth, exact query, transaction preview/abort, changefeed, audit, and local-
+  only enforcement. Shared conformance plus TypeScript, Python, Go, Java, and
+  .NET clients keep F5 open.
 
 - The bi-temporal claim kernel has immutable supersession corrections,
   canonical SHA-256 identities covering provenance and validity, and atomic

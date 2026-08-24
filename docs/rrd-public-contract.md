@@ -68,6 +68,9 @@ authentication mode, mutation/idempotency classification, security action, and
 public request/response type names. `GET /v1/schema/endpoints` serves the exact
 catalogue used by the server. Duplicate operations/routes, GET mutations,
 private Rust paths, invalid names, and ordering drift fail contract tests.
+The first consumer is `rrd-client`; it imports these public types directly and
+has no dependency on storage, query, server, estate, or security implementation
+crates in its release dependency graph.
 
 The frozen JSON fixture is
 [`public-contract-v1.json`](../crates/rrd-contract/fixtures/public-contract-v1.json).
