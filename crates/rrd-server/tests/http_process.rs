@@ -1,12 +1,19 @@
-use rrd_contract::{transaction_operation_sha256, CanonicalId, CorrelationId, TransactionMutation};
-use rrd_server::{load_or_create_token_key, HttpError, RrdHttpServer, RRD_MAX_BODY_BYTES};
-use serde_json::{json, Value};
+use rrd_contract::{CanonicalId, CorrelationId, TransactionMutation, transaction_operation_sha256};
+use rrd_server::{HttpError, RRD_MAX_BODY_BYTES, RrdHttpServer, load_or_create_token_key};
+use serde_json::{Value, json};
+use std::collections::BTreeMap;
 use std::io::{Read, Write};
 use std::net::{Shutdown, SocketAddr, TcpStream};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::thread::JoinHandle;
 use std::time::Duration;
+use vyrm_core::{
+    RuntimeCommit, RuntimeMutation, RuntimeProperties, RuntimePropertySchema, RuntimeRecord,
+    RuntimeRecordSchema, RuntimeRef, RuntimeSchemaRegistry, RuntimeType, RuntimeValue,
+    RuntimeValueType, ScopeId,
+};
+use vyrm_store::Engine;
 use vyrm_store::PersistentEngine;
 
 fn estate_context(at: u64, operation: &str) -> rrd_estate::MutationContext {
@@ -177,6 +184,107 @@ fn start_root() -> (tempfile::TempDir, PathBuf, RunningServer) {
     (temporary, root, server)
 }
 
+fn seed_query_fixture(root: &Path) {
+    let engine = PersistentEngine::open(root).unwrap();
+    let mut registry = RuntimeSchemaRegistry::empty(1, "RRD query fixture");
+    registry.records.insert(
+        RuntimeType::new("document").unwrap(),
+        RuntimeRecordSchema {
+            properties: BTreeMap::from([(
+                "title".into(),
+                RuntimePropertySchema::required(RuntimeValueType::String),
+            )]),
+            ..RuntimeRecordSchema::default()
+        },
+    );
+    engine
+        .commit_runtime(&RuntimeCommit {
+            scope: ScopeId::new("instance:socket-test").unwrap(),
+            at: 100,
+            actor: "rrd-query-fixture".into(),
+            expected_cursor: 0,
+            mutations: vec![
+                RuntimeMutation::Schema { registry },
+                RuntimeMutation::Record {
+                    record: RuntimeRecord {
+                        reference: RuntimeRef::new("document", "alpha").unwrap(),
+                        valid_from: 100,
+                        valid_to: None,
+                        properties: RuntimeProperties::from([(
+                            "title".into(),
+                            RuntimeValue::String("Alpha".into()),
+                        )]),
+                    },
+                },
+            ],
+        })
+        .unwrap();
+}
+
+#[test]
+fn authenticated_query_exposes_exact_vyrmql_vyrmmx_contract() {
+    let temporary = tempfile::tempdir().unwrap();
+    let root = temporary.path().join("instance");
+    seed_query_fixture(&root);
+    let server = start(&root);
+    let create = envelope(
+        json!({
+            "limits": {
+                "idle_timeout_ms": 60_000,
+                "absolute_timeout_ms": 300_000,
+                "max_open_transactions": 2
+            }
+        }),
+        Some("query-session"),
+        None,
+    );
+    let (status, created) = post(&server, "/v1/sessions", &create, None);
+    assert_eq!(status, 200);
+    let session_id = payload(&created)["session_id"].as_str().unwrap();
+    let token = payload(&created)["token"].as_str().unwrap();
+    let query = envelope(
+        json!({
+            "scope": "instance:socket-test",
+            "query": "FROM record:document AT VALID 100 KNOWN HEAD PROJECT id, title EXPLAIN CONTRACT",
+            "parameters": {},
+            "budget": {
+                "max_scanned_changes": 100,
+                "max_rows": 10,
+                "max_output_bytes": 16384,
+                "max_batch_rows": 10
+            }
+        }),
+        None,
+        None,
+    );
+    let (status, denied) = post(&server, "/v1/query", &query, None);
+    assert_eq!(status, 401);
+    assert_eq!(denied["outcome"]["error"]["code"], "unauthenticated");
+
+    let (status, result) = post(&server, "/v1/query", &query, Some((session_id, token)));
+    assert_eq!(status, 200, "{result}");
+    let result = payload(&result);
+    assert_eq!(result["scope"], "instance:socket-test");
+    assert_eq!(result["schema_revision"], 1);
+    assert_eq!(result["plan"]["exact"], true);
+    assert_eq!(result["plan"]["candidates"][0]["selected"], true);
+    assert_eq!(result["execution"]["returned_rows"], 1);
+    assert_eq!(result["rows"][0]["identity"], "record:document:alpha");
+    assert_eq!(result["rows"][0]["values"]["title"]["type"], "string");
+    assert_eq!(result["rows"][0]["values"]["title"]["value"], "Alpha");
+
+    let mut wrong_scope = query;
+    wrong_scope["payload"]["scope"] = json!("instance:other");
+    let (status, wrong) = post(
+        &server,
+        "/v1/query",
+        &wrong_scope,
+        Some((session_id, token)),
+    );
+    assert_eq!(status, 400);
+    assert_eq!(wrong["outcome"]["error"]["code"], "invalid_argument");
+}
+
 #[test]
 fn authenticated_estate_read_returns_the_public_snapshot_only() {
     let temporary = tempfile::tempdir().unwrap();
@@ -316,13 +424,15 @@ fn real_socket_exercises_lifecycle_commit_and_restart_replay() {
     let (status, capabilities) = http(server.address, "GET", "/v1/capabilities", &[], &[]);
     assert_eq!(status, 200);
     assert_eq!(payload(&capabilities)["deployment_mode"], "local_server");
-    assert!(payload(&capabilities)["capabilities"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .any(|capability| {
-            capability["name"] == "remote-listen" && capability["status"] == "unavailable"
-        }));
+    assert!(
+        payload(&capabilities)["capabilities"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|capability| {
+                capability["name"] == "remote-listen" && capability["status"] == "unavailable"
+            })
+    );
 
     let create = envelope(
         json!({
@@ -705,9 +815,11 @@ fn concurrent_same_commit_is_single_acceptance_and_retry_converges() {
         .map(|worker| worker.join().unwrap())
         .collect::<Vec<_>>();
     assert!(results.iter().any(|(status, _)| *status == 200));
-    assert!(results
-        .iter()
-        .all(|(status, _)| matches!(*status, 200 | 409)));
+    assert!(
+        results
+            .iter()
+            .all(|(status, _)| matches!(*status, 200 | 409))
+    );
 
     let (status, converged) = post(&server, &path, &commit, Some((&session_id, &token)));
     assert_eq!(status, 200);

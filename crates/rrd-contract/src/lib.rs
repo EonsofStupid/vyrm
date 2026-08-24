@@ -16,8 +16,178 @@ pub const MAX_ID_BYTES: usize = 128;
 pub const MAX_MESSAGE_BYTES: usize = 4_096;
 pub const MAX_CAPABILITIES: usize = 512;
 pub const MAX_TRANSACTION_CLAIMS: usize = 4_096;
+pub const MAX_QUERY_BYTES: usize = 64 * 1024;
+pub const MAX_QUERY_PARAMETERS: usize = 128;
+pub const MAX_QUERY_PARAMETER_BYTES: usize = 64 * 1024;
+pub const MAX_QUERY_SCANNED_CHANGES: u64 = 1_000_000;
+pub const MAX_QUERY_ROWS: u64 = 100_000;
+pub const MAX_QUERY_OUTPUT_BYTES: u64 = 768 * 1024;
+pub const MAX_QUERY_BATCH_ROWS: u64 = 1_024;
 pub const MIN_LEASE_MS: u64 = 1_000;
 pub const MAX_LEASE_MS: u64 = 3_600_000;
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", content = "value", rename_all = "snake_case")]
+pub enum QueryValue {
+    Null,
+    Bool(bool),
+    Integer(i64),
+    Unsigned(u64),
+    Decimal(String),
+    String(String),
+    Digest(String),
+    List(Vec<QueryValue>),
+    Map(BTreeMap<String, QueryValue>),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct QueryBudget {
+    pub max_scanned_changes: u64,
+    pub max_rows: u64,
+    pub max_output_bytes: u64,
+    pub max_batch_rows: u64,
+}
+
+impl Default for QueryBudget {
+    fn default() -> Self {
+        Self {
+            max_scanned_changes: 100_000,
+            max_rows: 10_000,
+            max_output_bytes: 512 * 1024,
+            max_batch_rows: 256,
+        }
+    }
+}
+
+impl QueryBudget {
+    pub fn validate(&self) -> Result<()> {
+        for (name, value, maximum) in [
+            (
+                "max_scanned_changes",
+                self.max_scanned_changes,
+                MAX_QUERY_SCANNED_CHANGES,
+            ),
+            ("max_rows", self.max_rows, MAX_QUERY_ROWS),
+            (
+                "max_output_bytes",
+                self.max_output_bytes,
+                MAX_QUERY_OUTPUT_BYTES,
+            ),
+            ("max_batch_rows", self.max_batch_rows, MAX_QUERY_BATCH_ROWS),
+        ] {
+            if value == 0 || value > maximum {
+                return invalid(format!("query {name} must be in 1..={maximum}"));
+            }
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ExecuteQuery {
+    pub scope: String,
+    pub query: String,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub parameters: BTreeMap<String, QueryValue>,
+    #[serde(default)]
+    pub budget: QueryBudget,
+}
+
+impl ExecuteQuery {
+    pub fn validate(&self) -> Result<()> {
+        if self.scope.is_empty() || self.scope.len() > MAX_ID_BYTES || self.scope.contains('\0') {
+            return invalid(format!(
+                "query scope length must be in 1..={MAX_ID_BYTES} bytes and contain no NUL"
+            ));
+        }
+        if self.query.trim().is_empty() || self.query.len() > MAX_QUERY_BYTES {
+            return invalid(format!(
+                "query text length must be in 1..={MAX_QUERY_BYTES} bytes"
+            ));
+        }
+        if self.parameters.len() > MAX_QUERY_PARAMETERS {
+            return invalid(format!(
+                "query parameters may contain at most {MAX_QUERY_PARAMETERS} entries"
+            ));
+        }
+        if self.parameters.values().any(|value| {
+            !matches!(
+                value,
+                QueryValue::Null
+                    | QueryValue::Bool(_)
+                    | QueryValue::Integer(_)
+                    | QueryValue::Unsigned(_)
+                    | QueryValue::String(_)
+            )
+        }) {
+            return invalid(
+                "query parameters support only null, boolean, integer, unsigned, and string values",
+            );
+        }
+        let parameter_bytes = serde_json::to_vec(&self.parameters)
+            .map_err(|error| ContractError(error.to_string()))?
+            .len();
+        if parameter_bytes > MAX_QUERY_PARAMETER_BYTES {
+            return invalid(format!(
+                "query parameters may encode at most {MAX_QUERY_PARAMETER_BYTES} bytes"
+            ));
+        }
+        self.budget.validate()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct QueryPlanCandidate {
+    pub name: String,
+    pub selected: bool,
+    pub exact: bool,
+    pub reason: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct QueryPlanSnapshot {
+    pub plan_sha256: String,
+    pub exact: bool,
+    pub deterministic_order: String,
+    pub authorization_boundary: String,
+    pub candidates: Vec<QueryPlanCandidate>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct QueryRowSnapshot {
+    pub identity: String,
+    pub values: BTreeMap<String, QueryValue>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct QueryExecutionSnapshot {
+    pub scanned_changes: u64,
+    pub stamp_validation: String,
+    pub stamp_validation_max_changes: u64,
+    pub stamp_validation_proof_nodes: u16,
+    pub returned_rows: u64,
+    pub output_bytes: u64,
+    pub truncated: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct QueryResult {
+    pub canonical_query: String,
+    pub scope: String,
+    pub read_manifest_sha256: String,
+    pub known_at_cursor: u64,
+    pub schema_revision: u64,
+    pub plan: QueryPlanSnapshot,
+    pub execution: QueryExecutionSnapshot,
+    pub rows: Vec<QueryRowSnapshot>,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

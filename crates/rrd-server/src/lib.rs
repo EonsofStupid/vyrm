@@ -2,20 +2,22 @@
 
 mod http;
 
-pub use http::{load_or_create_token_key, HttpError, RrdHttpServer, RRD_MAX_BODY_BYTES};
+pub use http::{HttpError, RRD_MAX_BODY_BYTES, RrdHttpServer, load_or_create_token_key};
 
 use hmac::{Hmac, KeyInit, Mac};
 use rrd_contract::{
-    transaction_operation_sha256, AbortTransaction, BeginTransaction, CanonicalId, CloseSession,
-    CommitReceipt, CommitTransaction, CorrelationId, CreateSession, PreviewTransaction,
-    RenewSession, SessionEndState, SessionLease, SessionLimits, SessionTermination,
+    AbortTransaction, BeginTransaction, CanonicalId, CloseSession, CommitReceipt,
+    CommitTransaction, CorrelationId, CreateSession, ExecuteQuery, PreviewTransaction,
+    QueryExecutionSnapshot, QueryPlanCandidate, QueryPlanSnapshot, QueryResult, QueryRowSnapshot,
+    QueryValue, RenewSession, SessionEndState, SessionLease, SessionLimits, SessionTermination,
     TransactionLease, TransactionMutation, TransactionPreview, TransactionState,
+    transaction_operation_sha256,
 };
 use serde::{Deserialize, Serialize};
 use sha2::Sha256;
 use std::collections::BTreeMap;
 use std::fmt;
-use vyrm_core::{digest, Claim, Predicate, Producer, Subject};
+use vyrm_core::{Claim, Predicate, Producer, RuntimeValue, ScopeId, Subject, digest};
 use vyrm_store::{ControlTransition, Engine};
 
 const SESSION_STATE_FORMAT: u16 = 1;
@@ -40,6 +42,7 @@ pub enum ServiceError {
     CommitInProgress,
     WrongScope,
     OperationDigestMismatch,
+    Query(String),
 }
 
 impl fmt::Display for ServiceError {
@@ -170,6 +173,105 @@ impl<E: Engine> RrdService<E> {
             .load()
             .map(|document| document.as_ref().map(rrd_estate::public_snapshot))
             .map_err(Into::into)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn execute_query(
+        &self,
+        session_id: &CorrelationId,
+        token: &CorrelationId,
+        request: &ExecuteQuery,
+        now: u64,
+        request_id: &str,
+        operation_id: &str,
+    ) -> Result<QueryResult> {
+        request
+            .validate()
+            .map_err(|error| ServiceError::Query(error.to_string()))?;
+        self.authorize(session_id, token, now, request_id, operation_id)?;
+        let expected_scope = format!("instance:{}", self.instance);
+        if request.scope != expected_scope {
+            return Err(ServiceError::WrongScope);
+        }
+        let scope = ScopeId::new(request.scope.clone())
+            .map_err(|error| ServiceError::Query(error.to_string()))?;
+        let query = vyrm_ql::parse(&request.query)
+            .map_err(|error| ServiceError::Query(error.to_string()))?;
+        let parameters = request
+            .parameters
+            .iter()
+            .map(|(name, value)| Ok((name.clone(), runtime_value(value)?)))
+            .collect::<Result<vyrm_mx::Parameters>>()?;
+        let catalog = vyrm_mx::Catalog::capture(&self.engine, &scope)
+            .map_err(|error| ServiceError::Query(error.to_string()))?;
+        let bound = vyrm_mx::bind(&query, &parameters, &catalog)
+            .map_err(|error| ServiceError::Query(error.to_string()))?;
+        let plan = vyrm_mx::plan(&bound).map_err(|error| ServiceError::Query(error.to_string()))?;
+        let budget = vyrm_mx::ExecutionBudget {
+            max_scanned_changes: usize::try_from(request.budget.max_scanned_changes)
+                .map_err(|_| ServiceError::Query("query scan budget exceeds usize".into()))?,
+            max_rows: usize::try_from(request.budget.max_rows)
+                .map_err(|_| ServiceError::Query("query row budget exceeds usize".into()))?,
+            max_output_bytes: usize::try_from(request.budget.max_output_bytes)
+                .map_err(|_| ServiceError::Query("query output budget exceeds usize".into()))?,
+            max_batch_rows: usize::try_from(request.budget.max_batch_rows)
+                .map_err(|_| ServiceError::Query("query batch budget exceeds usize".into()))?,
+        };
+        let execution = vyrm_mx::execute(&self.engine, &plan, &budget)
+            .map_err(|error| ServiceError::Query(error.to_string()))?;
+        let rows = execution
+            .batches
+            .iter()
+            .flat_map(|batch| batch.rows.iter())
+            .map(|row| {
+                Ok(QueryRowSnapshot {
+                    identity: row.identity.clone(),
+                    values: row
+                        .values
+                        .iter()
+                        .map(|(name, value)| Ok((name.clone(), query_value(value)?)))
+                        .collect::<Result<_>>()?,
+                })
+            })
+            .collect::<Result<Vec<_>>>()?;
+        Ok(QueryResult {
+            canonical_query: query.canonical(),
+            scope: request.scope.clone(),
+            read_manifest_sha256: execution.read_manifest.clone(),
+            known_at_cursor: execution.known_at_cursor,
+            schema_revision: bound.schema_revision,
+            plan: QueryPlanSnapshot {
+                plan_sha256: plan.digest.clone(),
+                exact: plan.explanation.contract.exact,
+                deterministic_order: plan.explanation.contract.deterministic_order.clone(),
+                authorization_boundary: plan.explanation.contract.authorization_boundary.clone(),
+                candidates: plan
+                    .explanation
+                    .candidates
+                    .iter()
+                    .map(|candidate| QueryPlanCandidate {
+                        name: candidate.name.clone(),
+                        selected: candidate.selected,
+                        exact: candidate.exact,
+                        reason: candidate.reason.clone(),
+                    })
+                    .collect(),
+            },
+            execution: QueryExecutionSnapshot {
+                scanned_changes: u64::try_from(execution.scanned_changes)
+                    .map_err(|_| ServiceError::Query("scanned changes exceed u64".into()))?,
+                stamp_validation: execution.stamp_validation,
+                stamp_validation_max_changes: u64::try_from(execution.stamp_validation_max_changes)
+                    .map_err(|_| ServiceError::Query("stamp evidence exceeds u64".into()))?,
+                stamp_validation_proof_nodes: execution.stamp_validation_proof_nodes,
+                returned_rows: u64::try_from(execution.returned_rows)
+                    .map_err(|_| ServiceError::Query("returned rows exceed u64".into()))?,
+                output_bytes: u64::try_from(execution.output_bytes)
+                    .map_err(|_| ServiceError::Query("output bytes exceed u64".into()))?,
+                truncated: execution.truncated,
+            },
+            rows,
+        })
     }
 
     pub fn create_session(
@@ -866,6 +968,51 @@ fn touch_or_expire_after_commit(state: &mut SessionState, now: u64) {
             transaction.lease.state = TransactionState::Expired;
         }
     }
+}
+
+fn runtime_value(value: &QueryValue) -> Result<RuntimeValue> {
+    Ok(match value {
+        QueryValue::Null => RuntimeValue::Null,
+        QueryValue::Bool(value) => RuntimeValue::Bool(*value),
+        QueryValue::Integer(value) => RuntimeValue::Integer(*value),
+        QueryValue::Unsigned(value) => RuntimeValue::Unsigned(*value),
+        QueryValue::Decimal(value) => RuntimeValue::Decimal(value.clone()),
+        QueryValue::String(value) => RuntimeValue::String(value.clone()),
+        QueryValue::Digest(value) => RuntimeValue::Digest(value.clone()),
+        QueryValue::List(values) => RuntimeValue::List(
+            values
+                .iter()
+                .map(runtime_value)
+                .collect::<Result<Vec<_>>>()?,
+        ),
+        QueryValue::Map(values) => RuntimeValue::Map(
+            values
+                .iter()
+                .map(|(name, value)| Ok((name.clone(), runtime_value(value)?)))
+                .collect::<Result<_>>()?,
+        ),
+    })
+}
+
+fn query_value(value: &RuntimeValue) -> Result<QueryValue> {
+    Ok(match value {
+        RuntimeValue::Null => QueryValue::Null,
+        RuntimeValue::Bool(value) => QueryValue::Bool(*value),
+        RuntimeValue::Integer(value) => QueryValue::Integer(*value),
+        RuntimeValue::Unsigned(value) => QueryValue::Unsigned(*value),
+        RuntimeValue::Decimal(value) => QueryValue::Decimal(value.clone()),
+        RuntimeValue::String(value) => QueryValue::String(value.clone()),
+        RuntimeValue::Digest(value) => QueryValue::Digest(value.clone()),
+        RuntimeValue::List(values) => {
+            QueryValue::List(values.iter().map(query_value).collect::<Result<Vec<_>>>()?)
+        }
+        RuntimeValue::Map(values) => QueryValue::Map(
+            values
+                .iter()
+                .map(|(name, value)| Ok((name.clone(), query_value(value)?)))
+                .collect::<Result<_>>()?,
+        ),
+    })
 }
 
 fn public_claims(request: &CommitTransaction, session_id: &CorrelationId) -> Result<Vec<Claim>> {

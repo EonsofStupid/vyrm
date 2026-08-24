@@ -1,19 +1,19 @@
 use crate::{RrdService, ServiceError};
-use axum::body::{to_bytes, Body, Bytes};
+use axum::Router;
+use axum::body::{Body, Bytes, to_bytes};
 use axum::extract::{Request, State};
-use axum::http::{header, HeaderMap, HeaderValue, Method, StatusCode};
+use axum::http::{HeaderMap, HeaderValue, Method, StatusCode, header};
 use axum::response::Response;
 use axum::routing::any;
-use axum::Router;
 use rrd_contract::{
     AbortTransaction, BeginTransaction, CanonicalId, CapabilityDescriptor, CapabilityStatus,
     CloseSession, CommitTransaction, CorrelationId, CreateSession, DeploymentMode, ErrorBody,
-    ErrorCode, Liveness, PreviewTransaction, ReadEstate, Readiness, RenewSession, RequestContext,
-    RequestEnvelope, ResourceId, ResourceKind, ResponseEnvelope, ResponseOutcome,
-    ServiceCapabilities, PROTOCOL, PROTOCOL_VERSION,
+    ErrorCode, ExecuteQuery, Liveness, PROTOCOL, PROTOCOL_VERSION, PreviewTransaction, ReadEstate,
+    Readiness, RenewSession, RequestContext, RequestEnvelope, ResourceId, ResourceKind,
+    ResponseEnvelope, ResponseOutcome, ServiceCapabilities,
 };
-use serde::de::DeserializeOwned;
 use serde::Serialize;
+use serde::de::DeserializeOwned;
 use std::collections::BTreeMap;
 use std::fmt;
 use std::fs::{File, OpenOptions};
@@ -21,8 +21,8 @@ use std::future::Future;
 use std::io::{self, Read, Write};
 use std::net::{SocketAddr, TcpListener};
 use std::path::Path;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 use vyrm_core::digest;
 use vyrm_store::{Engine, Error as StoreError, PersistentEngine};
@@ -201,6 +201,7 @@ impl AppState {
                 self.close_session(&headers, &body, path, now)
             }
             (Method::POST, "/v1/transactions") => self.begin_transaction(&headers, &body, now),
+            (Method::POST, "/v1/query") => self.execute_query(&headers, &body, now),
             (Method::POST, path) if estate_action(path, "read").is_some() => {
                 self.read_estate(&headers, &body, path, now)
             }
@@ -375,6 +376,28 @@ impl AppState {
                     .ok_or_else(|| {
                         ApiError::new(ErrorCode::NotFound, "estate authority not found", false)
                     })
+            },
+        )
+    }
+
+    fn execute_query(&self, headers: &HeaderMap, body: &[u8], now: u64) -> HttpResponse {
+        self.with_authenticated_envelope::<ExecuteQuery, _, _>(
+            headers,
+            body,
+            now,
+            false,
+            None,
+            |envelope, session, token| {
+                self.service
+                    .execute_query(
+                        session,
+                        token,
+                        &envelope.payload,
+                        now,
+                        envelope.context.request_id.as_str(),
+                        envelope.context.operation_id.as_str(),
+                    )
+                    .map_err(api_error)
             },
         )
     }
@@ -786,6 +809,7 @@ fn api_error(error: ServiceError) -> ApiError {
     let message = error.to_string();
     match error {
         ServiceError::Contract(_)
+        | ServiceError::Query(_)
         | ServiceError::OperationDigestMismatch
         | ServiceError::WrongScope => ApiError::new(ErrorCode::InvalidArgument, message, false),
         ServiceError::SessionNotFound | ServiceError::TransactionNotFound => {
@@ -869,6 +893,25 @@ fn capabilities(instance: &CanonicalId, backend: CanonicalId) -> ServiceCapabili
             limitation: Some(format!(
                 "claim mutation surface on {backend}; F6 multi-model transactions remain open"
             )),
+        },
+        CapabilityDescriptor {
+            name: CanonicalId::new("exact-vyrmql-query").unwrap(),
+            contract_version: 1,
+            status: CapabilityStatus::Experimental,
+            limits: BTreeMap::from([
+                (
+                    CanonicalId::new("max-query-bytes").unwrap(),
+                    rrd_contract::MAX_QUERY_BYTES as u64,
+                ),
+                (
+                    CanonicalId::new("max-output-bytes").unwrap(),
+                    rrd_contract::MAX_QUERY_OUTPUT_BYTES,
+                ),
+            ]),
+            limitation: Some(
+                "exact session-scoped VyrmQL/VyrmMX reads; mutating VyrmQL and live queries remain open"
+                    .into(),
+            ),
         },
         CapabilityDescriptor {
             name: CanonicalId::new("estate-authority-read").unwrap(),

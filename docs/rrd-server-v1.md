@@ -38,6 +38,13 @@ places that secret elsewhere. `X-RRD-Session` carries the session identifier;
   maximum concurrent transactions, and a server-generated secret token.
 - `POST /v1/sessions/{session}/renew` rotates the token and never extends past
   absolute expiry.
+- `POST /v1/query` authenticates the session, requires the exact
+  `instance:<server-instance>` scope, and executes bounded VyrmQL through the
+  VyrmMX binder, planner, and executor. The typed response includes the
+  canonical query, read manifest, cursor, schema revision, selected and
+  rejected plan candidates, execution evidence, and rows. This endpoint is a
+  read-only F6 walking skeleton; mutating VyrmQL and live subscriptions remain
+  open.
 - `POST /v1/estates/{estate}/read` returns the typed public `EstateSnapshot`
   for a resource path containing that estate and this server instance. It
   requires a live session token, exposes no raw idempotency keys, and performs
@@ -112,7 +119,9 @@ is exercised. This is deliberately not presented as one cross-keyspace commit.
   only if no commit was accepted; otherwise the durable accepted result wins.
 - Session/transaction counts, body bytes, mutation count, and lease duration
   have configured hard bounds. Result-byte and execution-time caps remain
-  open.
+  open for generalized work. Query input, parameter count/bytes, scanned
+  changes, returned rows, batch rows, and encoded output bytes are bounded by
+  the public query contract.
 - Expiry cleanup is idempotent and never deletes canonical data.
 - Disconnect does not imply abort or commit; the transaction remains governed
   by its lease and idempotency identity.
@@ -131,7 +140,13 @@ The matrix also proves that an unauthenticated estate read is denied, URL and
 resource-estate identities must agree, and the response is the public snapshot
 rather than the persisted authority document.
 
+The real-socket matrix proves the same authentication and scope denial for the
+query endpoint and verifies an exact persisted-record query, typed row output,
+planner candidates, validation evidence, and cursor/schema coordinates.
+
 F2 is not closed by that matrix. Remaining black-box gates are cancellation of
 long-running query work, deadline races during generalized commit, prospective
-multi-model read-your-writes, CRUD/schema/vector/snapshot administration,
-result/time limits, metrics export, and released-version negotiation clients.
+multi-model read-your-writes, mutating VyrmQL, live subscriptions,
+CRUD/schema/vector/snapshot administration, generalized result/time limits,
+durable query-span export, metrics export, and released-version negotiation
+clients.

@@ -18,10 +18,13 @@ Version 1 freezes:
 - success/error response framing and stable error codes.
 
 F2 extends version 1 additively with bounded transport-session leases,
-transaction leases and terminal states, a claim-only public mutation type, and
-commit receipts. These types remain independent of `vyrm_core`; later
-multi-model transaction mutations extend the tagged public enum rather than
-serializing private runtime structs.
+transaction leases and terminal states, a claim-only public mutation type,
+commit receipts, and the first read-only query contract. `ExecuteQuery`
+defines strict query, parameter, scan, row, batch, and encoded-output bounds;
+its typed result carries the canonical query, read coordinates, plan evidence,
+execution counters, and rows. These types remain independent of `vyrm_core`;
+later multi-model transaction mutations extend the tagged public enum rather
+than serializing private runtime structs.
 
 The frozen JSON fixture is
 [`public-contract-v1.json`](../crates/rrd-contract/fixtures/public-contract-v1.json).
@@ -29,6 +32,7 @@ Malformed identifiers, duplicate/unsorted capabilities, unsupported protocol
 versions, unknown fields, repeated resource kinds, and mutations without an
 idempotency key fail closed in tests.
 
-This is not yet an HTTP or gRPC service and is not presented as an SDK. F2 will
-bind transports to this contract; F5 will generate and test supported SDKs
-against those same bytes.
+`rrd-server` binds the current contract to a loopback-only HTTP alpha. It is
+not presented as an SDK or remote-authenticated service. F5 will generate and
+test supported SDKs against these same bytes, and F4 must land before remote
+exposure.

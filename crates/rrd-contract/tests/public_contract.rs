@@ -2,12 +2,13 @@ use rrd_contract::{
     BeginTransaction, CanonicalId, CapabilityDescriptor, CapabilityStatus, CloseSession,
     CommitReceipt, CommitTransaction, CorrelationId, DeploymentMode, ErrorBody, ErrorCode,
     EstateActivityPolicySnapshot, EstateBackupJobSnapshot, EstateBackupJobState,
-    EstateBackupJobsSnapshot, EstateMutationResult, EstateSnapshot, IdempotencyBinding, Liveness,
-    PROTOCOL, PROTOCOL_VERSION, PreviewTransaction, ReadEstate, Readiness, RenewSession,
-    RequestContext, RequestEnvelope, ResourceId, ResourceKind, ResourcePath, ResponseEnvelope,
-    ResponseOutcome, ServiceCapabilities, SessionEndState, SessionLease, SessionLimits,
-    SessionTermination, TransactionMutation, TransactionPreview, TransactionState,
-    transaction_operation_sha256,
+    EstateBackupJobsSnapshot, EstateMutationResult, EstateSnapshot, ExecuteQuery,
+    IdempotencyBinding, Liveness, PROTOCOL, PROTOCOL_VERSION, PreviewTransaction, QueryBudget,
+    QueryExecutionSnapshot, QueryPlanCandidate, QueryPlanSnapshot, QueryResult, QueryRowSnapshot,
+    QueryValue, ReadEstate, Readiness, RenewSession, RequestContext, RequestEnvelope, ResourceId,
+    ResourceKind, ResourcePath, ResponseEnvelope, ResponseOutcome, ServiceCapabilities,
+    SessionEndState, SessionLease, SessionLimits, SessionTermination, TransactionMutation,
+    TransactionPreview, TransactionState, transaction_operation_sha256,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -253,6 +254,72 @@ fn estate_backup_jobs_are_a_separate_strict_public_resource() {
     let mut unknown = expected;
     unknown["jobs"][0]["unknown"] = serde_json::json!(true);
     assert!(serde_json::from_value::<EstateBackupJobsSnapshot>(unknown).is_err());
+}
+
+#[test]
+fn query_contract_is_transport_neutral_bounded_and_strict() {
+    let request = ExecuteQuery {
+        scope: "instance:project-alpha".into(),
+        query: "FROM record:document AT VALID 42 KNOWN HEAD PROJECT title".into(),
+        parameters: BTreeMap::from([("title".into(), QueryValue::String("alpha".into()))]),
+        budget: QueryBudget::default(),
+    };
+    request.validate().unwrap();
+    let encoded = serde_json::to_value(&request).unwrap();
+    assert_eq!(encoded["scope"], "instance:project-alpha");
+    let mut unknown = encoded.clone();
+    unknown["unknown"] = serde_json::json!(true);
+    assert!(serde_json::from_value::<ExecuteQuery>(unknown).is_err());
+
+    let result = QueryResult {
+        canonical_query: request.query.clone(),
+        scope: request.scope.clone(),
+        read_manifest_sha256: "a".repeat(64),
+        known_at_cursor: 7,
+        schema_revision: 1,
+        plan: QueryPlanSnapshot {
+            plan_sha256: "b".repeat(64),
+            exact: true,
+            deterministic_order: "identity_ascending".into(),
+            authorization_boundary: "scope:instance:project-alpha".into(),
+            candidates: vec![QueryPlanCandidate {
+                name: "authoritative_log_scan".into(),
+                selected: true,
+                exact: true,
+                reason: "frozen fixture".into(),
+            }],
+        },
+        execution: QueryExecutionSnapshot {
+            scanned_changes: 7,
+            stamp_validation: "full_hash_chain_replay".into(),
+            stamp_validation_max_changes: 7,
+            stamp_validation_proof_nodes: 0,
+            returned_rows: 1,
+            output_bytes: 32,
+            truncated: false,
+        },
+        rows: vec![QueryRowSnapshot {
+            identity: "document:alpha".into(),
+            values: BTreeMap::from([("title".into(), QueryValue::String("Alpha".into()))]),
+        }],
+    };
+    assert_eq!(
+        serde_json::from_value::<QueryResult>(serde_json::to_value(&result).unwrap()).unwrap(),
+        result
+    );
+
+    let mut invalid_budget = request_budget_fixture();
+    invalid_budget.max_rows = 0;
+    assert!(invalid_budget.validate().is_err());
+    let mut invalid_parameter = request.clone();
+    invalid_parameter
+        .parameters
+        .insert("nested".into(), QueryValue::List(Vec::new()));
+    assert!(invalid_parameter.validate().is_err());
+}
+
+fn request_budget_fixture() -> QueryBudget {
+    QueryBudget::default()
 }
 
 #[test]

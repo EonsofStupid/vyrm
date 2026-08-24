@@ -212,6 +212,17 @@ user authentication or comprehensive audit. Cancellation, generalized
 read-your-writes, CRUD/schema/vector/snapshot administration, result/time
 bounds, metrics, and released-version client qualification keep F2 open.
 
+The public service now also exposes the first F6 breadth path through
+`POST /v1/query`: a transport-neutral, strictly bounded `ExecuteQuery`
+contract is authenticated against the persistent session, restricted to the
+server's exact instance scope, and executed by the real VyrmQL parser and
+VyrmMX catalogue/binder/planner/executor. The response preserves typed values,
+read manifest, cursor, schema revision, plan candidates, exactness/order/auth
+contracts, and execution evidence. A real-socket test proves unauthenticated
+and wrong-scope denial plus an exact persisted-record result. This does not yet
+provide mutating VyrmQL, multi-model public transactions, live queries, or
+durable service-query spans.
+
 **Deliverables**
 
 - One async server with health/readiness/capability endpoints.
