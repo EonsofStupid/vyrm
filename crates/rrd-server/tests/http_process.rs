@@ -287,6 +287,18 @@ fn initialized_security_authority_binds_sessions_and_denies_ungranted_routes() {
                 action: SecurityAction::QueryExecute,
                 resource_prefix: resource,
             },
+            ResourceGrant {
+                action: SecurityAction::AuditRead,
+                resource_prefix: rrd_contract::ResourcePath {
+                    segments: vec![
+                        rrd_contract::ResourceId::new(
+                            rrd_contract::ResourceKind::Instance,
+                            "socket-test",
+                        )
+                        .unwrap(),
+                    ],
+                },
+            },
         ],
     };
     SecurityRepository::new(&engine, instance)
@@ -305,6 +317,10 @@ fn initialized_security_authority_binds_sessions_and_denies_ungranted_routes() {
     drop(engine);
 
     let server = start(&root);
+    let (status, _) = http(server.address, "GET", "/v1/health/live", &[], &[]);
+    assert_eq!(status, 200);
+    let (status, _) = http(server.address, "GET", "/v1/not-a-route", &[], &[]);
+    assert_eq!(status, 404);
     let create = envelope(
         json!({
             "limits": {
@@ -363,14 +379,71 @@ fn initialized_security_authority_binds_sessions_and_denies_ungranted_routes() {
     let (status, denied) = post(&server, "/v1/backups", &backup, Some((session, token)));
     assert_eq!(status, 403, "{denied}");
     assert_eq!(denied["outcome"]["error"]["code"], "permission_denied");
-    server.stop();
+    let (status, unauthenticated) = post(&server, "/v1/backups", &backup, None);
+    assert_eq!(status, 401, "{unauthenticated}");
+
+    let mut invalid_query = query.clone();
+    invalid_query["payload"]["query"] = json!("NOT VYRMQL");
+    let (status, failed) = post(&server, "/v1/query", &invalid_query, Some((session, token)));
+    assert_eq!(status, 400, "{failed}");
+
+    let audit = envelope(json!({"after_sequence": 0, "limit": 32}), None, None);
+    let (status, audited) = post(&server, "/v1/audit/read", &audit, Some((session, token)));
+    assert_eq!(status, 200, "{audited}");
+    let records = payload(&audited)["records"].as_array().unwrap();
+    assert_eq!(records.len(), 13, "{audited}");
+    assert_eq!(records[0]["action"], "service_inspect");
+    assert_eq!(records[0]["decision"], "allowed");
+    assert_eq!(records[1]["action"], "unknown_request");
+    assert_eq!(records[1]["decision"], "failed");
     assert_eq!(
-        PersistentEngine::open(&root)
-            .unwrap()
-            .runtime_cursor()
-            .unwrap(),
+        records
+            .iter()
+            .filter(|record| {
+                record["action"] == "session_create" && record["decision"] == "denied"
+            })
+            .count(),
         2
     );
+    assert!(
+        records.iter().any(|record| {
+            record["action"] == "session_create" && record["phase"] == "authorized"
+        })
+    );
+    assert!(records.iter().any(|record| {
+        record["action"] == "query_execute"
+            && record["phase"] == "completed"
+            && record["decision"] == "allowed"
+    }));
+    assert!(records.iter().any(|record| {
+        record["action"] == "query_execute"
+            && record["phase"] == "completed"
+            && record["decision"] == "failed"
+    }));
+    assert_eq!(
+        records
+            .iter()
+            .filter(|record| {
+                record["action"] == "backup_create" && record["decision"] == "denied"
+            })
+            .count(),
+        2
+    );
+    assert!(
+        records
+            .iter()
+            .any(|record| { record["action"] == "audit_read" && record["phase"] == "authorized" })
+    );
+    let encoded = serde_json::to_string(records).unwrap();
+    assert!(!encoded.contains("local-api-key"));
+    assert!(!encoded.contains("wrong"));
+    server.stop();
+    let reopened = PersistentEngine::open(&root).unwrap();
+    assert_eq!(reopened.runtime_cursor().unwrap(), 2);
+    let journal = reopened.control_journal_since(0, 64).unwrap();
+    let encoded = serde_json::to_string(&journal).unwrap();
+    assert!(!encoded.contains("local-api-key"));
+    assert!(!encoded.contains("ApiKey"));
 }
 
 #[test]

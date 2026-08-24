@@ -579,6 +579,87 @@ pub struct RestoreInstanceBackupResult {
     pub idempotent_replay: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SecurityAction {
+    ServiceInspect,
+    UnknownRequest,
+    SessionCreate,
+    SessionRenew,
+    SessionClose,
+    QueryExecute,
+    TransactionBegin,
+    TransactionPreview,
+    TransactionCommit,
+    TransactionAbort,
+    ChangefeedRead,
+    ChangefeedFollow,
+    VectorSearch,
+    BackupCreate,
+    BackupList,
+    RestoreCreate,
+    EstateRead,
+    AuditRead,
+    SecurityAdmin,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AuditPhase {
+    Authorized,
+    Completed,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AuditDecision {
+    Allowed,
+    Denied,
+    Failed,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ReadAudit {
+    pub after_sequence: u64,
+    pub limit: u16,
+}
+
+impl ReadAudit {
+    pub fn validate(&self) -> Result<()> {
+        if self.limit == 0 || self.limit > 1_024 {
+            return invalid("audit page limit must be in 1..=1024");
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AuditRecordSnapshot {
+    pub sequence: u64,
+    pub audit_id: CanonicalId,
+    pub at_unix_ms: u64,
+    pub principal_id: Option<CanonicalId>,
+    pub action: SecurityAction,
+    pub resource: ResourcePath,
+    pub request_id: String,
+    pub operation_id: String,
+    pub phase: AuditPhase,
+    pub decision: AuditDecision,
+    pub status_code: u16,
+    pub request_sha256: String,
+    pub response_sha256: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AuditPage {
+    pub requested_after_sequence: u64,
+    pub through_sequence: u64,
+    pub records: Vec<AuditRecordSnapshot>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ReadEstate {}

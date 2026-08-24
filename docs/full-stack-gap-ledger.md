@@ -380,9 +380,16 @@ session creation with a principal/API key, durably binds that principal to the
 session, maps every current authenticated route to a closed action, and
 re-evaluates current exact resource policy on every request. A real-socket
 differential proves missing/wrong credential denial, allowed query, and denied
-ungranted backup with no data mutation. Provisioning APIs, TLS/mTLS, secret
-providers, row/field policy, rate limits, and complete endpoint audit
-integration remain open; remote bind is still denied.
+ungranted backup with no data mutation. Routed success, authorization denial,
+and execution failure are now written as redacted typed audit completions and
+available through a policy-protected bounded public read whose cursor advances
+over unrelated control history. The socket/reopen test proves all three
+decision classes and absence of API-key material from public and journal
+evidence. Pre-effect audit reservation is now implemented for authorized
+routed work. Provisioning APIs, TLS/mTLS, secret providers, row/field policy,
+rate limits, application-mutation/audit-completion atomicity, oversized-body/
+handler-failure coverage, retention/rotation, and external archival remain
+open; remote bind is still denied.
 
 **Deliverables**
 

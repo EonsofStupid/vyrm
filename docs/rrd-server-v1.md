@@ -78,11 +78,15 @@ places that secret elsewhere. `X-RRD-Session` carries the session identifier;
   it into a generated, absent `restore_id` root. It reopens and checks the
   restored claim/runtime watermarks before completing. It never overwrites or
   switches the active instance root.
+- `POST /v1/audit/read` requires the session principal to hold `audit_read` on
+  the exact resource and returns a bounded page of redacted typed outcomes from
+  the authenticated control journal. Its resume coordinate advances across
+  non-audit transitions.
 - `POST /v1/estates/{estate}/read` returns the typed public `EstateSnapshot`
   for a resource path containing that estate and this server instance. It
   requires a live session token, exposes no raw idempotency keys, and performs
-  no estate mutation. Session leases are still transport credentials rather
-  than F4 authorization.
+  no estate mutation. On secured instances the session principal must also
+  hold the exact `estate_read` grant.
 - `DELETE /v1/sessions/{session}` closes the session and aborts its open
   transactions idempotently.
 - `POST /v1/transactions` captures an Engine read stamp and creates one
@@ -211,6 +215,14 @@ transaction, verifies the single eleven-change cursor interval and one-claim
 receipt, restarts the server, replays the same runtime commit identity, and
 confirms that the authoritative scoped log contains exactly eleven changes.
 
+The secured-socket differential records public inspection, an unknown route,
+missing and wrong API-key session denials, an allowed exact query, an ungranted
+backup denial, a missing-bearer denial, and a granted but invalid query failure.
+Authorized session/query/audit work has a durable pre-execution reservation;
+the protected audit read returns thirteen authorization/completion records with
+only request/response digests. Reopened journal evidence contains neither raw
+API key nor authorization scheme.
+
 F2 is not closed by that matrix. Remaining black-box gates are cancellation of
 long-running query work, deadline races during generalized commit, prospective
 multi-model read-your-writes, lost-ack process interruption for the data scope,
@@ -221,3 +233,6 @@ clients. Backup object payloads remain referenced-only and the service does not
 deploy or switch a restored root. A process-kill matrix at the exact
 filesystem-effect/control-record gap remains a qualification gate even though
 restart recovery is implemented for that gap.
+F4 audit still requires application-mutation/audit-completion atomicity,
+explicit oversized-body/handler-failure coverage, retention/rotation, and
+external archival.

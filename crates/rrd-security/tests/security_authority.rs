@@ -1,6 +1,6 @@
 use rrd_contract::{CanonicalId, ResourceId, ResourceKind, ResourcePath};
 use rrd_security::{
-    Action, AuditDecision, AuditRecord, Error, Principal, PrincipalKind, ResourceGrant,
+    Action, AuditDecision, AuditPhase, AuditRecord, Error, Principal, PrincipalKind, ResourceGrant,
     SECURITY_FORMAT, SecurityRepository, SecurityState,
 };
 use std::collections::BTreeMap;
@@ -126,6 +126,7 @@ fn audit_is_redacted_idempotent_authenticated_and_replayable() {
         resource: path("alpha"),
         request_id: "request-query".into(),
         operation_id: "operation-query".into(),
+        phase: AuditPhase::Completed,
         decision: AuditDecision::Allowed,
         status_code: 200,
         request_sha256: digest::sha256_hex(b"redacted request"),
@@ -143,9 +144,10 @@ fn audit_is_redacted_idempotent_authenticated_and_replayable() {
 
     let engine = NativeEngine::open(&root).unwrap();
     let repository = SecurityRepository::new(&engine, CanonicalId::new("alpha").unwrap());
-    let records = repository.audit_since(0, 10).unwrap();
-    assert_eq!(records.len(), 1);
-    assert_eq!(records[0].1, record);
+    let page = repository.audit_since(0, 10).unwrap();
+    assert_eq!(page.records.len(), 1);
+    assert_eq!(page.records[0].1, record);
+    assert_eq!(page.through_sequence, 2);
     let journal = engine.control_journal_since(0, 10).unwrap();
     let encoded = serde_json::to_string(&journal).unwrap();
     assert!(!encoded.contains("do-not-journal-this-secret"));

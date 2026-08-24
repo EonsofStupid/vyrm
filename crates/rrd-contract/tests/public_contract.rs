@@ -5,11 +5,11 @@ use rrd_contract::{
     EstateBackupJobState, EstateBackupJobsSnapshot, EstateMutationResult, EstateSnapshot,
     ExecuteQuery, FollowChangefeed, IdempotencyBinding, Liveness, PROTOCOL, PROTOCOL_VERSION,
     PreviewTransaction, QueryBudget, QueryExecutionSnapshot, QueryPlanCandidate, QueryPlanSnapshot,
-    QueryResult, QueryRowSnapshot, QueryValue, ReadChangefeed, ReadEstate, Readiness, RenewSession,
-    RequestContext, RequestEnvelope, ResourceId, ResourceKind, ResourcePath, ResponseEnvelope,
-    ResponseOutcome, RestoreInstanceBackup, ServiceCapabilities, SessionEndState, SessionLease,
-    SessionLimits, SessionTermination, TransactionMutation, TransactionPreview, TransactionState,
-    transaction_operation_sha256,
+    QueryResult, QueryRowSnapshot, QueryValue, ReadAudit, ReadChangefeed, ReadEstate, Readiness,
+    RenewSession, RequestContext, RequestEnvelope, ResourceId, ResourceKind, ResourcePath,
+    ResponseEnvelope, ResponseOutcome, RestoreInstanceBackup, ServiceCapabilities, SessionEndState,
+    SessionLease, SessionLimits, SessionTermination, TransactionMutation, TransactionPreview,
+    TransactionState, transaction_operation_sha256,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -380,6 +380,32 @@ fn managed_backup_contract_accepts_no_filesystem_paths() {
         restored_at_unix_ms: 600,
     };
     assert!(invalid.validate().is_err());
+}
+
+#[test]
+fn audit_read_contract_is_bounded_and_strict() {
+    ReadAudit {
+        after_sequence: 41,
+        limit: 128,
+    }
+    .validate()
+    .unwrap();
+    assert!(
+        ReadAudit {
+            after_sequence: 0,
+            limit: 0,
+        }
+        .validate()
+        .is_err()
+    );
+    assert!(
+        serde_json::from_value::<ReadAudit>(serde_json::json!({
+            "after_sequence": 0,
+            "limit": 1,
+            "include_bodies": true
+        }))
+        .is_err()
+    );
 }
 
 #[test]

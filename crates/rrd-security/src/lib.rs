@@ -60,27 +60,7 @@ pub enum PrincipalKind {
     Node,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum Action {
-    SessionCreate,
-    SessionRenew,
-    SessionClose,
-    QueryExecute,
-    TransactionBegin,
-    TransactionPreview,
-    TransactionCommit,
-    TransactionAbort,
-    ChangefeedRead,
-    ChangefeedFollow,
-    VectorSearch,
-    BackupCreate,
-    BackupList,
-    RestoreCreate,
-    EstateRead,
-    AuditRead,
-    SecurityAdmin,
-}
+pub use rrd_contract::SecurityAction as Action;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -169,13 +149,7 @@ pub struct Authorization {
     pub policy_revision: u64,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum AuditDecision {
-    Allowed,
-    Denied,
-    Failed,
-}
+pub use rrd_contract::{AuditDecision, AuditPhase};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -187,10 +161,17 @@ pub struct AuditRecord {
     pub resource: ResourcePath,
     pub request_id: String,
     pub operation_id: String,
+    pub phase: AuditPhase,
     pub decision: AuditDecision,
     pub status_code: u16,
     pub request_sha256: String,
     pub response_sha256: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AuditJournalPage {
+    pub through_sequence: u64,
+    pub records: Vec<(u64, AuditRecord)>,
 }
 
 impl AuditRecord {
@@ -208,6 +189,9 @@ impl AuditRecord {
             || !self.request_id.is_ascii()
             || !self.operation_id.is_ascii()
             || !(100..=599).contains(&self.status_code)
+            || (self.phase == AuditPhase::Authorized
+                && (self.decision != AuditDecision::Allowed || self.status_code != 100))
+            || (self.phase == AuditPhase::Completed && self.status_code < 200)
         {
             return Err(Error::Invalid("audit coordinates are invalid".into()));
         }
@@ -326,7 +310,7 @@ impl<'a, E: Engine> SecurityRepository<'a, E> {
         Ok(())
     }
 
-    pub fn audit_since(&self, after: u64, limit: usize) -> Result<Vec<(u64, AuditRecord)>> {
+    pub fn audit_since(&self, after: u64, limit: usize) -> Result<AuditJournalPage> {
         if limit == 0 || limit > MAX_AUDIT_PAGE {
             return Err(Error::Invalid("audit page limit is outside bounds".into()));
         }
@@ -350,7 +334,10 @@ impl<'a, E: Engine> SecurityRepository<'a, E> {
                 break;
             }
         }
-        Ok(records)
+        Ok(AuditJournalPage {
+            through_sequence: cursor,
+            records,
+        })
     }
 }
 

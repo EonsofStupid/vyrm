@@ -54,6 +54,14 @@ explicit coverage matrix. No request accepts a source, catalogue, target, or
 active-instance filesystem path. The server owns generated locations and a
 restore always targets a new root.
 
+The F4 audit vocabulary freezes a closed security-action enum, authorization
+and completion phases, allow/deny/fail decisions, and a bounded cursor-addressed
+read. Public records contain principal/action/resource and request/operation
+coordinates plus request/response SHA-256 values; bodies, credentials, bearer
+tokens, and arbitrary headers are excluded. `through_sequence` is the scanned
+authenticated control-journal coordinate, so readers advance safely across
+unrelated control transitions.
+
 The frozen JSON fixture is
 [`public-contract-v1.json`](../crates/rrd-contract/fixtures/public-contract-v1.json).
 Malformed identifiers, duplicate/unsorted capabilities, unsupported protocol
