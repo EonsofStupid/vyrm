@@ -278,3 +278,26 @@ index.
   every foundation layer has a real executable path.
 - Trigger: operator review correctly identified that the prior sequence was
   over-investing in F3 depth relative to the stated full-product objective.
+
+## 2026-08-23 — RRD exact query service backbone
+
+- Commit: `2e3d558` (`feat(rrd): expose exact query service`).
+- Capability: added the transport-neutral, strictly bounded `ExecuteQuery`
+  contract and the authenticated `POST /v1/query` service path. It uses the
+  real VyrmQL parser and VyrmMX catalogue, binder, planner, and executor rather
+  than a parallel HTTP query implementation.
+- Evidence: the public response retains typed values, canonical query, read
+  manifest, cursor, schema revision, planner candidates and exactness/order/
+  authorization contract, stamp validation, scanned changes, returned rows,
+  output bytes, and truncation. A real-socket test proves unauthenticated and
+  wrong-instance-scope denial and returns an exact persisted record.
+- Verification:
+  `cargo test -p rrd-contract -p rrd-server --all-features --locked`, strict
+  all-target/all-feature clippy for both crates, and `git diff --check` passed.
+- Limit: this is the read-only service skeleton. It does not yet provide
+  mutating VyrmQL, typed public multi-model transactions, live subscriptions,
+  remote F4 identity, SDKs, or durable query spans; request-level JSON tracing
+  is currently ephemeral.
+- Next gate: extend the same persistent RRD transaction boundary with typed
+  schema, record, relation, event, vector, time-series, geo, and object
+  mutations before adding another isolated subsystem.
