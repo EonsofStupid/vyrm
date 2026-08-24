@@ -543,6 +543,9 @@ implemented. See [`vyrmql-index-catalogue-v1.md`](vyrmql-index-catalogue-v1.md).
   bounded execution.
 - Push live subscriptions with backpressure/reconnect plus retained changefeed
   replay from exact cursors.
+- Semantic live-query polling now exists internally with exact-cursor replay,
+  deterministic row deltas, and bounded three-engine differentials. Public RRD
+  delivery, wakeup/streaming, SDKs, retention, and backpressure remain open.
 - User-defined triggers/functions only after capability and audit gates exist.
 
 **Exit gate:** multi-model and live-query differentials cover semantics,

@@ -85,7 +85,10 @@ shows unselected candidates in plan evidence. It deliberately does not select
 an index until verified materialization and artifact reads exist. See
 [`docs/vyrmql-index-catalogue-v1.md`](docs/vyrmql-index-catalogue-v1.md).
 Full text, mutating statements, materialized scalar indexes, and push
-subscriptions remain open.
+subscriptions remain open. VyrmMX now also computes deterministic resumable
+semantic live-query deltas (added/updated/removed rows) between exact runtime
+cursors; the authenticated RRD/SDK delivery surface is the next boundary. See
+[`docs/vyrmql-live-query-v1.md`](docs/vyrmql-live-query-v1.md).
 
 F3 now has its first authority artifact in
 [`rrd-estate`](crates/rrd-estate): a bounded, versioned estate document whose

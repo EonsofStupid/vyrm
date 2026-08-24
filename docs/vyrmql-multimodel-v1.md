@@ -55,4 +55,6 @@ The initial index catalogue/lifecycle and planner rejection evidence are
 documented in [`vyrmql-index-catalogue-v1.md`](vyrmql-index-catalogue-v1.md).
 Materialized index execution, spatial operators, planner statistics, full text,
 mutating VyrmQL, streaming responses, and push live subscriptions remain
-explicit gaps.
+explicit gaps. Exact-cursor semantic delta polling is implemented internally
+and documented in [`vyrmql-live-query-v1.md`](vyrmql-live-query-v1.md); its RRD
+transport and SDK boundary remains open.

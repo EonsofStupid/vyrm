@@ -161,6 +161,10 @@ Kubernetes operation, and authoritative Connectome management.
   planner refuses those candidates until a verified artifact reader exists;
   materialization, selection, uniqueness enforcement, and public administration
   remain open.
+  Resumable semantic polling now evaluates one query at exact resume/head
+  cursors and returns deterministic added/updated/removed rows with bounded,
+  fail-closed execution on all three engines. It is not yet exposed by an
+  authenticated RRD route, long-poll wakeup, streaming transport, or SDKs.
 
 - The bi-temporal claim kernel has immutable supersession corrections,
   canonical SHA-256 identities covering provenance and validity, and atomic

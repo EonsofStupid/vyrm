@@ -792,3 +792,21 @@ index.
 - Limit: no scalar artifact is built or read yet, uniqueness is not enforced,
   and no public RRD index route exists. Those are the next index slices before
   live-query delivery.
+
+## 2026-08-24 — resumable semantic live-query deltas
+
+- Commit: `82323ea` (`feat(query): add resumable semantic live deltas`).
+- Semantics: one `KNOWN HEAD` query is evaluated at an explicit resume cursor
+  and one captured head, then rows are deterministically classified as added,
+  updated with before/after values, or removed by stable identity.
+- Resume contract: results carry from/through/head cursors and a SHA-256 binding
+  of query contract version, canonical query, and typed parameters. Repeating
+  `through_cursor` yields an empty poll until the log advances.
+- Safety: future resumes, fixed-known queries, zero delta budgets, truncated
+  snapshots, duplicate identities, and oversized deltas fail closed.
+- Evidence: additions, updates, removals, empty replay, cursor validation, and
+  budget behavior are identical on memory, Fjall compatibility, and native
+  VyrmKV; all VyrmMX tests and strict Clippy pass.
+- Limit: this is the semantic engine, not yet public realtime. The authenticated
+  RRD route, changefeed wakeup, streaming/backpressure, retained subscriptions,
+  and all six SDK surfaces remain the next delivery slice.
