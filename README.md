@@ -69,6 +69,14 @@ warnings-as-errors, formatting, locked restore, xUnit v3 transport/auth/error
 tests, and NuGet packing pass. Generated payload models, shared conformance, and
 publication remain open.
 
+F6 query breadth has started on the existing atomic multi-model authority.
+VyrmQL/VyrmMX now read records, relations, events, claims, time-series samples,
+and geospatial values through the same explicit valid/known time, stamped plan,
+budget, and authoritative-log execution path. Three-engine differential tests
+and a secured real-RRD test prove series/geo results and persistence. See
+[`docs/vyrmql-multimodel-v1.md`](docs/vyrmql-multimodel-v1.md); traversal,
+indexes, full text, mutating statements, and push subscriptions remain open.
+
 F3 now has its first authority artifact in
 [`rrd-estate`](crates/rrd-estate): a bounded, versioned estate document whose
 desired state, observations, operation leases, idempotency bindings, receipts,

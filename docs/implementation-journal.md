@@ -704,3 +704,25 @@ index.
   skeletons. Generated payload completeness, shared real-server/released-version
   conformance, examples/reference output, and publication remain open. The next
   breadth slice moves to F6 multi-model/query/index/realtime foundations.
+
+## 2026-08-24 — VyrmQL series and geospatial read foundation
+
+- Commit: `9ca9d1f` (`feat(query): expose series and geo in VyrmQL`).
+- Corrected boundary: public transactions already atomically persist every
+  current data family. F6 therefore extends missing read semantics instead of
+  adding a parallel mutation path or wrapper.
+- Grammar/planner: added `series:<kind>` and `geo:<kind>` sources beside record,
+  relation, event, and claim. Both use explicit valid/known time, the captured
+  schema/read stamp, a digest-bound exact plan, deterministic identity order,
+  and the existing execution budgets.
+- Execution: series rows expose sample/series identity, observation time, and
+  typed scalar values; geo rows resolve the active version and expose subject,
+  field, validity, geometry kind, and canonical decimal point/bounding-box
+  coordinates. Custom properties remain visible through `PROJECT *`, while
+  filtering/explicit projection is intentionally limited to frozen built-ins.
+- Evidence: parser corpus/canonicalization, eight VyrmMX tests, three-engine
+  series/geo differentials, pre-observation/pre-validity exclusion, the secured
+  real-RRD atomic-data test, and strict Clippy pass.
+- Limit: recursive traversal, general numeric/spatial operators, indexes and
+  statistics, full text, mutating/multi-statement VyrmQL, streaming batches,
+  and push live subscriptions remain open F6 breadth.

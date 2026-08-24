@@ -140,6 +140,15 @@ Kubernetes operation, and authoritative Connectome management.
   restore, three xUnit transport/auth/error tests, and NuGet packing. All six
   intended clients now exist; shared real-server/version conformance, complete
   generated payload models, and release publication keep F5 open.
+- F6 has started from the existing atomic public data transaction rather than
+  duplicating it. VyrmQL/VyrmMX sources now cover records, relations, events,
+  claims, series samples, and geo values with explicit valid/known time,
+  stamped exact plans, deterministic rows, and bounded execution. Memory,
+  Fjall compatibility, and native VyrmKV return identical series/geo results;
+  a secured real-RRD transaction/query test proves the same public typed rows.
+  Only frozen series/geo built-ins are bindable today. Traversal, general
+  operators, index lifecycle, full text, mutating VyrmQL, streaming, and push
+  subscriptions keep F6 open.
 
 - The bi-temporal claim kernel has immutable supersession corrections,
   canonical SHA-256 identities covering provenance and validity, and atomic

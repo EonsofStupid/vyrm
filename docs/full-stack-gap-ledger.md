@@ -502,6 +502,18 @@ unsupported server/client version pairs fail explicitly.
 
 ### F6 — complete the Surreal-class RRD data/query surface
 
+**Status:** in progress. The public transaction contract and RRD coordinator
+already atomically commit schema, claim, record, relation, event, vector,
+series, geo, and object-reference mutations; this is retained as the write
+authority rather than rebuilt. The first read-breadth slice adds
+`series:<kind>` and `geo:<kind>` to the existing record/relation/event/claim
+VyrmQL grammar. They bind and execute through the same explicit valid/known
+time, captured read stamp, content-addressed exact plan, deterministic ordering,
+and scan/row/output/batch budgets. Memory, Fjall compatibility, native VyrmKV,
+and secured real-RRD tests prove typed results and time cutoffs. Details and
+current built-in-field limits are in
+[`vyrmql-multimodel-v1.md`](vyrmql-multimodel-v1.md).
+
 **Deliverables**
 
 - Mutating VyrmQL and multi-statement transactions.
