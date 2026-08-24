@@ -1,6 +1,12 @@
 # Build artifacts (workspace also builds into CARGO_TARGET_DIR when set)
 /target
 **/node_modules/
+**/.venv/
+**/__pycache__/
+**/.pytest_cache/
+**/.mypy_cache/
+**/.ruff_cache/
+**/dist/
 
 # Session transcripts and hooks — operator-local, never part of the product
 /.chat
