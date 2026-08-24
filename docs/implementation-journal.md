@@ -301,3 +301,33 @@ index.
 - Next gate: extend the same persistent RRD transaction boundary with typed
   schema, record, relation, event, vector, time-series, geo, and object
   mutations before adding another isolated subsystem.
+
+## 2026-08-23 — RRD atomic public multi-model transactions
+
+- Commit: `4c3956b` (`feat(rrd): expose atomic multi-model transactions`).
+- Capability: extended the transport-neutral transaction vocabulary with
+  schema registries, records/documents, graph relations, events,
+  dense/sparse/multi-dense vectors and embedding provenance, time-series
+  samples, WGS84 geo values, and pre-staged immutable object references. The
+  `data` transaction scope lowers them explicitly into the existing
+  authoritative runtime instead of exposing private Rust representations.
+- Atomicity: claims and every typed model share one `RuntimeCommit`, exact
+  global-cursor compare-and-swap, hash chain, audit envelope, projection
+  outbox, and content identity. The persistent RRD prepared intent freezes the
+  runtime time and commit digest; restart recovery resolves that digest from
+  the runtime commit catalogue before attempting another write.
+- Evidence: one real HTTP socket transaction commits all nine mutation
+  families as eleven changes, advances one claim sequence and one eleven-entry
+  runtime interval, restarts the server, returns the same commit SHA-256 as an
+  idempotent replay, and retains exactly eleven scoped changes with no
+  duplicate claim.
+- Verification:
+  `cargo test -p rrd-contract -p rrd-server --all-features --locked`, strict
+  all-target/all-feature clippy for both crates, and `git diff --check` passed.
+- Limit: prospective data preview currently validates the public mutations but
+  is not yet a complete read-your-writes graph projection. Mutating VyrmQL,
+  object upload/staging, live subscriptions, model-specific administration,
+  data-scope process-kill qualification, F4 identity, and SDKs remain open.
+- Next gate: expose retained runtime changefeeds/live subscriptions and the
+  existing vector/search execution path through this same authenticated public
+  service backbone.
