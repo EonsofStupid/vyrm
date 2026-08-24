@@ -24,6 +24,8 @@ pub const MAX_QUERY_SCANNED_CHANGES: u64 = 1_000_000;
 pub const MAX_QUERY_ROWS: u64 = 100_000;
 pub const MAX_QUERY_OUTPUT_BYTES: u64 = 768 * 1024;
 pub const MAX_QUERY_BATCH_ROWS: u64 = 1_024;
+pub const MAX_VECTOR_SEARCH_CHANGES: u64 = 1_000_000;
+pub const MAX_VECTOR_SEARCH_TOP_K: u64 = 100_000;
 pub const MIN_LEASE_MS: u64 = 1_000;
 pub const MAX_LEASE_MS: u64 = 3_600_000;
 
@@ -188,6 +190,134 @@ pub struct QueryResult {
     pub plan: QueryPlanSnapshot,
     pub execution: QueryExecutionSnapshot,
     pub rows: Vec<QueryRowSnapshot>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum VectorSearchMetric {
+    Cosine,
+    Dot,
+    Euclidean,
+    Manhattan,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MultiVectorComparator {
+    MaxSim,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum VectorSearchQuery {
+    Dense {
+        values: Vec<f32>,
+    },
+    Sparse {
+        dimensions: u32,
+        indices: Vec<u32>,
+        values: Vec<f32>,
+    },
+    MultiDense {
+        dimensions: u32,
+        vectors: Vec<Vec<f32>>,
+        comparator: MultiVectorComparator,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SearchVectors {
+    pub scope: String,
+    pub valid_at: u64,
+    pub field: CanonicalId,
+    pub query: VectorSearchQuery,
+    pub metric: VectorSearchMetric,
+    pub top_k: u64,
+    pub max_scanned_changes: u64,
+}
+
+impl SearchVectors {
+    pub fn validate(&self) -> Result<()> {
+        if self.scope.is_empty()
+            || self.scope.len() > MAX_ID_BYTES
+            || self.scope.as_bytes().contains(&0)
+        {
+            return invalid("vector search scope is invalid");
+        }
+        if self.valid_at == 0 {
+            return invalid("vector search valid_at must be greater than zero");
+        }
+        if self.top_k == 0 || self.top_k > MAX_VECTOR_SEARCH_TOP_K {
+            return invalid(format!(
+                "vector search top_k must be in 1..={MAX_VECTOR_SEARCH_TOP_K}"
+            ));
+        }
+        if self.max_scanned_changes == 0 || self.max_scanned_changes > MAX_VECTOR_SEARCH_CHANGES {
+            return invalid(format!(
+                "vector search max_scanned_changes must be in 1..={MAX_VECTOR_SEARCH_CHANGES}"
+            ));
+        }
+        let vector = match &self.query {
+            VectorSearchQuery::Dense { values } => DataVectorValue::Dense {
+                values: values.clone(),
+            },
+            VectorSearchQuery::Sparse {
+                dimensions,
+                indices,
+                values,
+            } => DataVectorValue::Sparse {
+                dimensions: *dimensions,
+                indices: indices.clone(),
+                values: values.clone(),
+            },
+            VectorSearchQuery::MultiDense {
+                dimensions,
+                vectors,
+                ..
+            } => DataVectorValue::MultiDense {
+                dimensions: *dimensions,
+                vectors: vectors.clone(),
+            },
+        };
+        validate_data_vector(&vector)?;
+        if self.metric == VectorSearchMetric::Cosine {
+            let zero = match &self.query {
+                VectorSearchQuery::Dense { values } | VectorSearchQuery::Sparse { values, .. } => {
+                    values.iter().all(|value| *value == 0.0)
+                }
+                VectorSearchQuery::MultiDense { vectors, .. } => vectors
+                    .iter()
+                    .any(|values| values.iter().all(|value| *value == 0.0)),
+            };
+            if zero {
+                return invalid("cosine vector search rejects zero-norm query rows");
+            }
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct VectorSearchHit {
+    pub reference: DataReference,
+    pub subject: DataReference,
+    pub source_cursor: u64,
+    pub score: f64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct VectorSearchResult {
+    pub scope: String,
+    pub read_manifest_sha256: String,
+    pub known_at_cursor: u64,
+    pub scanned_changes: u64,
+    pub plan_sha256: String,
+    pub access_path: CanonicalId,
+    pub exact: bool,
+    pub hits: Vec<VectorSearchHit>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

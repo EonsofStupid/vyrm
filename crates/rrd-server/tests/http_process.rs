@@ -461,6 +461,36 @@ fn data_transaction_atomically_commits_every_public_model_and_replays_after_rest
     assert_eq!(receipt["last_claim_sequence"], 1);
     assert_eq!(receipt["idempotent_replay"], false);
     assert_eq!(receipt["runtime_commit_sha256"].as_str().unwrap().len(), 64);
+    let vector_search = envelope(
+        json!({
+            "scope": "instance:socket-test",
+            "valid_at": 100,
+            "field": "title_embedding",
+            "query": {"kind": "dense", "values": [0.6, 0.8]},
+            "metric": "cosine",
+            "top_k": 1,
+            "max_scanned_changes": 100
+        }),
+        None,
+        None,
+    );
+    let (status, denied) = post(&server, "/v1/vector/search", &vector_search, None);
+    assert_eq!(status, 401, "{denied}");
+    let (status, searched) = post(
+        &server,
+        "/v1/vector/search",
+        &vector_search,
+        Some((&session_id, &token)),
+    );
+    assert_eq!(status, 200, "{searched}");
+    let search = payload(&searched);
+    assert_eq!(search["known_at_cursor"], 11);
+    assert_eq!(search["access_path"], "exact_scan");
+    assert_eq!(search["exact"], true);
+    assert_eq!(search["hits"][0]["reference"]["id"], "alpha-title");
+    assert_eq!(search["hits"][0]["subject"]["id"], "alpha");
+    assert_eq!(search["hits"][0]["source_cursor"], 8);
+    assert!((search["hits"][0]["score"].as_f64().unwrap() - 1.0).abs() < 1e-9);
     server.stop();
 
     let server = start(&root);

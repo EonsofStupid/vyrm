@@ -2380,6 +2380,7 @@ dependencies = [
  "vyrm-mx",
  "vyrm-ql",
  "vyrm-store",
+ "vyrm-vector",
 ]
 
 [[package]]

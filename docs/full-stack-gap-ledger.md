@@ -235,6 +235,16 @@ receipt, and observes no duplicate changes. Generalized read-your-writes,
 data-scope process-kill qualification, mutating VyrmQL, object upload/staging,
 and model-specific administration endpoints remain open.
 
+`POST /v1/vector/search` now exposes the canonical vector truth path over an
+authenticated runtime read stamp. Dense, sparse, and multi-dense/MaxSim query
+shapes, four metrics, top-k and scan budgets are public typed contracts; the
+result includes manifest/cursor, scan count, plan digest, selected access path,
+exactness, typed identities, source cursors, and scores. The socket fixture
+proves authentication denial and exact cosine retrieval of a vector written by
+the public data transaction. Public filter algebra, named model binding,
+persisted exact/HNSW/TurboQuant artifact serving, and vector administration
+remain F7 work.
+
 **Deliverables**
 
 - One async server with health/readiness/capability endpoints.

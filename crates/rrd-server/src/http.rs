@@ -10,7 +10,7 @@ use rrd_contract::{
     CloseSession, CommitTransaction, CorrelationId, CreateSession, DeploymentMode, ErrorBody,
     ErrorCode, ExecuteQuery, Liveness, PROTOCOL, PROTOCOL_VERSION, PreviewTransaction, ReadEstate,
     Readiness, RenewSession, RequestContext, RequestEnvelope, ResourceId, ResourceKind,
-    ResponseEnvelope, ResponseOutcome, ServiceCapabilities,
+    ResponseEnvelope, ResponseOutcome, SearchVectors, ServiceCapabilities,
 };
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -202,6 +202,7 @@ impl AppState {
             }
             (Method::POST, "/v1/transactions") => self.begin_transaction(&headers, &body, now),
             (Method::POST, "/v1/query") => self.execute_query(&headers, &body, now),
+            (Method::POST, "/v1/vector/search") => self.search_vectors(&headers, &body, now),
             (Method::POST, path) if estate_action(path, "read").is_some() => {
                 self.read_estate(&headers, &body, path, now)
             }
@@ -390,6 +391,28 @@ impl AppState {
             |envelope, session, token| {
                 self.service
                     .execute_query(
+                        session,
+                        token,
+                        &envelope.payload,
+                        now,
+                        envelope.context.request_id.as_str(),
+                        envelope.context.operation_id.as_str(),
+                    )
+                    .map_err(api_error)
+            },
+        )
+    }
+
+    fn search_vectors(&self, headers: &HeaderMap, body: &[u8], now: u64) -> HttpResponse {
+        self.with_authenticated_envelope::<SearchVectors, _, _>(
+            headers,
+            body,
+            now,
+            false,
+            None,
+            |envelope, session, token| {
+                self.service
+                    .search_vectors(
                         session,
                         token,
                         &envelope.payload,
@@ -810,6 +833,7 @@ fn api_error(error: ServiceError) -> ApiError {
     match error {
         ServiceError::Contract(_)
         | ServiceError::Query(_)
+        | ServiceError::Vector(_)
         | ServiceError::OperationDigestMismatch
         | ServiceError::WrongScope => ApiError::new(ErrorCode::InvalidArgument, message, false),
         ServiceError::SessionNotFound | ServiceError::TransactionNotFound => {
@@ -957,6 +981,25 @@ fn capabilities(instance: &CanonicalId, backend: CanonicalId) -> ServiceCapabili
             status: CapabilityStatus::Unavailable,
             limits: BTreeMap::new(),
             limitation: Some("non-loopback bind denied until F4 security".into()),
+        },
+        CapabilityDescriptor {
+            name: CanonicalId::new("vector-search").unwrap(),
+            contract_version: 1,
+            status: CapabilityStatus::Experimental,
+            limits: BTreeMap::from([
+                (
+                    CanonicalId::new("max-scanned-changes").unwrap(),
+                    rrd_contract::MAX_VECTOR_SEARCH_CHANGES,
+                ),
+                (
+                    CanonicalId::new("max-top-k").unwrap(),
+                    rrd_contract::MAX_VECTOR_SEARCH_TOP_K,
+                ),
+            ]),
+            limitation: Some(
+                "exact canonical dense, sparse, and multi-vector search; public filters and persisted HNSW/TurboQuant artifact serving remain open"
+                    .into(),
+            ),
         },
     ];
     capabilities.sort_by(|left, right| left.name.cmp(&right.name));

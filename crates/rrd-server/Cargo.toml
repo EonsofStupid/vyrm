@@ -13,6 +13,7 @@ vyrm-core = { path = "../vyrm-core" }
 vyrm-ql = { path = "../vyrm-ql" }
 vyrm-mx = { path = "../vyrm-mx" }
 vyrm-store = { path = "../vyrm-store" }
+vyrm-vector = { path = "../vyrm-vector" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 hmac = "0.13"

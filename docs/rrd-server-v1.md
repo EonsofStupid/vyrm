@@ -46,6 +46,12 @@ places that secret elsewhere. `X-RRD-Session` carries the session identifier;
   rejected plan candidates, execution evidence, and rows. This endpoint is a
   read-only F6 walking skeleton; mutating VyrmQL and live subscriptions remain
   open.
+- `POST /v1/vector/search` captures an authenticated runtime read stamp and
+  runs bounded dense, sparse, or multi-vector search through the canonical
+  Vyrm vector planner and exact oracle. The response includes manifest/cursor,
+  scan evidence, plan digest, selected access path, exactness, score, source
+  cursor, and typed vector/subject identities. Public filters and persisted
+  HNSW/TurboQuant artifact serving remain open.
 - `POST /v1/estates/{estate}/read` returns the typed public `EstateSnapshot`
   for a resource path containing that estate and this server instance. It
   requires a live session token, exposes no raw idempotency keys, and performs
@@ -149,6 +155,10 @@ rather than the persisted authority document.
 The real-socket matrix proves the same authentication and scope denial for the
 query endpoint and verifies an exact persisted-record query, typed row output,
 planner candidates, validation evidence, and cursor/schema coordinates.
+
+The multi-model socket fixture also searches its committed vector through the
+public service, proves unauthenticated denial, and observes an exact cosine hit
+bound to the same runtime cursor and source change.
 
 It also commits all nine runtime mutation families through one `data`
 transaction, verifies the single eleven-change cursor interval and one-claim

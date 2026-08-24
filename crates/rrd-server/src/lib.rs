@@ -10,9 +10,10 @@ use rrd_contract::{
     CommitTransaction, CorrelationId, CreateSession, DataGeoPoint, DataGeoValue, DataProperties,
     DataReference, DataSchemaRegistry, DataSeriesValue, DataValueType, DataVectorNormalization,
     DataVectorValue, ExecuteQuery, PreviewTransaction, QueryExecutionSnapshot, QueryPlanCandidate,
-    QueryPlanSnapshot, QueryResult, QueryRowSnapshot, QueryValue, RenewSession, SessionEndState,
-    SessionLease, SessionLimits, SessionTermination, TransactionLease, TransactionMutation,
-    TransactionPreview, TransactionState, transaction_operation_sha256,
+    QueryPlanSnapshot, QueryResult, QueryRowSnapshot, QueryValue, RenewSession, SearchVectors,
+    SessionEndState, SessionLease, SessionLimits, SessionTermination, TransactionLease,
+    TransactionMutation, TransactionPreview, TransactionState, VectorSearchHit, VectorSearchMetric,
+    VectorSearchQuery, VectorSearchResult, transaction_operation_sha256,
 };
 use serde::{Deserialize, Serialize};
 use sha2::Sha256;
@@ -51,6 +52,7 @@ pub enum ServiceError {
     WrongScope,
     OperationDigestMismatch,
     Query(String),
+    Vector(String),
 }
 
 impl fmt::Display for ServiceError {
@@ -283,6 +285,111 @@ impl<E: Engine> RrdService<E> {
                 truncated: execution.truncated,
             },
             rows,
+        })
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn search_vectors(
+        &self,
+        session_id: &CorrelationId,
+        token: &CorrelationId,
+        request: &SearchVectors,
+        now: u64,
+        request_id: &str,
+        operation_id: &str,
+    ) -> Result<VectorSearchResult> {
+        request
+            .validate()
+            .map_err(|error| ServiceError::Vector(error.to_string()))?;
+        self.authorize(session_id, token, now, request_id, operation_id)?;
+        let expected_scope = format!("instance:{}", self.instance);
+        if request.scope != expected_scope {
+            return Err(ServiceError::WrongScope);
+        }
+        let scope = ScopeId::new(request.scope.clone()).map_err(core_vector)?;
+        let read = self.engine.runtime_read_stamp(&scope)?;
+        let limit = usize::try_from(request.max_scanned_changes)
+            .map_err(|_| ServiceError::Vector("vector scan budget exceeds usize".into()))?;
+        let page = self.engine.runtime_read_changes(&read, 0, limit)?;
+        if page.through_cursor < page.head_cursor {
+            return Err(ServiceError::Vector(format!(
+                "vector exact scan requires more than {} retained changes",
+                request.max_scanned_changes
+            )));
+        }
+        let candidates = vyrm_vector::candidates_from_changes(&page.changes, &scope);
+        let runtime = vyrm_vector::VectorRuntime::new(candidates).map_err(core_vector)?;
+        let query = match &request.query {
+            VectorSearchQuery::Dense { values } => vyrm_vector::VectorQuery::Dense {
+                values: values.clone(),
+            },
+            VectorSearchQuery::Sparse {
+                dimensions,
+                indices,
+                values,
+            } => vyrm_vector::VectorQuery::Sparse {
+                dimensions: *dimensions,
+                indices: indices.clone(),
+                values: values.clone(),
+            },
+            VectorSearchQuery::MultiDense {
+                dimensions,
+                vectors,
+                comparator: _,
+            } => vyrm_vector::VectorQuery::MultiDense {
+                dimensions: *dimensions,
+                vectors: vectors.clone(),
+                comparator: vyrm_vector::MultiVectorComparator::MaxSim,
+            },
+        };
+        let search = vyrm_vector::SearchRequest {
+            scope,
+            read: read.clone(),
+            valid_at: request.valid_at,
+            field: request.field.as_str().into(),
+            query,
+            metric: match request.metric {
+                VectorSearchMetric::Cosine => vyrm_vector::ScoreMetric::Cosine,
+                VectorSearchMetric::Dot => vyrm_vector::ScoreMetric::Dot,
+                VectorSearchMetric::Euclidean => vyrm_vector::ScoreMetric::Euclidean,
+                VectorSearchMetric::Manhattan => vyrm_vector::ScoreMetric::Manhattan,
+            },
+            embedding_model: None,
+            top_k: usize::try_from(request.top_k)
+                .map_err(|_| ServiceError::Vector("vector top_k exceeds usize".into()))?,
+            mode: vyrm_vector::SearchMode::Exact,
+            filter: None,
+        };
+        let prepared = runtime.prepare_search(&search, 1).map_err(core_vector)?;
+        let execution = runtime
+            .execute_search(&search, &prepared)
+            .map_err(core_vector)?;
+        let access_path = match execution.plan.selected.kind {
+            vyrm_vector::AccessPathKind::ExactScan => "exact_scan",
+            vyrm_vector::AccessPathKind::ExactSegment => "exact_segment",
+            vyrm_vector::AccessPathKind::Hnsw => "hnsw",
+        };
+        Ok(VectorSearchResult {
+            scope: request.scope.clone(),
+            read_manifest_sha256: read.manifest_id,
+            known_at_cursor: read.commit_cursor,
+            scanned_changes: page.validation.change_reads,
+            plan_sha256: prepared.plan_digest().into(),
+            access_path: CanonicalId::new(access_path)
+                .map_err(|error| ServiceError::Vector(error.to_string()))?,
+            exact: execution.plan.selected.kind != vyrm_vector::AccessPathKind::Hnsw,
+            hits: execution
+                .hits
+                .into_iter()
+                .map(|hit| {
+                    Ok(VectorSearchHit {
+                        reference: public_data_ref(&hit.reference)?,
+                        subject: public_data_ref(&hit.subject)?,
+                        source_cursor: hit.source_cursor,
+                        score: hit.score,
+                    })
+                })
+                .collect::<Result<_>>()?,
         })
     }
 
@@ -1413,6 +1520,19 @@ fn runtime_geo_value(value: &DataGeoValue) -> GeoValue {
 
 fn core_contract(error: vyrm_core::Error) -> ServiceError {
     ServiceError::Contract(error.to_string())
+}
+
+fn core_vector(error: vyrm_core::Error) -> ServiceError {
+    ServiceError::Vector(error.to_string())
+}
+
+fn public_data_ref(reference: &RuntimeRef) -> Result<DataReference> {
+    Ok(DataReference {
+        kind: CanonicalId::new(reference.kind.as_str())
+            .map_err(|error| ServiceError::Vector(error.to_string()))?,
+        id: CanonicalId::new(reference.id.as_str())
+            .map_err(|error| ServiceError::Vector(error.to_string()))?,
+    })
 }
 
 fn public_claim(mutation: &TransactionMutation, session_id: &CorrelationId) -> Result<Claim> {
