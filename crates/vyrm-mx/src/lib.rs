@@ -9,6 +9,7 @@ mod catalog;
 mod error;
 mod execute;
 mod index;
+mod live;
 mod plan;
 
 pub use catalog::{Catalog, SchemaVersion};
@@ -18,6 +19,7 @@ pub use index::{
     IndexCatalogue, IndexCatalogueRepository, IndexDefinition, IndexEntry, IndexMutationContext,
     INDEX_CATALOGUE_CONTRACT_VERSION,
 };
+pub use live::{poll_live_query, LiveQueryBudget, LiveQueryDelta, LiveRowChange};
 pub use plan::{
     bind, plan, BoundFilter, BoundIndexCandidate, BoundQuery, CandidatePath, ExecutionContract,
     LogicalOperator, LogicalPlan, Parameters, PhysicalOperator, PhysicalPlan, PlanExplanation,
