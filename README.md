@@ -497,6 +497,16 @@ references; mounted credential bytes are bounded, hashed, never journaled, and
 identical retries converge while drift fails. See
 [`docs/rrd-security-bootstrap-v1.md`](docs/rrd-security-bootstrap-v1.md).
 
+F8 now also has an executable Kubernetes breadth baseline in
+[`rrd-kubernetes`](crates/rrd-kubernetes): a generated `RrdInstance` CRD, real
+kube-rs reconciliation loop/finalizer, least-privilege RBAC, retained single-
+node StatefulSet storage, mTLS bootstrap, disruption budget, default-deny
+network policy, and status contract. It deliberately does not deploy multiple
+independent RRD pods as a fake distributed database. Published images, real-
+cluster qualification, safe upgrades/CSI recovery, and RRD-to-Raft integration
+remain open. See
+[`docs/rrd-kubernetes-v1alpha1.md`](docs/rrd-kubernetes-v1alpha1.md).
+
 For JS/TanStack workflows, successful and failed tool runs are journaled under
 canonical, manager-specific subjects—`package:bun:*`, `package:pnpm:*`,
 `package:npm:*`, and `package:yarn:*`. Script names remain part of the identity,

@@ -45,7 +45,8 @@ The manifest is bounded to one MiB and uses this strict shape:
 `credential_file` must be an absolute path. The command permits Kubernetes's
 in-directory projected-secret symlinks but rejects a resolved path that escapes
 the declared mount directory. Credential files are bounded to 64 KiB, must be
-non-empty regular files, and on Unix must deny group/other access. Only their
+non-empty regular files, and on Unix must deny all other access and group
+write/execute (owner-only or Kubernetes `fsGroup` read is admitted). Only their
 SHA-256 digests enter the persistent principal state.
 
 ## Replay and drift

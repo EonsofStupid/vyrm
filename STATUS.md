@@ -206,6 +206,17 @@ Kubernetes operation, and authoritative Connectome management.
   returns missing identities at the same snapshot. First-class delete remains
   open.
 
+- F8 now has both its prior executable Raft baseline and a first Kubernetes
+  operator baseline. `rrd-kubernetes` generates a structural/status-enabled
+  `RrdInstance` CRD with CEL admission and runs a real kube-rs watch/finalizer/
+  server-side-apply loop. It renders a secured one-replica StatefulSet with
+  offline security bootstrap, TLS 1.3 mTLS, retained PVC, headless/client
+  Services, PDB, default-deny NetworkPolicy, non-root hardening, resource bounds,
+  least-privilege RBAC, and observed status/digest. It does not claim Multi-AZ:
+  RRD is not yet backed by `vyrm-cluster`, and release images, live-cluster
+  conformance, safe upgrade/CSI/certificate controllers, and fault qualification
+  remain open.
+
 - The bi-temporal claim kernel has immutable supersession corrections,
   canonical SHA-256 identities covering provenance and validity, and atomic
   batch parity between Fjall and the in-memory reference engine.

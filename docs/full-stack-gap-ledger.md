@@ -625,8 +625,8 @@ update/recovery matrices on fixed hardware and corpora against current Qdrant.
 
 ### F8 — qualify distributed and Kubernetes operation
 
-**Status:** experimental distributed foundation present; Kubernetes product
-surface absent. `vyrm-cluster` freezes canonical three-zone placement,
+**Status:** experimental distributed and Kubernetes foundations present; no
+Multi-AZ product qualification. `vyrm-cluster` freezes canonical three-zone placement,
 per-shard quorum semantics, explicit partial-order snapshot vectors, transfer
 and reshard cutovers, transport identities, bounded telemetry, and restart-safe
 artifact sessions. Its OpenRaft adapter runs both an in-process three-voter
@@ -635,11 +635,21 @@ replication, leader loss/failover, membership change, snapshot install,
 corruption denial, mTLS peer-identity denial, minority-partition write/read
 denial, and survival of every single disk loss in the modeled topology.
 
-This is a real executable distributed baseline, not production or Kubernetes
-qualification. There is no CRD/operator, container/release image, rolling
-upgrade controller, disruption budget, CSI recovery workflow, certificate
-rotation controller, independent-host fault lab, or supported control-plane
-agent yet.
+`rrd-kubernetes` now adds a real kube-rs watch/controller, generated namespaced
+`RrdInstance` CRD with status/CEL admission, finalizer, server-side apply,
+least-privilege RBAC, and deterministic headless/client Services, one-replica
+StatefulSet, retained PVC, PDB, and default-deny NetworkPolicy. A security-
+bootstrap init container plus TLS 1.3 mTLS server makes a fresh persistent
+volume executable. Tests freeze CRD drift, RBAC exclusions, unsafe-spec denial,
+and exact rendered resources.
+
+This remains a single-node Kubernetes alpha, not Multi-AZ. The public RRD data
+plane is not yet backed by `vyrm-cluster`; the controller therefore refuses to
+misrepresent independent RRD pods as replicas. There is no published release
+image/SBOM/signature, real-cluster conformance, RRD/Raft integration, safe
+rolling-upgrade controller, CSI recovery workflow, certificate rotation
+controller, independent-host fault lab, or supported outbound control-plane
+agent yet. See [`rrd-kubernetes-v1alpha1.md`](rrd-kubernetes-v1alpha1.md).
 
 **Deliverables**
 

@@ -1094,8 +1094,8 @@ index.
   versioned JSON manifest, and timestamp. Principal entries reference absolute
   mounted credential files rather than embedding credentials.
 - Safety: manifest and credential reads are bounded; paths may use Kubernetes
-  projected-secret symlinks only inside their mount; credential files must be
-  private regular files on Unix. Only SHA-256 digests enter the validated
+  projected-secret symlinks only inside their mount; credential files must deny
+  other access and group write/execute on Unix. Only SHA-256 digests enter the validated
   persistent `SecurityState` and authenticated control transition.
 - Recovery: the same material is an idempotent no-op after process/database
   reopen. Any changed policy or credential fails without replacing the initial
@@ -1105,3 +1105,27 @@ index.
   Clippy passes.
 - Limit: authorized ongoing principal/policy mutation and secret rotation APIs
   remain open; this command owns initial offline provisioning only.
+
+## 2026-08-24 — Kubernetes RRD operator foundation
+
+- Commit: `20dafe6` (`feat(kubernetes): add secured RRD operator baseline`).
+- API: `rrflow.io/v1alpha1 RrdInstance` is a generated namespaced structural
+  CRD with status subresource and CEL rules for contract version, digest-pinned
+  image, retained storage, bootstrap time, names, and conservative quantities.
+- Controller: kube-rs supplies watch/relist recovery, owned-StatefulSet events,
+  finalizer handling, server-side apply, status updates, and bounded retry. The
+  finalizer removes owned workload/network resources while StatefulSet PVC
+  retention preserves data.
+- Workload: deterministic resources include headless/client Services, one
+  secured StatefulSet with offline bootstrap and mTLS, PDB, and default-deny
+  NetworkPolicy. Pods are non-root, drop capabilities, use a read-only root,
+  omit service-account tokens, and carry explicit resource bounds.
+- Packaging: checked CRD, least-privilege operator RBAC/Deployment template,
+  and example instance are under `deploy/kubernetes`; the placeholder image
+  digest must be replaced by a published release artifact.
+- Evidence: generated/checked CRD equality, structural/status/CEL assertions,
+  RBAC exclusion of Secrets/exec/wildcards, deterministic resource/digest
+  replay, and unsafe image/storage/name/identity denial pass with strict Clippy.
+- Limit: one RRD pod is intentional. Public RRD is not yet integrated with the
+  separate Raft state machine, so no Multi-AZ, safe upgrade, CSI recovery,
+  certificate rotation, or real-cluster qualification is claimed.
