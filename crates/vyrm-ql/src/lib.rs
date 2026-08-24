@@ -7,9 +7,10 @@
 
 use serde::{Deserialize, Serialize};
 use std::fmt;
-use vyrm_core::{Predicate, RuntimeType, RuntimeValue};
+use vyrm_core::{Predicate, RuntimeRef, RuntimeType, RuntimeValue};
 
 pub const QUERY_CONTRACT_VERSION: u16 = 1;
+pub const MAX_TRAVERSAL_DEPTH: u16 = 32;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Query {
@@ -50,6 +51,16 @@ impl Query {
         }
         if self.limit == Some(0) {
             return Err(ParseError::new(0, "LIMIT must be greater than zero"));
+        }
+        if matches!(
+            &self.source,
+            Source::Traversal { max_depth, .. }
+                if !(1..=MAX_TRAVERSAL_DEPTH).contains(max_depth)
+        ) {
+            return Err(ParseError::new(
+                0,
+                format!("traversal depth must be in 1..={MAX_TRAVERSAL_DEPTH}"),
+            ));
         }
         if let Projection::Fields(fields) = &self.projection {
             if fields.is_empty() {
@@ -129,6 +140,12 @@ pub enum Source {
     Geo {
         kind: RuntimeType,
     },
+    Traversal {
+        relation: RuntimeType,
+        start: RuntimeRef,
+        direction: TraversalDirection,
+        max_depth: u16,
+    },
     Claim {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         predicate: Option<Predicate>,
@@ -143,10 +160,39 @@ impl Source {
             Self::Event { kind } => format!("event:{kind}"),
             Self::Series { kind } => format!("series:{kind}"),
             Self::Geo { kind } => format!("geo:{kind}"),
+            Self::Traversal {
+                relation,
+                start,
+                direction,
+                max_depth,
+            } => format!(
+                "traverse:{relation} START {}:{} DIRECTION {} DEPTH {max_depth}",
+                start.kind,
+                start.id,
+                direction.canonical()
+            ),
             Self::Claim {
                 predicate: Some(predicate),
             } => format!("claim:{predicate}"),
             Self::Claim { predicate: None } => "claim".into(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TraversalDirection {
+    Outgoing,
+    Incoming,
+    Both,
+}
+
+impl TraversalDirection {
+    fn canonical(self) -> &'static str {
+        match self {
+            Self::Outgoing => "OUTGOING",
+            Self::Incoming => "INCOMING",
+            Self::Both => "BOTH",
         }
     }
 }
@@ -486,6 +532,7 @@ impl Parser {
             "geo" => RuntimeType::new(name)
                 .map(|kind| Source::Geo { kind })
                 .map_err(|error| ParseError::new(token.offset, error.to_string())),
+            "traverse" => self.traversal_source(name, token.offset),
             "claim" => Predicate::new(name)
                 .map(|predicate| Source::Claim {
                     predicate: Some(predicate),
@@ -496,6 +543,57 @@ impl Parser {
                 format!("unknown source family {family:?}"),
             )),
         }
+    }
+
+    fn traversal_source(&mut self, relation: String, offset: usize) -> Result<Source, ParseError> {
+        let relation = RuntimeType::new(relation)
+            .map_err(|error| ParseError::new(offset, error.to_string()))?;
+        self.keyword("START")?;
+        let start_kind = self.word("traversal start kind")?;
+        self.punctuation(TokenKind::Colon, "':' in traversal start")?;
+        let start_id = self.word("traversal start ID")?;
+        let start = RuntimeRef::new(start_kind, start_id)
+            .map_err(|error| ParseError::new(offset, error.to_string()))?;
+        self.keyword("DIRECTION")?;
+        let direction_token = self.next("traversal direction")?;
+        let TokenKind::Word(direction) = &direction_token.kind else {
+            return Err(ParseError::new(
+                direction_token.offset,
+                "expected OUTGOING, INCOMING, or BOTH",
+            ));
+        };
+        let direction = match direction.to_ascii_lowercase().as_str() {
+            "outgoing" => TraversalDirection::Outgoing,
+            "incoming" => TraversalDirection::Incoming,
+            "both" => TraversalDirection::Both,
+            _ => {
+                return Err(ParseError::new(
+                    direction_token.offset,
+                    "expected OUTGOING, INCOMING, or BOTH",
+                ))
+            }
+        };
+        self.keyword("DEPTH")?;
+        let depth_offset = self.peek().map_or(offset, |token| token.offset);
+        let depth = self.number("traversal depth")?;
+        let max_depth = u16::try_from(depth).map_err(|_| {
+            ParseError::new(
+                depth_offset,
+                format!("traversal depth must be in 1..={MAX_TRAVERSAL_DEPTH}"),
+            )
+        })?;
+        if !(1..=MAX_TRAVERSAL_DEPTH).contains(&max_depth) {
+            return Err(ParseError::new(
+                depth_offset,
+                format!("traversal depth must be in 1..={MAX_TRAVERSAL_DEPTH}"),
+            ));
+        }
+        Ok(Source::Traversal {
+            relation,
+            start,
+            direction,
+            max_depth,
+        })
     }
 
     fn time_expr(&mut self) -> Result<TimeExpr, ParseError> {

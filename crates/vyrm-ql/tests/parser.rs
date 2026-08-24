@@ -13,6 +13,7 @@ fn parser_corpus_round_trips_to_one_canonical_form() {
         "FROM claim AT VALID 0 KNOWN 0 PROJECT * LIMIT 1",
         "FROM series:metric AT VALID 1000 KNOWN HEAD WHERE series_id = \"latency\" PROJECT observed_at, value",
         "FROM geo:location AT VALID 1000 KNOWN HEAD PROJECT subject_id, geometry_kind",
+        "FROM traverse:depends_on START document:a DIRECTION OUTGOING DEPTH 4 AT VALID 1000 KNOWN HEAD PROJECT node_id, depth, path",
     ];
     for source in corpus {
         let first = parse(source).unwrap_or_else(|error| panic!("{source}: {error}"));
@@ -60,6 +61,9 @@ fn malformed_or_ambiguous_queries_fail_with_offsets() {
         "FROM record:doc AT VALID 1 KNOWN HEAD PROJECT * LIMIT 0",
         "FROM record:doc AT VALID 1 KNOWN HEAD PROJECT * EXPLAIN",
         "FROM record:doc AT VALID 1 KNOWN HEAD PROJECT * GARBAGE",
+        "FROM traverse:edge START node:a DIRECTION SIDEWAYS DEPTH 2 AT VALID 1 KNOWN HEAD PROJECT *",
+        "FROM traverse:edge START node:a DIRECTION BOTH DEPTH 0 AT VALID 1 KNOWN HEAD PROJECT *",
+        "FROM traverse:edge START node:a DIRECTION BOTH DEPTH 33 AT VALID 1 KNOWN HEAD PROJECT *",
     ] {
         let error = parse(source).expect_err(source);
         assert!(!error.message.is_empty());

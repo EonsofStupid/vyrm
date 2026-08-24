@@ -1,11 +1,11 @@
 use crate::{BoundFilter, Error, LogicalOperator, PhysicalOperator, PhysicalPlan, Result};
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use vyrm_core::{
     resolve_as_of, Claim, GeoValue, RuntimeChange, RuntimeGeo, RuntimeGraphSnapshot,
     RuntimeMutation, RuntimeValue, SeriesValue,
 };
-use vyrm_ql::{Projection, Source};
+use vyrm_ql::{Projection, Source, TraversalDirection};
 use vyrm_store::Engine;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -492,8 +492,114 @@ fn rows_for_source(
             })
             .collect(),
         Source::Geo { kind } => geo_rows(changes, scope, kind, valid_at, known_at_cursor),
+        Source::Traversal {
+            relation,
+            start,
+            direction,
+            max_depth,
+        } => traversal_rows(
+            changes,
+            scope,
+            relation,
+            start,
+            *direction,
+            *max_depth,
+            valid_at,
+            known_at_cursor,
+        ),
         Source::Claim { predicate } => claim_rows(changes, scope, predicate.as_ref(), valid_at),
     }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn traversal_rows(
+    changes: &[RuntimeChange],
+    scope: &vyrm_core::ScopeId,
+    relation_kind: &vyrm_core::RuntimeType,
+    start: &vyrm_core::RuntimeRef,
+    direction: TraversalDirection,
+    max_depth: u16,
+    valid_at: u64,
+    known_at_cursor: u64,
+) -> Vec<QueryRow> {
+    let snapshot =
+        RuntimeGraphSnapshot::from_changes(changes, scope.clone(), valid_at, known_at_cursor);
+    if !snapshot
+        .records
+        .iter()
+        .any(|record| &record.reference == start)
+    {
+        return Vec::new();
+    }
+    let mut relations = snapshot
+        .relations
+        .into_iter()
+        .filter(|relation| &relation.reference.kind == relation_kind)
+        .collect::<Vec<_>>();
+    relations.sort_by(|left, right| left.reference.cmp(&right.reference));
+    let mut visited = BTreeSet::from([start.clone()]);
+    let mut queue = VecDeque::from([(start.clone(), 0_u16, vec![start.clone()])]);
+    let mut rows = Vec::new();
+    while let Some((current, depth, path)) = queue.pop_front() {
+        if depth >= max_depth {
+            continue;
+        }
+        for relation in &relations {
+            let next = match direction {
+                TraversalDirection::Outgoing if relation.from == current => Some(&relation.to),
+                TraversalDirection::Incoming if relation.to == current => Some(&relation.from),
+                TraversalDirection::Both if relation.from == current => Some(&relation.to),
+                TraversalDirection::Both if relation.to == current => Some(&relation.from),
+                _ => None,
+            };
+            let Some(next) = next else {
+                continue;
+            };
+            if !visited.insert(next.clone()) {
+                continue;
+            }
+            let next_depth = depth + 1;
+            let mut next_path = path.clone();
+            next_path.push(next.clone());
+            let mut values = BTreeMap::new();
+            values.insert(
+                "depth".into(),
+                RuntimeValue::Unsigned(u64::from(next_depth)),
+            );
+            values.insert("node_kind".into(), string(next.kind.to_string()));
+            values.insert("node_id".into(), string(next.id.to_string()));
+            values.insert(
+                "relation_kind".into(),
+                string(relation.reference.kind.to_string()),
+            );
+            values.insert(
+                "relation_id".into(),
+                string(relation.reference.id.to_string()),
+            );
+            values.insert("from_kind".into(), string(relation.from.kind.to_string()));
+            values.insert("from_id".into(), string(relation.from.id.to_string()));
+            values.insert("to_kind".into(), string(relation.to.kind.to_string()));
+            values.insert("to_id".into(), string(relation.to.id.to_string()));
+            values.insert(
+                "path".into(),
+                RuntimeValue::List(
+                    next_path
+                        .iter()
+                        .map(|node| string(format!("{}:{}", node.kind, node.id)))
+                        .collect(),
+                ),
+            );
+            rows.push(QueryRow {
+                identity: format!(
+                    "traversal:{}:{}:{}:{}:{}:{}",
+                    relation_kind, start.kind, start.id, next_depth, relation.reference.id, next.id
+                ),
+                values,
+            });
+            queue.push_back((next.clone(), next_depth, next_path));
+        }
+    }
+    rows
 }
 
 fn geo_rows(

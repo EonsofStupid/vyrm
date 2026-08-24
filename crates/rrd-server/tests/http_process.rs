@@ -984,6 +984,11 @@ fn data_transaction_atomically_commits_every_public_model_and_replays_after_rest
             "geo:location:alpha-office",
             ("longitude", "decimal", json!("-73")),
         ),
+        (
+            "FROM traverse:linked START document:alpha DIRECTION OUTGOING DEPTH 3 AT VALID 100 KNOWN HEAD PROJECT node_id, depth, path",
+            "traversal:linked:document:alpha:1:alpha-beta:beta",
+            ("node_id", "string", json!("beta")),
+        ),
     ] {
         let request = envelope(
             json!({

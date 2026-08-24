@@ -513,6 +513,42 @@ fn fields_for_source(source: &Source, schema: &RuntimeSchemaRegistry) -> Result<
             ],
             Vec::new(),
         ),
+        Source::Traversal {
+            relation, start, ..
+        } => {
+            let definition = schema.relations.get(relation).ok_or_else(|| {
+                Error::Binding(format!(
+                    "relation type {relation} is not registered at this cursor"
+                ))
+            })?;
+            if !schema.records.contains_key(&start.kind) {
+                return Err(Error::Binding(format!(
+                    "traversal start type {} is not registered at this cursor",
+                    start.kind
+                )));
+            }
+            if !definition.from.contains(&start.kind) && !definition.to.contains(&start.kind) {
+                return Err(Error::Binding(format!(
+                    "traversal start type {} is not an endpoint of relation {relation}",
+                    start.kind
+                )));
+            }
+            (
+                &[
+                    ("depth", &[RuntimeValueType::Unsigned]),
+                    ("node_kind", &[RuntimeValueType::String]),
+                    ("node_id", &[RuntimeValueType::String]),
+                    ("relation_kind", &[RuntimeValueType::String]),
+                    ("relation_id", &[RuntimeValueType::String]),
+                    ("from_kind", &[RuntimeValueType::String]),
+                    ("from_id", &[RuntimeValueType::String]),
+                    ("to_kind", &[RuntimeValueType::String]),
+                    ("to_id", &[RuntimeValueType::String]),
+                    ("path", &[RuntimeValueType::List]),
+                ],
+                Vec::new(),
+            )
+        }
         Source::Claim { .. } => (
             &[
                 ("subject", &[RuntimeValueType::String]),

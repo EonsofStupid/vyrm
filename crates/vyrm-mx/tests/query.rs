@@ -160,6 +160,16 @@ fn fixture_commit() -> RuntimeCommit {
                     properties: RuntimeProperties::new(),
                 },
             },
+            RuntimeMutation::Relation {
+                relation: RuntimeRelation {
+                    reference: RuntimeRef::new("depends_on", "b-a-cycle").unwrap(),
+                    from: RuntimeRef::new("document", "b").unwrap(),
+                    to: RuntimeRef::new("document", "a").unwrap(),
+                    valid_from: 20,
+                    valid_to: None,
+                    properties: properties(&[("strength", "cycle")]),
+                },
+            },
         ],
     }
 }
@@ -260,13 +270,45 @@ fn series_and_geo_queries_match_every_persistent_engine() {
 }
 
 #[test]
+fn bounded_graph_traversal_is_deterministic_across_every_engine() {
+    for (text, expected_node) in [
+        (
+            "FROM traverse:depends_on START document:a DIRECTION OUTGOING DEPTH 3 AT VALID 100 KNOWN HEAD PROJECT node_id, depth, path EXPLAIN CONTRACT",
+            "b",
+        ),
+        (
+            "FROM traverse:depends_on START document:b DIRECTION INCOMING DEPTH 3 AT VALID 100 KNOWN HEAD PROJECT node_id, depth, path EXPLAIN CONTRACT",
+            "a",
+        ),
+    ] {
+        let memory = MemoryEngine::new();
+        let fjall_root = tempfile::tempdir().unwrap();
+        let fjall = Store::open(fjall_root.path()).unwrap();
+        let native_root = tempfile::tempdir().unwrap();
+        let native = NativeEngine::open(&native_root.path().join("native")).unwrap();
+        let left = execute_fixture(&memory, text);
+        assert_eq!(left, execute_fixture(&fjall, text), "{text}");
+        assert_eq!(left, execute_fixture(&native, text), "{text}");
+        assert_eq!(left.returned_rows, 1, "{text}");
+        assert_eq!(
+            left.batches[0].rows[0].values["node_id"],
+            value(expected_node)
+        );
+        assert_eq!(
+            left.batches[0].rows[0].values["depth"],
+            RuntimeValue::Unsigned(1)
+        );
+    }
+}
+
+#[test]
 fn all_source_families_execute_at_explicit_time() {
     let engine = MemoryEngine::new();
     engine.commit_runtime(&fixture_commit()).unwrap();
     let catalog = Catalog::capture(&engine, &ScopeId::new("instance:test").unwrap()).unwrap();
     for (text, identity) in [
         (
-            "FROM relation:depends_on AT VALID 100 KNOWN HEAD PROJECT id",
+            "FROM relation:depends_on AT VALID 100 KNOWN HEAD WHERE id = \"a-b\" PROJECT id",
             "relation:depends_on:a-b",
         ),
         (
@@ -313,7 +355,7 @@ fn bound_event_cursor_uses_one_exact_authoritative_position_on_every_engine() {
             [
                 PhysicalOperator::AuthoritativeEventCursorLookup {
                     cursor: 5,
-                    through_cursor: 9,
+                    through_cursor: 10,
                     exact: true,
                     ..
                 },
