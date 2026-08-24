@@ -7,17 +7,25 @@ pub use http::{HttpError, RRD_MAX_BODY_BYTES, RrdHttpServer, load_or_create_toke
 use hmac::{Hmac, KeyInit, Mac};
 use rrd_contract::{
     AbortTransaction, BeginTransaction, CanonicalId, CloseSession, CommitReceipt,
-    CommitTransaction, CorrelationId, CreateSession, ExecuteQuery, PreviewTransaction,
-    QueryExecutionSnapshot, QueryPlanCandidate, QueryPlanSnapshot, QueryResult, QueryRowSnapshot,
-    QueryValue, RenewSession, SessionEndState, SessionLease, SessionLimits, SessionTermination,
-    TransactionLease, TransactionMutation, TransactionPreview, TransactionState,
-    transaction_operation_sha256,
+    CommitTransaction, CorrelationId, CreateSession, DataGeoPoint, DataGeoValue, DataProperties,
+    DataReference, DataSchemaRegistry, DataSeriesValue, DataValueType, DataVectorNormalization,
+    DataVectorValue, ExecuteQuery, PreviewTransaction, QueryExecutionSnapshot, QueryPlanCandidate,
+    QueryPlanSnapshot, QueryResult, QueryRowSnapshot, QueryValue, RenewSession, SessionEndState,
+    SessionLease, SessionLimits, SessionTermination, TransactionLease, TransactionMutation,
+    TransactionPreview, TransactionState, transaction_operation_sha256,
 };
 use serde::{Deserialize, Serialize};
 use sha2::Sha256;
 use std::collections::BTreeMap;
 use std::fmt;
-use vyrm_core::{Claim, Predicate, Producer, RuntimeValue, ScopeId, Subject, digest};
+use vyrm_core::{
+    Claim, EmbeddingProvenance, GeoPoint, GeoValue, ObjectReceipt, ObjectReference, Predicate,
+    Producer, RuntimeCommit, RuntimeEvent, RuntimeEventSchema, RuntimeGeo, RuntimeMutation,
+    RuntimeProperties, RuntimePropertySchema, RuntimeRecord, RuntimeRecordSchema, RuntimeRef,
+    RuntimeRelation, RuntimeRelationSchema, RuntimeSchemaRegistry, RuntimeSeriesSample,
+    RuntimeType, RuntimeValue, RuntimeValueType, RuntimeVector, ScopeId, SeriesValue, Subject,
+    VectorNormalization, VectorValue, digest,
+};
 use vyrm_store::{ControlTransition, Engine};
 
 const SESSION_STATE_FORMAT: u16 = 1;
@@ -128,6 +136,10 @@ struct TransactionRecord {
 struct CommitIntent {
     idempotency_key: CorrelationId,
     operation_sha256: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    runtime_at_unix_ms: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    runtime_commit_sha256: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -352,6 +364,9 @@ impl<E: Engine> RrdService<E> {
         request
             .validate()
             .map_err(|error| ServiceError::Contract(error.to_string()))?;
+        if !matches!(request.scope.as_str(), "claims" | "data") {
+            return Err(ServiceError::WrongScope);
+        }
         let (bytes, mut state) =
             self.authorize(session_id, token, now, request_id, operation_id)?;
         let operation_sha256 = operation_digest(request)?;
@@ -435,6 +450,8 @@ impl<E: Engine> RrdService<E> {
             .transactions
             .get(transaction_id)
             .ok_or(ServiceError::TransactionNotFound)?;
+        let transaction_scope = record.lease.scope.clone();
+        let read_cursor = record.lease.read_cursor;
         if record.lease.state == TransactionState::Committed {
             let intent = record
                 .commit_intent
@@ -480,12 +497,20 @@ impl<E: Engine> RrdService<E> {
                 )?;
                 return Err(ServiceError::TransactionExpired);
             }
-            if record.lease.scope.as_str() != "claims" {
+            let runtime_identity = if transaction_scope.as_str() == "data" {
+                let commit =
+                    public_runtime_commit(request, session_id, &self.instance, read_cursor, now)?;
+                Some((now, commit.digest()))
+            } else if transaction_scope.as_str() == "claims" {
+                None
+            } else {
                 return Err(ServiceError::WrongScope);
-            }
+            };
             record.commit_intent = Some(CommitIntent {
                 idempotency_key: idempotency_key.clone(),
                 operation_sha256: request.operation_sha256.clone(),
+                runtime_at_unix_ms: runtime_identity.as_ref().map(|value| value.0),
+                runtime_commit_sha256: runtime_identity.map(|value| value.1),
             });
             bytes = self.replace_session(
                 session_id,
@@ -497,14 +522,58 @@ impl<E: Engine> RrdService<E> {
                 operation_id,
             )?;
         }
-        let claims = public_claims(request, session_id)?;
-        let storage_key = claim_acceptance_key(&self.instance, session_id, idempotency_key);
-        let accepted = self.engine.append_batch_idempotent(
-            &storage_key,
-            &request.operation_sha256,
-            &claims,
-        )?;
-        let accepted_receipt = receipt(transaction_id, &accepted);
+        let accepted_receipt = if transaction_scope.as_str() == "claims" {
+            let claims = public_claims(request, session_id)?;
+            let storage_key = claim_acceptance_key(&self.instance, session_id, idempotency_key);
+            let accepted = self.engine.append_batch_idempotent(
+                &storage_key,
+                &request.operation_sha256,
+                &claims,
+            )?;
+            receipt(transaction_id, &accepted)
+        } else if transaction_scope.as_str() == "data" {
+            let intent = state
+                .transactions
+                .get(transaction_id)
+                .and_then(|record| record.commit_intent.as_ref())
+                .ok_or(ServiceError::TransactionClosed)?;
+            let runtime_at = intent.runtime_at_unix_ms.ok_or_else(|| {
+                ServiceError::Contract("data transaction intent lacks runtime time".into())
+            })?;
+            let expected_commit = intent.runtime_commit_sha256.as_ref().ok_or_else(|| {
+                ServiceError::Contract("data transaction intent lacks runtime identity".into())
+            })?;
+            let commit = public_runtime_commit(
+                request,
+                session_id,
+                &self.instance,
+                read_cursor,
+                runtime_at,
+            )?;
+            if commit.digest() != *expected_commit {
+                return Err(ServiceError::OperationDigestMismatch);
+            }
+            let (outcome, idempotent_replay) =
+                if let Some(outcome) = self.engine.runtime_commit_outcome(expected_commit)? {
+                    (outcome, true)
+                } else {
+                    match self.engine.commit_runtime(&commit) {
+                        Ok(outcome) => (outcome, false),
+                        Err(error) => match self.engine.runtime_commit_outcome(expected_commit)? {
+                            Some(outcome) => (outcome, true),
+                            None => return Err(error.into()),
+                        },
+                    }
+                };
+            runtime_receipt(
+                transaction_id,
+                &request.operation_sha256,
+                &outcome,
+                idempotent_replay,
+            )
+        } else {
+            return Err(ServiceError::WrongScope);
+        };
         let record = state
             .transactions
             .get_mut(transaction_id)
@@ -777,7 +846,7 @@ impl<E: Engine> RrdService<E> {
             )?;
             return Err(ServiceError::TransactionExpired);
         }
-        if transaction.lease.scope.as_str() != "claims" {
+        if !matches!(transaction.lease.scope.as_str(), "claims" | "data") {
             return Err(ServiceError::WrongScope);
         }
         let preview = TransactionPreview {
@@ -1015,37 +1084,377 @@ fn query_value(value: &RuntimeValue) -> Result<QueryValue> {
     })
 }
 
+fn public_runtime_commit(
+    request: &CommitTransaction,
+    session_id: &CorrelationId,
+    instance: &CanonicalId,
+    expected_cursor: u64,
+    at: u64,
+) -> Result<RuntimeCommit> {
+    let mutations = request
+        .mutations
+        .iter()
+        .map(|mutation| public_runtime_mutation(mutation, session_id))
+        .collect::<Result<Vec<_>>>()?;
+    let commit = RuntimeCommit {
+        scope: ScopeId::new(format!("instance:{instance}")).map_err(core_contract)?,
+        at,
+        actor: format!("session:{}", session_id.as_str()),
+        expected_cursor,
+        mutations,
+    };
+    commit.validate().map_err(core_contract)?;
+    Ok(commit)
+}
+
+fn public_runtime_mutation(
+    mutation: &TransactionMutation,
+    session_id: &CorrelationId,
+) -> Result<RuntimeMutation> {
+    Ok(match mutation {
+        TransactionMutation::AssertClaim { .. } => RuntimeMutation::Claim {
+            claim: public_claim(mutation, session_id)?,
+        },
+        TransactionMutation::PutSchema { registry } => RuntimeMutation::Schema {
+            registry: runtime_schema(registry)?,
+        },
+        TransactionMutation::PutRecord {
+            reference,
+            valid_from,
+            valid_to,
+            properties,
+        } => RuntimeMutation::Record {
+            record: RuntimeRecord {
+                reference: runtime_ref(reference)?,
+                valid_from: *valid_from,
+                valid_to: *valid_to,
+                properties: runtime_properties(properties)?,
+            },
+        },
+        TransactionMutation::PutRelation {
+            reference,
+            from,
+            to,
+            valid_from,
+            valid_to,
+            properties,
+        } => RuntimeMutation::Relation {
+            relation: RuntimeRelation {
+                reference: runtime_ref(reference)?,
+                from: runtime_ref(from)?,
+                to: runtime_ref(to)?,
+                valid_from: *valid_from,
+                valid_to: *valid_to,
+                properties: runtime_properties(properties)?,
+            },
+        },
+        TransactionMutation::AppendEvent {
+            kind,
+            subject,
+            properties,
+        } => RuntimeMutation::Event {
+            event: RuntimeEvent {
+                kind: RuntimeType::new(kind.as_str()).map_err(core_contract)?,
+                subject: subject.as_ref().map(runtime_ref).transpose()?,
+                properties: runtime_properties(properties)?,
+            },
+        },
+        TransactionMutation::PutVector {
+            reference,
+            subject,
+            field,
+            valid_from,
+            valid_to,
+            value,
+            provenance,
+            properties,
+        } => RuntimeMutation::Vector {
+            vector: RuntimeVector {
+                reference: runtime_ref(reference)?,
+                subject: runtime_ref(subject)?,
+                field: field.as_str().into(),
+                valid_from: *valid_from,
+                valid_to: *valid_to,
+                value: runtime_vector_value(value),
+                provenance: provenance
+                    .as_ref()
+                    .map(|value| -> Result<EmbeddingProvenance> {
+                        Ok(EmbeddingProvenance {
+                            source_digest: value.source_sha256.clone(),
+                            model: value.model.clone(),
+                            model_digest: value.model_sha256.clone(),
+                            dimensions: value.dimensions,
+                            normalization: match value.normalization {
+                                DataVectorNormalization::None => VectorNormalization::None,
+                                DataVectorNormalization::UnitL2 => VectorNormalization::UnitL2,
+                            },
+                            generation_parameters: runtime_properties(
+                                &value.generation_parameters,
+                            )?,
+                        })
+                    })
+                    .transpose()?,
+                properties: runtime_properties(properties)?,
+            },
+        },
+        TransactionMutation::AppendSeriesSample {
+            reference,
+            series,
+            observed_at,
+            value,
+            properties,
+        } => RuntimeMutation::SeriesSample {
+            sample: RuntimeSeriesSample {
+                reference: runtime_ref(reference)?,
+                series: runtime_ref(series)?,
+                observed_at: *observed_at,
+                value: match value {
+                    DataSeriesValue::Integer(value) => SeriesValue::Integer(*value),
+                    DataSeriesValue::Unsigned(value) => SeriesValue::Unsigned(*value),
+                    DataSeriesValue::Decimal(value) => SeriesValue::Decimal(value.clone()),
+                    DataSeriesValue::Bool(value) => SeriesValue::Bool(*value),
+                    DataSeriesValue::String(value) => SeriesValue::String(value.clone()),
+                },
+                properties: runtime_properties(properties)?,
+            },
+        },
+        TransactionMutation::PutGeo {
+            reference,
+            subject,
+            field,
+            valid_from,
+            valid_to,
+            value,
+            properties,
+        } => RuntimeMutation::Geo {
+            geo: RuntimeGeo {
+                reference: runtime_ref(reference)?,
+                subject: runtime_ref(subject)?,
+                field: field.as_str().into(),
+                valid_from: *valid_from,
+                valid_to: *valid_to,
+                value: runtime_geo_value(value),
+                properties: runtime_properties(properties)?,
+            },
+        },
+        TransactionMutation::PublishObjectReference {
+            reference,
+            subject,
+            sha256,
+            length,
+            media_type,
+            receipt,
+            properties,
+        } => RuntimeMutation::Object {
+            object: ObjectReference {
+                reference: runtime_ref(reference)?,
+                subject: subject.as_ref().map(runtime_ref).transpose()?,
+                sha256: sha256.clone(),
+                length: *length,
+                media_type: media_type.clone(),
+                receipt: ObjectReceipt {
+                    backend: receipt.backend.clone(),
+                    key: receipt.key.clone(),
+                    version: receipt.version.clone(),
+                    etag: receipt.etag.clone(),
+                },
+                properties: runtime_properties(properties)?,
+            },
+        },
+    })
+}
+
+fn runtime_ref(reference: &DataReference) -> Result<RuntimeRef> {
+    RuntimeRef::new(reference.kind.as_str(), reference.id.as_str()).map_err(core_contract)
+}
+
+fn runtime_properties(properties: &DataProperties) -> Result<RuntimeProperties> {
+    properties
+        .iter()
+        .map(|(name, value)| Ok((name.clone(), runtime_value(value)?)))
+        .collect()
+}
+
+fn runtime_schema(registry: &DataSchemaRegistry) -> Result<RuntimeSchemaRegistry> {
+    Ok(RuntimeSchemaRegistry {
+        revision: registry.revision,
+        migration: registry.migration.clone(),
+        records: registry
+            .records
+            .iter()
+            .map(|(kind, schema)| {
+                Ok((
+                    RuntimeType::new(kind.as_str()).map_err(core_contract)?,
+                    RuntimeRecordSchema {
+                        properties: runtime_property_schemas(&schema.properties),
+                        allow_additional_properties: schema.allow_additional_properties,
+                        unique_properties: schema.unique_properties.clone(),
+                    },
+                ))
+            })
+            .collect::<Result<_>>()?,
+        relations: registry
+            .relations
+            .iter()
+            .map(|(kind, schema)| {
+                Ok((
+                    RuntimeType::new(kind.as_str()).map_err(core_contract)?,
+                    RuntimeRelationSchema {
+                        from: schema
+                            .from
+                            .iter()
+                            .map(|kind| RuntimeType::new(kind.as_str()).map_err(core_contract))
+                            .collect::<Result<_>>()?,
+                        to: schema
+                            .to
+                            .iter()
+                            .map(|kind| RuntimeType::new(kind.as_str()).map_err(core_contract))
+                            .collect::<Result<_>>()?,
+                        properties: runtime_property_schemas(&schema.properties),
+                        allow_additional_properties: schema.allow_additional_properties,
+                        unique_pair: schema.unique_pair,
+                        max_outgoing: schema.max_outgoing,
+                        max_incoming: schema.max_incoming,
+                    },
+                ))
+            })
+            .collect::<Result<_>>()?,
+        events: registry
+            .events
+            .iter()
+            .map(|(kind, schema)| {
+                Ok((
+                    RuntimeType::new(kind.as_str()).map_err(core_contract)?,
+                    RuntimeEventSchema {
+                        subject_required: schema.subject_required,
+                        subject_types: schema
+                            .subject_types
+                            .iter()
+                            .map(|kind| RuntimeType::new(kind.as_str()).map_err(core_contract))
+                            .collect::<Result<_>>()?,
+                        properties: runtime_property_schemas(&schema.properties),
+                        allow_additional_properties: schema.allow_additional_properties,
+                    },
+                ))
+            })
+            .collect::<Result<_>>()?,
+    })
+}
+
+fn runtime_property_schemas(
+    properties: &BTreeMap<String, rrd_contract::DataPropertySchema>,
+) -> BTreeMap<String, RuntimePropertySchema> {
+    properties
+        .iter()
+        .map(|(name, schema)| {
+            (
+                name.clone(),
+                RuntimePropertySchema {
+                    value_type: match schema.value_type {
+                        DataValueType::Null => RuntimeValueType::Null,
+                        DataValueType::Bool => RuntimeValueType::Bool,
+                        DataValueType::Integer => RuntimeValueType::Integer,
+                        DataValueType::Unsigned => RuntimeValueType::Unsigned,
+                        DataValueType::Decimal => RuntimeValueType::Decimal,
+                        DataValueType::String => RuntimeValueType::String,
+                        DataValueType::Digest => RuntimeValueType::Digest,
+                        DataValueType::List => RuntimeValueType::List,
+                        DataValueType::Map => RuntimeValueType::Map,
+                    },
+                    required: schema.required,
+                },
+            )
+        })
+        .collect()
+}
+
+fn runtime_vector_value(value: &DataVectorValue) -> VectorValue {
+    match value {
+        DataVectorValue::Dense { values } => VectorValue::Dense {
+            values: values.clone(),
+        },
+        DataVectorValue::Sparse {
+            dimensions,
+            indices,
+            values,
+        } => VectorValue::Sparse {
+            dimensions: *dimensions,
+            indices: indices.clone(),
+            values: values.clone(),
+        },
+        DataVectorValue::MultiDense {
+            dimensions,
+            vectors,
+        } => VectorValue::MultiDense {
+            dimensions: *dimensions,
+            vectors: vectors.clone(),
+        },
+    }
+}
+
+fn runtime_geo_value(value: &DataGeoValue) -> GeoValue {
+    let point = |value: &DataGeoPoint| GeoPoint {
+        longitude: value.longitude,
+        latitude: value.latitude,
+    };
+    match value {
+        DataGeoValue::Point { point: value } => GeoValue::Point {
+            point: point(value),
+        },
+        DataGeoValue::BoundingBox {
+            southwest,
+            northeast,
+        } => GeoValue::BoundingBox {
+            southwest: point(southwest),
+            northeast: point(northeast),
+        },
+    }
+}
+
+fn core_contract(error: vyrm_core::Error) -> ServiceError {
+    ServiceError::Contract(error.to_string())
+}
+
+fn public_claim(mutation: &TransactionMutation, session_id: &CorrelationId) -> Result<Claim> {
+    let TransactionMutation::AssertClaim {
+        subject,
+        predicate,
+        object,
+        valid_from,
+        tx_time,
+        producer,
+        confidence,
+    } = mutation
+    else {
+        return Err(ServiceError::Contract(
+            "expected an assert_claim mutation".into(),
+        ));
+    };
+    let mut claim = Claim::new(
+        Subject::new(subject.as_str()).map_err(core_contract)?,
+        Predicate::new(predicate.as_str()).map_err(core_contract)?,
+        object,
+        *valid_from,
+        *tx_time,
+        Producer {
+            actor: producer.as_str().into(),
+            on_behalf_of: None,
+            session: Some(session_id.as_str().into()),
+        },
+    );
+    claim.confidence = *confidence;
+    Ok(claim)
+}
+
 fn public_claims(request: &CommitTransaction, session_id: &CorrelationId) -> Result<Vec<Claim>> {
     request
         .mutations
         .iter()
         .map(|mutation| match mutation {
-            TransactionMutation::AssertClaim {
-                subject,
-                predicate,
-                object,
-                valid_from,
-                tx_time,
-                producer,
-                confidence,
-            } => {
-                let mut claim = Claim::new(
-                    Subject::new(subject.as_str())
-                        .map_err(|error| ServiceError::Contract(error.to_string()))?,
-                    Predicate::new(predicate.as_str())
-                        .map_err(|error| ServiceError::Contract(error.to_string()))?,
-                    object,
-                    *valid_from,
-                    *tx_time,
-                    Producer {
-                        actor: producer.as_str().into(),
-                        on_behalf_of: None,
-                        session: Some(session_id.as_str().into()),
-                    },
-                );
-                claim.confidence = *confidence;
-                Ok(claim)
-            }
+            TransactionMutation::AssertClaim { .. } => public_claim(mutation, session_id),
+            _ => Err(ServiceError::Contract(
+                "the claims transaction scope accepts only assert_claim mutations".into(),
+            )),
         })
         .collect()
 }
@@ -1060,7 +1469,35 @@ fn receipt(
         first_claim_sequence: accepted.append.first_sequence,
         last_claim_sequence: accepted.append.last_sequence,
         mutation_count: accepted.append.count as u64,
+        runtime_commit_sha256: None,
+        first_runtime_cursor: None,
+        last_runtime_cursor: None,
+        claim_mutation_count: None,
         idempotent_replay: accepted.idempotent_replay,
+    }
+}
+
+fn runtime_receipt(
+    transaction_id: &CorrelationId,
+    operation_sha256: &str,
+    accepted: &vyrm_core::RuntimeCommitOutcome,
+    idempotent_replay: bool,
+) -> CommitReceipt {
+    let claim_count = accepted
+        .last_claim_sequence
+        .zip(accepted.first_claim_sequence)
+        .map_or(0, |(last, first)| last - first + 1);
+    CommitReceipt {
+        transaction_id: transaction_id.clone(),
+        operation_sha256: operation_sha256.into(),
+        first_claim_sequence: accepted.first_claim_sequence.unwrap_or(0),
+        last_claim_sequence: accepted.last_claim_sequence.unwrap_or(0),
+        mutation_count: accepted.count as u64,
+        runtime_commit_sha256: Some(accepted.commit_id.clone()),
+        first_runtime_cursor: Some(accepted.first_cursor),
+        last_runtime_cursor: Some(accepted.last_cursor),
+        claim_mutation_count: Some(claim_count),
+        idempotent_replay,
     }
 }
 

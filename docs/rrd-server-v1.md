@@ -2,7 +2,8 @@
 
 Status: F2 alpha process implemented. The async loopback HTTP boundary and
 persistent coordinator are shipped; the broader F2 administration,
-cancellation, metrics, and multi-model transaction exit gate remains open.
+cancellation, metrics, read-your-writes, and mutating-query exit gate remains
+open.
 
 The first RRD server is a new process boundary, not an HTTP wrapper around the
 CLI and not an extension of `vyrmd`'s MCP protocol. `vyrmd` remains the AI-tool
@@ -53,15 +54,18 @@ places that secret elsewhere. `X-RRD-Session` carries the session identifier;
 - `DELETE /v1/sessions/{session}` closes the session and aborts its open
   transactions idempotently.
 - `POST /v1/transactions` captures an Engine read stamp and creates one
-  server-side transaction lease bound to exactly one instance and scope.
+  server-side transaction lease bound to exactly one instance and either the
+  legacy `claims` scope or typed `data` scope.
 - `POST /v1/transactions/{transaction}/preview` validates and returns the
-  ordered prospective claim mutations, read cursor, and canonical operation
-  digest. Full multi-model read-your-writes projection remains an F6 gate.
+  ordered prospective mutations, read cursor, and canonical operation digest.
+  Full multi-model read-your-writes projection remains an F6 gate.
 - `POST /v1/transactions/{transaction}/commit` requires a mutation
   idempotency key, exact operation digest, and deadline; it commits through
-  the matching authoritative Engine transaction. The first implemented
-  mutation surface uses `Engine::append_batch_idempotent`; later multi-model
-  mutations must retain the same durable acceptance contract.
+  the matching authoritative Engine transaction. The `claims` scope retains
+  `Engine::append_batch_idempotent`. The `data` scope lowers the public typed
+  schema, claim, record, relation, event, vector, series, geo, and pre-staged
+  object-reference vocabulary into one atomic `RuntimeCommit` with exact
+  cursor conflict detection.
 - `DELETE /v1/transactions/{transaction}` aborts idempotently.
 
 Every response uses `ResponseEnvelope`; every failure uses the stable
@@ -102,14 +106,16 @@ replay does not invent a second lifecycle transition. Successful activity
 advances idle expiry but never crosses absolute expiry. A compare-and-swap
 conflict fails closed rather than overwriting a concurrent lifecycle event.
 
-Claim acceptance uses a recoverable three-transition protocol until the
-broader F6 transaction engine owns it as one generalized transaction: first
+Claim and data acceptance use a recoverable three-transition protocol until
+the broader F6 transaction engine owns it as one generalized transaction: first
 `transaction.commit_prepared` durably binds the only permitted key/digest,
-then the authoritative claim append stores its receipt atomically with data,
-then `transaction.committed` records the terminal state. A stop at either gap
-resumes only the prepared identity, cannot accept a different retry key, and
-cannot duplicate claims. Recovery after lease expiry and after process restart
-is exercised. This is deliberately not presented as one cross-keyspace commit.
+then the authoritative claim or runtime commit stores its receipt atomically
+with data, then `transaction.committed` records the terminal state. A data
+intent also freezes runtime time and content digest; recovery resolves that
+digest through the authoritative runtime commit catalogue. A stop at either
+gap resumes only the prepared identity and cannot accept a different retry
+key or duplicate data. Recovery after process restart is exercised. This is
+deliberately not presented as one cross-keyspace commit.
 
 ## Time and resource invariants
 
@@ -144,9 +150,15 @@ The real-socket matrix proves the same authentication and scope denial for the
 query endpoint and verifies an exact persisted-record query, typed row output,
 planner candidates, validation evidence, and cursor/schema coordinates.
 
+It also commits all nine runtime mutation families through one `data`
+transaction, verifies the single eleven-change cursor interval and one-claim
+receipt, restarts the server, replays the same runtime commit identity, and
+confirms that the authoritative scoped log contains exactly eleven changes.
+
 F2 is not closed by that matrix. Remaining black-box gates are cancellation of
 long-running query work, deadline races during generalized commit, prospective
-multi-model read-your-writes, mutating VyrmQL, live subscriptions,
+multi-model read-your-writes, lost-ack process interruption for the data scope,
+mutating VyrmQL, live subscriptions,
 CRUD/schema/vector/snapshot administration, generalized result/time limits,
 durable query-span export, metrics export, and released-version negotiation
 clients.

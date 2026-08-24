@@ -16,6 +16,7 @@ pub const MAX_ID_BYTES: usize = 128;
 pub const MAX_MESSAGE_BYTES: usize = 4_096;
 pub const MAX_CAPABILITIES: usize = 512;
 pub const MAX_TRANSACTION_CLAIMS: usize = 4_096;
+pub const MAX_VECTOR_DIMENSIONS: usize = 1_048_576;
 pub const MAX_QUERY_BYTES: usize = 64 * 1024;
 pub const MAX_QUERY_PARAMETERS: usize = 128;
 pub const MAX_QUERY_PARAMETER_BYTES: usize = 64 * 1024;
@@ -985,8 +986,172 @@ impl TransactionLease {
     }
 }
 
-/// First public mutation surface. Later F6 multi-model mutations extend this
-/// tagged enum without exposing private `vyrm_core` representations.
+pub type DataValue = QueryValue;
+pub type DataProperties = BTreeMap<String, DataValue>;
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DataReference {
+    pub kind: CanonicalId,
+    pub id: CanonicalId,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DataValueType {
+    Null,
+    Bool,
+    Integer,
+    Unsigned,
+    Decimal,
+    String,
+    Digest,
+    List,
+    Map,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DataPropertySchema {
+    pub value_type: DataValueType,
+    #[serde(default)]
+    pub required: bool,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DataRecordSchema {
+    #[serde(default)]
+    pub properties: BTreeMap<String, DataPropertySchema>,
+    #[serde(default)]
+    pub allow_additional_properties: bool,
+    #[serde(default)]
+    pub unique_properties: BTreeSet<String>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DataRelationSchema {
+    #[serde(default)]
+    pub from: BTreeSet<CanonicalId>,
+    #[serde(default)]
+    pub to: BTreeSet<CanonicalId>,
+    #[serde(default)]
+    pub properties: BTreeMap<String, DataPropertySchema>,
+    #[serde(default)]
+    pub allow_additional_properties: bool,
+    #[serde(default)]
+    pub unique_pair: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_outgoing: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_incoming: Option<u64>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DataEventSchema {
+    #[serde(default)]
+    pub subject_required: bool,
+    #[serde(default)]
+    pub subject_types: BTreeSet<CanonicalId>,
+    #[serde(default)]
+    pub properties: BTreeMap<String, DataPropertySchema>,
+    #[serde(default)]
+    pub allow_additional_properties: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DataSchemaRegistry {
+    pub revision: u64,
+    pub migration: String,
+    #[serde(default)]
+    pub records: BTreeMap<CanonicalId, DataRecordSchema>,
+    #[serde(default)]
+    pub relations: BTreeMap<CanonicalId, DataRelationSchema>,
+    #[serde(default)]
+    pub events: BTreeMap<CanonicalId, DataEventSchema>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum DataVectorValue {
+    Dense {
+        values: Vec<f32>,
+    },
+    Sparse {
+        dimensions: u32,
+        indices: Vec<u32>,
+        values: Vec<f32>,
+    },
+    MultiDense {
+        dimensions: u32,
+        vectors: Vec<Vec<f32>>,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DataVectorNormalization {
+    None,
+    UnitL2,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DataEmbeddingProvenance {
+    pub source_sha256: String,
+    pub model: String,
+    pub model_sha256: String,
+    pub dimensions: u32,
+    pub normalization: DataVectorNormalization,
+    #[serde(default)]
+    pub generation_parameters: DataProperties,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", content = "value", rename_all = "snake_case")]
+pub enum DataSeriesValue {
+    Integer(i64),
+    Unsigned(u64),
+    Decimal(String),
+    Bool(bool),
+    String(String),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DataGeoPoint {
+    pub longitude: f64,
+    pub latitude: f64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum DataGeoValue {
+    Point {
+        point: DataGeoPoint,
+    },
+    BoundingBox {
+        southwest: DataGeoPoint,
+        northeast: DataGeoPoint,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DataObjectReceipt {
+    pub backend: String,
+    pub key: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub version: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub etag: Option<String>,
+}
+
+/// Public multi-model mutation vocabulary. It is deliberately independent of
+/// `vyrm_core`; adapters lower these values into the authoritative runtime.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "mutation", rename_all = "snake_case", deny_unknown_fields)]
 pub enum TransactionMutation {
@@ -999,6 +1164,77 @@ pub enum TransactionMutation {
         producer: CanonicalId,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         confidence: Option<f32>,
+    },
+    PutSchema {
+        registry: DataSchemaRegistry,
+    },
+    PutRecord {
+        reference: DataReference,
+        valid_from: u64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        valid_to: Option<u64>,
+        #[serde(default)]
+        properties: DataProperties,
+    },
+    PutRelation {
+        reference: DataReference,
+        from: DataReference,
+        to: DataReference,
+        valid_from: u64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        valid_to: Option<u64>,
+        #[serde(default)]
+        properties: DataProperties,
+    },
+    AppendEvent {
+        kind: CanonicalId,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        subject: Option<DataReference>,
+        #[serde(default)]
+        properties: DataProperties,
+    },
+    PutVector {
+        reference: DataReference,
+        subject: DataReference,
+        field: CanonicalId,
+        valid_from: u64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        valid_to: Option<u64>,
+        value: DataVectorValue,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        provenance: Option<DataEmbeddingProvenance>,
+        #[serde(default)]
+        properties: DataProperties,
+    },
+    AppendSeriesSample {
+        reference: DataReference,
+        series: DataReference,
+        observed_at: u64,
+        value: DataSeriesValue,
+        #[serde(default)]
+        properties: DataProperties,
+    },
+    PutGeo {
+        reference: DataReference,
+        subject: DataReference,
+        field: CanonicalId,
+        valid_from: u64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        valid_to: Option<u64>,
+        value: DataGeoValue,
+        #[serde(default)]
+        properties: DataProperties,
+    },
+    PublishObjectReference {
+        reference: DataReference,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        subject: Option<DataReference>,
+        sha256: String,
+        length: u64,
+        media_type: String,
+        receipt: DataObjectReceipt,
+        #[serde(default)]
+        properties: DataProperties,
     },
 }
 
@@ -1027,8 +1263,183 @@ impl TransactionMutation {
                 }
                 Ok(())
             }
+            Self::PutSchema { registry } => validate_data_schema(registry),
+            Self::PutRecord {
+                valid_from,
+                valid_to,
+                properties,
+                ..
+            }
+            | Self::PutRelation {
+                valid_from,
+                valid_to,
+                properties,
+                ..
+            }
+            | Self::PutGeo {
+                valid_from,
+                valid_to,
+                properties,
+                ..
+            } => {
+                validate_data_window(*valid_from, *valid_to)?;
+                validate_data_properties(properties)
+            }
+            Self::AppendEvent { properties, .. } => validate_data_properties(properties),
+            Self::PutVector {
+                valid_from,
+                valid_to,
+                value,
+                provenance,
+                properties,
+                ..
+            } => {
+                validate_data_window(*valid_from, *valid_to)?;
+                let dimensions = validate_data_vector(value)?;
+                if let Some(provenance) = provenance {
+                    validate_sha256(&provenance.source_sha256, "embedding source_sha256")?;
+                    validate_sha256(&provenance.model_sha256, "embedding model_sha256")?;
+                    if provenance.model.trim().is_empty()
+                        || provenance.model.len() > MAX_MESSAGE_BYTES
+                        || provenance.dimensions as usize != dimensions
+                    {
+                        return invalid("embedding provenance is inconsistent with the vector");
+                    }
+                    validate_data_properties(&provenance.generation_parameters)?;
+                }
+                validate_data_properties(properties)
+            }
+            Self::AppendSeriesSample {
+                observed_at,
+                value,
+                properties,
+                ..
+            } => {
+                if *observed_at == 0 {
+                    return invalid("series observed_at must be greater than zero");
+                }
+                if matches!(value, DataSeriesValue::Decimal(value) if value.trim().is_empty()) {
+                    return invalid("series decimal must not be empty");
+                }
+                validate_data_properties(properties)
+            }
+            Self::PublishObjectReference {
+                sha256,
+                media_type,
+                receipt,
+                properties,
+                ..
+            } => {
+                validate_sha256(sha256, "object sha256")?;
+                if media_type.trim().is_empty()
+                    || receipt.backend.trim().is_empty()
+                    || receipt.key.trim().is_empty()
+                {
+                    return invalid(
+                        "object media type, receipt backend, and key must not be empty",
+                    );
+                }
+                validate_data_properties(properties)
+            }
         }
     }
+}
+
+fn validate_data_window(valid_from: u64, valid_to: Option<u64>) -> Result<()> {
+    if valid_from == 0 || valid_to.is_some_and(|end| end <= valid_from) {
+        return invalid("data validity window must start above zero and end after its start");
+    }
+    Ok(())
+}
+
+fn validate_data_properties(properties: &DataProperties) -> Result<()> {
+    if properties
+        .keys()
+        .any(|name| name.is_empty() || name.len() > MAX_ID_BYTES || name.as_bytes().contains(&0))
+    {
+        return invalid("data property names must be bounded, non-empty, and contain no NUL");
+    }
+    let bytes = serde_json::to_vec(properties).map_err(|error| ContractError(error.to_string()))?;
+    if bytes.len() > MAX_QUERY_PARAMETER_BYTES {
+        return invalid(format!(
+            "data properties may encode at most {MAX_QUERY_PARAMETER_BYTES} bytes per object"
+        ));
+    }
+    Ok(())
+}
+
+fn validate_data_schema(registry: &DataSchemaRegistry) -> Result<()> {
+    if registry.revision == 0 || registry.migration.trim().is_empty() {
+        return invalid("data schema requires a positive revision and migration description");
+    }
+    if registry.records.is_empty() && registry.relations.is_empty() && registry.events.is_empty() {
+        return invalid("data schema must govern at least one type");
+    }
+    for schema in registry.records.values() {
+        if schema
+            .unique_properties
+            .iter()
+            .any(|name| !schema.properties.contains_key(name))
+        {
+            return invalid("record schema unique properties must be declared properties");
+        }
+    }
+    for schema in registry.relations.values() {
+        if schema.from.is_empty()
+            || schema.to.is_empty()
+            || schema.max_outgoing == Some(0)
+            || schema.max_incoming == Some(0)
+        {
+            return invalid("relation schema requires endpoints and positive cardinality limits");
+        }
+    }
+    Ok(())
+}
+
+fn validate_data_vector(value: &DataVectorValue) -> Result<usize> {
+    let finite = |values: &[f32]| values.iter().all(|value| value.is_finite());
+    let dimensions = match value {
+        DataVectorValue::Dense { values } => {
+            if !finite(values) {
+                return invalid("dense vector values must be finite");
+            }
+            values.len()
+        }
+        DataVectorValue::Sparse {
+            dimensions,
+            indices,
+            values,
+        } => {
+            if indices.is_empty()
+                || indices.len() != values.len()
+                || indices.iter().any(|index| index >= dimensions)
+                || indices.windows(2).any(|pair| pair[0] >= pair[1])
+                || !finite(values)
+            {
+                return invalid("sparse vector indices and values are invalid");
+            }
+            *dimensions as usize
+        }
+        DataVectorValue::MultiDense {
+            dimensions,
+            vectors,
+        } => {
+            if vectors.is_empty()
+                || vectors
+                    .iter()
+                    .any(|vector| vector.len() != *dimensions as usize || !finite(vector))
+            {
+                return invalid("multi-dense vector rows are invalid");
+            }
+            *dimensions as usize
+        }
+    };
+    if dimensions == 0 || dimensions > MAX_VECTOR_DIMENSIONS {
+        return invalid(format!(
+            "vector dimensions must be in 1..={MAX_VECTOR_DIMENSIONS}"
+        ));
+    }
+    Ok(dimensions)
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -1119,17 +1530,50 @@ pub struct CommitReceipt {
     pub first_claim_sequence: u64,
     pub last_claim_sequence: u64,
     pub mutation_count: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runtime_commit_sha256: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub first_runtime_cursor: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_runtime_cursor: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub claim_mutation_count: Option<u64>,
     pub idempotent_replay: bool,
 }
 
 impl CommitReceipt {
     pub fn validate(&self) -> Result<()> {
         validate_sha256(&self.operation_sha256, "operation_sha256")?;
-        if self.first_claim_sequence == 0
-            || self.last_claim_sequence < self.first_claim_sequence
-            || self.mutation_count != self.last_claim_sequence - self.first_claim_sequence + 1
-        {
-            return invalid("commit receipt sequence interval is inconsistent");
+        match (
+            &self.runtime_commit_sha256,
+            self.first_runtime_cursor,
+            self.last_runtime_cursor,
+            self.claim_mutation_count,
+        ) {
+            (None, None, None, None) => {
+                if self.first_claim_sequence == 0
+                    || self.last_claim_sequence < self.first_claim_sequence
+                    || self.mutation_count
+                        != self.last_claim_sequence - self.first_claim_sequence + 1
+                {
+                    return invalid("commit receipt sequence interval is inconsistent");
+                }
+            }
+            (Some(commit), Some(first), Some(last), Some(claims)) => {
+                validate_sha256(commit, "runtime_commit_sha256")?;
+                if first == 0 || last < first || self.mutation_count != last - first + 1 {
+                    return invalid("runtime commit receipt cursor interval is inconsistent");
+                }
+                if (claims == 0
+                    && (self.first_claim_sequence != 0 || self.last_claim_sequence != 0))
+                    || (claims > 0
+                        && (self.first_claim_sequence == 0
+                            || self.last_claim_sequence - self.first_claim_sequence + 1 != claims))
+                {
+                    return invalid("runtime commit receipt claim interval is inconsistent");
+                }
+            }
+            _ => return invalid("runtime commit receipt fields must be supplied together"),
         }
         Ok(())
     }

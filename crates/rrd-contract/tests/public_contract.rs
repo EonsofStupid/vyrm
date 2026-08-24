@@ -400,6 +400,10 @@ fn session_and_claim_transaction_contracts_are_bounded() {
         first_claim_sequence: 7,
         last_claim_sequence: 7,
         mutation_count: 1,
+        runtime_commit_sha256: None,
+        first_runtime_cursor: None,
+        last_runtime_cursor: None,
+        claim_mutation_count: None,
         idempotent_replay: false,
     }
     .validate()
@@ -410,7 +414,10 @@ fn session_and_claim_transaction_contracts_are_bounded() {
     invalid.idle_timeout_ms = invalid.absolute_timeout_ms + 1;
     assert!(invalid.validate().is_err());
     let mut invalid_commit = commit;
-    let TransactionMutation::AssertClaim { confidence, .. } = &mut invalid_commit.mutations[0];
+    let TransactionMutation::AssertClaim { confidence, .. } = &mut invalid_commit.mutations[0]
+    else {
+        unreachable!()
+    };
     *confidence = Some(f32::NAN);
     assert!(invalid_commit.validate().is_err());
 }

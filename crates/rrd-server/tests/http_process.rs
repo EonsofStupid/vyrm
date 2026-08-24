@@ -286,6 +286,203 @@ fn authenticated_query_exposes_exact_vyrmql_vyrmmx_contract() {
 }
 
 #[test]
+fn data_transaction_atomically_commits_every_public_model_and_replays_after_restart() {
+    let (_temporary, root, server) = start_root();
+    let create = envelope(
+        json!({
+            "limits": {
+                "idle_timeout_ms": 60_000,
+                "absolute_timeout_ms": 300_000,
+                "max_open_transactions": 2
+            }
+        }),
+        Some("data-session"),
+        None,
+    );
+    let (status, created) = post(&server, "/v1/sessions", &create, None);
+    assert_eq!(status, 200, "{created}");
+    let session_id = payload(&created)["session_id"].as_str().unwrap().to_owned();
+    let token = payload(&created)["token"].as_str().unwrap().to_owned();
+    let begin = envelope(
+        json!({"scope": "data", "timeout_ms": 60_000}),
+        Some("begin-data"),
+        None,
+    );
+    let (status, began) = post(
+        &server,
+        "/v1/transactions",
+        &begin,
+        Some((&session_id, &token)),
+    );
+    assert_eq!(status, 200, "{began}");
+    let transaction_id = payload(&began)["transaction_id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let zero_digest = "0".repeat(64);
+    let mutations = json!([
+        {
+            "mutation": "put_schema",
+            "registry": {
+                "revision": 1,
+                "migration": "bootstrap all public data models",
+                "records": {
+                    "document": {
+                        "properties": {"title": {"value_type": "string", "required": true}},
+                        "allow_additional_properties": false,
+                        "unique_properties": []
+                    },
+                    "series": {
+                        "properties": {},
+                        "allow_additional_properties": true,
+                        "unique_properties": []
+                    }
+                },
+                "relations": {
+                    "linked": {
+                        "from": ["document"],
+                        "to": ["document"],
+                        "properties": {},
+                        "allow_additional_properties": true,
+                        "unique_pair": true
+                    }
+                },
+                "events": {
+                    "observed": {
+                        "subject_required": true,
+                        "subject_types": ["document"],
+                        "properties": {},
+                        "allow_additional_properties": true
+                    }
+                }
+            }
+        },
+        {
+            "mutation": "assert_claim",
+            "subject": "alpha",
+            "predicate": "status",
+            "object": "indexed",
+            "valid_from": 100,
+            "tx_time": 100,
+            "producer": "socket-test",
+            "confidence": 1.0
+        },
+        {
+            "mutation": "put_record",
+            "reference": {"kind": "document", "id": "alpha"},
+            "valid_from": 100,
+            "properties": {"title": {"type": "string", "value": "Alpha"}}
+        },
+        {
+            "mutation": "put_record",
+            "reference": {"kind": "document", "id": "beta"},
+            "valid_from": 100,
+            "properties": {"title": {"type": "string", "value": "Beta"}}
+        },
+        {
+            "mutation": "put_record",
+            "reference": {"kind": "series", "id": "latency"},
+            "valid_from": 100,
+            "properties": {}
+        },
+        {
+            "mutation": "put_relation",
+            "reference": {"kind": "linked", "id": "alpha-beta"},
+            "from": {"kind": "document", "id": "alpha"},
+            "to": {"kind": "document", "id": "beta"},
+            "valid_from": 100,
+            "properties": {"reason": {"type": "string", "value": "test"}}
+        },
+        {
+            "mutation": "append_event",
+            "kind": "observed",
+            "subject": {"kind": "document", "id": "alpha"},
+            "properties": {"source": {"type": "string", "value": "socket"}}
+        },
+        {
+            "mutation": "put_vector",
+            "reference": {"kind": "embedding", "id": "alpha-title"},
+            "subject": {"kind": "document", "id": "alpha"},
+            "field": "title_embedding",
+            "valid_from": 100,
+            "value": {"kind": "dense", "values": [0.6, 0.8]},
+            "properties": {}
+        },
+        {
+            "mutation": "append_series_sample",
+            "reference": {"kind": "sample", "id": "latency-100"},
+            "series": {"kind": "series", "id": "latency"},
+            "observed_at": 100,
+            "value": {"type": "unsigned", "value": 17},
+            "properties": {}
+        },
+        {
+            "mutation": "put_geo",
+            "reference": {"kind": "location", "id": "alpha-office"},
+            "subject": {"kind": "document", "id": "alpha"},
+            "field": "office",
+            "valid_from": 100,
+            "value": {"kind": "point", "point": {"longitude": -73.0, "latitude": 40.0}},
+            "properties": {}
+        },
+        {
+            "mutation": "publish_object_reference",
+            "reference": {"kind": "object", "id": "alpha-body"},
+            "subject": {"kind": "document", "id": "alpha"},
+            "sha256": zero_digest,
+            "length": 0,
+            "media_type": "text/plain",
+            "receipt": {
+                "backend": "fixture-verified",
+                "key": format!("objects/sha256/00/{}", "0".repeat(64))
+            },
+            "properties": {}
+        }
+    ]);
+    let typed: Vec<TransactionMutation> = serde_json::from_value(mutations.clone()).unwrap();
+    let operation_sha256 = transaction_operation_sha256(&typed);
+    let commit = envelope(
+        json!({
+            "operation_sha256": operation_sha256,
+            "mutations": mutations
+        }),
+        Some("commit-data"),
+        Some(u64::MAX),
+    );
+    let path = format!("/v1/transactions/{transaction_id}/commit");
+    let (status, committed) = post(&server, &path, &commit, Some((&session_id, &token)));
+    assert_eq!(status, 200, "{committed}");
+    let receipt = payload(&committed);
+    assert_eq!(receipt["mutation_count"], 11);
+    assert_eq!(receipt["first_runtime_cursor"], 1);
+    assert_eq!(receipt["last_runtime_cursor"], 11);
+    assert_eq!(receipt["claim_mutation_count"], 1);
+    assert_eq!(receipt["first_claim_sequence"], 1);
+    assert_eq!(receipt["last_claim_sequence"], 1);
+    assert_eq!(receipt["idempotent_replay"], false);
+    assert_eq!(receipt["runtime_commit_sha256"].as_str().unwrap().len(), 64);
+    server.stop();
+
+    let server = start(&root);
+    let (status, replayed) = post(&server, &path, &commit, Some((&session_id, &token)));
+    assert_eq!(status, 200, "{replayed}");
+    assert_eq!(payload(&replayed)["idempotent_replay"], true);
+    assert_eq!(
+        payload(&replayed)["runtime_commit_sha256"],
+        receipt["runtime_commit_sha256"]
+    );
+    server.stop();
+
+    let engine = PersistentEngine::open(&root).unwrap();
+    let page = engine
+        .runtime_changes_since(0, 32, Some(&ScopeId::new("instance:socket-test").unwrap()))
+        .unwrap();
+    assert_eq!(page.changes.len(), 11);
+    assert_eq!(engine.runtime_cursor().unwrap(), 11);
+    assert_eq!(engine.sequence().unwrap(), 1);
+}
+
+#[test]
 fn authenticated_estate_read_returns_the_public_snapshot_only() {
     let temporary = tempfile::tempdir().unwrap();
     let root = temporary.path().join("instance");

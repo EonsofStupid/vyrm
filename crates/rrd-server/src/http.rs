@@ -890,9 +890,20 @@ fn capabilities(instance: &CanonicalId, backend: CanonicalId) -> ServiceCapabili
                 CanonicalId::new("max-mutations").unwrap(),
                 rrd_contract::MAX_TRANSACTION_CLAIMS as u64,
             )]),
-            limitation: Some(format!(
-                "claim mutation surface on {backend}; F6 multi-model transactions remain open"
-            )),
+            limitation: Some(format!("legacy claim-only scope on {backend}")),
+        },
+        CapabilityDescriptor {
+            name: CanonicalId::new("multi-model-transactions").unwrap(),
+            contract_version: 1,
+            status: CapabilityStatus::Experimental,
+            limits: BTreeMap::from([(
+                CanonicalId::new("max-mutations").unwrap(),
+                rrd_contract::MAX_TRANSACTION_CLAIMS as u64,
+            )]),
+            limitation: Some(
+                "atomic schema, claim, record, relation, event, vector, series, geo, and pre-staged object-reference commits; mutating VyrmQL and read-your-writes remain open"
+                    .into(),
+            ),
         },
         CapabilityDescriptor {
             name: CanonicalId::new("exact-vyrmql-query").unwrap(),

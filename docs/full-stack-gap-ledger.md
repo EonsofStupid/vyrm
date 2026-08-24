@@ -184,8 +184,9 @@ before F4, and makes accepted-request idempotency durable rather than
 process-local.
 
 **Implementation progress 2026-08-23:** `rrd-contract` now owns bounded session
-limits/leases, transaction leases/states, the first public claim mutation, and
-commit receipts without importing private Vyrm types. Engine now provides an
+limits/leases, transaction leases/states, typed public multi-model mutations,
+and generalized commit receipts without importing private Vyrm types. Engine
+now provides an
 atomic idempotent claim append: client key, operation SHA-256, and accepted
 sequence receipt share the authoritative claim transaction in the existing
 metadata keyspace. Memory, Fjall compatibility, and native engines pass the
@@ -220,8 +221,19 @@ VyrmMX catalogue/binder/planner/executor. The response preserves typed values,
 read manifest, cursor, schema revision, plan candidates, exactness/order/auth
 contracts, and execution evidence. A real-socket test proves unauthenticated
 and wrong-scope denial plus an exact persisted-record result. This does not yet
-provide mutating VyrmQL, multi-model public transactions, live queries, or
-durable service-query spans.
+provide mutating VyrmQL, live queries, or durable service-query spans.
+
+The same public transaction resource now has a `data` scope whose typed
+vocabulary lowers explicitly into one authoritative `RuntimeCommit`. Schema,
+claim, record, relation, event, dense/sparse/multi-dense vector, series sample,
+geo, and pre-staged object-reference changes share exact-cursor conflict
+detection, the runtime hash chain, audit envelope, projection outbox, and one
+commit identity. The coordinator freezes that identity in its durable prepared
+intent and resolves lost acknowledgements from the runtime commit catalogue.
+A real-socket test commits all nine families, restarts, replays the identical
+receipt, and observes no duplicate changes. Generalized read-your-writes,
+data-scope process-kill qualification, mutating VyrmQL, object upload/staging,
+and model-specific administration endpoints remain open.
 
 **Deliverables**
 
