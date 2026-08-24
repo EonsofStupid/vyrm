@@ -251,9 +251,18 @@ lossless claim provenance, typed data mutation, and prior/current change
 digests; the page carries authenticated-read method/cost evidence and advances
 through unrelated global cursors safely. The socket fixture verifies
 authentication denial, `3 + 8` pagination of one eleven-change transaction,
-digest-chain continuity, and exact resume after server restart. Push/long-poll
-delivery, subscription leases, backpressure, and reconnect heartbeats remain
-open before calling this a real-time live-query surface.
+digest-chain continuity, and exact resume after server restart. Streaming
+push, subscription leases, backpressure, and reconnect heartbeats remain open
+before calling this a real-time live-query surface.
+
+`POST /v1/changes/follow` now adds bounded five-second long-poll delivery over
+that same retained coordinate. A concurrent real-socket test waits after
+cursor two, commits an event at cursor three, receives exactly that typed
+event, and then verifies an explicit empty timeout at cursor three. Streaming
+SSE/WebSocket transport, durable subscription ownership, server-driven
+heartbeats, cancellation on disconnect, and fan-out backpressure remain open;
+the capability is advertised as experimental follow rather than complete live
+queries.
 
 **Deliverables**
 

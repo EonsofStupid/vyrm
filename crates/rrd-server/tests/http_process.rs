@@ -9,9 +9,9 @@ use std::process::Command;
 use std::thread::JoinHandle;
 use std::time::Duration;
 use vyrm_core::{
-    RuntimeCommit, RuntimeMutation, RuntimeProperties, RuntimePropertySchema, RuntimeRecord,
-    RuntimeRecordSchema, RuntimeRef, RuntimeSchemaRegistry, RuntimeType, RuntimeValue,
-    RuntimeValueType, ScopeId,
+    RuntimeCommit, RuntimeEventSchema, RuntimeMutation, RuntimeProperties, RuntimePropertySchema,
+    RuntimeRecord, RuntimeRecordSchema, RuntimeRef, RuntimeSchemaRegistry, RuntimeType,
+    RuntimeValue, RuntimeValueType, ScopeId,
 };
 use vyrm_store::Engine;
 use vyrm_store::PersistentEngine;
@@ -197,6 +197,17 @@ fn seed_query_fixture(root: &Path) {
             ..RuntimeRecordSchema::default()
         },
     );
+    registry.events.insert(
+        RuntimeType::new("observed").unwrap(),
+        RuntimeEventSchema {
+            subject_required: true,
+            subject_types: [RuntimeType::new("document").unwrap()]
+                .into_iter()
+                .collect(),
+            allow_additional_properties: true,
+            ..RuntimeEventSchema::default()
+        },
+    );
     engine
         .commit_runtime(&RuntimeCommit {
             scope: ScopeId::new("instance:socket-test").unwrap(),
@@ -283,6 +294,135 @@ fn authenticated_query_exposes_exact_vyrmql_vyrmmx_contract() {
     );
     assert_eq!(status, 400);
     assert_eq!(wrong["outcome"]["error"]["code"], "invalid_argument");
+}
+
+#[test]
+fn bounded_changefeed_follow_wakes_on_a_commit_and_times_out_at_the_same_cursor() {
+    let temporary = tempfile::tempdir().unwrap();
+    let root = temporary.path().join("instance");
+    seed_query_fixture(&root);
+    let server = start(&root);
+    let create = envelope(
+        json!({
+            "limits": {
+                "idle_timeout_ms": 60_000,
+                "absolute_timeout_ms": 300_000,
+                "max_open_transactions": 2
+            }
+        }),
+        Some("follow-session"),
+        None,
+    );
+    let (status, created) = post(&server, "/v1/sessions", &create, None);
+    assert_eq!(status, 200, "{created}");
+    let session_id = payload(&created)["session_id"].as_str().unwrap().to_owned();
+    let token = payload(&created)["token"].as_str().unwrap().to_owned();
+    let follow = envelope(
+        json!({
+            "read": {
+                "scope": "instance:socket-test",
+                "after_cursor": 2,
+                "limit": 8
+            },
+            "wait_timeout_ms": 1_000
+        }),
+        None,
+        None,
+    );
+    let address = server.address;
+    let follow_body = serde_json::to_vec(&follow).unwrap();
+    let follow_session = session_id.clone();
+    let follow_token = token.clone();
+    let waiting = std::thread::spawn(move || {
+        let authorization = format!("Bearer {follow_token}");
+        http(
+            address,
+            "POST",
+            "/v1/changes/follow",
+            &[
+                ("Content-Type", "application/json"),
+                ("X-RRD-Session", &follow_session),
+                ("Authorization", &authorization),
+            ],
+            &follow_body,
+        )
+    });
+    std::thread::sleep(Duration::from_millis(50));
+
+    let begin = envelope(
+        json!({"scope": "data", "timeout_ms": 10_000}),
+        Some("follow-begin"),
+        None,
+    );
+    let (status, began) = post(
+        &server,
+        "/v1/transactions",
+        &begin,
+        Some((&session_id, &token)),
+    );
+    assert_eq!(status, 200, "{began}");
+    let transaction = payload(&began)["transaction_id"].as_str().unwrap();
+    let mutations = json!([{
+        "mutation": "append_event",
+        "kind": "observed",
+        "subject": {"kind": "document", "id": "alpha"},
+        "properties": {"source": {"type": "string", "value": "follow-test"}}
+    }]);
+    let typed: Vec<TransactionMutation> = serde_json::from_value(mutations.clone()).unwrap();
+    let commit = envelope(
+        json!({
+            "operation_sha256": transaction_operation_sha256(&typed),
+            "mutations": mutations
+        }),
+        Some("follow-commit"),
+        Some(u64::MAX),
+    );
+    let (status, committed) = post(
+        &server,
+        &format!("/v1/transactions/{transaction}/commit"),
+        &commit,
+        Some((&session_id, &token)),
+    );
+    assert_eq!(status, 200, "{committed}");
+    assert_eq!(payload(&committed)["last_runtime_cursor"], 3);
+
+    let (status, followed) = waiting.join().unwrap();
+    assert_eq!(status, 200, "{followed}");
+    assert_eq!(payload(&followed)["timed_out"], false);
+    assert_eq!(payload(&followed)["page"]["through_cursor"], 3);
+    assert_eq!(payload(&followed)["page"]["changes"][0]["cursor"], 3);
+    assert_eq!(
+        payload(&followed)["page"]["changes"][0]["mutation"]["mutation"]["mutation"],
+        "append_event"
+    );
+
+    let timeout = envelope(
+        json!({
+            "read": {
+                "scope": "instance:socket-test",
+                "after_cursor": 3,
+                "limit": 8
+            },
+            "wait_timeout_ms": 50
+        }),
+        None,
+        None,
+    );
+    let (status, timed_out) = post(
+        &server,
+        "/v1/changes/follow",
+        &timeout,
+        Some((&session_id, &token)),
+    );
+    assert_eq!(status, 200, "{timed_out}");
+    assert_eq!(payload(&timed_out)["timed_out"], true);
+    assert_eq!(payload(&timed_out)["page"]["through_cursor"], 3);
+    assert!(
+        payload(&timed_out)["page"]["changes"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
 }
 
 #[test]

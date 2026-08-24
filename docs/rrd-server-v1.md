@@ -57,8 +57,13 @@ places that secret elsewhere. `X-RRD-Session` carries the session identifier;
   when no scoped change matches. Each entry carries commit/ordinal/scope/time/
   actor coordinates, prior and current change SHA-256, a lossless claim
   snapshot or typed public data mutation, and authenticated-read evidence.
-  Clients resume from `through_cursor`; push and long-poll delivery remain
-  open.
+  Clients resume from `through_cursor`; bounded long-poll is available through
+  the separate follow operation.
+- `POST /v1/changes/follow` waits at most five seconds for the first retained
+  page after the supplied cursor and returns either that page or an explicit
+  timeout at the newest observed `through_cursor`. It uses the same typed replay
+  contract, so reconnect never depends on transient server memory. Streaming
+  transport and durable subscription leases remain open.
 - `POST /v1/estates/{estate}/read` returns the typed public `EstateSnapshot`
   for a resource path containing that estate and this server instance. It
   requires a live session token, exposes no raw idempotency keys, and performs
@@ -171,6 +176,11 @@ The fixture pages the same eleven-change commit as `3 + 8`, verifies
 hash-chain continuity across the page boundary, preserves full claim
 provenance and typed mutation bodies, restarts, and resumes exactly at cursor
 ten to retrieve cursor eleven without replaying earlier entries.
+
+A separate real-socket test starts a follow at cursor two, commits an event at
+cursor three from another connection, observes the waiting request wake with
+that typed event, then proves a subsequent follow times out cleanly at cursor
+three with no fabricated change.
 
 It also commits all nine runtime mutation families through one `data`
 transaction, verifies the single eleven-change cursor interval and one-claim

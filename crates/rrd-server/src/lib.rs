@@ -6,22 +6,24 @@ pub use http::{HttpError, RRD_MAX_BODY_BYTES, RrdHttpServer, load_or_create_toke
 
 use hmac::{Hmac, KeyInit, Mac};
 use rrd_contract::{
-    AbortTransaction, BeginTransaction, CanonicalId, ChangeMutationSnapshot, ChangefeedPage,
-    ChangefeedValidation, ClaimChangeSnapshot, ClaimPromotionSnapshot, ClaimTierSnapshot,
-    CloseSession, CommitReceipt, CommitTransaction, CorrelationId, CreateSession, DataEventSchema,
-    DataGeoPoint, DataGeoValue, DataObjectReceipt, DataProperties, DataPropertySchema,
-    DataRecordSchema, DataReference, DataRelationSchema, DataSchemaRegistry, DataSeriesValue,
-    DataValueType, DataVectorNormalization, DataVectorValue, ExecuteQuery, PreviewTransaction,
-    QueryExecutionSnapshot, QueryPlanCandidate, QueryPlanSnapshot, QueryResult, QueryRowSnapshot,
-    QueryValue, ReadChangefeed, RenewSession, RuntimeChangeSnapshot, SearchVectors,
-    SessionEndState, SessionLease, SessionLimits, SessionTermination, TransactionLease,
-    TransactionMutation, TransactionPreview, TransactionState, VectorSearchHit, VectorSearchMetric,
-    VectorSearchQuery, VectorSearchResult, transaction_operation_sha256,
+    AbortTransaction, BeginTransaction, CanonicalId, ChangeMutationSnapshot,
+    ChangefeedFollowResult, ChangefeedPage, ChangefeedValidation, ClaimChangeSnapshot,
+    ClaimPromotionSnapshot, ClaimTierSnapshot, CloseSession, CommitReceipt, CommitTransaction,
+    CorrelationId, CreateSession, DataEventSchema, DataGeoPoint, DataGeoValue, DataObjectReceipt,
+    DataProperties, DataPropertySchema, DataRecordSchema, DataReference, DataRelationSchema,
+    DataSchemaRegistry, DataSeriesValue, DataValueType, DataVectorNormalization, DataVectorValue,
+    ExecuteQuery, FollowChangefeed, PreviewTransaction, QueryExecutionSnapshot, QueryPlanCandidate,
+    QueryPlanSnapshot, QueryResult, QueryRowSnapshot, QueryValue, ReadChangefeed, RenewSession,
+    RuntimeChangeSnapshot, SearchVectors, SessionEndState, SessionLease, SessionLimits,
+    SessionTermination, TransactionLease, TransactionMutation, TransactionPreview,
+    TransactionState, VectorSearchHit, VectorSearchMetric, VectorSearchQuery, VectorSearchResult,
+    transaction_operation_sha256,
 };
 use serde::{Deserialize, Serialize};
 use sha2::Sha256;
 use std::collections::BTreeMap;
 use std::fmt;
+use std::time::{Duration, Instant};
 use vyrm_core::{
     Claim, EmbeddingProvenance, GeoPoint, GeoValue, ObjectReceipt, ObjectReference, Predicate,
     Producer, PromotionState, RuntimeCommit, RuntimeEvent, RuntimeEventSchema, RuntimeGeo,
@@ -437,6 +439,46 @@ impl<E: Engine> RrdService<E> {
                 .map(public_runtime_change)
                 .collect::<Result<_>>()?,
         })
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn follow_changefeed(
+        &self,
+        session_id: &CorrelationId,
+        token: &CorrelationId,
+        request: &FollowChangefeed,
+        now: u64,
+        request_id: &str,
+        operation_id: &str,
+    ) -> Result<ChangefeedFollowResult> {
+        request
+            .validate()
+            .map_err(|error| ServiceError::Changefeed(error.to_string()))?;
+        let started = Instant::now();
+        let timeout = Duration::from_millis(request.wait_timeout_ms);
+        loop {
+            let page = self.read_changefeed(
+                session_id,
+                token,
+                &request.read,
+                now,
+                request_id,
+                operation_id,
+            )?;
+            let elapsed = started.elapsed();
+            if !page.changes.is_empty() || elapsed >= timeout {
+                return Ok(ChangefeedFollowResult {
+                    timed_out: page.changes.is_empty(),
+                    waited_ms: u64::try_from(elapsed.as_millis()).unwrap_or(u64::MAX),
+                    page,
+                });
+            }
+            std::thread::sleep(
+                timeout
+                    .saturating_sub(elapsed)
+                    .min(Duration::from_millis(25)),
+            );
+        }
     }
 
     pub fn create_session(

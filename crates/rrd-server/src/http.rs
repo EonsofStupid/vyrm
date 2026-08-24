@@ -8,9 +8,9 @@ use axum::routing::any;
 use rrd_contract::{
     AbortTransaction, BeginTransaction, CanonicalId, CapabilityDescriptor, CapabilityStatus,
     CloseSession, CommitTransaction, CorrelationId, CreateSession, DeploymentMode, ErrorBody,
-    ErrorCode, ExecuteQuery, Liveness, PROTOCOL, PROTOCOL_VERSION, PreviewTransaction,
-    ReadChangefeed, ReadEstate, Readiness, RenewSession, RequestContext, RequestEnvelope,
-    ResourceId, ResourceKind, ResponseEnvelope, ResponseOutcome, SearchVectors,
+    ErrorCode, ExecuteQuery, FollowChangefeed, Liveness, PROTOCOL, PROTOCOL_VERSION,
+    PreviewTransaction, ReadChangefeed, ReadEstate, Readiness, RenewSession, RequestContext,
+    RequestEnvelope, ResourceId, ResourceKind, ResponseEnvelope, ResponseOutcome, SearchVectors,
     ServiceCapabilities,
 };
 use serde::Serialize;
@@ -204,6 +204,7 @@ impl AppState {
             (Method::POST, "/v1/transactions") => self.begin_transaction(&headers, &body, now),
             (Method::POST, "/v1/query") => self.execute_query(&headers, &body, now),
             (Method::POST, "/v1/changes/read") => self.read_changefeed(&headers, &body, now),
+            (Method::POST, "/v1/changes/follow") => self.follow_changefeed(&headers, &body, now),
             (Method::POST, "/v1/vector/search") => self.search_vectors(&headers, &body, now),
             (Method::POST, path) if estate_action(path, "read").is_some() => {
                 self.read_estate(&headers, &body, path, now)
@@ -437,6 +438,38 @@ impl AppState {
             |envelope, session, token| {
                 self.service
                     .read_changefeed(
+                        session,
+                        token,
+                        &envelope.payload,
+                        now,
+                        envelope.context.request_id.as_str(),
+                        envelope.context.operation_id.as_str(),
+                    )
+                    .map_err(api_error)
+            },
+        )
+    }
+
+    fn follow_changefeed(&self, headers: &HeaderMap, body: &[u8], now: u64) -> HttpResponse {
+        self.with_authenticated_envelope::<FollowChangefeed, _, _>(
+            headers,
+            body,
+            now,
+            false,
+            None,
+            |envelope, session, token| {
+                if envelope.context.deadline_unix_ms.is_some_and(|deadline| {
+                    now.checked_add(envelope.payload.wait_timeout_ms)
+                        .is_none_or(|completion| completion > deadline)
+                }) {
+                    return Err(ApiError::new(
+                        ErrorCode::DeadlineExceeded,
+                        "changefeed follow wait exceeds the request deadline",
+                        false,
+                    ));
+                }
+                self.service
+                    .follow_changefeed(
                         session,
                         token,
                         &envelope.payload,
@@ -932,6 +965,19 @@ fn estate_action<'a>(path: &'a str, action: &str) -> Option<&'a str> {
 fn capabilities(instance: &CanonicalId, backend: CanonicalId) -> ServiceCapabilities {
     let mut capabilities = vec![
         CapabilityDescriptor {
+            name: CanonicalId::new("changefeed-follow").unwrap(),
+            contract_version: 1,
+            status: CapabilityStatus::Experimental,
+            limits: BTreeMap::from([(
+                CanonicalId::new("max-wait-ms").unwrap(),
+                rrd_contract::MAX_CHANGEFEED_WAIT_MS,
+            )]),
+            limitation: Some(
+                "bounded authenticated long-poll over retained replay; streaming transport, durable subscription leases, and server push remain open"
+                    .into(),
+            ),
+        },
+        CapabilityDescriptor {
             name: CanonicalId::new("changefeed-replay").unwrap(),
             contract_version: 1,
             status: CapabilityStatus::Experimental,
@@ -940,7 +986,7 @@ fn capabilities(instance: &CanonicalId, backend: CanonicalId) -> ServiceCapabili
                 rrd_contract::MAX_CHANGEFEED_PAGE,
             )]),
             limitation: Some(
-                "authenticated retained cursor replay with lossless claim and typed data snapshots; push/long-poll delivery remains open"
+                "authenticated retained cursor replay with lossless claim and typed data snapshots"
                     .into(),
             ),
         },

@@ -41,6 +41,11 @@ non-claim mutation. `through_cursor`, rather than the final matching change,
 is the sole resume coordinate so scoped feeds cannot stall on unrelated global
 activity.
 
+The bounded follow contract wraps that exact read coordinate with a maximum
+five-second wait. Its result distinguishes a timeout from delivered data and
+always returns a normal replay page, keeping disconnect/reconnect behavior
+independent of server-local subscription state.
+
 The frozen JSON fixture is
 [`public-contract-v1.json`](../crates/rrd-contract/fixtures/public-contract-v1.json).
 Malformed identifiers, duplicate/unsorted capabilities, unsupported protocol

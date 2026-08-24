@@ -2,7 +2,7 @@ use rrd_contract::{
     BeginTransaction, CanonicalId, CapabilityDescriptor, CapabilityStatus, CloseSession,
     CommitReceipt, CommitTransaction, CorrelationId, DeploymentMode, ErrorBody, ErrorCode,
     EstateActivityPolicySnapshot, EstateBackupJobSnapshot, EstateBackupJobState,
-    EstateBackupJobsSnapshot, EstateMutationResult, EstateSnapshot, ExecuteQuery,
+    EstateBackupJobsSnapshot, EstateMutationResult, EstateSnapshot, ExecuteQuery, FollowChangefeed,
     IdempotencyBinding, Liveness, PROTOCOL, PROTOCOL_VERSION, PreviewTransaction, QueryBudget,
     QueryExecutionSnapshot, QueryPlanCandidate, QueryPlanSnapshot, QueryResult, QueryRowSnapshot,
     QueryValue, ReadChangefeed, ReadEstate, Readiness, RenewSession, RequestContext,
@@ -339,6 +339,14 @@ fn changefeed_request_is_cursor_addressed_bounded_and_strict() {
     assert!(invalid.validate().is_err());
     invalid.limit = rrd_contract::MAX_CHANGEFEED_PAGE + 1;
     assert!(invalid.validate().is_err());
+
+    let mut follow = FollowChangefeed {
+        read: request,
+        wait_timeout_ms: 1_000,
+    };
+    follow.validate().unwrap();
+    follow.wait_timeout_ms = rrd_contract::MAX_CHANGEFEED_WAIT_MS + 1;
+    assert!(follow.validate().is_err());
 }
 
 #[test]

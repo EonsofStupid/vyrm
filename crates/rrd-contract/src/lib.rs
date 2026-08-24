@@ -27,6 +27,7 @@ pub const MAX_QUERY_BATCH_ROWS: u64 = 1_024;
 pub const MAX_VECTOR_SEARCH_CHANGES: u64 = 1_000_000;
 pub const MAX_VECTOR_SEARCH_TOP_K: u64 = 100_000;
 pub const MAX_CHANGEFEED_PAGE: u64 = 4_096;
+pub const MAX_CHANGEFEED_WAIT_MS: u64 = 5_000;
 pub const MIN_LEASE_MS: u64 = 1_000;
 pub const MAX_LEASE_MS: u64 = 3_600_000;
 
@@ -427,6 +428,33 @@ pub struct ChangefeedPage {
     pub has_more: bool,
     pub validation: ChangefeedValidation,
     pub changes: Vec<RuntimeChangeSnapshot>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FollowChangefeed {
+    pub read: ReadChangefeed,
+    pub wait_timeout_ms: u64,
+}
+
+impl FollowChangefeed {
+    pub fn validate(&self) -> Result<()> {
+        self.read.validate()?;
+        if self.wait_timeout_ms == 0 || self.wait_timeout_ms > MAX_CHANGEFEED_WAIT_MS {
+            return invalid(format!(
+                "changefeed wait_timeout_ms must be in 1..={MAX_CHANGEFEED_WAIT_MS}"
+            ));
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ChangefeedFollowResult {
+    pub timed_out: bool,
+    pub waited_ms: u64,
+    pub page: ChangefeedPage,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
