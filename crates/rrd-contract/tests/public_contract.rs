@@ -12,8 +12,8 @@ use rrd_contract::{
     RequestEnvelope, ResourceId, ResourceKind, ResourcePath, ResponseEnvelope, ResponseOutcome,
     RestoreInstanceBackup, SearchVectors, ServiceCapabilities, SessionEndState, SessionLease,
     SessionLimits, SessionTermination, TransactionMutation, TransactionPreview, TransactionState,
-    VectorMemoryTier, VectorSearchMetric, VectorSearchQuery, VectorValueKind, PROTOCOL,
-    PROTOCOL_VERSION,
+    VectorMemoryTier, VectorPayloadCondition, VectorPayloadFilter, VectorPayloadOperator,
+    VectorSearchMetric, VectorSearchQuery, VectorValueKind, PROTOCOL, PROTOCOL_VERSION,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -406,6 +406,14 @@ fn vector_collection_contract_is_named_bounded_and_search_addressable() {
         query: VectorSearchQuery::Dense {
             values: vec![0.6, 0.8],
         },
+        filter: Some(VectorPayloadFilter::Condition {
+            condition: VectorPayloadCondition {
+                property: CanonicalId::new("tenant").unwrap(),
+                operator: VectorPayloadOperator::Equals {
+                    value: QueryValue::String("alpha".into()),
+                },
+            },
+        }),
         metric: None,
         top_k: 10,
         max_scanned_changes: 100,
@@ -421,6 +429,7 @@ fn vector_collection_contract_is_named_bounded_and_search_addressable() {
         query: VectorSearchQuery::Dense {
             values: vec![0.6, 0.8],
         },
+        filter: None,
         metric: None,
         top_k: 10,
         max_scanned_changes: 100,

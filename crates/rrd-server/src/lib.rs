@@ -24,8 +24,8 @@ use rrd_contract::{
     SearchVectors, SessionEndState, SessionLease, SessionLimits, SessionTermination,
     TransactionLease, TransactionMutation, TransactionPreview, TransactionState,
     VectorCollectionCatalogueSnapshot, VectorCollectionSnapshot, VectorEmbeddingModel,
-    VectorMemoryTier, VectorSearchHit, VectorSearchMetric, VectorSearchQuery, VectorSearchResult,
-    VectorValueKind,
+    VectorMemoryTier, VectorPayloadFilter, VectorPayloadOperator, VectorSearchHit,
+    VectorSearchMetric, VectorSearchQuery, VectorSearchResult, VectorValueKind,
 };
 use serde::{Deserialize, Serialize};
 use sha2::Sha256;
@@ -823,7 +823,11 @@ impl<E: Engine> RrdService<E> {
             top_k: usize::try_from(request.top_k)
                 .map_err(|_| ServiceError::Vector("vector top_k exceeds usize".into()))?,
             mode: vyrm_vector::SearchMode::Exact,
-            filter: None,
+            filter: request
+                .filter
+                .as_ref()
+                .map(internal_vector_filter)
+                .transpose()?,
         };
         let prepared = runtime.prepare_search(&search, 1).map_err(core_vector)?;
         let execution = runtime
@@ -2442,6 +2446,59 @@ fn validate_collection_query(
         ));
     }
     Ok(())
+}
+
+fn internal_vector_filter(filter: &VectorPayloadFilter) -> Result<vyrm_vector::FilterExpression> {
+    Ok(match filter {
+        VectorPayloadFilter::Condition { condition } => {
+            vyrm_vector::FilterExpression::Condition {
+                condition: vyrm_vector::FilterCondition {
+                    property: condition.property.as_str().into(),
+                    operator: match &condition.operator {
+                        VectorPayloadOperator::Equals { value } => {
+                            vyrm_vector::FilterOperator::Equals {
+                                value: runtime_value(value)?,
+                            }
+                        }
+                        VectorPayloadOperator::NotEquals { value } => {
+                            vyrm_vector::FilterOperator::NotEquals {
+                                value: runtime_value(value)?,
+                            }
+                        }
+                        VectorPayloadOperator::In { values } => vyrm_vector::FilterOperator::In {
+                            values: values.iter().map(runtime_value).collect::<Result<_>>()?,
+                        },
+                        VectorPayloadOperator::Range { gt, gte, lt, lte } => {
+                            vyrm_vector::FilterOperator::Range {
+                                gt: gt.as_ref().map(runtime_value).transpose()?,
+                                gte: gte.as_ref().map(runtime_value).transpose()?,
+                                lt: lt.as_ref().map(runtime_value).transpose()?,
+                                lte: lte.as_ref().map(runtime_value).transpose()?,
+                            }
+                        }
+                        VectorPayloadOperator::Exists { value } => {
+                            vyrm_vector::FilterOperator::Exists { value: *value }
+                        }
+                    },
+                },
+            }
+        }
+        VectorPayloadFilter::All { filters } => vyrm_vector::FilterExpression::All {
+            filters: filters
+                .iter()
+                .map(internal_vector_filter)
+                .collect::<Result<_>>()?,
+        },
+        VectorPayloadFilter::Any { filters } => vyrm_vector::FilterExpression::Any {
+            filters: filters
+                .iter()
+                .map(internal_vector_filter)
+                .collect::<Result<_>>()?,
+        },
+        VectorPayloadFilter::Not { filter } => vyrm_vector::FilterExpression::Not {
+            filter: Box::new(internal_vector_filter(filter)?),
+        },
+    })
 }
 
 fn public_runtime_commit(

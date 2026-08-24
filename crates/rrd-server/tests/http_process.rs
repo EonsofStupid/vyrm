@@ -1035,7 +1035,7 @@ fn data_transaction_atomically_commits_every_public_model_and_replays_after_rest
             "field": "title_embedding",
             "valid_from": 100,
             "value": {"kind": "dense", "values": [0.6, 0.8]},
-            "properties": {}
+            "properties": {"tenant": {"type": "string", "value": "alpha"}}
         },
         {
             "mutation": "append_series_sample",
@@ -1142,6 +1142,13 @@ fn data_transaction_atomically_commits_every_public_model_and_replays_after_rest
             "collection_id": "documents",
             "vector_name": "title",
             "query": {"kind": "dense", "values": [0.6, 0.8]},
+            "filter": {
+                "kind": "condition",
+                "condition": {
+                    "property": "tenant",
+                    "operator": {"operator": "equals", "value": {"type": "string", "value": "alpha"}}
+                }
+            },
             "top_k": 1,
             "max_scanned_changes": 100
         }),
@@ -1167,6 +1174,34 @@ fn data_transaction_atomically_commits_every_public_model_and_replays_after_rest
     assert_eq!(search["hits"][0]["subject"]["id"], "alpha");
     assert_eq!(search["hits"][0]["source_cursor"], 8);
     assert!((search["hits"][0]["score"].as_f64().unwrap() - 1.0).abs() < 1e-9);
+    let filtered_out = envelope(
+        json!({
+            "scope": "instance:socket-test",
+            "valid_at": 100,
+            "collection_id": "documents",
+            "vector_name": "title",
+            "query": {"kind": "dense", "values": [0.6, 0.8]},
+            "filter": {
+                "kind": "condition",
+                "condition": {
+                    "property": "tenant",
+                    "operator": {"operator": "equals", "value": {"type": "string", "value": "other"}}
+                }
+            },
+            "top_k": 1,
+            "max_scanned_changes": 100
+        }),
+        None,
+        None,
+    );
+    let (status, filtered) = post(
+        &server,
+        "/v1/vector/search",
+        &filtered_out,
+        Some((&session_id, &token)),
+    );
+    assert_eq!(status, 200, "{filtered}");
+    assert!(payload(&filtered)["hits"].as_array().unwrap().is_empty());
     let wrong_dimensions = envelope(
         json!({
             "scope": "instance:socket-test",

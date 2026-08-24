@@ -14,7 +14,7 @@ use std::fmt;
 pub const PROTOCOL: &str = "rrd";
 pub const PROTOCOL_VERSION: u16 = 1;
 pub const OPENAPI_DOCUMENT_SHA256: &str =
-    "d31ea8c4d50edb1c3b1640abf55fc18657ba49ac134785c4d3f682d7c4af3c2f";
+    "a6809faf79e177c4196f9697c5b66ec26ecd9946c295a18c4eaa5f6aaa70807e";
 pub const MAX_ID_BYTES: usize = 128;
 pub const MAX_MESSAGE_BYTES: usize = 4_096;
 pub const MAX_CAPABILITIES: usize = 512;
@@ -487,6 +487,82 @@ pub struct EnsureVectorCollectionResult {
     pub idempotent_replay: bool,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "operator", rename_all = "snake_case", deny_unknown_fields)]
+pub enum VectorPayloadOperator {
+    Equals { value: QueryValue },
+    NotEquals { value: QueryValue },
+    In { values: Vec<QueryValue> },
+    Range {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        gt: Option<QueryValue>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        gte: Option<QueryValue>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        lt: Option<QueryValue>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        lte: Option<QueryValue>,
+    },
+    Exists { value: bool },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct VectorPayloadCondition {
+    pub property: CanonicalId,
+    pub operator: VectorPayloadOperator,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum VectorPayloadFilter {
+    Condition { condition: VectorPayloadCondition },
+    All { filters: Vec<VectorPayloadFilter> },
+    Any { filters: Vec<VectorPayloadFilter> },
+    Not { filter: Box<VectorPayloadFilter> },
+}
+
+impl VectorPayloadFilter {
+    pub fn validate(&self) -> Result<()> {
+        let mut nodes = 0_usize;
+        self.validate_at(0, &mut nodes)
+    }
+
+    fn validate_at(&self, depth: usize, nodes: &mut usize) -> Result<()> {
+        *nodes += 1;
+        if depth > 32 || *nodes > 4_096 {
+            return invalid("vector payload filter exceeds depth or node bounds");
+        }
+        match self {
+            Self::Condition { condition } => match &condition.operator {
+                VectorPayloadOperator::In { values } if values.is_empty() => {
+                    invalid("vector payload in filter requires values")
+                }
+                VectorPayloadOperator::Range { gt, gte, lt, lte } => {
+                    if (gt.is_some() && gte.is_some())
+                        || (lt.is_some() && lte.is_some())
+                        || (gt.is_none() && gte.is_none() && lt.is_none() && lte.is_none())
+                    {
+                        return invalid("vector payload range bounds are invalid");
+                    }
+                    Ok(())
+                }
+                _ => Ok(()),
+            },
+            Self::All { filters } | Self::Any { filters } => {
+                if filters.is_empty() {
+                    return invalid("vector payload all/any filter requires children");
+                }
+                for filter in filters {
+                    filter.validate_at(depth + 1, nodes)?;
+                }
+                Ok(())
+            }
+            Self::Not { filter } => filter.validate_at(depth + 1, nodes),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum VectorSearchQuery {
@@ -517,6 +593,8 @@ pub struct SearchVectors {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub field: Option<CanonicalId>,
     pub query: VectorSearchQuery,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub filter: Option<VectorPayloadFilter>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub metric: Option<VectorSearchMetric>,
     pub top_k: u64,
@@ -572,6 +650,9 @@ impl SearchVectors {
             },
         };
         validate_data_vector(&vector)?;
+        if let Some(filter) = &self.filter {
+            filter.validate()?;
+        }
         if self.metric == Some(VectorSearchMetric::Cosine) {
             let zero = match &self.query {
                 VectorSearchQuery::Dense { values } | VectorSearchQuery::Sparse { values, .. } => {
@@ -1330,6 +1411,7 @@ pub fn openapi_document() -> Result<serde_json::Value> {
     let catalogue = endpoint_catalogue();
     catalogue.validate()?;
     let query_value_schema = openapi_query_value_schema()?;
+    let vector_payload_filter_schema = openapi_vector_payload_filter_schema()?;
     let mut paths = serde_json::Map::new();
     for descriptor in &catalogue.endpoints {
         let method = match descriptor.method {
@@ -1441,7 +1523,8 @@ pub fn openapi_document() -> Result<serde_json::Value> {
         "paths": paths,
         "components": {
             "schemas": {
-                "QueryValue": query_value_schema
+                "QueryValue": query_value_schema,
+                "VectorPayloadFilter": vector_payload_filter_schema
             },
             "securitySchemes": {
                 "rrdApiKey": {
@@ -1479,6 +1562,8 @@ fn rebase_local_schema_refs(value: &mut serde_json::Value, schema_pointer: &str)
             if let Some(serde_json::Value::String(reference)) = object.get_mut("$ref") {
                 if reference == "#" || reference == "#/$defs/QueryValue" {
                     *reference = "#/components/schemas/QueryValue".into();
+                } else if reference == "#/$defs/VectorPayloadFilter" {
+                    *reference = "#/components/schemas/VectorPayloadFilter".into();
                 } else if let Some(suffix) = reference.strip_prefix("#/") {
                     *reference = format!("{schema_pointer}/{suffix}");
                 }
@@ -1489,6 +1574,7 @@ fn rebase_local_schema_refs(value: &mut serde_json::Value, schema_pointer: &str)
             let remove_definitions =
                 if let Some(serde_json::Value::Object(definitions)) = object.get_mut("$defs") {
                     definitions.remove("QueryValue");
+                    definitions.remove("VectorPayloadFilter");
                     definitions.is_empty()
                 } else {
                     false
@@ -1511,6 +1597,19 @@ fn openapi_query_value_schema() -> Result<serde_json::Value> {
         .cloned();
     let mut schema = definition.unwrap_or(generated);
     rebase_local_schema_refs(&mut schema, "#/components/schemas/QueryValue");
+    Ok(schema)
+}
+
+fn openapi_vector_payload_filter_schema() -> Result<serde_json::Value> {
+    let generated = serde_json::to_value(schemars::schema_for!(VectorPayloadFilter))
+        .map_err(|error| ContractError(error.to_string()))?;
+    let definition = generated
+        .get("$defs")
+        .and_then(serde_json::Value::as_object)
+        .and_then(|definitions| definitions.get("VectorPayloadFilter"))
+        .cloned();
+    let mut schema = definition.unwrap_or(generated);
+    rebase_local_schema_refs(&mut schema, "#/components/schemas/VectorPayloadFilter");
     Ok(schema)
 }
 

@@ -486,6 +486,62 @@ export interface components {
                 [key: string]: components["schemas"]["QueryValue"];
             };
         };
+        /** VectorPayloadFilter */
+        VectorPayloadFilter: {
+            $defs: {
+                /**
+                 * @description A canonical public identifier component.
+                 *
+                 *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                 *     labels are separate data and may use arbitrary Unicode.
+                 */
+                CanonicalId: string;
+                VectorPayloadCondition: {
+                    operator: components["schemas"]["VectorPayloadFilter"]["$defs"]["VectorPayloadOperator"];
+                    property: components["schemas"]["VectorPayloadFilter"]["$defs"]["CanonicalId"];
+                };
+                VectorPayloadOperator: {
+                    /** @constant */
+                    operator: "equals";
+                    value: components["schemas"]["QueryValue"];
+                } | {
+                    /** @constant */
+                    operator: "not_equals";
+                    value: components["schemas"]["QueryValue"];
+                } | {
+                    /** @constant */
+                    operator: "in";
+                    values: components["schemas"]["QueryValue"][];
+                } | {
+                    gt?: components["schemas"]["QueryValue"] | null;
+                    gte?: components["schemas"]["QueryValue"] | null;
+                    lt?: components["schemas"]["QueryValue"] | null;
+                    lte?: components["schemas"]["QueryValue"] | null;
+                    /** @constant */
+                    operator: "range";
+                } | {
+                    /** @constant */
+                    operator: "exists";
+                    value: boolean;
+                };
+            };
+        } & ({
+            condition: components["schemas"]["VectorPayloadFilter"]["$defs"]["VectorPayloadCondition"];
+            /** @constant */
+            kind: "condition";
+        } | {
+            filters: components["schemas"]["QueryValue"][];
+            /** @constant */
+            kind: "all";
+        } | {
+            filters: components["schemas"]["QueryValue"][];
+            /** @constant */
+            kind: "any";
+        } | {
+            filter: components["schemas"]["QueryValue"];
+            /** @constant */
+            kind: "not";
+        });
     };
     responses: never;
     parameters: never;
@@ -11993,6 +12049,328 @@ export interface operations {
                          *     labels are separate data and may use arbitrary Unicode.
                          */
                         field?: string | null;
+                        filter?: ({
+                            condition: {
+                                operator: {
+                                    /** @constant */
+                                    operator: "equals";
+                                    value: {
+                                        /** @constant */
+                                        type: "null";
+                                    } | {
+                                        /** @constant */
+                                        type: "bool";
+                                        value: boolean;
+                                    } | {
+                                        /** @constant */
+                                        type: "integer";
+                                        /** Format: int64 */
+                                        value: number;
+                                    } | {
+                                        /** @constant */
+                                        type: "unsigned";
+                                        /** Format: uint64 */
+                                        value: number;
+                                    } | {
+                                        /** @constant */
+                                        type: "decimal";
+                                        value: string;
+                                    } | {
+                                        /** @constant */
+                                        type: "string";
+                                        value: string;
+                                    } | {
+                                        /** @constant */
+                                        type: "digest";
+                                        value: string;
+                                    } | {
+                                        /** @constant */
+                                        type: "list";
+                                        value: components["schemas"]["QueryValue"][];
+                                    } | {
+                                        /** @constant */
+                                        type: "map";
+                                        value: {
+                                            [key: string]: components["schemas"]["QueryValue"];
+                                        };
+                                    };
+                                } | {
+                                    /** @constant */
+                                    operator: "not_equals";
+                                    value: {
+                                        /** @constant */
+                                        type: "null";
+                                    } | {
+                                        /** @constant */
+                                        type: "bool";
+                                        value: boolean;
+                                    } | {
+                                        /** @constant */
+                                        type: "integer";
+                                        /** Format: int64 */
+                                        value: number;
+                                    } | {
+                                        /** @constant */
+                                        type: "unsigned";
+                                        /** Format: uint64 */
+                                        value: number;
+                                    } | {
+                                        /** @constant */
+                                        type: "decimal";
+                                        value: string;
+                                    } | {
+                                        /** @constant */
+                                        type: "string";
+                                        value: string;
+                                    } | {
+                                        /** @constant */
+                                        type: "digest";
+                                        value: string;
+                                    } | {
+                                        /** @constant */
+                                        type: "list";
+                                        value: components["schemas"]["QueryValue"][];
+                                    } | {
+                                        /** @constant */
+                                        type: "map";
+                                        value: {
+                                            [key: string]: components["schemas"]["QueryValue"];
+                                        };
+                                    };
+                                } | {
+                                    /** @constant */
+                                    operator: "in";
+                                    values: ({
+                                        /** @constant */
+                                        type: "null";
+                                    } | {
+                                        /** @constant */
+                                        type: "bool";
+                                        value: boolean;
+                                    } | {
+                                        /** @constant */
+                                        type: "integer";
+                                        /** Format: int64 */
+                                        value: number;
+                                    } | {
+                                        /** @constant */
+                                        type: "unsigned";
+                                        /** Format: uint64 */
+                                        value: number;
+                                    } | {
+                                        /** @constant */
+                                        type: "decimal";
+                                        value: string;
+                                    } | {
+                                        /** @constant */
+                                        type: "string";
+                                        value: string;
+                                    } | {
+                                        /** @constant */
+                                        type: "digest";
+                                        value: string;
+                                    } | {
+                                        /** @constant */
+                                        type: "list";
+                                        value: components["schemas"]["QueryValue"][];
+                                    } | {
+                                        /** @constant */
+                                        type: "map";
+                                        value: {
+                                            [key: string]: components["schemas"]["QueryValue"];
+                                        };
+                                    })[];
+                                } | {
+                                    gt?: ({
+                                        /** @constant */
+                                        type: "null";
+                                    } | {
+                                        /** @constant */
+                                        type: "bool";
+                                        value: boolean;
+                                    } | {
+                                        /** @constant */
+                                        type: "integer";
+                                        /** Format: int64 */
+                                        value: number;
+                                    } | {
+                                        /** @constant */
+                                        type: "unsigned";
+                                        /** Format: uint64 */
+                                        value: number;
+                                    } | {
+                                        /** @constant */
+                                        type: "decimal";
+                                        value: string;
+                                    } | {
+                                        /** @constant */
+                                        type: "string";
+                                        value: string;
+                                    } | {
+                                        /** @constant */
+                                        type: "digest";
+                                        value: string;
+                                    } | {
+                                        /** @constant */
+                                        type: "list";
+                                        value: components["schemas"]["QueryValue"][];
+                                    } | {
+                                        /** @constant */
+                                        type: "map";
+                                        value: {
+                                            [key: string]: components["schemas"]["QueryValue"];
+                                        };
+                                    }) | null;
+                                    gte?: ({
+                                        /** @constant */
+                                        type: "null";
+                                    } | {
+                                        /** @constant */
+                                        type: "bool";
+                                        value: boolean;
+                                    } | {
+                                        /** @constant */
+                                        type: "integer";
+                                        /** Format: int64 */
+                                        value: number;
+                                    } | {
+                                        /** @constant */
+                                        type: "unsigned";
+                                        /** Format: uint64 */
+                                        value: number;
+                                    } | {
+                                        /** @constant */
+                                        type: "decimal";
+                                        value: string;
+                                    } | {
+                                        /** @constant */
+                                        type: "string";
+                                        value: string;
+                                    } | {
+                                        /** @constant */
+                                        type: "digest";
+                                        value: string;
+                                    } | {
+                                        /** @constant */
+                                        type: "list";
+                                        value: components["schemas"]["QueryValue"][];
+                                    } | {
+                                        /** @constant */
+                                        type: "map";
+                                        value: {
+                                            [key: string]: components["schemas"]["QueryValue"];
+                                        };
+                                    }) | null;
+                                    lt?: ({
+                                        /** @constant */
+                                        type: "null";
+                                    } | {
+                                        /** @constant */
+                                        type: "bool";
+                                        value: boolean;
+                                    } | {
+                                        /** @constant */
+                                        type: "integer";
+                                        /** Format: int64 */
+                                        value: number;
+                                    } | {
+                                        /** @constant */
+                                        type: "unsigned";
+                                        /** Format: uint64 */
+                                        value: number;
+                                    } | {
+                                        /** @constant */
+                                        type: "decimal";
+                                        value: string;
+                                    } | {
+                                        /** @constant */
+                                        type: "string";
+                                        value: string;
+                                    } | {
+                                        /** @constant */
+                                        type: "digest";
+                                        value: string;
+                                    } | {
+                                        /** @constant */
+                                        type: "list";
+                                        value: components["schemas"]["QueryValue"][];
+                                    } | {
+                                        /** @constant */
+                                        type: "map";
+                                        value: {
+                                            [key: string]: components["schemas"]["QueryValue"];
+                                        };
+                                    }) | null;
+                                    lte?: ({
+                                        /** @constant */
+                                        type: "null";
+                                    } | {
+                                        /** @constant */
+                                        type: "bool";
+                                        value: boolean;
+                                    } | {
+                                        /** @constant */
+                                        type: "integer";
+                                        /** Format: int64 */
+                                        value: number;
+                                    } | {
+                                        /** @constant */
+                                        type: "unsigned";
+                                        /** Format: uint64 */
+                                        value: number;
+                                    } | {
+                                        /** @constant */
+                                        type: "decimal";
+                                        value: string;
+                                    } | {
+                                        /** @constant */
+                                        type: "string";
+                                        value: string;
+                                    } | {
+                                        /** @constant */
+                                        type: "digest";
+                                        value: string;
+                                    } | {
+                                        /** @constant */
+                                        type: "list";
+                                        value: components["schemas"]["QueryValue"][];
+                                    } | {
+                                        /** @constant */
+                                        type: "map";
+                                        value: {
+                                            [key: string]: components["schemas"]["QueryValue"];
+                                        };
+                                    }) | null;
+                                    /** @constant */
+                                    operator: "range";
+                                } | {
+                                    /** @constant */
+                                    operator: "exists";
+                                    value: boolean;
+                                };
+                                /**
+                                 * @description A canonical public identifier component.
+                                 *
+                                 *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                 *     labels are separate data and may use arbitrary Unicode.
+                                 */
+                                property: string;
+                            };
+                            /** @constant */
+                            kind: "condition";
+                        } | {
+                            filters: components["schemas"]["VectorPayloadFilter"][];
+                            /** @constant */
+                            kind: "all";
+                        } | {
+                            filters: components["schemas"]["VectorPayloadFilter"][];
+                            /** @constant */
+                            kind: "any";
+                        } | {
+                            filter: components["schemas"]["VectorPayloadFilter"];
+                            /** @constant */
+                            kind: "not";
+                        }) | null;
                         /** Format: uint64 */
                         max_scanned_changes: number;
                         /** @enum {string|null} */
