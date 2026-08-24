@@ -331,3 +331,25 @@ index.
 - Next gate: expose retained runtime changefeeds/live subscriptions and the
   existing vector/search execution path through this same authenticated public
   service backbone.
+
+## 2026-08-23 — RRD canonical vector-search service
+
+- Commit: `f393037` (`feat(rrd): expose exact vector search`).
+- Capability: added the typed, authenticated `POST /v1/vector/search`
+  contract for bounded dense, sparse, and multi-dense/MaxSim queries using
+  cosine, dot, Euclidean, or Manhattan scoring.
+- Evidence: the service captures an authoritative runtime read stamp, denies
+  incomplete scans rather than returning partial truth, builds the canonical
+  candidate set, and runs the existing Vyrm vector planner and exact oracle.
+  Responses carry manifest/cursor, scan count, plan digest, selected access
+  path, exactness, typed vector/subject references, source cursor, and score.
+- Verification: the multi-model real-socket fixture proves unauthenticated
+  denial and exact cosine retrieval of the vector committed in the preceding
+  public transaction. All `rrd-contract` and `rrd-server` tests and strict
+  all-target/all-feature clippy passed; `git diff --check` passed.
+- Limit: the public path is canonical exact search only. Filter algebra,
+  embedding model binding, persisted exact/HNSW/TurboQuant artifact serving,
+  recommendation/discovery algebra, and GPU selection remain open and are not
+  advertised as available.
+- Next gate: expose retained, cursor-addressed runtime changefeed replay so
+  Connectome and SDKs can observe and reconstruct the same committed activity.
