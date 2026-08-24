@@ -24,7 +24,7 @@ internal Rust API being mislabeled as an SDK. Its scope and limitations are in
 [`docs/rrd-public-contract.md`](docs/rrd-public-contract.md).
 
 The first F5 client is [`rrd-client`](crates/rrd-client), an asynchronous Rust
-consumer of that public contract. It negotiates capabilities, covers all 24
+consumer of that public contract. It negotiates capabilities, covers all 26
 currently published operations, bounds time and response bytes, preserves
 typed errors and request identity, and safely retries reads or
 idempotency-bound mutations after transport loss. It remains loopback-only
@@ -40,7 +40,7 @@ current route catalogue; shared real-server conformance and release packaging
 remain open.
 
 The Python F5 walking skeleton is in [`sdks/python`](sdks/python). It derives
-the closed 24-operation route surface from the same OpenAPI authority, validates
+the closed 26-operation route surface from the same OpenAPI authority, validates
 untrusted envelopes with Pydantic, and enforces the same bounded retry,
 identity, deadline, resource, idempotency, and loopback-cleartext rules. uv,
 Ruff, strict mypy, pytest, and package builds gate it; generated payload models,
@@ -95,6 +95,16 @@ catalogues for all six SDKs. A bounded five-second server-side wait wakes when
 the authoritative cursor advances and returns explicit timeout/wait evidence;
 streaming/backpressure and retained subscriptions remain open. See
 [`docs/vyrmql-live-query-v1.md`](docs/vyrmql-live-query-v1.md).
+
+F7 now has its first public administration vertical. RRD persists a versioned,
+CAS-protected vector-collection catalogue with durable idempotency receipts and
+control-journal history. A collection binds one or more named dense, sparse, or
+multi-dense vector spaces to exact fields, dimensions, metrics, optional model
+digests, and pinned/cached/cold placement policy. Authenticated ensure/list
+routes have distinct deny-by-default actions, and collection-addressed search
+resolves and validates that contract before executing the exact oracle. Point
+and payload administration, filtered persisted ANN serving, inference, and
+TurboQuant remain open.
 
 F3 now has its first authority artifact in
 [`rrd-estate`](crates/rrd-estate): a bounded, versioned estate document whose

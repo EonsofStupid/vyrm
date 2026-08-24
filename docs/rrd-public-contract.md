@@ -29,6 +29,15 @@ coordinates, plan evidence, execution counters, and rows. These types remain
 independent of `vyrm_core`; the server performs an explicit lowering into the
 authoritative runtime rather than serializing private runtime structs.
 
+The vector boundary now includes journaled collection administration. A named
+vector definition freezes its stored field, dense/sparse/multi-dense kind,
+dimensions, metric, optional embedding-model digest, and requested
+pinned/cached/cold placement. Ensure is mutation-idempotent; list exposes the
+authoritative catalogue revision and stable collection generation. Search may
+use the original field/metric address for compatibility or a collection plus
+vector name; the latter resolves the persisted contract and rejects kind or
+dimension drift before executing.
+
 The first vector-read contract supports bounded dense, sparse, and
 multi-dense/MaxSim queries across cosine, dot, Euclidean, and Manhattan
 metrics. Its result carries the authoritative read manifest/cursor, scan count,
@@ -63,7 +72,7 @@ authenticated control-journal coordinate, so readers advance safely across
 unrelated control transitions.
 
 F5 begins from `EndpointCatalogue`, not handwritten per-language route lists.
-It freezes 20 sorted operation identities with HTTP method/path template,
+It currently freezes 26 sorted operation identities with HTTP method/path template,
 authentication mode, mutation/idempotency classification, security action, and
 public request/response type names. `GET /v1/schema/endpoints` serves the exact
 catalogue used by the server. Duplicate operations/routes, GET mutations,

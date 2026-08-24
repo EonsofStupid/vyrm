@@ -115,7 +115,7 @@ Kubernetes operation, and authoritative Connectome management.
   advances through the authenticated control journal. Provisioning, TLS/mTLS,
   secret providers, row/field policy, rate limits, audit retention/archival,
   and application-mutation/audit-completion atomicity keep F4 open.
-- F5 publishes one validated catalogue for all 24 current RRD operations and
+- F5 publishes one validated catalogue for all 26 current RRD operations and
   serves it from the running process. JSON Schema for every public wire type
   and deterministic OpenAPI 3.1 are derived from the same authority, served by
   RRD, and protected by a frozen digest. The first supported `rrd-client` Rust
@@ -130,13 +130,13 @@ Kubernetes operation, and authoritative Connectome management.
   query/error tests. The Python walking skeleton derives the same closed route
   surface, validates envelopes with Pydantic, and passes uv lock/build,
   generation-drift, Ruff, strict mypy, retry/auth/query/error tests. The
-  generated Go walking skeleton covers all 24 operations with a
+  generated Go walking skeleton covers all 26 operations with a
   standard-library client and passes format, vet, drift, behavioral, and race
-  gates. The generated Java 21 walking skeleton covers all 24 operations,
+  gates. The generated Java 21 walking skeleton covers all 26 operations,
   compiles with warnings as errors, and passes real-loopback JUnit retry/auth/
   query/error tests. Shared conformance, packaging, generated payload models,
   async Python/Java. The generated asynchronous .NET 10 walking skeleton covers
-  all 24 operations and passes formatting, warnings-as-errors build, locked
+  all 26 operations and passes formatting, warnings-as-errors build, locked
   restore, three xUnit transport/auth/error tests, and NuGet packing. All six
   intended clients now exist; shared real-server/version conformance, complete
   generated payload models, and release publication keep F5 open.
@@ -172,6 +172,16 @@ Kubernetes operation, and authoritative Connectome management.
   cursor advancement, respects request deadlines, and distinguishes timeout
   from an empty delta. Streaming/backpressure, retained subscriptions, and
   ergonomic typed SDK helpers remain open.
+
+- F7 has an executable public collection foundation. Named dense, sparse, and
+  multi-dense spaces persist in a CAS-protected catalogue with exact field,
+  dimension, metric, optional model-digest, and pinned/cached/cold policy.
+  Ensure/list use separate authorization actions, durable idempotency receipts,
+  stable generations, and the authenticated control journal. Search may address
+  a collection plus vector name and fails before execution on kind/dimension
+  drift. Native reopen, replay, collision, list, denial, and real-process exact
+  search pass. Point/payload administration, persisted filtered ANN serving,
+  inference, physical tier enforcement, and TurboQuant remain F7 work.
 
 - The bi-temporal claim kernel has immutable supersession corrections,
   canonical SHA-256 identities covering provenance and validity, and atomic

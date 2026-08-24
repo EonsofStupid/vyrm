@@ -31,6 +31,25 @@ ordering semantics.
 The portable contract and projection identities are frozen by
 `crates/vyrm-vector/fixtures/vector-search-v1.json`.
 
+## Persistent collection control
+
+The first F7 product-facing control surface is now executable. A
+`VectorCollectionRepository` stores a versioned catalogue in authoritative
+control state and advances it through compare-and-swap journal transitions.
+Each collection owns one or more named vector definitions binding field, value
+kind, dimensions, metric, optional embedding-model digest, and requested
+pinned/cached/cold placement. Accepted mutations retain bounded operation
+receipts so exact retries survive restart and changed payloads under one key
+conflict.
+
+RRD exposes authenticated ensure/list operations with separate deny-by-default
+actions. Collection-addressed search resolves the stored definition and rejects
+kind/dimension drift before planning. Native reopen and real-process tests prove
+replay, collision, list, denial, and exact search through the catalogue. This
+is collection/named-vector administration; point/payload administration,
+physical memory-tier enforcement, and persistent ANN artifact serving remain
+open.
+
 ## Rebuildable projections
 
 Two canonical JSON reference artifacts currently exist:

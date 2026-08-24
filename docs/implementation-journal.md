@@ -903,3 +903,32 @@ index.
 - Limit: this is bounded long-poll delivery, not SSE/WebSocket streaming.
   Retained subscription leases, per-subscriber backpressure, streaming
   cancellation, and ergonomic helpers across every SDK remain open.
+
+## 2026-08-24 — persistent vector collections and named spaces
+
+- Commit: `e7945bb` (`feat(vector): add persistent collection administration`).
+- Authority: `vyrm-vector` now owns a versioned per-scope collection catalogue
+  in CAS-protected control state. Each transition enters the authenticated
+  control journal; bounded idempotency receipts survive reopen, exact retries
+  replay, changed payloads conflict, and concurrent same-operation losers
+  converge on the winning receipt.
+- Contract: a collection contains unique named dense, sparse, or multi-dense
+  vector spaces binding field, dimensions, metric, optional model digest, and
+  pinned/cached/cold placement policy. Search can address collection plus vector
+  name and validates kind/dimensions before using the exact oracle. The legacy
+  direct field/metric address remains accepted for protocol compatibility.
+- Public surface: authenticated `POST /v1/vector/collections/ensure` and
+  `/list` have distinct deny-by-default actions. The reviewed OpenAPI digest is
+  `1d25005eeccb5d39ebd927ee842036e2d8fbf74d21a33e3887d73c8b6b0c3d50` and
+  now describes 26 operations; Rust and all five generated SDK route surfaces
+  include both operations.
+- Evidence: native reopen preserves collection generation, receipt, and journal
+  history. A real RRD process proves unauthenticated denial, ensure, exact
+  replay, 409 collision, catalogue list, collection-addressed exact search, and
+  dimension-mismatch denial. Vector/contract/server/client suites and strict
+  Clippy pass; TypeScript, Python, and Go complete their generation and quality
+  gates. Java/.NET generation drift checks pass; their runtime suites were not
+  rerun because Maven and the .NET SDK are absent from this host.
+- Limit: this does not yet implement point/payload administration, payload
+  indexes, physical memory-tier enforcement, persistent HNSW serving,
+  inference, or TurboQuant.
