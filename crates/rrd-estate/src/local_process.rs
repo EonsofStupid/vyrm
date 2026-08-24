@@ -923,10 +923,12 @@ fn wait_for_owned_exit(
             }
             Some(process) => {
                 if process.start_time() != record.process_start_time_unix_s {
-                    return Err(permanent(
-                        request,
-                        "refusing fallback kill after managed PID start identity changed",
-                    ));
+                    // The recorded process has exited and its PID has already
+                    // been reused. Never inspect or signal the replacement.
+                    // Request-file shutdown still verifies the original
+                    // process's completion marker in `stop` before accepting
+                    // this as a graceful exit.
+                    return Ok(true);
                 }
                 match process
                     .exe()
