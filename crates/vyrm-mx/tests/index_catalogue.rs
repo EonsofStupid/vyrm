@@ -1,14 +1,15 @@
 use std::collections::BTreeMap;
 use vyrm_core::{
     digest, ProjectionId, ProjectionState, RuntimeCommit, RuntimeMutation, RuntimePropertySchema,
-    RuntimeRecordSchema, RuntimeSchemaRegistry, RuntimeType, RuntimeValueType, ScopeId,
+    RuntimeRecord, RuntimeRecordSchema, RuntimeRef, RuntimeSchemaRegistry, RuntimeType,
+    RuntimeValue, RuntimeValueType, ScopeId,
 };
 use vyrm_mx::{
-    bind, plan, Catalog, Error, IndexCatalogueRepository, IndexDefinition, IndexMutationContext,
-    Parameters,
+    bind, execute, plan, Catalog, Error, ExecutionBudget, IndexArtifactPublication,
+    IndexCatalogueRepository, IndexDefinition, IndexMutationContext, Parameters,
 };
 use vyrm_ql::{parse, Source};
-use vyrm_store::{Engine, MemoryEngine, NativeEngine, Store};
+use vyrm_store::{Durability, Engine, MemoryEngine, NativeEngine, Store};
 
 fn scope() -> ScopeId {
     ScopeId::new("instance:index-test").unwrap()
@@ -38,7 +39,31 @@ fn seed<E: Engine>(engine: &E) -> Catalog {
             at: 1,
             actor: "test".into(),
             expected_cursor: 0,
-            mutations: vec![RuntimeMutation::Schema { registry }],
+            mutations: vec![
+                RuntimeMutation::Schema { registry },
+                RuntimeMutation::Record {
+                    record: RuntimeRecord {
+                        reference: RuntimeRef::new("document", "alpha").unwrap(),
+                        valid_from: 10,
+                        valid_to: None,
+                        properties: BTreeMap::from([
+                            ("status".into(), RuntimeValue::String("open".into())),
+                            ("title".into(), RuntimeValue::String("Alpha".into())),
+                        ]),
+                    },
+                },
+                RuntimeMutation::Record {
+                    record: RuntimeRecord {
+                        reference: RuntimeRef::new("document", "beta").unwrap(),
+                        valid_from: 10,
+                        valid_to: None,
+                        properties: BTreeMap::from([
+                            ("status".into(), RuntimeValue::String("closed".into())),
+                            ("title".into(), RuntimeValue::String("Beta".into())),
+                        ]),
+                    },
+                },
+            ],
         })
         .unwrap();
     Catalog::capture(engine, &scope()).unwrap()
@@ -74,22 +99,22 @@ fn exercise<E: Engine>(engine: &E) {
     assert_eq!(created.revision, 1);
     assert_eq!(entry.stamp.generation, 1);
     assert_eq!(entry.stamp.state, ProjectionState::Building);
-    assert!(!entry.is_usable_at(1));
+    assert!(!entry.is_usable_at(3, 10));
 
     let ready = repository
-        .publish_ready(
+        .build(
             &context(3, "ready-1"),
             &entry.definition.id,
-            1,
-            1,
-            digest::sha256_hex(b"index-artifact-v1"),
+            10,
+            &ExecutionBudget::default(),
         )
         .unwrap();
-    assert!(ready.entries[&entry.definition.id].is_usable_at(1));
-    assert!(!ready.entries[&entry.definition.id].is_usable_at(2));
+    assert!(ready.entries[&entry.definition.id].is_usable_at(3, 10));
+    assert!(!ready.entries[&entry.definition.id].is_usable_at(2, 10));
+    assert!(!ready.entries[&entry.definition.id].is_usable_at(3, 11));
     let captured = Catalog::capture(engine, &scope()).unwrap();
     let query = parse(
-        "FROM record:document AT VALID 1 KNOWN HEAD WHERE status = \"open\" PROJECT title EXPLAIN CONTRACT",
+        "FROM record:document AT VALID 10 KNOWN HEAD WHERE status = \"open\" PROJECT title EXPLAIN CONTRACT",
     )
     .unwrap();
     let physical = plan(&bind(&query, &Parameters::new(), &captured).unwrap()).unwrap();
@@ -99,36 +124,89 @@ fn exercise<E: Engine>(engine: &E) {
         .iter()
         .find(|candidate| candidate.name == "index:document-status-title")
         .unwrap();
-    assert!(!candidate.selected);
-    assert!(!candidate.exact);
-    assert!(candidate.reason.contains("ready and fresh at cursor 1"));
+    assert!(candidate.selected);
+    assert!(candidate.exact);
+    assert!(candidate.reason.contains("ready and exact at cursor 3"));
     assert!(candidate.reason.contains("matched prefix 1/2"));
+    let execution = execute(engine, &physical, &ExecutionBudget::default()).unwrap();
+    assert_eq!(execution.scanned_changes, 2);
+    assert_eq!(execution.returned_rows, 1);
+    assert_eq!(
+        execution.batches[0].rows[0].identity,
+        "record:document:alpha"
+    );
+
+    engine
+        .commit_runtime(&RuntimeCommit {
+            scope: scope(),
+            at: 20,
+            actor: "test".into(),
+            expected_cursor: 3,
+            mutations: vec![RuntimeMutation::Record {
+                record: RuntimeRecord {
+                    reference: RuntimeRef::new("document", "gamma").unwrap(),
+                    valid_from: 20,
+                    valid_to: None,
+                    properties: BTreeMap::from([
+                        ("status".into(), RuntimeValue::String("open".into())),
+                        ("title".into(), RuntimeValue::String("Gamma".into())),
+                    ]),
+                },
+            }],
+        })
+        .unwrap();
+    let stale_catalogue = Catalog::capture(engine, &scope()).unwrap();
+    let stale_query = parse(
+        "FROM record:document AT VALID 20 KNOWN HEAD WHERE status = \"open\" PROJECT title EXPLAIN CONTRACT",
+    )
+    .unwrap();
+    let stale_plan =
+        plan(&bind(&stale_query, &Parameters::new(), &stale_catalogue).unwrap()).unwrap();
+    assert_eq!(
+        stale_plan
+            .explanation
+            .candidates
+            .iter()
+            .find(|candidate| candidate.selected)
+            .unwrap()
+            .name,
+        "authoritative_log_scan"
+    );
+    assert_eq!(
+        execute(engine, &stale_plan, &ExecutionBudget::default())
+            .unwrap()
+            .returned_rows,
+        2
+    );
 
     let rebuilding = repository
         .begin_rebuild(&context(4, "rebuild"), &entry.definition.id)
         .unwrap();
     assert_eq!(rebuilding.entries[&entry.definition.id].stamp.generation, 2);
-    assert!(!rebuilding.entries[&entry.definition.id].is_usable_at(1));
+    assert!(!rebuilding.entries[&entry.definition.id].is_usable_at(4, 20));
     assert!(matches!(
         repository.publish_ready(
             &context(5, "stale-ready"),
             &entry.definition.id,
-            1,
-            1,
-            digest::sha256_hex(b"stale"),
+            &IndexArtifactPublication {
+                generation: 1,
+                source_cursor: 4,
+                valid_at: 20,
+                artifact_rows: 3,
+                artifact_digest: digest::sha256_hex(b"stale"),
+            },
         ),
         Err(Error::Catalog(_))
     ));
     let ready = repository
-        .publish_ready(
+        .build(
             &context(6, "ready-2"),
             &entry.definition.id,
-            2,
-            1,
-            digest::sha256_hex(b"index-artifact-v2"),
+            20,
+            &ExecutionBudget::default(),
         )
         .unwrap();
-    assert!(ready.entries[&entry.definition.id].is_usable_at(1));
+    assert!(ready.entries[&entry.definition.id].is_usable_at(4, 20));
     let quarantined = repository
         .quarantine(&context(7, "quarantine"), &entry.definition.id)
         .unwrap();
@@ -136,7 +214,7 @@ fn exercise<E: Engine>(engine: &E) {
         quarantined.entries[&entry.definition.id].stamp.state,
         ProjectionState::Quarantined
     );
-    assert!(!quarantined.entries[&entry.definition.id].is_usable_at(1));
+    assert!(!quarantined.entries[&entry.definition.id].is_usable_at(4, 20));
     let retired = repository
         .retire(&context(8, "retire"), &entry.definition.id)
         .unwrap();
@@ -183,12 +261,11 @@ fn native_catalogue_reopens_and_invalid_fields_fail_before_control_state_changes
             .create(&context(3, "create"), &query_catalogue, definition())
             .unwrap();
         repository
-            .publish_ready(
+            .build(
                 &context(4, "ready"),
                 &index_id,
-                1,
-                1,
-                digest::sha256_hex(b"reopen-artifact"),
+                10,
+                &ExecutionBudget::default(),
             )
             .unwrap();
     }
@@ -197,5 +274,77 @@ fn native_catalogue_reopens_and_invalid_fields_fail_before_control_state_changes
         .load()
         .unwrap();
     assert_eq!(catalogue.revision, 2);
-    assert!(catalogue.entries[&index_id].is_usable_at(1));
+    assert!(catalogue.entries[&index_id].is_usable_at(3, 10));
+    let captured = Catalog::capture(&reopened, &scope()).unwrap();
+    let query = parse(
+        "FROM record:document AT VALID 10 KNOWN HEAD WHERE status = \"open\" PROJECT title EXPLAIN CONTRACT",
+    )
+    .unwrap();
+    let physical = plan(&bind(&query, &Parameters::new(), &captured).unwrap()).unwrap();
+    assert_eq!(
+        physical
+            .explanation
+            .candidates
+            .iter()
+            .find(|candidate| candidate.selected)
+            .unwrap()
+            .name,
+        "index:document-status-title"
+    );
+    assert_eq!(
+        execute(&reopened, &physical, &ExecutionBudget::default())
+            .unwrap()
+            .returned_rows,
+        1
+    );
+}
+
+#[test]
+fn selected_index_fails_closed_when_artifact_bytes_are_corrupted() {
+    let engine = MemoryEngine::new();
+    let query_catalogue = seed(&engine);
+    let index_id = ProjectionId::new("document-status-title").unwrap();
+    let repository = IndexCatalogueRepository::new(&engine, scope());
+    repository
+        .create(&context(2, "create"), &query_catalogue, definition())
+        .unwrap();
+    let ready = repository
+        .build(
+            &context(3, "build"),
+            &index_id,
+            10,
+            &ExecutionBudget::default(),
+        )
+        .unwrap();
+    let entry = &ready.entries[&index_id];
+    let query = parse(
+        "FROM record:document AT VALID 10 KNOWN HEAD WHERE status = \"open\" PROJECT title EXPLAIN CONTRACT",
+    )
+    .unwrap();
+    let captured = Catalog::capture(&engine, &scope()).unwrap();
+    let physical = plan(&bind(&query, &Parameters::new(), &captured).unwrap()).unwrap();
+    assert_eq!(
+        physical
+            .explanation
+            .candidates
+            .iter()
+            .find(|candidate| candidate.selected)
+            .unwrap()
+            .name,
+        "index:document-status-title"
+    );
+    let artifact_name = format!(
+        "query-index/{}/{}/{}/{}",
+        scope(),
+        index_id,
+        entry.stamp.generation,
+        entry.stamp.artifact_digest
+    );
+    engine
+        .put_projection_with(&artifact_name, b"corrupted", Durability::Authoritative)
+        .unwrap();
+    assert!(matches!(
+        execute(&engine, &physical, &ExecutionBudget::default()),
+        Err(Error::Integrity(_))
+    ));
 }

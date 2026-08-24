@@ -16,7 +16,8 @@ pub use catalog::{Catalog, SchemaVersion};
 pub use error::{Error, Result};
 pub use execute::{execute, ExecutionBudget, QueryBatch, QueryExecution, QueryRow};
 pub use index::{
-    IndexCatalogue, IndexCatalogueRepository, IndexDefinition, IndexEntry, IndexMutationContext,
+    IndexArtifact, IndexArtifactPublication, IndexCatalogue, IndexCatalogueRepository,
+    IndexDefinition, IndexEntry, IndexMutationContext, INDEX_ARTIFACT_CONTRACT_VERSION,
     INDEX_CATALOGUE_CONTRACT_VERSION,
 };
 pub use live::{poll_live_query, LiveQueryBudget, LiveQueryDelta, LiveRowChange};

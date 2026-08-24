@@ -1,9 +1,12 @@
-use crate::{BoundFilter, Error, LogicalOperator, PhysicalOperator, PhysicalPlan, Result};
+use crate::{
+    index::index_artifact_name, BoundFilter, Error, IndexArtifact, LogicalOperator,
+    PhysicalOperator, PhysicalPlan, Result,
+};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use vyrm_core::{
     resolve_as_of, Claim, GeoValue, RuntimeChange, RuntimeGeo, RuntimeGraphSnapshot,
-    RuntimeMutation, RuntimeValue, SeriesValue,
+    RuntimeMutation, RuntimeReadValidation, RuntimeValue, SeriesValue,
 };
 use vyrm_ql::{ComparisonOperator, Projection, Source, TraversalDirection};
 use vyrm_store::Engine;
@@ -95,21 +98,14 @@ pub fn execute<E: Engine>(
             budget.max_scanned_changes
         )));
     }
-    let page = access.load(engine, &plan.logical.read)?;
+    let loaded = access.load(engine, &plan.logical.read, &shape)?;
     let stamp_validation_max_changes =
-        usize::try_from(page.validation.change_reads).map_err(|_| {
+        usize::try_from(loaded.validation.change_reads).map_err(|_| {
             Error::Budget("stamp-validation evidence exceeds this platform's address space".into())
         })?;
-    let stamp_validation = page.validation.method.clone();
-    let stamp_validation_proof_nodes = page.validation.proof_nodes;
-    let changes = page.changes;
-    let mut rows = rows_for_source(
-        &changes,
-        &plan.logical.read.scope,
-        &shape.source,
-        contract.valid_at,
-        contract.known_at_cursor,
-    );
+    let stamp_validation = loaded.validation.method.clone();
+    let stamp_validation_proof_nodes = loaded.validation.proof_nodes;
+    let mut rows = loaded.rows;
     rows.retain(|row| {
         shape
             .filters
@@ -165,8 +161,28 @@ pub fn execute<E: Engine>(
 }
 
 enum ReadPath {
-    LogScan { through_cursor: u64 },
-    EventCursorLookup { cursor: u64, through_cursor: u64 },
+    LogScan {
+        through_cursor: u64,
+    },
+    EventCursorLookup {
+        cursor: u64,
+        through_cursor: u64,
+    },
+    ScalarIndex {
+        id: vyrm_core::ProjectionId,
+        generation: u64,
+        source_cursor: u64,
+        schema_revision: u64,
+        valid_at: u64,
+        config_digest: String,
+        artifact_digest: String,
+        artifact_rows: u64,
+    },
+}
+
+struct LoadedAccess {
+    rows: Vec<QueryRow>,
+    validation: RuntimeReadValidation,
 }
 
 impl ReadPath {
@@ -241,6 +257,35 @@ impl ReadPath {
                     through_cursor: *through_cursor,
                 })
             }
+            PhysicalOperator::MaterializedScalarIndex {
+                id,
+                generation,
+                source_cursor,
+                schema_revision,
+                valid_at,
+                config_digest,
+                artifact_digest,
+                artifact_rows,
+                exact,
+                stable_order,
+            } if *source_cursor == known_at_cursor
+                && *schema_revision == plan.logical.schema_revision
+                && *valid_at == shape.valid_at
+                && *exact
+                && stable_order == "identity_ascending"
+                && selected[0].name == format!("index:{id}") =>
+            {
+                Ok(Self::ScalarIndex {
+                    id: id.clone(),
+                    generation: *generation,
+                    source_cursor: *source_cursor,
+                    schema_revision: *schema_revision,
+                    valid_at: *valid_at,
+                    config_digest: config_digest.clone(),
+                    artifact_digest: artifact_digest.clone(),
+                    artifact_rows: *artifact_rows,
+                })
+            }
             _ => Err(Error::Integrity(
                 "physical access path does not match the stamped logical query".into(),
             )),
@@ -256,6 +301,8 @@ impl ReadPath {
                 cursor,
                 through_cursor,
             } => Ok(usize::from(*cursor > 0 && *cursor <= *through_cursor)),
+            Self::ScalarIndex { artifact_rows, .. } => usize::try_from(*artifact_rows)
+                .map_err(|_| Error::Budget("index artifact rows exceed usize".into())),
         }
     }
 
@@ -263,7 +310,59 @@ impl ReadPath {
         &self,
         engine: &E,
         stamp: &vyrm_core::ReadStamp,
-    ) -> Result<vyrm_core::RuntimeChangePage> {
+        shape: &PlanShape,
+    ) -> Result<LoadedAccess> {
+        if let Self::ScalarIndex {
+            id,
+            generation,
+            source_cursor,
+            schema_revision,
+            valid_at,
+            config_digest,
+            artifact_digest,
+            artifact_rows,
+        } = self
+        {
+            let validation = engine.runtime_read_changes(stamp, stamp.commit_cursor, 1)?;
+            if validation.through_cursor != stamp.commit_cursor
+                || validation.head_cursor != stamp.commit_cursor
+                || !validation.changes.is_empty()
+            {
+                return Err(Error::Integrity(
+                    "index stamp validation did not preserve the captured head".into(),
+                ));
+            }
+            let name = index_artifact_name(&stamp.scope, id, *generation, artifact_digest);
+            let bytes = engine
+                .get_projection(&name)?
+                .ok_or_else(|| Error::Integrity(format!("index artifact {id} is missing")))?;
+            if vyrm_core::digest::sha256_hex(&bytes) != *artifact_digest {
+                return Err(Error::Integrity(format!(
+                    "index artifact {id} digest does not verify"
+                )));
+            }
+            let artifact = IndexArtifact::decode(&bytes)?;
+            if artifact.scope != stamp.scope
+                || artifact.definition.id != *id
+                || artifact.definition.source != shape.source
+                || artifact.definition.config_digest()? != *config_digest
+                || artifact.generation != *generation
+                || artifact.source_cursor != *source_cursor
+                || artifact.schema_revision != *schema_revision
+                || artifact.valid_at != *valid_at
+                || artifact.rows.len()
+                    != usize::try_from(*artifact_rows)
+                        .map_err(|_| Error::Budget("index artifact rows exceed usize".into()))?
+            {
+                return Err(Error::Integrity(format!(
+                    "index artifact {id} does not satisfy the physical plan"
+                )));
+            }
+            return Ok(LoadedAccess {
+                rows: artifact.rows,
+                validation: validation.validation,
+            });
+        }
         let (after, limit, expected_through) = match self {
             Self::LogScan { through_cursor } if *through_cursor == 0 => {
                 (stamp.commit_cursor, 1, stamp.commit_cursor)
@@ -276,6 +375,7 @@ impl ReadPath {
                 (stamp.commit_cursor, 1, stamp.commit_cursor)
             }
             Self::EventCursorLookup { cursor, .. } => (cursor - 1, 1, *cursor),
+            Self::ScalarIndex { .. } => unreachable!("scalar indexes return above"),
         };
         let page = engine.runtime_read_changes(stamp, after, limit)?;
         if page.through_cursor != expected_through || page.head_cursor != stamp.commit_cursor {
@@ -293,7 +393,17 @@ impl ReadPath {
                 "stamped access returned a change outside its cursor interval".into(),
             ));
         }
-        Ok(page)
+        let rows = rows_for_source(
+            &page.changes,
+            &stamp.scope,
+            &shape.source,
+            shape.valid_at,
+            shape.known_at_cursor,
+        );
+        Ok(LoadedAccess {
+            rows,
+            validation: page.validation,
+        })
     }
 }
 

@@ -45,6 +45,10 @@ pub struct BoundIndexCandidate {
     pub generation: u64,
     pub source_cursor: u64,
     pub state: ProjectionState,
+    pub config_digest: String,
+    pub artifact_digest: String,
+    pub built_valid_at: Option<u64>,
+    pub artifact_rows: Option<u64>,
     pub fields: Vec<String>,
     pub matched_prefix: usize,
 }
@@ -78,6 +82,18 @@ pub enum PhysicalOperator {
     AuthoritativeEventCursorLookup {
         cursor: u64,
         through_cursor: u64,
+        exact: bool,
+        stable_order: String,
+    },
+    MaterializedScalarIndex {
+        id: ProjectionId,
+        generation: u64,
+        source_cursor: u64,
+        schema_revision: u64,
+        valid_at: u64,
+        config_digest: String,
+        artifact_digest: String,
+        artifact_rows: u64,
         exact: bool,
         stable_order: String,
     },
@@ -203,6 +219,10 @@ pub fn bind(query: &Query, parameters: &Parameters, catalog: &Catalog) -> Result
                 generation: entry.stamp.generation,
                 source_cursor: entry.stamp.source_cursor,
                 state: entry.stamp.state,
+                config_digest: entry.stamp.config_digest.clone(),
+                artifact_digest: entry.stamp.artifact_digest.clone(),
+                built_valid_at: entry.built_valid_at,
+                artifact_rows: entry.artifact_rows,
                 fields: entry.definition.fields.clone(),
                 matched_prefix,
             })
@@ -251,11 +271,30 @@ pub fn plan(bound: &BoundQuery) -> Result<PhysicalPlan> {
         operators,
     };
     let event_cursor = event_cursor_filter(bound);
+    let selected_index = event_cursor
+        .is_none()
+        .then(|| {
+            bound
+                .index_candidates
+                .iter()
+                .filter(|candidate| {
+                    candidate.state == ProjectionState::Ready
+                        && candidate.source_cursor == bound.known_at_cursor
+                        && candidate.built_valid_at == Some(bound.valid_at)
+                        && candidate.artifact_rows.is_some()
+                })
+                .max_by(|left, right| {
+                    left.matched_prefix
+                        .cmp(&right.matched_prefix)
+                        .then_with(|| right.id.cmp(&left.id))
+                })
+        })
+        .flatten();
     let mut candidates = if let Some(cursor) = event_cursor {
         vec![
             CandidatePath {
                 name: "authoritative_event_cursor_lookup".into(),
-                selected: true,
+                selected: selected_index.is_none(),
                 exact: true,
                 reason: format!(
                     "uses bound global cursor {cursor} after the captured stamp is validated"
@@ -278,9 +317,14 @@ pub fn plan(bound: &BoundQuery) -> Result<PhysicalPlan> {
         vec![
             CandidatePath {
                 name: "authoritative_log_scan".into(),
-                selected: true,
+                selected: selected_index.is_none(),
                 exact: true,
-                reason: "replays the immutable log at the captured read stamp".into(),
+                reason: if selected_index.is_none() {
+                    "replays the immutable log at the captured read stamp".into()
+                } else {
+                    "rejected: a verified exact scalar index requests fewer materialized rows"
+                        .into()
+                },
             },
             CandidatePath {
                 name: "derived_projection".into(),
@@ -292,22 +336,39 @@ pub fn plan(bound: &BoundQuery) -> Result<PhysicalPlan> {
     };
     candidates.extend(bound.index_candidates.iter().map(|index| {
         let state = format!("{:?}", index.state).to_ascii_lowercase();
-        let freshness = if index.source_cursor >= bound.known_at_cursor {
+        let freshness = if index.source_cursor == bound.known_at_cursor {
             "fresh"
+        } else if index.source_cursor > bound.known_at_cursor {
+            "newer-than-requested"
         } else {
             "stale"
         };
+        let selected = selected_index.is_some_and(|selected| selected.id == index.id);
+        let time = index
+            .built_valid_at
+            .map_or_else(|| "unbuilt".into(), |value| format!("valid-time {value}"));
         CandidatePath {
             name: format!("index:{}", index.id),
-            selected: false,
-            exact: false,
-            reason: format!(
-                "rejected: generation {} is {state} and {freshness} at cursor {}; matched prefix {}/{} but no verified artifact reader is installed",
-                index.generation,
-                index.source_cursor,
-                index.matched_prefix,
-                index.fields.len()
-            ),
+            selected,
+            exact: selected,
+            reason: if selected {
+                format!(
+                    "selected: verified generation {} is ready and exact at cursor {} and valid-time {}; matched prefix {}/{}",
+                    index.generation,
+                    index.source_cursor,
+                    bound.valid_at,
+                    index.matched_prefix,
+                    index.fields.len()
+                )
+            } else {
+                format!(
+                    "rejected: generation {} is {state}, {freshness} at cursor {}, and {time}; matched prefix {}/{}",
+                    index.generation,
+                    index.source_cursor,
+                    index.matched_prefix,
+                    index.fields.len()
+                )
+            },
         }
     }));
     let explanation = PlanExplanation {
@@ -331,19 +392,35 @@ pub fn plan(bound: &BoundQuery) -> Result<PhysicalPlan> {
         },
         candidates,
     };
-    let access = event_cursor.map_or_else(
-        || PhysicalOperator::AuthoritativeLogScan {
-            through_cursor: bound.known_at_cursor,
-            exact: true,
-            stable_order: "global_cursor".into(),
-        },
-        |cursor| PhysicalOperator::AuthoritativeEventCursorLookup {
+    let access = if let Some(cursor) = event_cursor {
+        PhysicalOperator::AuthoritativeEventCursorLookup {
             cursor,
             through_cursor: bound.known_at_cursor,
             exact: true,
             stable_order: "global_cursor".into(),
-        },
-    );
+        }
+    } else if let Some(index) = selected_index {
+        PhysicalOperator::MaterializedScalarIndex {
+            id: index.id.clone(),
+            generation: index.generation,
+            source_cursor: index.source_cursor,
+            schema_revision: bound.schema_revision,
+            valid_at: bound.valid_at,
+            config_digest: index.config_digest.clone(),
+            artifact_digest: index.artifact_digest.clone(),
+            artifact_rows: index
+                .artifact_rows
+                .expect("selected indexes have a row count"),
+            exact: true,
+            stable_order: "identity_ascending".into(),
+        }
+    } else {
+        PhysicalOperator::AuthoritativeLogScan {
+            through_cursor: bound.known_at_cursor,
+            exact: true,
+            stable_order: "global_cursor".into(),
+        }
+    };
     let physical_operators = vec![access, PhysicalOperator::ReferenceEvaluate];
     let digest = plan_digest(&logical, &physical_operators, &explanation)?;
     Ok(PhysicalPlan {

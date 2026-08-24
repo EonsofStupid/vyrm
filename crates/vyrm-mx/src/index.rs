@@ -1,14 +1,16 @@
-use crate::{bind, Catalog, Error, Parameters, Result};
+use crate::{bind, execute, plan, Catalog, Error, ExecutionBudget, Parameters, QueryRow, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use vyrm_core::{
     digest, ProjectionId, ProjectionStamp, ProjectionState, ScopeId, DATA_RUNTIME_CONTRACT_VERSION,
 };
 use vyrm_ql::{CursorExpr, Projection, Query, Source, TemporalSelector, TimeExpr};
-use vyrm_store::{ControlTransition, Engine};
+use vyrm_store::{ControlTransition, Durability, Engine};
 
 pub const INDEX_CATALOGUE_CONTRACT_VERSION: u16 = 1;
+pub const INDEX_ARTIFACT_CONTRACT_VERSION: u16 = 1;
 const MAX_INDEX_FIELDS: usize = 16;
+const MAX_INDEX_ARTIFACT_ROWS: usize = 1_000_000;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -50,16 +52,85 @@ impl IndexDefinition {
 pub struct IndexEntry {
     pub definition: IndexDefinition,
     pub stamp: ProjectionStamp,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub built_valid_at: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub artifact_rows: Option<u64>,
 }
 
 impl IndexEntry {
-    pub fn is_usable_at(&self, source_cursor: u64) -> bool {
+    pub fn is_usable_at(&self, source_cursor: u64, valid_at: u64) -> bool {
         self.stamp.state == ProjectionState::Ready
-            && self.stamp.source_cursor >= source_cursor
+            && self.stamp.source_cursor == source_cursor
+            && self.built_valid_at == Some(valid_at)
+            && self.artifact_rows.is_some()
             && self
                 .definition
                 .config_digest()
                 .is_ok_and(|digest| self.stamp.config_digest == digest)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct IndexArtifact {
+    pub contract_version: u16,
+    pub scope: ScopeId,
+    pub definition: IndexDefinition,
+    pub generation: u64,
+    pub source_cursor: u64,
+    pub schema_revision: u64,
+    pub valid_at: u64,
+    pub rows: Vec<QueryRow>,
+}
+
+impl IndexArtifact {
+    pub fn validate(&self) -> Result<()> {
+        if self.contract_version != INDEX_ARTIFACT_CONTRACT_VERSION {
+            return Err(Error::Integrity(format!(
+                "unsupported index artifact contract version {}",
+                self.contract_version
+            )));
+        }
+        self.definition.validate()?;
+        if self.generation == 0 || self.source_cursor == 0 {
+            return Err(Error::Integrity(
+                "index artifact generation and source cursor must be greater than zero".into(),
+            ));
+        }
+        if self.rows.len() > MAX_INDEX_ARTIFACT_ROWS {
+            return Err(Error::Integrity("index artifact row limit exceeded".into()));
+        }
+        if self
+            .rows
+            .windows(2)
+            .any(|rows| rows[0].identity >= rows[1].identity)
+        {
+            return Err(Error::Integrity(
+                "index artifact row identities must be unique and sorted".into(),
+            ));
+        }
+        Ok(())
+    }
+
+    pub fn encode(&self) -> Result<Vec<u8>> {
+        self.validate()?;
+        Ok(serde_json::to_vec(self)?)
+    }
+
+    pub fn decode(bytes: &[u8]) -> Result<Self> {
+        let artifact: Self = serde_json::from_slice(bytes)?;
+        artifact.validate()?;
+        if artifact.encode()? != bytes {
+            return Err(Error::Integrity(
+                "index artifact bytes are not canonical".into(),
+            ));
+        }
+        Ok(artifact)
+    }
+
+    pub fn digest(&self) -> Result<String> {
+        Ok(digest::sha256_hex(&self.encode()?))
     }
 }
 
@@ -102,6 +173,13 @@ impl IndexCatalogue {
                     "index identity or configuration digest disagrees for {id}"
                 )));
             }
+            if entry.stamp.state == ProjectionState::Ready
+                && (entry.built_valid_at.is_none() || entry.artifact_rows.is_none())
+            {
+                return Err(Error::Integrity(format!(
+                    "ready index {id} is missing artifact coverage"
+                )));
+            }
         }
         Ok(())
     }
@@ -113,6 +191,15 @@ pub struct IndexMutationContext {
     pub actor: String,
     pub request_id: String,
     pub operation_id: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IndexArtifactPublication {
+    pub generation: u64,
+    pub source_cursor: u64,
+    pub valid_at: u64,
+    pub artifact_rows: u64,
+    pub artifact_digest: String,
 }
 
 impl IndexMutationContext {
@@ -136,7 +223,7 @@ pub struct IndexCatalogueRepository<'a, E: Engine + ?Sized> {
     key: String,
 }
 
-impl<'a, E: Engine + ?Sized> IndexCatalogueRepository<'a, E> {
+impl<'a, E: Engine> IndexCatalogueRepository<'a, E> {
     pub fn new(engine: &'a E, scope: ScopeId) -> Self {
         let key = format!("server/state/index-catalogue/{scope}");
         Self { engine, scope, key }
@@ -192,6 +279,8 @@ impl<'a, E: Engine + ?Sized> IndexCatalogueRepository<'a, E> {
                         artifact_digest: digest::sha256_hex(&[]),
                         state: ProjectionState::Building,
                     },
+                    built_valid_at: None,
+                    artifact_rows: None,
                 },
             );
             Ok(())
@@ -218,41 +307,136 @@ impl<'a, E: Engine + ?Sized> IndexCatalogueRepository<'a, E> {
             entry.stamp.source_cursor = 0;
             entry.stamp.artifact_digest = digest::sha256_hex(&[]);
             entry.stamp.state = ProjectionState::Building;
+            entry.built_valid_at = None;
+            entry.artifact_rows = None;
             Ok(())
         })
+    }
+
+    pub fn build(
+        &self,
+        context: &IndexMutationContext,
+        id: &ProjectionId,
+        valid_at: u64,
+        budget: &ExecutionBudget,
+    ) -> Result<IndexCatalogue> {
+        context.validate()?;
+        let catalogue = self.load()?;
+        let entry = catalogue
+            .entries
+            .get(id)
+            .ok_or_else(|| Error::Catalog(format!("unknown index {id}")))?;
+        if entry.stamp.state != ProjectionState::Building {
+            return Err(Error::Catalog(format!("index {id} is not building")));
+        }
+        let generation = entry.stamp.generation;
+        let definition = entry.definition.clone();
+        let query_catalogue = Catalog::capture(self.engine, &self.scope)?;
+        let mut query = Query::new(
+            definition.source.clone(),
+            TemporalSelector {
+                valid_at: TimeExpr::Literal(valid_at),
+                known_at: CursorExpr::Head,
+            },
+        );
+        query.projection = Projection::All;
+        let bound = bind(&query, &Parameters::new(), &query_catalogue)?;
+        let physical = plan(&bound)?;
+        let execution = execute(self.engine, &physical, budget)?;
+        if execution.truncated {
+            return Err(Error::Budget(
+                "index build execution was truncated by its budget".into(),
+            ));
+        }
+        let rows = execution
+            .batches
+            .into_iter()
+            .flat_map(|batch| batch.rows)
+            .collect::<Vec<_>>();
+        let artifact = IndexArtifact {
+            contract_version: INDEX_ARTIFACT_CONTRACT_VERSION,
+            scope: self.scope.clone(),
+            definition,
+            generation,
+            source_cursor: query_catalogue.read.commit_cursor,
+            schema_revision: bound.schema_revision,
+            valid_at,
+            rows,
+        };
+        let bytes = artifact.encode()?;
+        let artifact_digest = digest::sha256_hex(&bytes);
+        let name = index_artifact_name(&self.scope, id, generation, &artifact_digest);
+        if let Some(existing) = self.engine.get_projection(&name)? {
+            if existing != bytes {
+                return Err(Error::Integrity(
+                    "content-addressed index artifact name contains different bytes".into(),
+                ));
+            }
+        } else {
+            self.engine
+                .put_projection_with(&name, &bytes, Durability::Authoritative)?;
+        }
+        let stored = self
+            .engine
+            .get_projection(&name)?
+            .ok_or_else(|| Error::Integrity("published index artifact is unreadable".into()))?;
+        if digest::sha256_hex(&stored) != artifact_digest {
+            return Err(Error::Integrity(
+                "published index artifact digest does not verify".into(),
+            ));
+        }
+        let stored_artifact = IndexArtifact::decode(&stored)?;
+        if stored_artifact != artifact {
+            return Err(Error::Integrity(
+                "published index artifact does not decode to the built artifact".into(),
+            ));
+        }
+        self.publish_ready(
+            context,
+            id,
+            &IndexArtifactPublication {
+                generation,
+                source_cursor: artifact.source_cursor,
+                valid_at,
+                artifact_rows: u64::try_from(artifact.rows.len())
+                    .map_err(|_| Error::Budget("index artifact row count exceeds u64".into()))?,
+                artifact_digest,
+            },
+        )
     }
 
     pub fn publish_ready(
         &self,
         context: &IndexMutationContext,
         id: &ProjectionId,
-        generation: u64,
-        source_cursor: u64,
-        artifact_digest: String,
+        publication: &IndexArtifactPublication,
     ) -> Result<IndexCatalogue> {
         context.validate()?;
         let scope_head = self.engine.runtime_read_stamp(&self.scope)?.commit_cursor;
-        if source_cursor == 0 || source_cursor > scope_head {
+        if publication.source_cursor == 0 || publication.source_cursor > scope_head {
             return Err(Error::Catalog(
                 "index source cursor must name an existing authoritative change".into(),
             ));
         }
         let id = id.clone();
+        let publication = publication.clone();
         self.update(context, "index.ready", move |catalogue| {
             let entry = catalogue
                 .entries
                 .get_mut(&id)
                 .ok_or_else(|| Error::Catalog(format!("unknown index {id}")))?;
-            if entry.stamp.generation != generation
+            if entry.stamp.generation != publication.generation
                 || entry.stamp.state != ProjectionState::Building
             {
                 return Err(Error::Catalog(
                     "index publication is stale or not building".into(),
                 ));
             }
-            entry.stamp.source_cursor = source_cursor;
-            entry.stamp.artifact_digest = artifact_digest;
+            entry.stamp.source_cursor = publication.source_cursor;
+            entry.stamp.artifact_digest = publication.artifact_digest;
             entry.stamp.state = ProjectionState::Ready;
+            entry.built_valid_at = Some(publication.valid_at);
+            entry.artifact_rows = Some(publication.artifact_rows);
             entry
                 .stamp
                 .validate()
@@ -332,6 +516,15 @@ impl<'a, E: Engine + ?Sized> IndexCatalogueRepository<'a, E> {
         })?;
         Ok(catalogue)
     }
+}
+
+pub(crate) fn index_artifact_name(
+    scope: &ScopeId,
+    id: &ProjectionId,
+    generation: u64,
+    artifact_digest: &str,
+) -> String {
+    format!("query-index/{scope}/{id}/{generation}/{artifact_digest}")
 }
 
 fn validate_fields(catalogue: &Catalog, definition: &IndexDefinition) -> Result<()> {
