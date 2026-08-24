@@ -14,7 +14,7 @@ use std::fmt;
 pub const PROTOCOL: &str = "rrd";
 pub const PROTOCOL_VERSION: u16 = 1;
 pub const OPENAPI_DOCUMENT_SHA256: &str =
-    "91a5681109cf45c4d544856733533acb3e44bb70630cb1ba03c048aaaf164da7";
+    "68d87505b85d7d99e6a58ce49404040d832295c6572f70f791db635dd45bbf64";
 pub const MAX_ID_BYTES: usize = 128;
 pub const MAX_MESSAGE_BYTES: usize = 4_096;
 pub const MAX_CAPABILITIES: usize = 512;
@@ -762,6 +762,53 @@ pub struct VectorPointPage {
     pub truncated: bool,
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct RetrieveVectorPoints {
+    pub scope: String,
+    pub collection_id: CanonicalId,
+    pub vector_name: CanonicalId,
+    pub valid_at: u64,
+    pub references: Vec<DataReference>,
+    pub max_scanned_changes: u64,
+}
+
+impl RetrieveVectorPoints {
+    pub fn validate(&self) -> Result<()> {
+        validate_vector_scope(&self.scope)?;
+        if self.valid_at == 0 {
+            return invalid("vector point retrieve valid_at must be greater than zero");
+        }
+        if self.references.is_empty() || self.references.len() > MAX_VECTOR_POINT_PAGE as usize {
+            return invalid(format!(
+                "vector point retrieve references must contain 1..={MAX_VECTOR_POINT_PAGE} identities"
+            ));
+        }
+        if self.references.iter().collect::<BTreeSet<_>>().len() != self.references.len() {
+            return invalid("vector point retrieve references must be unique");
+        }
+        if self.max_scanned_changes == 0 || self.max_scanned_changes > MAX_VECTOR_SEARCH_CHANGES {
+            return invalid(format!(
+                "vector point retrieve max_scanned_changes must be in 1..={MAX_VECTOR_SEARCH_CHANGES}"
+            ));
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct VectorPointBatch {
+    pub scope: String,
+    pub collection_id: CanonicalId,
+    pub vector_name: CanonicalId,
+    pub read_manifest_sha256: String,
+    pub known_at_cursor: u64,
+    pub scanned_changes: u64,
+    pub points: Vec<VectorPointSnapshot>,
+    pub missing: Vec<DataReference>,
+}
+
 fn validate_vector_scope(scope: &str) -> Result<()> {
     if scope.is_empty() || scope.len() > MAX_ID_BYTES || scope.as_bytes().contains(&0) {
         return invalid("vector scope is invalid");
@@ -1048,6 +1095,7 @@ pub enum SecurityAction {
     ChangefeedFollow,
     VectorCollectionEnsure,
     VectorCollectionList,
+    VectorPointRetrieve,
     VectorPointScroll,
     VectorSearch,
     BackupCreate,
@@ -1449,6 +1497,16 @@ pub fn endpoint_catalogue() -> EndpointCatalogue {
             "VectorCollectionCatalogueSnapshot",
         ),
         endpoint(
+            "vector-point-retrieve",
+            HttpMethod::Post,
+            "/v1/vector/points/retrieve",
+            EndpointAuthentication::SessionBearer,
+            false,
+            SecurityAction::VectorPointRetrieve,
+            "RetrieveVectorPoints",
+            "VectorPointBatch",
+        ),
+        endpoint(
             "vector-point-scroll",
             HttpMethod::Post,
             "/v1/vector/points/scroll",
@@ -1750,6 +1808,7 @@ fn request_envelope_schema(name: &str) -> Result<serde_json::Value> {
         "ReadEstate" => schema_json::<RequestEnvelope<ReadEstate>>(),
         "RenewSession" => schema_json::<RequestEnvelope<RenewSession>>(),
         "RestoreInstanceBackup" => schema_json::<RequestEnvelope<RestoreInstanceBackup>>(),
+        "RetrieveVectorPoints" => schema_json::<RequestEnvelope<RetrieveVectorPoints>>(),
         "ScrollVectorPoints" => schema_json::<RequestEnvelope<ScrollVectorPoints>>(),
         "SearchVectors" => schema_json::<RequestEnvelope<SearchVectors>>(),
         _ => return invalid(format!("no public request schema for {name}")),
@@ -1791,6 +1850,7 @@ fn response_envelope_schema(name: &str) -> Result<serde_json::Value> {
         "SessionTermination" => schema_json::<ResponseEnvelope<SessionTermination>>(),
         "TransactionLease" => schema_json::<ResponseEnvelope<TransactionLease>>(),
         "TransactionPreview" => schema_json::<ResponseEnvelope<TransactionPreview>>(),
+        "VectorPointBatch" => schema_json::<ResponseEnvelope<VectorPointBatch>>(),
         "VectorPointPage" => schema_json::<ResponseEnvelope<VectorPointPage>>(),
         "VectorCollectionCatalogueSnapshot" => {
             schema_json::<ResponseEnvelope<VectorCollectionCatalogueSnapshot>>()

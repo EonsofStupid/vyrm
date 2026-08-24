@@ -27,6 +27,7 @@ public enum OperationId {
     TRANSACTION_PREVIEW("transaction-preview", "POST", "/v1/transactions/{transaction}/preview", Authentication.SESSION_BEARER, false),
     VECTOR_COLLECTION_ENSURE("vector-collection-ensure", "POST", "/v1/vector/collections/ensure", Authentication.SESSION_BEARER, true),
     VECTOR_COLLECTION_LIST("vector-collection-list", "POST", "/v1/vector/collections/list", Authentication.SESSION_BEARER, false),
+    VECTOR_POINT_RETRIEVE("vector-point-retrieve", "POST", "/v1/vector/points/retrieve", Authentication.SESSION_BEARER, false),
     VECTOR_POINT_SCROLL("vector-point-scroll", "POST", "/v1/vector/points/scroll", Authentication.SESSION_BEARER, false),
     VECTOR_SEARCH("vector-search", "POST", "/v1/vector/search", Authentication.SESSION_BEARER, false);
 

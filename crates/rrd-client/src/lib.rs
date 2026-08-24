@@ -19,10 +19,10 @@ use rrd_contract::{
     FollowChangefeed, InstanceBackupCatalogueSnapshot, ListInstanceBackups, ListVectorCollections,
     PreviewTransaction, QueryResult, ReadAudit, ReadChangefeed, ReadEstate, RenewSession,
     RequestContext, RequestEnvelope, ResourceId, ResourceKind, ResourcePath, ResponseEnvelope,
-    ResponseOutcome, RestoreInstanceBackup, RestoreInstanceBackupResult, ScrollVectorPoints,
-    SearchVectors, ServiceCapabilities, SessionLease, SessionTermination, TransactionLease,
-    TransactionPreview, VectorCollectionCatalogueSnapshot, VectorPointPage, VectorSearchResult,
-    PROTOCOL, PROTOCOL_VERSION,
+    ResponseOutcome, RestoreInstanceBackup, RestoreInstanceBackupResult, RetrieveVectorPoints,
+    ScrollVectorPoints, SearchVectors, ServiceCapabilities, SessionLease, SessionTermination,
+    TransactionLease, TransactionPreview, VectorCollectionCatalogueSnapshot, VectorPointBatch,
+    VectorPointPage, VectorSearchResult, PROTOCOL, PROTOCOL_VERSION,
 };
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -459,6 +459,23 @@ impl RrdClient {
         self.session_call(
             Method::POST,
             "/v1/vector/points/scroll",
+            session,
+            request,
+            options,
+            false,
+        )
+        .await
+    }
+
+    pub async fn retrieve_vector_points(
+        &self,
+        session: &Session,
+        request: RetrieveVectorPoints,
+        options: RequestOptions,
+    ) -> Result<VectorPointBatch> {
+        self.session_call(
+            Method::POST,
+            "/v1/vector/points/retrieve",
             session,
             request,
             options,

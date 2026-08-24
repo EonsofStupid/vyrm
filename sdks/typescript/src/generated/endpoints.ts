@@ -150,6 +150,12 @@ export const endpoints = {
     "authentication": "session_bearer",
     "mutation": false
   },
+  "vector-point-retrieve": {
+    "method": "POST",
+    "path": "/v1/vector/points/retrieve",
+    "authentication": "session_bearer",
+    "mutation": false
+  },
   "vector-point-scroll": {
     "method": "POST",
     "path": "/v1/vector/points/scroll",

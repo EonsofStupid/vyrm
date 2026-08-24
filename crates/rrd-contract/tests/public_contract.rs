@@ -544,7 +544,7 @@ fn audit_read_contract_is_bounded_and_strict() {
 fn endpoint_catalogue_is_complete_sorted_and_transport_neutral() {
     let catalogue = rrd_contract::endpoint_catalogue();
     catalogue.validate().unwrap();
-    assert_eq!(catalogue.endpoints.len(), 27);
+    assert_eq!(catalogue.endpoints.len(), 28);
     assert_eq!(catalogue.endpoints[0].operation.as_str(), "audit-read");
     let create = catalogue
         .endpoints

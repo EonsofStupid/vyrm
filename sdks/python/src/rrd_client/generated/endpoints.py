@@ -27,6 +27,7 @@ OperationId = Literal[
     "transaction-preview",
     "vector-collection-ensure",
     "vector-collection-list",
+    "vector-point-retrieve",
     "vector-point-scroll",
     "vector-search",
 ]
@@ -189,6 +190,12 @@ ENDPOINTS: Final[dict[OperationId, Endpoint]] = {
         "method": "POST",
         "mutation": False,
         "path": "/v1/vector/collections/list",
+    },
+    "vector-point-retrieve": {
+        "authentication": "session_bearer",
+        "method": "POST",
+        "mutation": False,
+        "path": "/v1/vector/points/retrieve",
     },
     "vector-point-scroll": {
         "authentication": "session_bearer",

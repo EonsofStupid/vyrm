@@ -21,12 +21,12 @@ use rrd_contract::{
     NamedVectorDefinition, PollLiveQuery, PreviewTransaction, QueryExecutionSnapshot,
     QueryIndexCatalogueSnapshot, QueryIndexSnapshot, QueryIndexState, QueryPlanCandidate,
     QueryPlanSnapshot, QueryResult, QueryRowSnapshot, QueryValue, ReadAudit, ReadChangefeed,
-    RenewSession, RestoreInstanceBackup, RestoreInstanceBackupResult, RuntimeChangeSnapshot,
-    ScrollVectorPoints, SearchVectors, SessionEndState, SessionLease, SessionLimits,
-    SessionTermination,
+    RenewSession, RestoreInstanceBackup, RestoreInstanceBackupResult, RetrieveVectorPoints,
+    RuntimeChangeSnapshot, ScrollVectorPoints, SearchVectors, SessionEndState, SessionLease,
+    SessionLimits, SessionTermination,
     TransactionLease, TransactionMutation, TransactionPreview, TransactionState,
     VectorCollectionCatalogueSnapshot, VectorCollectionSnapshot, VectorEmbeddingModel,
-    VectorMemoryTier, VectorPayloadFilter, VectorPayloadOperator, VectorPointPage,
+    VectorMemoryTier, VectorPayloadFilter, VectorPayloadOperator, VectorPointBatch, VectorPointPage,
     VectorPointSnapshot, VectorSearchHit, VectorSearchMetric, VectorSearchQuery, VectorSearchResult,
     VectorValueKind,
 };
@@ -794,21 +794,7 @@ impl<E: Engine> RrdService<E> {
         candidates.truncate(limit);
         let points = candidates
             .iter()
-            .map(|candidate| {
-                Ok(VectorPointSnapshot {
-                    reference: public_data_ref(&candidate.vector.reference)?,
-                    subject: public_data_ref(&candidate.vector.subject)?,
-                    source_cursor: candidate.source_cursor,
-                    value: public_vector_value(&candidate.vector.value),
-                    provenance: candidate
-                        .vector
-                        .provenance
-                        .as_ref()
-                        .map(public_provenance)
-                        .transpose()?,
-                    payload: public_properties(&candidate.vector.properties)?,
-                })
-            })
+            .map(public_vector_point)
             .collect::<Result<Vec<_>>>()?;
         let next_after = truncated
             .then(|| points.last().map(|point| point.reference.clone()))
@@ -823,6 +809,90 @@ impl<E: Engine> RrdService<E> {
             points,
             next_after,
             truncated,
+        })
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn retrieve_vector_points(
+        &self,
+        session_id: &CorrelationId,
+        token: &CorrelationId,
+        request: &RetrieveVectorPoints,
+        now: u64,
+        request_id: &str,
+        operation_id: &str,
+    ) -> Result<VectorPointBatch> {
+        request
+            .validate()
+            .map_err(|error| ServiceError::Vector(error.to_string()))?;
+        self.authorize(session_id, token, now, request_id, operation_id)?;
+        let scope = self.query_scope(&request.scope)?;
+        let catalogue = vyrm_vector::VectorCollectionRepository::new(&self.engine, scope.clone())
+            .load()
+            .map_err(vector_collection_error)?;
+        let collection = catalogue
+            .collections
+            .get(&ProjectionId::new(request.collection_id.as_str()).map_err(core_vector)?)
+            .ok_or_else(|| {
+                ServiceError::Vector(format!(
+                    "unknown vector collection {}",
+                    request.collection_id
+                ))
+            })?;
+        let config = collection
+            .definition
+            .vectors
+            .get(&ProjectionId::new(request.vector_name.as_str()).map_err(core_vector)?)
+            .ok_or_else(|| {
+                ServiceError::Vector(format!(
+                    "unknown named vector {} in collection {}",
+                    request.vector_name, request.collection_id
+                ))
+            })?;
+        let read = self.engine.runtime_read_stamp(&scope)?;
+        let scan_limit = usize::try_from(request.max_scanned_changes)
+            .map_err(|_| ServiceError::Vector("vector point scan budget exceeds usize".into()))?;
+        let page = self.engine.runtime_read_changes(&read, 0, scan_limit)?;
+        if page.through_cursor < page.head_cursor {
+            return Err(ServiceError::Vector(format!(
+                "vector point retrieve requires more than {} retained changes",
+                request.max_scanned_changes
+            )));
+        }
+        let visibility = vyrm_vector::VectorVisibilityRequest {
+            scope: scope.clone(),
+            read: read.clone(),
+            valid_at: request.valid_at,
+            field: config.field.clone(),
+            embedding_model: config.embedding_model.clone(),
+            filter: None,
+        };
+        let visible = vyrm_vector::materialize_visible(
+            &visibility,
+            vyrm_vector::candidates_from_changes(&page.changes, &scope),
+        )
+        .map_err(core_vector)?
+        .into_iter()
+        .map(|candidate| (candidate.vector.reference.clone(), candidate))
+        .collect::<BTreeMap<_, _>>();
+        let mut points = Vec::new();
+        let mut missing = Vec::new();
+        for reference in &request.references {
+            let runtime_reference = runtime_ref(reference)?;
+            match visible.get(&runtime_reference) {
+                Some(candidate) => points.push(public_vector_point(candidate)?),
+                None => missing.push(reference.clone()),
+            }
+        }
+        Ok(VectorPointBatch {
+            scope: request.scope.clone(),
+            collection_id: request.collection_id.clone(),
+            vector_name: request.vector_name.clone(),
+            read_manifest_sha256: read.manifest_id,
+            known_at_cursor: read.commit_cursor,
+            scanned_changes: page.validation.change_reads,
+            points,
+            missing,
         })
     }
 
@@ -3248,6 +3318,22 @@ fn public_provenance(value: &EmbeddingProvenance) -> Result<DataEmbeddingProvena
             VectorNormalization::UnitL2 => DataVectorNormalization::UnitL2,
         },
         generation_parameters: public_properties(&value.generation_parameters)?,
+    })
+}
+
+fn public_vector_point(candidate: &vyrm_vector::VectorCandidate) -> Result<VectorPointSnapshot> {
+    Ok(VectorPointSnapshot {
+        reference: public_data_ref(&candidate.vector.reference)?,
+        subject: public_data_ref(&candidate.vector.subject)?,
+        source_cursor: candidate.source_cursor,
+        value: public_vector_value(&candidate.vector.value),
+        provenance: candidate
+            .vector
+            .provenance
+            .as_ref()
+            .map(public_provenance)
+            .transpose()?,
+        payload: public_properties(&candidate.vector.properties)?,
     })
 }
 
