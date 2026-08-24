@@ -76,8 +76,11 @@ budget, and authoritative-log execution path. Three-engine differential tests
 and a secured real-RRD test prove series/geo results and persistence. See
 [`docs/vyrmql-multimodel-v1.md`](docs/vyrmql-multimodel-v1.md). VyrmQL now also
 has schema-bound, direction-explicit, depth-capped recursive graph expansion
-with deterministic shortest paths and cycle suppression. Indexes, full text,
-mutating statements, and push subscriptions remain open.
+with deterministic shortest paths and cycle suppression. Typed scalar predicates
+support `=`, `!=`, `<`, `<=`, `>`, and `>=`; ordering is deliberately limited to
+integers, unsigned integers, and strings until an exact decimal ordering contract
+lands. Indexes, full text, mutating statements, and push subscriptions remain
+open.
 
 F3 now has its first authority artifact in
 [`rrd-estate`](crates/rrd-estate): a bounded, versioned estate document whose

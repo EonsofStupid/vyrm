@@ -745,3 +745,24 @@ index.
 - Limit: traversal currently returns nodes/paths for one relation type and does
   not yet implement path predicates, weighted paths, all-path enumeration, or
   index-assisted expansion. Index/realtime breadth remains next.
+
+## 2026-08-24 — typed scalar comparison predicates
+
+- Commit: `bfa4e15` (`feat(query): add typed comparison predicates`).
+- Contract: filters now retain `=`, `!=`, `<`, `<=`, `>`, or `>=` through the
+  typed VyrmQL AST, canonical text, bound logical plan, physical-plan digest,
+  and reference executor. Older serialized equality filters remain readable
+  through an equality default.
+- Safety: equality and inequality use exact typed values. Ordering accepts only
+  same-type integer, unsigned integer, and string values; decimal, null,
+  boolean, structured, and mixed-type ordering fail during binding rather than
+  receiving implicit coercion or lexical numeric semantics.
+- Planning: event-cursor point lookup remains eligible only for equality, so a
+  range predicate cannot accidentally inherit a point-access contract.
+- Evidence: parser canonical/malformed/mutation tests, plan goldens, a truth
+  table for every operator, three-engine persistent differentials, unsupported
+  decimal ordering rejection, the authenticated real-RRD process query, and
+  strict Clippy all pass.
+- Limit: this is predicate algebra, not an index claim. Index catalogues,
+  maintenance, selection evidence, statistics, spatial/full-text operators,
+  and live subscriptions remain the next F6 foundation slices.

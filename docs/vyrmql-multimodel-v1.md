@@ -1,9 +1,9 @@
 # VyrmQL multi-model read foundation
 
 Status: executable stamped reads for records, relations, events, claims,
-time-series samples, geospatial values, and bounded recursive graph traversal.
-General operators, indexes, full text, mutating statements, and push
-subscriptions remain open.
+time-series samples, geospatial values, and bounded recursive graph traversal,
+with typed scalar comparison predicates. Indexes, full text, mutating
+statements, and push subscriptions remain open.
 
 VyrmQL sources now include:
 
@@ -42,6 +42,15 @@ hard maximum depth are mandatory; every row exposes depth, reached node, edge,
 endpoints, and the complete node path. Three-engine and secured RRD tests prove
 outgoing/incoming semantics and cycle termination.
 
-Numeric/spatial operators, index catalogues and lifecycle, planner statistics,
-full text, mutating VyrmQL, streaming responses, and push live subscriptions
-remain explicit gaps.
+Filters preserve a typed comparison operator through parsing, binding, plan
+digests, and execution. The grammar supports `=`, `!=`, `<`, `<=`, `>`, and
+`>=`. Equality/inequality work for every type accepted by the selected field;
+ordering is currently fail-closed to same-type integer, unsigned integer, and
+string values. Decimal and mixed-type ordering are rejected at binding rather
+than compared lexically or coerced. The exact event-cursor lookup is selected
+only for `cursor = <unsigned>`; other cursor comparisons keep the authoritative
+scan.
+
+Spatial operators, index catalogues and lifecycle, planner statistics, full
+text, mutating VyrmQL, streaming responses, and push live subscriptions remain
+explicit gaps.

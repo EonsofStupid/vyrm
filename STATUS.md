@@ -149,8 +149,10 @@ Kubernetes operation, and authoritative Connectome management.
   Bounded recursive traversal now validates its start/relation against the
   stamped schema, requires direction and depth, returns deterministic shortest
   paths, and terminates cycles; three-engine and secured-RRD tests pass. Only
-  frozen series/geo built-ins are bindable today. General operators, index
-  lifecycle, full text, mutating VyrmQL, streaming, and push subscriptions keep
+  frozen series/geo built-ins are bindable today. Scalar equality, inequality,
+  and ordering predicates are typed and deterministic; ordering currently
+  accepts only integer, unsigned, and string operands. Index lifecycle, spatial
+  operators, full text, mutating VyrmQL, streaming, and push subscriptions keep
   F6 open.
 
 - The bi-temporal claim kernel has immutable supersession corrections,

@@ -519,12 +519,16 @@ Binding proves the types against the stamped schema; execution walks only the
 visible bitemporal graph snapshot, orders edges canonically, suppresses cycles,
 and emits one deterministic shortest-path row per reached node. Memory, Fjall
 compatibility, native VyrmKV, and secured RRD tests cover it.
+Typed predicates now carry their comparison operator through the AST, bound
+plan, digest, and executor. `=`, `!=`, `<`, `<=`, `>`, and `>=` round-trip to a
+canonical query; ordering is fail-closed to integer, unsigned, and string
+operands. The event-cursor point path remains eligible only for equality.
 
 **Deliverables**
 
 - Mutating VyrmQL and multi-statement transactions.
 - General document/record/edge CRUD and schemafull/schemaless policy.
-- Relational links, recursive graph traversal, series and geospatial operators.
+- Relational links, richer graph/path algebra, and spatial operators.
 - Ordinary/compound/unique/count, spatial and full-text indexes.
 - Full-text analyzers and a replacement lexical stack measured against the old
   BM25 path; this is where the later LFG/TurboQuant retrieval integration lands.
