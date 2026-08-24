@@ -633,3 +633,27 @@ index.
   generated per-payload models, shared real-server/version conformance, and
   package publication remain open. Go, Java, and .NET are the next breadth
   slices.
+
+## 2026-08-24 — generated Go RRD client foundation
+
+- Commit: `a1450ae` (`feat(sdk): add generated Go RRD client`).
+- Generated surface: a shell-free Go generator projects a closed operation
+  constant set plus method/path/authentication/mutation metadata for all 21
+  routes from authoritative OpenAPI. Go's formatter canonicalizes checked-in
+  output and the generator supplies an exact drift gate.
+- Runtime: the standard-library client covers every operation plus capability,
+  catalogue, OpenAPI, and session helpers. It accepts caller cancellation,
+  combines absolute and per-attempt deadlines, disables redirects, restricts
+  cleartext to credential-free loopback, validates identities/resources,
+  requires mutation idempotency, bounds response bodies, correlates response
+  identity, applies API-key/session auth, and retries only safe calls after
+  transport failure.
+- Validation: strict JSON decoding rejects unknown envelope fields and invalid
+  success/error discrimination before returning a generic object payload.
+- Evidence: generation drift, `gofmt`, `go vet`, behavioral tests, and the race
+  detector pass. Tests cover retry negotiation, capability identity, session/
+  query auth and envelopes, resource identity, remote-cleartext/deadline
+  denial, typed permission errors, and all 21 generated operations.
+- Limit: generated per-payload types, shared real-server/version conformance,
+  examples/reference generation, and module publication remain open. Java and
+  .NET are the next breadth slices.

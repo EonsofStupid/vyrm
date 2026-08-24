@@ -418,7 +418,7 @@ wire type derives JSON Schema, and deterministic OpenAPI 3.1 is built from that
 catalogue rather than maintained separately. The server publishes both at
 `GET /v1/schema/endpoints` and `GET /v1/schema/openapi`; a frozen SHA-256 fails
 unreviewed schema drift. This removes handwritten route and payload discovery
-as SDK sources. TypeScript and Python now have walking skeletons; the three
+as SDK sources. TypeScript, Python, and Go now have walking skeletons; the two
 remaining language packages and shared black-box conformance remain open.
 
 The first Rust client is now implemented in `rrd-client` and specified by
@@ -454,6 +454,17 @@ envelopes; uv, Ruff, strict mypy, pytest, generation drift, and distribution
 builds gate the package. Async transport, generated per-payload models, shared
 real-server conformance, and publication remain open. Go, Java, and .NET remain
 absent.
+
+The Go walking skeleton is implemented in `sdks/go` and specified by
+[`rrd-go-client-v1.md`](rrd-go-client-v1.md). Its shell-free generator emits a
+closed operation constant set and route/auth/mutation map for all 21 operations
+from the same OpenAPI authority. The standard-library client uses caller
+contexts, bounded response reads, strict envelopes, correlated identities,
+resource validation, mutation idempotency, combined deadlines, safe transport
+retry, API-key/session authentication, redirect denial, and loopback-only
+cleartext. Generation drift, `gofmt`, `go vet`, behavioral tests, and the race
+detector gate it. Generated payload types, shared real-server/version
+conformance, and publication remain open. Java and .NET remain absent.
 
 **Deliverables**
 

@@ -28,7 +28,7 @@ consumer of that public contract. It negotiates capabilities, covers all 21
 currently published operations, bounds time and response bytes, preserves
 typed errors and request identity, and safely retries reads or
 idempotency-bound mutations after transport loss. It remains loopback-only
-until the remote TLS gate is qualified; the other four supported-language
+until the remote TLS gate is qualified; the other two supported-language
 clients and shared conformance matrix remain open.
 
 The TypeScript F5 walking skeleton is in [`sdks/typescript`](sdks/typescript).
@@ -44,6 +44,14 @@ untrusted envelopes with Pydantic, and enforces the same bounded retry,
 identity, deadline, resource, idempotency, and loopback-cleartext rules. uv,
 Ruff, strict mypy, pytest, and package builds gate it; generated payload models,
 async transport, shared real-server conformance, and publication remain open.
+
+The Go F5 walking skeleton is in [`sdks/go`](sdks/go). It has no third-party
+runtime dependency, derives its closed operation set and route metadata from
+the OpenAPI authority, accepts caller cancellation through `context.Context`,
+and enforces strict envelopes, bounded I/O, deadlines, safe retries, resource
+identity, mutation idempotency, authentication, and loopback-only cleartext.
+Generated payload models, shared real-server conformance, and module release
+remain open.
 
 F3 now has its first authority artifact in
 [`rrd-estate`](crates/rrd-estate): a bounded, versioned estate document whose
