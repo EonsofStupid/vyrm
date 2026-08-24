@@ -195,8 +195,23 @@ fn run_controller_and_kill(
                     thread::sleep(Duration::from_millis(10));
                     continue 'retry;
                 }
+                let engine = PersistentEngine::open(database).unwrap();
+                let repository = EstateRepository::new(&engine, id("estate-a"));
+                let document = repository.load().unwrap().unwrap();
+                let operation_failures = document
+                    .operations
+                    .values()
+                    .filter_map(|operation| {
+                        operation
+                            .error
+                            .as_ref()
+                            .map(|error| format!("{}: {error}", operation.id))
+                    })
+                    .collect::<Vec<_>>();
+                let process_record =
+                    std::fs::read_to_string(state_root.join("processes/project-a.json")).ok();
                 panic!(
-                    "estate controller exited before hold marker at {at} ({status}); stdout={output:?}; stderr={error:?}"
+                    "estate controller exited before hold marker at {at} ({status}); stdout={output:?}; stderr={error:?}; operation_failures={operation_failures:?}; process_record={process_record:?}"
                 );
             }
             assert!(
