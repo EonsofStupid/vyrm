@@ -7,6 +7,8 @@
 **/.mypy_cache/
 **/.ruff_cache/
 **/dist/
+.tools/
+**/target/
 
 # Session transcripts and hooks — operator-local, never part of the product
 /.chat
