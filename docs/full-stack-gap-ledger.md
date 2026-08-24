@@ -605,6 +605,22 @@ update/recovery matrices on fixed hardware and corpora against current Qdrant.
 
 ### F8 — qualify distributed and Kubernetes operation
 
+**Status:** experimental distributed foundation present; Kubernetes product
+surface absent. `vyrm-cluster` freezes canonical three-zone placement,
+per-shard quorum semantics, explicit partial-order snapshot vectors, transfer
+and reshard cutovers, transport identities, bounded telemetry, and restart-safe
+artifact sessions. Its OpenRaft adapter runs both an in-process three-voter
+cluster and independent node processes over native Vyrm storage. Tests prove
+replication, leader loss/failover, membership change, snapshot install,
+corruption denial, mTLS peer-identity denial, minority-partition write/read
+denial, and survival of every single disk loss in the modeled topology.
+
+This is a real executable distributed baseline, not production or Kubernetes
+qualification. There is no CRD/operator, container/release image, rolling
+upgrade controller, disruption budget, CSI recovery workflow, certificate
+rotation controller, independent-host fault lab, or supported control-plane
+agent yet.
+
 **Deliverables**
 
 - Independent-host replication and failure evidence.
@@ -620,6 +636,23 @@ update/recovery matrices on fixed hardware and corpora against current Qdrant.
 RTO, availability and consistency; anything not demonstrated stays unclaimed.
 
 ### F9 — make Connectome the faithful developer/operator instrument
+
+**Status:** local developer foundation present; authoritative remote operations
+remain open. `connectome-ui` is a real loopback application over one physically
+bound Vyrm instance. It renders estates, logical tables, data models, source
+routes, query results, vector artifacts, retention, reasoning flights, temporal
+changes, causal traces, runtime graphs, and retained cluster observations.
+Freeze, rewind, forward, speed control, raw-event inspection, weak/strong prompt
+cohorts, and explicit capability maturity are backed by retained evidence.
+
+Commit `e21eb6e` adds the first connection-profile authority. The Connections
+workspace negotiates the public RRD capability handshake against an exact local
+instance before committing a bounded profile through Vyrm control-state CAS and
+its hash-chained journal. Retries are idempotent, key rebinding is denied, only
+credential references are retained, non-loopback cleartext is denied, and
+remote profiles require HTTPS. Authenticated data access, selecting a connected
+RRD as the active data source, remote TLS, profile deletion/rotation, and estate
+mutation controls remain open.
 
 **Deliverables**
 
@@ -667,8 +700,9 @@ each remaining product layer before returning to engine benchmark tuning:
    clients against one schema and conformance corpus;
 4. complete the baseline F6/F7 administrative, live, filtered-index,
    TurboQuant/inference, and memory-tier paths;
-5. establish F8 packaging and deployment modes, then make Connectome the F9
-   authoritative local/enterprise client;
+5. retain the executable F8 cluster and F9 local-panel foundations, then add
+   Kubernetes packaging/control and authenticated RRD source switching rather
+   than rebuilding their already-tested local/cluster semantics;
 6. integrate Automaton → LFG → Connectome/RRD lifecycle contracts and run the
    firm-alpha recovery/security/capability matrix;
 7. only then resume bounded performance optimization and comparative claims.

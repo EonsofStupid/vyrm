@@ -406,6 +406,13 @@ Kubernetes operation, and authoritative Connectome management.
   for every item. A reopen test proves prompt-flight packets survive both the
   store and recorder process boundary; enabling frontier runners changes the
   runner envelope without changing replay durability.
+- Connectome now has a persistent Connections workspace rather than an
+  in-browser endpoint field. Independent loopback RRD profiles must pass the
+  public protocol and exact-instance capability handshake before CAS/journal
+  persistence; retries are idempotent, key rebinding fails, non-loopback
+  cleartext fails, and only credential references are retained. This is the F9
+  connection authority baseline, not authenticated source switching or remote
+  TLS data access.
 - `vyrmQL` and `vyrmMX` now form a separate read-only query layer above the
   frozen engine port. The language requires explicit valid and known time;
   catalog binding rejects unknown types/fields and missing parameters; the

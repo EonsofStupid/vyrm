@@ -308,6 +308,15 @@ paired with the runtime scope that owns its schema revision.
 | Data models | Switch between scoped schema registries and inspect record, event, relation, property, uniqueness, endpoint, and cardinality rules |
 | Visuals | Choose one evidence-backed runtime visual, freeze its current event, and open the full prompt, temporal, trace, graph, or cluster lab |
 
+The panel also has a **Connections** workspace. It always shows the current
+embedded instance and can live-negotiate an independently running loopback RRD
+instance through the supported Rust client. Protocol and exact instance
+identity must match before the bounded profile is persisted through the native
+control journal. Profiles retain credential references, never secret values.
+This establishes the connection authority; authenticated remote data browsing,
+active-source switching, and remote TLS are still open and are not simulated by
+the UI.
+
 The deeper labs remain available from the same panel:
 
 | Lens | Purpose |

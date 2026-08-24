@@ -1011,3 +1011,24 @@ index.
   pass. The reviewed 28-operation OpenAPI digest is
   `68d87505b85d7d99e6a58ce49404040d832295c6572f70f791db635dd45bbf64`.
 - Limit: first-class point deletion/tombstones remain open.
+
+## 2026-08-24 — Connectome RRD connection authority
+
+- Commit: `e21eb6e` (`feat(connectome): add persistent RRD connection profiles`).
+- Contract: the local panel now owns a bounded connection catalogue with stable
+  profile identities, modes, exact RRD instance identities, endpoints, and
+  credential references. Secret values are not part of the contract.
+- Semantics: a loopback RRD profile is persisted only after the supported Rust
+  client negotiates protocol/version and verifies the returned instance. The
+  catalogue advances through control-state CAS plus the hash-chained journal;
+  request replays converge and idempotency-key rebinding fails.
+- UI: the real Connections workspace shows the embedded authority, retained RRD
+  profiles, generations, live negotiated implementation/capability evidence,
+  and the remaining authenticated-source-switching boundary.
+- Evidence: 17 Connectome Rust unit/integration tests pass, including a live
+  socket capability negotiation; strict Clippy and JavaScript syntax checks
+  pass. The pre-slice F8/F9 audit also passed 64 cluster/Connectome tests,
+  including independent-process Raft recovery and mTLS transport.
+- Limit: remote HTTPS profiles validate structurally but are not probed until
+  the F4 TLS client exists. Profiles do not yet establish authenticated data
+  sessions or select a remote RRD as the panel's active data source.
