@@ -1,10 +1,12 @@
 # RRFlow — durable data and runtime for reasoning-ready AI
 
-**RRFlow is the product. RRD means Reason Ready Daemon.** RRD is RRFlow's
-internal durable data/runtime authority: persistence, transactions, catalogue,
-query, indexes, reasoning state, lifecycle enforcement, security, audit,
-recovery, and diagnostics compose as one logical engine. Connectome is the
-operator/developer client.
+**RRFlow means Reason Ready Flow and is the single product. RRD means Reason
+Ready Daemon and is RRFlow's native engine/runtime.** RRD is what the
+pre-release Vyrm implementation was becoming and is the actual Fjall competitor,
+not a wrapper around it. Persistence, transactions, catalogue, Arrow/DataFusion
+query execution, indexes, reasoning state, lifecycle enforcement, security,
+audit, recovery, and diagnostics must compose through that one engine.
+Connectome is the operator/developer client.
 
 The repository is being migrated from its pre-release Vyrm identity. Existing
 `vyrm-*`, `vyrmd`, VyrmQL, and `.vyrm` names describe current code and durable

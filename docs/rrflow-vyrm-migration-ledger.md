@@ -28,7 +28,8 @@ or preserving the old architecture under new labels.
 
 | Legacy | Target | Disposition |
 |---|---|---|
-| Vyrm product/repository identity | RRFlow | Replace in current product documentation and repository metadata |
+| Vyrm product/repository identity | RRFlow (Reason Ready Flow), `github.com/EonsofStupid/rrflow` | Replace in current product documentation, repository metadata, SDK module coordinates, and Git remote |
+| Vyrm engine identity | RRD (Reason Ready Daemon) | Migrate the native engine/runtime into one RRFlow engine composition root; Vyrm does not survive underneath it |
 | `vyrm` CLI | `rrflow` | Direct rename with command-level conformance; no permanent alias before stable release unless an installed workflow proves it is needed |
 | `vyrmd` | RRD composition moves to `rrflow-daemon`; cooperative MCP becomes an RRFlow adapter | Split by responsibility, not by copying persistence |
 | VyrmQL | RRFlowQL | Change parser diagnostics, query traces, protocol descriptions, fixtures, and SDK generation together |
@@ -49,6 +50,7 @@ may remain an `RrdClient` where that clearly denotes the internal daemon.
 
 | Current package | Target package/module | Required migration evidence |
 |---|---|---|
+| aggregate Vyrm/RRD composition | `rrflow-engine` | One catalogue/transaction/query/event/recovery authority used by embedded and daemon faces |
 | `vyrm-core` | `rrflow-core` | Golden domain types, key ordering, temporal resolution, runtime/event digests |
 | `vyrm-kv` | `rrflow-storage-lsm` | WAL/segment/manifest reopen, crash matrix, snapshots, compaction, platform I/O |
 | `vyrm-store` | `rrflow-storage` | Memory/native/legacy differential, archive/restore, migrations, atomic runtime commits |
@@ -111,7 +113,7 @@ the CLI, SDK tests, and Connectome. The migration order is therefore:
 1. rrflow-core
 2. rrflow-storage-lsm
 3. rrflow-storage
-4. rrflow-query foundation and reference-executor boundary
+4. rrflow-engine composition root plus rrflow-query reference-executor boundary
 5. graph, vector, inference and operator-knowledge physical modules
 6. rrflow-runtime provider-neutral lifecycle
 7. rrflow-security and rrflow-protocol ownership cleanup
@@ -122,9 +124,10 @@ the CLI, SDK tests, and Connectome. The migration order is therefore:
 12. compatibility-reader removal and stable-release naming gate
 ```
 
-The Arrow/DataFusion work begins at step 4 after the storage snapshot/read-stamp
-port is available under its target identity. It must not be implemented inside
-the HTTP server or Connectome.
+The RRD engine composition root begins at step 4 after the storage
+snapshot/read-stamp port is available under its target identity. Arrow/DataFusion
+then integrates through that root. Neither belongs inside the HTTP transport or
+Connectome.
 
 ## Slice ledger
 
@@ -134,7 +137,7 @@ the HTTP server or Connectome.
 | N1 | pending | Rename/refactor `vyrm-core` to `rrflow-core` without semantic changes | Core golden/property tests and all direct dependants compile |
 | N2 | pending | Migrate native KV package to `rrflow-storage-lsm` while retaining legacy on-disk readers | WAL/manifest/segment/snapshot/crash/reopen matrix |
 | N3 | pending | Migrate storage facade and make RRD catalogue/transaction/snapshot ports explicit | Memory/native/Fjall compatibility differential plus archive/recovery |
-| N4 | pending | Establish `rrflow-query`; preserve current executor as oracle; introduce Arrow schemas and snapshot-bound providers | Exact parser/plan/result differential and bounded RecordBatch streaming |
+| N4 | pending | Establish `rrflow-engine` and `rrflow-query`; preserve current executor as oracle; introduce Arrow schemas and snapshot-bound providers | One engine composition path, exact parser/plan/result differential and bounded RecordBatch streaming |
 | N5 | pending | Integrate DataFusion physical planning/execution with RRFlow extension nodes | Pushdown, cancellation, memory/spill budgets, stale-index and restart tests |
 | N6 | pending | Migrate graph/vector/inference/operator knowledge behind shared catalogue and read stamp | Cross-model atomicity/freshness and artifact compatibility |
 | N7 | pending | Build `rrflow-runtime` neutral lifecycle and bind it to shared RRD authority | Adapter-neutral fixtures, fail-closed mutation, one-shot authorization |

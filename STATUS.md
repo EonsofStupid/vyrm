@@ -727,12 +727,13 @@ remote repetition remains required before compatibility retirement.
 
 ## Product and instance boundary
 
-**RRFlow is the product. RRD means Reason Ready Daemon.** RRD is RRFlow's one
-durable data/runtime authority; it owns the cohesive persistence, transaction,
-catalogue, query, index, reasoning, lifecycle, security, audit, and recovery
-contract. Vyrm is not a permanent native engine beneath RRD. Existing
-`vyrm-*`, VyrmQL, and `.vyrm/store` references describe current implementation
-and migration inputs.
+**RRFlow means Reason Ready Flow and is the single product. RRD means Reason
+Ready Daemon and is its one native engine/runtime.** RRD is the target identity
+for what Vyrm was becoming and is the actual Fjall competitor. Persistence,
+transactions, catalogue, query, indexes, reasoning, lifecycle, security, audit,
+and recovery compose through RRD; Vyrm does not survive as an engine beneath
+it. Existing `vyrm-*`, VyrmQL, and `.vyrm/store` references describe current
+implementation and migration inputs.
 
 The current workspace has native WAL/MVCC/LSM persistence but no Arrow or
 DataFusion dependency. The target RRD Arrow/DataFusion query plane is therefore

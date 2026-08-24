@@ -16,11 +16,12 @@ old-to-new name and durable-format sequence is tracked in
 
 ## Product boundary and naming
 
-**RRFlow is the whole product. RRD means Reason Ready Daemon.** RRD is RRFlow's
-durable runtime authority and is the replacement for the pre-release Vyrm
-identity. Storage, query, indexing, reasoning state, lifecycle enforcement, and
-diagnostics compose behind RRD; they are not separate products or independently
-persisted verticals.
+**RRFlow means Reason Ready Flow and is the whole product. RRD means Reason
+Ready Daemon and is RRFlow's one native engine/runtime.** RRD replaces the
+pre-release Vyrm identity and is the actual Fjall competitor. Storage, query,
+indexing, reasoning state, lifecycle enforcement, and diagnostics compose
+through that engine; they are not separate products or independently persisted
+verticals.
 
 RRFlow remains one cohesive system:
 

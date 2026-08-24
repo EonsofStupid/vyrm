@@ -1,3 +1,3 @@
-module github.com/EonsofStupid/vyrm/sdks/go
+module github.com/EonsofStupid/rrflow/sdks/go
 
 go 1.24

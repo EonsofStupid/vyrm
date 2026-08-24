@@ -11,12 +11,15 @@ The canonical umbrella is **RRFlow**:
 
 - RRO composes Automaton's provider/session brokerage with LFG's just-in-time
   context encoding and routing.
-- RRD, the Reason Ready Daemon, is RRFlow's cohesive durable data/runtime
-  authority: persistence, transactions, catalogue, query, indexes, reasoning,
-  lifecycle, security, audit, and recovery.
+- RRFlow means Reason Ready Flow and is the single product. RRD, the Reason
+  Ready Daemon, is its one native engine/runtime: persistence, transactions,
+  catalogue, query, indexes, reasoning, lifecycle, security, audit, and
+  recovery compose there.
 - Existing Vyrm-named LSM/MVCC code is migration input to RRD, not a permanent
-  engine brand or product boundary. Arrow/DataFusion is target architecture and
-  must not be implied by the current bespoke row executor.
+  engine brand or product boundary. RRD is the actual Fjall competitor; Fjall
+  remains only a compatibility reader and differential oracle. Arrow/DataFusion
+  is target architecture and must not be implied by the current bespoke row
+  executor.
 - Connectome Panel records, explains, visualizes, and controls those contracts.
 - PostgreSQL/pgvector is project-scoped shared operator knowledge behind the
   external adapter; it is neither Vyrm's canonical persistence nor LFG's JIT

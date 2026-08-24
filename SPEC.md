@@ -7,13 +7,15 @@
 | Scope | Existing kernel invariants that must survive migration; not the target product boundary or naming authority |
 | Target authority | `docs/rrflow-rrd-architecture.md` and `docs/rrflow-vyrm-migration-ledger.md` |
 
-> **Architecture correction (2026-08-24).** RRFlow is the product and RRD means
-> Reason Ready Daemon. RRD is the cohesive persistence, transaction, catalogue,
-> query, index, AI-runtime, security, audit, and recovery authority. Vyrm is not
-> a permanent engine beneath it. Names in this file describe the implementation
-> whose semantics and durable bytes must be migrated safely. Where this file
-> disagrees about product identity, source organization, or target naming, the
-> target architecture and migration ledger above are authoritative.
+> **Architecture correction (2026-08-24).** RRFlow means Reason Ready Flow and
+> is the single product. RRD means Reason Ready Daemon and is its native
+> engine/runtime: the target identity for what Vyrm was becoming and the actual
+> Fjall competitor. Persistence, transaction, catalogue, query, index,
+> AI-runtime, security, audit, and recovery compose through RRD rather than
+> separate engines. Names in this file describe implementation whose semantics
+> and durable bytes must be migrated safely. Where this file disagrees about
+> product identity, source organization, or target naming, the target
+> architecture and migration ledger above are authoritative.
 
 > **Full-stack expansion (2026-08-23).** The original Tier-0 kernel remains the
 > inward semantic authority, but it is no longer the complete product scope.

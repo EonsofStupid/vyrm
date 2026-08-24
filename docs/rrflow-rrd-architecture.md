@@ -10,12 +10,14 @@ is complete.
 
 ## Decision
 
-**RRFlow is the product. RRD means Reason Ready Daemon.**
+**RRFlow means Reason Ready Flow and is the single product. RRD means Reason
+Ready Daemon and is its one native engine/runtime.**
 
-RRD is RRFlow's internal durable data and AI-runtime authority. It is the one
-cohesive system that joins persistence, transactions, the catalogue, query
-planning and execution, indexes, reasoning state, lifecycle enforcement,
-security, audit, recovery, and diagnostics.
+RRD is what the pre-release Vyrm implementation was becoming. It is RRFlow's
+internal durable data and AI-runtime authority and the actual Fjall competitor.
+It joins persistence, transactions, the catalogue, query planning and
+execution, indexes, reasoning state, lifecycle enforcement, security, audit,
+recovery, and diagnostics through one engine contract.
 
 Vyrm is not a layer below RRD in the target architecture. `vyrm-*`, `vyrmd`,
 VyrmQL, `.vyrm`, and related identifiers name pre-release implementation that
@@ -27,8 +29,8 @@ complete an atomic migration.
 
 | Term | Meaning | Must not mean |
 |---|---|---|
-| RRFlow | The complete product, repository, CLI, configuration namespace, SDK family, and user-facing platform | One component beside Vyrm or RRD |
-| RRD | Reason Ready Daemon: RRFlow's internal durable data/runtime authority and service process | A second product brand, a thin HTTP wrapper, or only the reasoning loop |
+| RRFlow | Reason Ready Flow: the complete product, repository, CLI, configuration namespace, SDK family, and user-facing platform | One component beside Vyrm or RRD |
+| RRD | Reason Ready Daemon: RRFlow's single native engine/runtime and service process | A second product brand, a thin HTTP wrapper, an alias for only the LSM, or only the reasoning loop |
 | Connectome | RRFlow's local and enterprise operator/developer client | An authoritative database, policy store, or second runtime |
 | RRFlowQL | RRFlow's query language and typed query contract | A separately persisted engine |
 | adapter | A provider, runtime, protocol, package-runner, object-store, accelerator, or compatibility implementation behind an RRFlow port | An owner of policy, catalogue, transaction, or lifecycle truth |
@@ -77,7 +79,15 @@ DataFusion dependency. The existing VyrmQL/VyrmMX path is a bespoke row
 executor and remains a conformance oracle while the RRD Arrow/DataFusion plane
 is introduced.
 
-## One logical engine
+## One engine product
+
+RRD is not `rrd-server` placed in front of unrelated Vyrm verticals. The target
+has one engine composition root, used directly for embedded execution and
+hosted by the `rrd` process for local or remote execution. That composition root
+owns the catalogue, transaction coordinator, read stamps, query execution,
+security decisions, durable events, and recovery. Lower crates are internal
+physical components and cannot be composed independently into another RRFlow
+truth.
 
 RRD has exactly one of each authoritative concern:
 
@@ -128,9 +138,10 @@ underneath another database. The target storage plane includes:
 - local, object-store, and later distributed durability implementations behind
   capability-checked ports.
 
-The existing native LSM/MVCC code is retained and migrated into this plane. The
-Fjall path remains a temporary compatibility reader and differential oracle; it
-does not define RRD architecture.
+The existing native LSM/MVCC code is retained and migrated into RRD. This is the
+physical work that competes with Fjall. The Fjall path remains a temporary
+compatibility reader and differential oracle; it is never an RRD engine mode or
+default and does not define RRFlow architecture.
 
 ## Arrow and DataFusion execution plane
 
@@ -239,6 +250,7 @@ applications. The target names are:
 
 ```text
 crates/
+├─ rrflow-engine            RRD composition root and only authoritative engine API
 ├─ rrflow-core              canonical identities, values, events, transactions
 ├─ rrflow-storage           persistence port, archives, recovery, engine selection
 ├─ rrflow-storage-lsm       native WAL/MVCC/LSM physical implementation
@@ -250,7 +262,7 @@ crates/
 ├─ rrflow-cluster           replication, placement and distributed evidence
 ├─ rrflow-security          identity, authorization and audit
 ├─ rrflow-protocol          versioned RRD wire contract
-├─ rrflow-daemon            RRD composition root and service process
+├─ rrflow-daemon            hosts `rrflow-engine` as the `rrd` service process
 ├─ rrflow-client            supported Rust client
 ├─ rrflow-control-plane     estates, reconciliation, backup and deployment jobs
 ├─ rrflow-kubernetes        Kubernetes control adapter
@@ -264,6 +276,11 @@ retain private parser, logical-plan, physical-plan, and executor subcrates if
 compile times justify them, but it exposes one query contract. The same rule
 applies to storage and indexes.
 
+Only `rrflow-engine` composes the lower data/runtime components. Embedded users
+link it directly; `rrflow-daemon` hosts the same engine. The daemon, protocol,
+SDKs, CLI, adapters, and Connectome must not bypass it to assemble their own
+catalogue, transaction, query, vector, graph, or lifecycle behavior.
+
 The RRD executable is `rrd`. User/project commands use `rrflow`. Cooperative
 MCP tools and provider adapters use RRFlow names because they are product-facing
 surfaces, not the daemon itself.
@@ -276,7 +293,7 @@ As of 2026-08-24:
   estate/security, cluster, and Connectome capabilities are real but distributed
   across legacy and newer crate boundaries;
 - `rrd-server` directly composes multiple `vyrm-*` crates rather than one
-  finished RRD engine facade;
+  finished RRD engine composition root;
 - query parsing/execution and vector planning have separate catalogues and
   execution paths that still require unification behind the RRD catalogue and
   transaction/read-stamp contract;
@@ -298,9 +315,11 @@ The Vyrm-to-RRFlow migration is complete only when:
    first stable release;
 3. RRD exposes one catalogue, transaction/read-stamp model, security authority,
    event/outbox path, and recovery model across every supported data model;
-4. RRFlowQL streams Arrow RecordBatches through a DataFusion-backed execution
+4. embedded execution and the `rrd` process use the same `rrflow-engine`
+   composition root, with no consumer rebuilding the engine from lower crates;
+5. RRFlowQL streams Arrow RecordBatches through a DataFusion-backed execution
    plane with semantic differential coverage against the existing executor;
-5. embedded, local-daemon, and remote paths pass the same conformance corpus;
-6. restart, corruption, migration, cancellation, backpressure, stale-index,
+6. embedded, local-daemon, and remote paths pass the same conformance corpus;
+7. restart, corruption, migration, cancellation, backpressure, stale-index,
    fail-closed authorization, and cross-version recovery tests pass; and
-7. all required Linux, macOS/ARM, and Windows CI jobs are green.
+8. all required Linux, macOS/ARM, and Windows CI jobs are green.
