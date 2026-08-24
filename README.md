@@ -1,11 +1,21 @@
-# vyrm — native storage engine for RRD
+# RRFlow — durable data and runtime for reasoning-ready AI
 
-The umbrella is **RRFlow**: RRO orchestrates Automaton and LFG, RRD composes the
-durable data/runtime contract, and Connectome Panel is the operator client and
-visualizer. This repository is **Vyrm**, RRD's native persistence engine. Vyrm
-owns the LSM authority and evidence needed by those layers; it does not own
-workflow orchestration or UI semantics. A columnar analytical path remains a
-measured future addition, not a property of the current row/key-value engine.
+**RRFlow is the product. RRD means Reason Ready Daemon.** RRD is RRFlow's
+internal durable data/runtime authority: persistence, transactions, catalogue,
+query, indexes, reasoning state, lifecycle enforcement, security, audit,
+recovery, and diagnostics compose as one logical engine. Connectome is the
+operator/developer client.
+
+The repository is being migrated from its pre-release Vyrm identity. Existing
+`vyrm-*`, `vyrmd`, VyrmQL, and `.vyrm` names describe current code and durable
+migration inputs; they are not permanent product or subsystem boundaries. The
+authoritative target is [RRFlow and the Reason Ready Daemon](docs/rrflow-rrd-architecture.md),
+and the dependency-safe rename/recovery sequence is in the
+[migration ledger](docs/rrflow-vyrm-migration-ledger.md).
+
+Native WAL/MVCC/LSM persistence is real. Arrow/DataFusion execution is not yet
+implemented in this workspace and remains a gated RRD integration; the current
+bespoke query executor is its semantic conformance oracle.
 
 > **Full-stack baseline (2026-08-23).** Vyrm is a substantive local alpha
 > persistence/runtime kernel; it is not yet a complete SurrealDB- or
@@ -179,7 +189,7 @@ prompt
                          └─ deny mutation when evidence or authorization is stale
 ```
 
-Vyrm provides:
+The current pre-migration implementation provides:
 
 - bi-temporal claims with immutable supersession and provenance;
 - atomic typed runtime commits spanning claims, graph records, relations,
@@ -519,8 +529,9 @@ and post-tool commits the digest-bound observation, temporal status claim,
 runtime change, outcome, and audit atomically. See
 [`docs/package-workflows.md`](docs/package-workflows.md).
 
-Vyrm owns the storage contract. `vyrm_store::NativeEngine` now implements the
-same `Engine` port as the in-memory reference and transitional Fjall adapter;
+RRD owns the target storage contract. The current legacy
+`vyrm_store::NativeEngine` implements the same `Engine` port as the in-memory
+reference and transitional Fjall adapter;
 claim recall, projections, schema enforcement, hash-chained commits, snapshots,
 concurrent CAS, restart, and exact `vyrmQL` results run through a three-backend
 differential. `vyrmMX` now lowers an event query with a bound built-in `cursor`

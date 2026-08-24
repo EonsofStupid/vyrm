@@ -51,10 +51,11 @@ projections to that platform while retaining the shared runtime invariants.
 
 An instance may project or query operator-authored project knowledge through a
 capability adapter. pgvector is the first planned compatibility target for
-existing Postgres estates. Vyrm remains authoritative for reasoning, policy,
-audit, trace, graph, projection freshness, and adapter decisions; Postgres owns
-its rows and transaction history. An idempotent outbox coordinates writes and a
-persisted trace link records the exact project and external source revision.
+existing Postgres estates. RRD remains authoritative for RRFlow reasoning,
+policy, audit, trace, graph, projection freshness, and adapter decisions;
+Postgres owns its rows and transaction history. An idempotent outbox coordinates
+writes and a persisted trace link records the exact project and external source
+revision.
 See [`runtime-tracing-operator-knowledge.md`](runtime-tracing-operator-knowledge.md).
 
 The portable boundary is now executable in `vyrm-operator`: immutable

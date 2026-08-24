@@ -1,13 +1,16 @@
-# vyrm — Work Plan
+# RRFlow — Work Plan
 
 | Field | Value |
 |-------|-------|
-| Status | Full-stack correction active 2026-08-23; kernel history retained below. |
-| Governs | Sequencing and acceptance of work against `SPEC.md` |
-| Does not govern | Contracts, terminology, or requirements. Those are `SPEC.md` only. |
+| Status | Controlled RRFlow/RRD architecture and naming migration active 2026-08-24; implementation history retained below |
+| Governs | Historical sequencing plus executable capability work not superseded by the current migration ledger |
+| Does not govern | Target product boundary, terminology, or rename order; those are `docs/rrflow-rrd-architecture.md` and `docs/rrflow-vyrm-migration-ledger.md` |
 
-This document sequences work. It does not restate requirements. Where the two
-disagree, `SPEC.md` is authoritative and this document is wrong.
+This document retains substantial implementation history. Current work follows
+the [RRFlow/RRD architecture](docs/rrflow-rrd-architecture.md) and
+[migration ledger](docs/rrflow-vyrm-migration-ledger.md). Where historical
+Vyrm product boundaries or names conflict with them, the newer documents are
+authoritative.
 
 > **Full-stack sequencing correction (2026-08-23).** The bounded VyrmKV/Fjall
 > optimization and SurrealDB 3.0.5 claim diagnostic were performed before a

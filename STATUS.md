@@ -727,14 +727,23 @@ remote repetition remains required before compatibility retirement.
 
 ## Product and instance boundary
 
-The product umbrella is **RRFlow**. RRO owns orchestration around Automaton and
-LFG; RRD owns the composed data/runtime contract; Connectome Panel is the
-operator UI; and Vyrm is RRD's native LSM persistence engine. A columnar path is
-a future evidence-gated engine capability, not a current claim. A major
-platform receives one isolated Connectome/Vyrm instance molded to that platform.
-A set of related small projects may share an umbrella instance only through
-explicit membership. The default remains the existing per-checkout
-`.vyrm/store`.
+**RRFlow is the product. RRD means Reason Ready Daemon.** RRD is RRFlow's one
+durable data/runtime authority; it owns the cohesive persistence, transaction,
+catalogue, query, index, reasoning, lifecycle, security, audit, and recovery
+contract. Vyrm is not a permanent native engine beneath RRD. Existing
+`vyrm-*`, VyrmQL, and `.vyrm/store` references describe current implementation
+and migration inputs.
+
+The current workspace has native WAL/MVCC/LSM persistence but no Arrow or
+DataFusion dependency. The target RRD Arrow/DataFusion query plane is therefore
+not a current capability claim. See `docs/rrflow-rrd-architecture.md` and
+`docs/rrflow-vyrm-migration-ledger.md`.
+
+A major platform receives one isolated RRFlow/RRD instance molded to that
+platform. A set of related small projects may share an umbrella instance only
+through explicit membership. The current per-checkout `.vyrm/store` remains in
+place until the migration ledger's read-old/write-new path is implemented and
+verified.
 
 The current routing projection is bound to one canonical project root and
 refuses implicit rebinding. The instance manifest now prevents a different

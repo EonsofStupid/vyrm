@@ -1,11 +1,19 @@
-# vyrm — Kernel Specification v0
+# RRFlow — legacy kernel semantics and migration inputs
 
 | Field | Value |
 |-------|-------|
-| Status | Draft. Pre-release. Public RRD contract v1 is now migration-gated. |
-| Default substrate | Native `vyrmKV`; pre-existing non-native directories reopen through the Fjall 3.1.8 compatibility adapter until explicitly migrated |
-| Scope | Vyrm kernel plus the inward boundary of the multi-tier RRD product; outward product delivery is sequenced by the full-stack ledger |
-| Supersedes | Nothing. Extends `docs/architecture-journal.md` and `automaton/docs/00-abstract-layer.md`. |
+| Status | Draft, pre-release legacy semantic specification under controlled RRFlow/RRD migration |
+| Current default substrate | Native `vyrmKV`; pre-existing non-native directories reopen through the Fjall 3.1.8 compatibility adapter until explicitly migrated |
+| Scope | Existing kernel invariants that must survive migration; not the target product boundary or naming authority |
+| Target authority | `docs/rrflow-rrd-architecture.md` and `docs/rrflow-vyrm-migration-ledger.md` |
+
+> **Architecture correction (2026-08-24).** RRFlow is the product and RRD means
+> Reason Ready Daemon. RRD is the cohesive persistence, transaction, catalogue,
+> query, index, AI-runtime, security, audit, and recovery authority. Vyrm is not
+> a permanent engine beneath it. Names in this file describe the implementation
+> whose semantics and durable bytes must be migrated safely. Where this file
+> disagrees about product identity, source organization, or target naming, the
+> target architecture and migration ledger above are authoritative.
 
 > **Full-stack expansion (2026-08-23).** The original Tier-0 kernel remains the
 > inward semantic authority, but it is no longer the complete product scope.
@@ -68,8 +76,9 @@ MUST cite the date and host on which they were obtained.
 
 ## 2 · Position
 
-vyrm owns both its semantic contract and persistence architecture. New runtime
-stores use native `vyrmKV` behind the canonical `PersistentEngine` selector.
+The current implementation owns both the legacy semantic contract and
+persistence architecture that RRD must preserve while migrating. New runtime
+stores currently use native `vyrmKV` behind the `PersistentEngine` selector.
 Directories carrying native's authenticated `CURRENT` pointer reopen as native;
 other existing directories remain on the Fjall compatibility adapter until an
 explicit migration. Selection MUST fail closed and MUST NOT reinterpret bytes.

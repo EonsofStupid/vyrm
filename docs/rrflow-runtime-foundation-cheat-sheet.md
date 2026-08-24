@@ -9,6 +9,11 @@ This decision supersedes older repository text that presents Vyrm as a
 permanent product or independently branded storage subsystem. Those references
 describe current code and migration debt, not the target architecture.
 
+The complete product/data boundary is authoritative in
+[`rrflow-rrd-architecture.md`](rrflow-rrd-architecture.md). The controlled
+old-to-new name and durable-format sequence is tracked in
+[`rrflow-vyrm-migration-ledger.md`](rrflow-vyrm-migration-ledger.md).
+
 ## Product boundary and naming
 
 **RRFlow is the whole product. RRD means Reason Ready Daemon.** RRD is RRFlow's
@@ -33,6 +38,11 @@ RRFlow
 ├─ adapters and SDKs: provider/runtime/language integration surfaces
 └─ Connectome: local and enterprise operator client
 ```
+
+This is target architecture, not current implementation status. The repository
+does not yet depend on Arrow or DataFusion; its current query executor remains a
+reference oracle while that execution plane is introduced behind RRD's shared
+catalogue, transaction, and read-stamp contract.
 
 Use `RRFlow` in all new product, protocol, CLI, configuration, documentation,
 and module names. Use `RRD` only for the Reason Ready Daemon role and its public

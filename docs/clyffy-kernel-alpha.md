@@ -1,8 +1,9 @@
-# Vyrm alpha → Clyffy kernel handoff
+# RRFlow alpha → Clyffy kernel handoff
 
-Status: execution contract, 2026-08-19. This document separates what must be
-proved in Vyrm from what belongs in the later, clean Clyffy product repository.
-It is intentionally release-gated rather than calendar-gated.
+Status: historical execution contract under the 2026-08-24 RRFlow/RRD naming
+migration. Current product boundaries are authoritative in
+`rrflow-rrd-architecture.md`; Vyrm names below identify pre-migration code and
+evidence. This document remains release-gated rather than calendar-gated.
 
 ## Product boundary
 
@@ -10,17 +11,19 @@ The canonical umbrella is **RRFlow**:
 
 - RRO composes Automaton's provider/session brokerage with LFG's just-in-time
   context encoding and routing.
-- RRD owns the durable data/runtime contracts, query semantics, projections,
-  lifecycle evidence, and storage capabilities.
-- Vyrm is RRD's native LSM persistence engine. A columnar path remains a future
-  measured capability and must not be implied by the current implementation.
+- RRD, the Reason Ready Daemon, is RRFlow's cohesive durable data/runtime
+  authority: persistence, transactions, catalogue, query, indexes, reasoning,
+  lifecycle, security, audit, and recovery.
+- Existing Vyrm-named LSM/MVCC code is migration input to RRD, not a permanent
+  engine brand or product boundary. Arrow/DataFusion is target architecture and
+  must not be implied by the current bespoke row executor.
 - Connectome Panel records, explains, visualizes, and controls those contracts.
 - PostgreSQL/pgvector is project-scoped shared operator knowledge behind the
   external adapter; it is neither Vyrm's canonical persistence nor LFG's JIT
   compiler.
-- Clyffy will package the RRFlow capabilities into installable per-platform and
-  umbrella deployments. It consumes versioned Vyrm interfaces; it does not
-  fork Vyrm internals into a second implementation.
+- Clyffy will package RRFlow into installable per-platform and umbrella
+  deployments. It consumes versioned RRFlow/RRD interfaces; it does not fork
+  RRD internals into a second implementation.
 
 The Clyffy repository should not be created by pooling old repositories. It
 starts from a release manifest that pins reviewed versions of Automaton, LFG,
