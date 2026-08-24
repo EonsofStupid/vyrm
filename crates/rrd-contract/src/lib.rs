@@ -14,7 +14,7 @@ use std::fmt;
 pub const PROTOCOL: &str = "rrd";
 pub const PROTOCOL_VERSION: u16 = 1;
 pub const OPENAPI_DOCUMENT_SHA256: &str =
-    "a6809faf79e177c4196f9697c5b66ec26ecd9946c295a18c4eaa5f6aaa70807e";
+    "91a5681109cf45c4d544856733533acb3e44bb70630cb1ba03c048aaaf164da7";
 pub const MAX_ID_BYTES: usize = 128;
 pub const MAX_MESSAGE_BYTES: usize = 4_096;
 pub const MAX_CAPABILITIES: usize = 512;
@@ -31,6 +31,7 @@ pub const MAX_LIVE_QUERY_DELTA_ROWS: u64 = 100_000;
 pub const MAX_LIVE_QUERY_WAIT_MS: u64 = 5_000;
 pub const MAX_VECTOR_SEARCH_CHANGES: u64 = 1_000_000;
 pub const MAX_VECTOR_SEARCH_TOP_K: u64 = 100_000;
+pub const MAX_VECTOR_POINT_PAGE: u64 = 4_096;
 pub const MAX_CHANGEFEED_PAGE: u64 = 4_096;
 pub const MAX_CHANGEFEED_WAIT_MS: u64 = 5_000;
 pub const MIN_LEASE_MS: u64 = 1_000;
@@ -696,6 +697,71 @@ pub struct VectorSearchResult {
     pub hits: Vec<VectorSearchHit>,
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ScrollVectorPoints {
+    pub scope: String,
+    pub collection_id: CanonicalId,
+    pub vector_name: CanonicalId,
+    pub valid_at: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub after_reference: Option<DataReference>,
+    pub limit: u64,
+    pub max_scanned_changes: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub filter: Option<VectorPayloadFilter>,
+}
+
+impl ScrollVectorPoints {
+    pub fn validate(&self) -> Result<()> {
+        validate_vector_scope(&self.scope)?;
+        if self.valid_at == 0 {
+            return invalid("vector point scroll valid_at must be greater than zero");
+        }
+        if self.limit == 0 || self.limit > MAX_VECTOR_POINT_PAGE {
+            return invalid(format!(
+                "vector point scroll limit must be in 1..={MAX_VECTOR_POINT_PAGE}"
+            ));
+        }
+        if self.max_scanned_changes == 0 || self.max_scanned_changes > MAX_VECTOR_SEARCH_CHANGES {
+            return invalid(format!(
+                "vector point scroll max_scanned_changes must be in 1..={MAX_VECTOR_SEARCH_CHANGES}"
+            ));
+        }
+        if let Some(filter) = &self.filter {
+            filter.validate()?;
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct VectorPointSnapshot {
+    pub reference: DataReference,
+    pub subject: DataReference,
+    pub source_cursor: u64,
+    pub value: DataVectorValue,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provenance: Option<DataEmbeddingProvenance>,
+    pub payload: DataProperties,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct VectorPointPage {
+    pub scope: String,
+    pub collection_id: CanonicalId,
+    pub vector_name: CanonicalId,
+    pub read_manifest_sha256: String,
+    pub known_at_cursor: u64,
+    pub scanned_changes: u64,
+    pub points: Vec<VectorPointSnapshot>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub next_after: Option<DataReference>,
+    pub truncated: bool,
+}
+
 fn validate_vector_scope(scope: &str) -> Result<()> {
     if scope.is_empty() || scope.len() > MAX_ID_BYTES || scope.as_bytes().contains(&0) {
         return invalid("vector scope is invalid");
@@ -982,6 +1048,7 @@ pub enum SecurityAction {
     ChangefeedFollow,
     VectorCollectionEnsure,
     VectorCollectionList,
+    VectorPointScroll,
     VectorSearch,
     BackupCreate,
     BackupList,
@@ -1382,6 +1449,16 @@ pub fn endpoint_catalogue() -> EndpointCatalogue {
             "VectorCollectionCatalogueSnapshot",
         ),
         endpoint(
+            "vector-point-scroll",
+            HttpMethod::Post,
+            "/v1/vector/points/scroll",
+            EndpointAuthentication::SessionBearer,
+            false,
+            SecurityAction::VectorPointScroll,
+            "ScrollVectorPoints",
+            "VectorPointPage",
+        ),
+        endpoint(
             "vector-search",
             HttpMethod::Post,
             "/v1/vector/search",
@@ -1673,6 +1750,7 @@ fn request_envelope_schema(name: &str) -> Result<serde_json::Value> {
         "ReadEstate" => schema_json::<RequestEnvelope<ReadEstate>>(),
         "RenewSession" => schema_json::<RequestEnvelope<RenewSession>>(),
         "RestoreInstanceBackup" => schema_json::<RequestEnvelope<RestoreInstanceBackup>>(),
+        "ScrollVectorPoints" => schema_json::<RequestEnvelope<ScrollVectorPoints>>(),
         "SearchVectors" => schema_json::<RequestEnvelope<SearchVectors>>(),
         _ => return invalid(format!("no public request schema for {name}")),
     };
@@ -1713,6 +1791,7 @@ fn response_envelope_schema(name: &str) -> Result<serde_json::Value> {
         "SessionTermination" => schema_json::<ResponseEnvelope<SessionTermination>>(),
         "TransactionLease" => schema_json::<ResponseEnvelope<TransactionLease>>(),
         "TransactionPreview" => schema_json::<ResponseEnvelope<TransactionPreview>>(),
+        "VectorPointPage" => schema_json::<ResponseEnvelope<VectorPointPage>>(),
         "VectorCollectionCatalogueSnapshot" => {
             schema_json::<ResponseEnvelope<VectorCollectionCatalogueSnapshot>>()
         }

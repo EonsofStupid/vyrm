@@ -40,9 +40,12 @@ pub use compact::{
 };
 pub use contract::{
     EmbeddingModelBinding, MultiVectorComparator, ScoreMetric, SearchHit, SearchMode,
-    SearchRequest, VectorCandidate, VectorQuery,
+    SearchRequest, VectorCandidate, VectorQuery, VectorVisibilityRequest,
 };
-pub use exact::{candidates_from_changes, search_changes_exact, search_exact, search_exact_ref};
+pub use exact::{
+    candidates_from_changes, materialize_visible, search_changes_exact, search_exact,
+    search_exact_ref,
+};
 pub use filter::{FilterCondition, FilterExpression, FilterOperator};
 pub use hnsw::{HnswConfig, HnswDescriptor, HnswIndex, HNSW_FORMAT_VERSION};
 pub use plan::{

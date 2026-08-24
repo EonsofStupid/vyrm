@@ -30,6 +30,7 @@ const (
 	OperationTransactionPreview     OperationID = "transaction-preview"
 	OperationVectorCollectionEnsure OperationID = "vector-collection-ensure"
 	OperationVectorCollectionList   OperationID = "vector-collection-list"
+	OperationVectorPointScroll      OperationID = "vector-point-scroll"
 	OperationVectorSearch           OperationID = "vector-search"
 )
 
@@ -59,5 +60,6 @@ var endpoints = map[OperationID]Endpoint{
 	OperationTransactionPreview:     {Method: "POST", Path: "/v1/transactions/{transaction}/preview", Authentication: "session_bearer", Mutation: false},
 	OperationVectorCollectionEnsure: {Method: "POST", Path: "/v1/vector/collections/ensure", Authentication: "session_bearer", Mutation: true},
 	OperationVectorCollectionList:   {Method: "POST", Path: "/v1/vector/collections/list", Authentication: "session_bearer", Mutation: false},
+	OperationVectorPointScroll:      {Method: "POST", Path: "/v1/vector/points/scroll", Authentication: "session_bearer", Mutation: false},
 	OperationVectorSearch:           {Method: "POST", Path: "/v1/vector/search", Authentication: "session_bearer", Mutation: false},
 }

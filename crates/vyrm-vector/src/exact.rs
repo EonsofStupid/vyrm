@@ -1,5 +1,7 @@
 use crate::contract::invalid;
-use crate::{ScoreMetric, SearchHit, SearchRequest, VectorCandidate, VectorQuery};
+use crate::{
+    ScoreMetric, SearchHit, SearchRequest, VectorCandidate, VectorQuery, VectorVisibilityRequest,
+};
 use std::collections::{BTreeMap, BTreeSet};
 use vyrm_core::{Result, RuntimeChange, RuntimeMutation, RuntimeRef, ScopeId, VectorValue};
 
@@ -45,7 +47,15 @@ pub fn search_exact_ref<'a>(
     candidates: impl IntoIterator<Item = &'a VectorCandidate>,
 ) -> Result<Vec<SearchHit>> {
     request.validate()?;
-    let latest = materialize_visible_refs(request, candidates)?;
+    let visibility = VectorVisibilityRequest {
+        scope: request.scope.clone(),
+        read: request.read.clone(),
+        valid_at: request.valid_at,
+        field: request.field.clone(),
+        embedding_model: request.embedding_model.clone(),
+        filter: request.filter.clone(),
+    };
+    let latest = materialize_visible_refs(&visibility, candidates)?;
     let mut hits = Vec::new();
     for candidate in latest {
         let vector = &candidate.vector;
@@ -62,10 +72,22 @@ pub fn search_exact_ref<'a>(
     Ok(hits)
 }
 
+pub fn materialize_visible(
+    request: &VectorVisibilityRequest,
+    candidates: impl IntoIterator<Item = VectorCandidate>,
+) -> Result<Vec<VectorCandidate>> {
+    let candidates = candidates.into_iter().collect::<Vec<_>>();
+    Ok(materialize_visible_refs(request, &candidates)?
+        .into_iter()
+        .cloned()
+        .collect())
+}
+
 fn materialize_visible_refs<'a>(
-    request: &SearchRequest,
+    request: &VectorVisibilityRequest,
     candidates: impl IntoIterator<Item = &'a VectorCandidate>,
 ) -> Result<Vec<&'a VectorCandidate>> {
+    request.validate()?;
     let mut latest = BTreeMap::<&'a RuntimeRef, &'a VectorCandidate>::new();
     let mut versions = BTreeSet::new();
     for candidate in candidates {

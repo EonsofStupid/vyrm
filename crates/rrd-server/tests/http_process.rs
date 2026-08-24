@@ -1202,6 +1202,40 @@ fn data_transaction_atomically_commits_every_public_model_and_replays_after_rest
     );
     assert_eq!(status, 200, "{filtered}");
     assert!(payload(&filtered)["hits"].as_array().unwrap().is_empty());
+    let scroll_points = envelope(
+        json!({
+            "scope": "instance:socket-test",
+            "collection_id": "documents",
+            "vector_name": "title",
+            "valid_at": 100,
+            "limit": 1,
+            "max_scanned_changes": 100,
+            "filter": {
+                "kind": "condition",
+                "condition": {
+                    "property": "tenant",
+                    "operator": {"operator": "equals", "value": {"type": "string", "value": "alpha"}}
+                }
+            }
+        }),
+        None,
+        None,
+    );
+    let (status, denied) = post(&server, "/v1/vector/points/scroll", &scroll_points, None);
+    assert_eq!(status, 401, "{denied}");
+    let (status, scrolled) = post(
+        &server,
+        "/v1/vector/points/scroll",
+        &scroll_points,
+        Some((&session_id, &token)),
+    );
+    assert_eq!(status, 200, "{scrolled}");
+    let point_page = payload(&scrolled);
+    assert_eq!(point_page["known_at_cursor"], 11);
+    assert_eq!(point_page["points"][0]["reference"]["id"], "alpha-title");
+    assert_eq!(point_page["points"][0]["payload"]["tenant"]["value"], "alpha");
+    assert_eq!(point_page["truncated"], false);
+    assert!(point_page.get("next_after").is_none());
     let wrong_dimensions = envelope(
         json!({
             "scope": "instance:socket-test",
@@ -1664,12 +1698,12 @@ fn real_socket_exercises_lifecycle_commit_and_restart_replay() {
     assert_eq!(payload(&catalogue)["protocol_version"], 1);
     assert_eq!(
         payload(&catalogue)["endpoints"].as_array().unwrap().len(),
-        26
+        27
     );
     let (status, openapi) = http(server.address, "GET", "/v1/schema/openapi", &[], &[]);
     assert_eq!(status, 200, "{openapi}");
     assert_eq!(payload(&openapi)["openapi"], "3.1.0");
-    assert_eq!(payload(&openapi)["x-rrd-endpoint-count"], 26);
+    assert_eq!(payload(&openapi)["x-rrd-endpoint-count"], 27);
     assert!(payload(&openapi)["paths"]["/v1/query"]["post"]["requestBody"]
         ["content"]["application/json"]["schema"]
         .is_object());

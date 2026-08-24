@@ -129,6 +129,37 @@ pub struct SearchRequest {
     pub filter: Option<FilterExpression>,
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct VectorVisibilityRequest {
+    pub scope: ScopeId,
+    pub read: ReadStamp,
+    pub valid_at: Millis,
+    pub field: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub embedding_model: Option<EmbeddingModelBinding>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub filter: Option<FilterExpression>,
+}
+
+impl VectorVisibilityRequest {
+    pub fn validate(&self) -> Result<()> {
+        self.read.validate()?;
+        if self.scope != self.read.scope {
+            return invalid("vector visibility scope differs from its read stamp");
+        }
+        if self.field.trim().is_empty() || self.field.as_bytes().contains(&0) {
+            return invalid("vector visibility field must be non-empty and contain no NUL bytes");
+        }
+        if let Some(model) = &self.embedding_model {
+            model.validate()?;
+        }
+        if let Some(filter) = &self.filter {
+            filter.validate()?;
+        }
+        Ok(())
+    }
+}
+
 impl SearchRequest {
     pub fn validate(&self) -> Result<()> {
         self.read.validate()?;

@@ -160,7 +160,7 @@ final class RrdClientTest {
                                     "request-expired", "operation-expired", null,
                                     Instant.ofEpochMilli(1), Map.of(), null, session, null)));
             assertTrue(expired.getMessage().contains("deadline has expired"));
-            assertEquals(26, OperationId.values().length);
+            assertEquals(27, OperationId.values().length);
             assertTrue(OperationId.BACKUP_CREATE.mutation());
             assertEquals(
                     OperationId.Authentication.PUBLIC,

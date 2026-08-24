@@ -12,8 +12,8 @@ use rrd_contract::{
     ErrorBody, ErrorCode, ExecuteQuery, FollowChangefeed, ListInstanceBackups, ListQueryIndexes,
     ListVectorCollections, Liveness, PollLiveQuery, PreviewTransaction, ReadAudit, ReadChangefeed,
     ReadEstate, Readiness, RenewSession, RequestContext, RequestEnvelope, ResourceId, ResourceKind,
-    ResponseEnvelope, ResponseOutcome, RestoreInstanceBackup, SearchVectors, ServiceCapabilities,
-    PROTOCOL, PROTOCOL_VERSION,
+    ResponseEnvelope, ResponseOutcome, RestoreInstanceBackup, ScrollVectorPoints, SearchVectors,
+    ServiceCapabilities, PROTOCOL, PROTOCOL_VERSION,
 };
 use rrd_security::{Action as SecurityAction, AuditRecord, SecurityRepository};
 use serde::de::DeserializeOwned;
@@ -249,6 +249,9 @@ impl AppState {
             }
             (Method::POST, "/v1/vector/collections/list") => {
                 self.list_vector_collections(&headers, &body, now)
+            }
+            (Method::POST, "/v1/vector/points/scroll") => {
+                self.scroll_vector_points(&headers, &body, now)
             }
             (Method::POST, "/v1/vector/search") => self.search_vectors(&headers, &body, now),
             (Method::POST, path) if estate_action(path, "read").is_some() => {
@@ -719,6 +722,29 @@ impl AppState {
             |envelope, session, token| {
                 self.service
                     .list_vector_collections(
+                        session,
+                        token,
+                        &envelope.payload,
+                        now,
+                        envelope.context.request_id.as_str(),
+                        envelope.context.operation_id.as_str(),
+                    )
+                    .map_err(api_error)
+            },
+        )
+    }
+
+    fn scroll_vector_points(&self, headers: &HeaderMap, body: &[u8], now: u64) -> HttpResponse {
+        self.with_authenticated_envelope::<ScrollVectorPoints, _, _>(
+            headers,
+            body,
+            now,
+            false,
+            SecurityAction::VectorPointScroll,
+            None,
+            |envelope, session, token| {
+                self.service
+                    .scroll_vector_points(
                         session,
                         token,
                         &envelope.payload,
