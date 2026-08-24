@@ -24,7 +24,7 @@ internal Rust API being mislabeled as an SDK. Its scope and limitations are in
 [`docs/rrd-public-contract.md`](docs/rrd-public-contract.md).
 
 The first F5 client is [`rrd-client`](crates/rrd-client), an asynchronous Rust
-consumer of that public contract. It negotiates capabilities, covers all 21
+consumer of that public contract. It negotiates capabilities, covers all 22
 currently published operations, bounds time and response bytes, preserves
 typed errors and request identity, and safely retries reads or
 idempotency-bound mutations after transport loss. It remains loopback-only
@@ -40,7 +40,7 @@ current route catalogue; shared real-server conformance and release packaging
 remain open.
 
 The Python F5 walking skeleton is in [`sdks/python`](sdks/python). It derives
-the closed 21-operation route surface from the same OpenAPI authority, validates
+the closed 22-operation route surface from the same OpenAPI authority, validates
 untrusted envelopes with Pydantic, and enforces the same bounded retry,
 identity, deadline, resource, idempotency, and loopback-cleartext rules. uv,
 Ruff, strict mypy, pytest, and package builds gate it; generated payload models,
@@ -87,7 +87,9 @@ an index until verified materialization and artifact reads exist. See
 Full text, mutating statements, materialized scalar indexes, and push
 subscriptions remain open. VyrmMX now also computes deterministic resumable
 semantic live-query deltas (added/updated/removed rows) between exact runtime
-cursors; the authenticated RRD/SDK delivery surface is the next boundary. See
+cursors. Authenticated polling is exposed through RRD and the generated route
+catalogues for all six SDKs; wakeup, streaming/backpressure, and retained
+subscriptions remain open. See
 [`docs/vyrmql-live-query-v1.md`](docs/vyrmql-live-query-v1.md).
 
 F3 now has its first authority artifact in

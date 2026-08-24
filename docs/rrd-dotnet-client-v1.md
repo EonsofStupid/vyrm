@@ -6,7 +6,7 @@ conformance, released-version testing, and NuGet publication remain open.
 
 `sdks/dotnet` generates a closed `OperationId` enum and endpoint switch from
 `rrd-contract`'s deterministic OpenAPI 3.1 document. The shell-free generator
-records method, path, authentication, and mutation classification for all 21
+records method, path, authentication, and mutation classification for all 22
 routes and supplies exact checked-in drift detection.
 
 The client uses `HttpClient` and `System.Text.Json`, with no third-party runtime
@@ -25,7 +25,7 @@ and error discrimination before returning a cloned JSON object.
 NuGet packing pass. The tests cover transport retry and capability identity,
 API-key session creation, bearer query envelopes, resource identity, remote-
 cleartext and expired-deadline denial, typed permission errors, cancellation-
-aware test execution, and all 21 generated operations.
+aware test execution, and all 22 generated operations.
 
 This is not the F5 exit gate. Generated request/result models, shared real-
 server fixtures, supported-version matrices, examples/API reference, and NuGet

@@ -810,3 +810,26 @@ index.
 - Limit: this is the semantic engine, not yet public realtime. The authenticated
   RRD route, changefeed wakeup, streaming/backpressure, retained subscriptions,
   and all six SDK surfaces remain the next delivery slice.
+
+## 2026-08-24 — authenticated semantic live-query polling
+
+- Commit: `28a4362` (`feat(rrd): expose semantic live query polling`).
+- Public boundary: `POST /v1/query/live/poll` now accepts one strict bounded
+  resume request and returns the VyrmMX added/updated/removed delta through one
+  captured head. Scope, query, parameters, execution budget, and delta budget
+  are validated before execution.
+- Security: the route requires a live session and the distinct
+  `query_live_poll` action. A grant for ordinary query execution does not imply
+  permission to poll live results.
+- SDK authority: the deterministic OpenAPI contract now publishes 22
+  operations and regenerated route catalogues cover Rust, TypeScript, Python,
+  Go, Java, and .NET. TypeScript's generated payload surface includes the new
+  strict request/result schemas.
+- Evidence: the real RRD process denies an unauthenticated poll and returns the
+  exact persisted series-row addition after authentication. Contract,
+  security, server, and Rust-client suites pass; strict Clippy passes; all five
+  non-Rust SDK generation/format/type/build/test gates pass; and
+  `cargo check --workspace --all-targets` is green.
+- Limit: this is resumable polling, not push delivery. Changefeed-assisted
+  wakeup, streaming/backpressure, retained subscription leases, and ergonomic
+  typed helpers in every SDK remain open.

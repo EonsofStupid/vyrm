@@ -7,7 +7,7 @@ Central publication remain open.
 
 `sdks/java` generates a closed `OperationId` enum from `rrd-contract`'s
 deterministic OpenAPI 3.1 document. The shell-free generator records method,
-path, authentication, and mutation classification for all 21 routes and
+path, authentication, and mutation classification for all 22 routes and
 supports checked-in drift detection.
 
 The client uses Java's standard HTTP client and Jackson 3.2 for bounded JSON

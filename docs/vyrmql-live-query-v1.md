@@ -1,8 +1,10 @@
 # VyrmQL semantic live-query foundation
 
-Status: deterministic resumable polling exists inside VyrmMX. The authenticated
-RRD route, long-poll wakeup, streaming transport, SDK surface, and retained
-subscription registry remain open.
+Status: deterministic resumable polling exists inside VyrmMX and through the
+authenticated `POST /v1/query/live/poll` RRD route. The operation has its own
+deny-by-default security action and is present in all six generated SDK route
+catalogues. Long-poll wakeup, typed ergonomic SDK methods, streaming transport,
+backpressure, and a retained subscription registry remain open.
 
 A live query is an ordinary typed VyrmQL read with explicit `AT VALID` and
 `KNOWN HEAD`. The caller separately supplies the last consumed runtime cursor.
@@ -19,4 +21,6 @@ empty idempotent poll until authoritative state advances.
 
 Three-engine differentials prove identical additions, updates, removals, empty
 replay, digest identity, and budget denial on memory, Fjall compatibility, and
-native VyrmKV. This is semantic realtime, not yet a network delivery claim.
+native VyrmKV. A real-process test proves unauthenticated denial and exact
+authenticated delivery. This is resumable network polling, not yet a streaming
+or push-subscription claim.

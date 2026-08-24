@@ -54,6 +54,11 @@ places that secret elsewhere. `X-RRD-Session` carries the session identifier;
   rejected plan candidates, execution evidence, and rows. This endpoint is a
   read-only F6 walking skeleton; mutating VyrmQL and live subscriptions remain
   open.
+- `POST /v1/query/live/poll` authenticates the session under a separate
+  deny-by-default action and returns bounded added/updated/removed row deltas
+  from an exact resume cursor through one captured head. It is resumable
+  polling; wakeup, streaming/backpressure, and retained subscriptions remain
+  open.
 - `POST /v1/vector/search` captures an authenticated runtime read stamp and
   runs bounded dense, sparse, or multi-vector search through the canonical
   Vyrm vector planner and exact oracle. The response includes manifest/cursor,
