@@ -1,15 +1,18 @@
 use rrd_contract::{
     transaction_operation_sha256, BeginTransaction, CanonicalId, CapabilityDescriptor,
     CapabilityStatus, CloseSession, CommitReceipt, CommitTransaction, CorrelationId,
-    CreateInstanceBackup, DeploymentMode, EnsureQueryIndex, ErrorBody, ErrorCode,
+    CreateInstanceBackup, DeploymentMode, EnsureQueryIndex, EnsureVectorCollection, ErrorBody,
+    ErrorCode,
     EstateActivityPolicySnapshot, EstateBackupJobSnapshot, EstateBackupJobState,
     EstateBackupJobsSnapshot, EstateMutationResult, EstateSnapshot, ExecuteQuery, FollowChangefeed,
-    IdempotencyBinding, ListQueryIndexes, Liveness, PollLiveQuery, PreviewTransaction, QueryBudget,
+    IdempotencyBinding, ListQueryIndexes, ListVectorCollections, Liveness, NamedVectorDefinition,
+    PollLiveQuery, PreviewTransaction, QueryBudget,
     QueryExecutionSnapshot, QueryPlanCandidate, QueryPlanSnapshot, QueryResult, QueryRowSnapshot,
     QueryValue, ReadAudit, ReadChangefeed, ReadEstate, Readiness, RenewSession, RequestContext,
     RequestEnvelope, ResourceId, ResourceKind, ResourcePath, ResponseEnvelope, ResponseOutcome,
-    RestoreInstanceBackup, ServiceCapabilities, SessionEndState, SessionLease, SessionLimits,
-    SessionTermination, TransactionMutation, TransactionPreview, TransactionState, PROTOCOL,
+    RestoreInstanceBackup, SearchVectors, ServiceCapabilities, SessionEndState, SessionLease,
+    SessionLimits, SessionTermination, TransactionMutation, TransactionPreview, TransactionState,
+    VectorMemoryTier, VectorSearchMetric, VectorSearchQuery, VectorValueKind, PROTOCOL,
     PROTOCOL_VERSION,
 };
 use serde::{Deserialize, Serialize};
@@ -372,6 +375,61 @@ fn query_index_administration_contract_is_bounded_and_strict() {
 }
 
 #[test]
+fn vector_collection_contract_is_named_bounded_and_search_addressable() {
+    let vector = NamedVectorDefinition {
+        name: CanonicalId::new("title").unwrap(),
+        field: CanonicalId::new("title_embedding").unwrap(),
+        kind: VectorValueKind::Dense,
+        dimensions: 2,
+        metric: VectorSearchMetric::Cosine,
+        embedding_model: None,
+        memory_tier: VectorMemoryTier::Cached,
+    };
+    EnsureVectorCollection {
+        scope: "instance:project-alpha".into(),
+        collection_id: CanonicalId::new("documents").unwrap(),
+        vectors: vec![vector.clone()],
+    }
+    .validate()
+    .unwrap();
+    ListVectorCollections {
+        scope: "instance:project-alpha".into(),
+    }
+    .validate()
+    .unwrap();
+    SearchVectors {
+        scope: "instance:project-alpha".into(),
+        valid_at: 42,
+        collection_id: Some(CanonicalId::new("documents").unwrap()),
+        vector_name: Some(vector.name),
+        field: None,
+        query: VectorSearchQuery::Dense {
+            values: vec![0.6, 0.8],
+        },
+        metric: None,
+        top_k: 10,
+        max_scanned_changes: 100,
+    }
+    .validate()
+    .unwrap();
+    assert!(SearchVectors {
+        scope: "instance:project-alpha".into(),
+        valid_at: 42,
+        collection_id: Some(CanonicalId::new("documents").unwrap()),
+        vector_name: None,
+        field: None,
+        query: VectorSearchQuery::Dense {
+            values: vec![0.6, 0.8],
+        },
+        metric: None,
+        top_k: 10,
+        max_scanned_changes: 100,
+    }
+    .validate()
+    .is_err());
+}
+
+#[test]
 fn changefeed_request_is_cursor_addressed_bounded_and_strict() {
     let request = ReadChangefeed {
         scope: "instance:project-alpha".into(),
@@ -456,7 +514,7 @@ fn audit_read_contract_is_bounded_and_strict() {
 fn endpoint_catalogue_is_complete_sorted_and_transport_neutral() {
     let catalogue = rrd_contract::endpoint_catalogue();
     catalogue.validate().unwrap();
-    assert_eq!(catalogue.endpoints.len(), 24);
+    assert_eq!(catalogue.endpoints.len(), 26);
     assert_eq!(catalogue.endpoints[0].operation.as_str(), "audit-read");
     let create = catalogue
         .endpoints

@@ -14,15 +14,18 @@ use rrd_contract::{
     DataObjectReceipt, DataProperties, DataPropertySchema, DataRecordSchema, DataReference,
     DataRelationSchema, DataSchemaRegistry, DataSeriesValue, DataValueType,
     DataVectorNormalization, DataVectorValue, EnsureQueryIndex, EnsureQueryIndexResult,
-    ExecuteQuery, FollowChangefeed, InstanceBackupCatalogueSnapshot, InstanceBackupSnapshot,
-    ListInstanceBackups, ListQueryIndexes, LiveQueryDeltaResult, LiveQueryRowChange,
-    LogicalArchiveSnapshot, PollLiveQuery, PreviewTransaction, QueryExecutionSnapshot,
+    EnsureVectorCollection, EnsureVectorCollectionResult, ExecuteQuery, FollowChangefeed,
+    InstanceBackupCatalogueSnapshot, InstanceBackupSnapshot, ListInstanceBackups, ListQueryIndexes,
+    ListVectorCollections, LiveQueryDeltaResult, LiveQueryRowChange, LogicalArchiveSnapshot,
+    NamedVectorDefinition, PollLiveQuery, PreviewTransaction, QueryExecutionSnapshot,
     QueryIndexCatalogueSnapshot, QueryIndexSnapshot, QueryIndexState, QueryPlanCandidate,
     QueryPlanSnapshot, QueryResult, QueryRowSnapshot, QueryValue, ReadAudit, ReadChangefeed,
     RenewSession, RestoreInstanceBackup, RestoreInstanceBackupResult, RuntimeChangeSnapshot,
     SearchVectors, SessionEndState, SessionLease, SessionLimits, SessionTermination,
-    TransactionLease, TransactionMutation, TransactionPreview, TransactionState, VectorSearchHit,
-    VectorSearchMetric, VectorSearchQuery, VectorSearchResult,
+    TransactionLease, TransactionMutation, TransactionPreview, TransactionState,
+    VectorCollectionCatalogueSnapshot, VectorCollectionSnapshot, VectorEmbeddingModel,
+    VectorMemoryTier, VectorSearchHit, VectorSearchMetric, VectorSearchQuery, VectorSearchResult,
+    VectorValueKind,
 };
 use serde::{Deserialize, Serialize};
 use sha2::Sha256;
@@ -630,6 +633,90 @@ impl<E: Engine> RrdService<E> {
     }
 
     #[allow(clippy::too_many_arguments)]
+    pub fn ensure_vector_collection(
+        &self,
+        session_id: &CorrelationId,
+        token: &CorrelationId,
+        idempotency_key: &CorrelationId,
+        request: &EnsureVectorCollection,
+        now: u64,
+        request_id: &str,
+        operation_id: &str,
+    ) -> Result<EnsureVectorCollectionResult> {
+        request
+            .validate()
+            .map_err(|error| ServiceError::Vector(error.to_string()))?;
+        self.authorize(session_id, token, now, request_id, operation_id)?;
+        let scope = self.query_scope(&request.scope)?;
+        let operation_digest = operation_digest(request)?;
+        let repository = vyrm_vector::VectorCollectionRepository::new(&self.engine, scope);
+        if let Some(receipt) = repository
+            .operation_receipt(idempotency_key.as_str(), &operation_digest)
+            .map_err(vector_collection_error)?
+        {
+            let catalogue = repository.load().map_err(vector_collection_error)?;
+            return Ok(EnsureVectorCollectionResult {
+                collection: public_vector_collection(&receipt.entry)?,
+                catalogue_revision: catalogue.revision,
+                idempotent_replay: true,
+            });
+        }
+        let definition = internal_vector_collection(request)?;
+        let context = vyrm_vector::CollectionMutationContext {
+            at: now,
+            actor: format!("session:{}", session_id.as_str()),
+            request_id: request_id.into(),
+            operation_id: operation_id.into(),
+        };
+        let (catalogue, idempotent_replay) = repository
+            .ensure(
+                &context,
+                idempotency_key.as_str().into(),
+                operation_digest,
+                definition,
+            )
+            .map_err(vector_collection_error)?;
+        let entry = catalogue
+            .collections
+            .get(&ProjectionId::new(request.collection_id.as_str()).map_err(core_vector)?)
+            .ok_or_else(|| ServiceError::Vector("ensured vector collection disappeared".into()))?;
+        Ok(EnsureVectorCollectionResult {
+            collection: public_vector_collection(entry)?,
+            catalogue_revision: catalogue.revision,
+            idempotent_replay,
+        })
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn list_vector_collections(
+        &self,
+        session_id: &CorrelationId,
+        token: &CorrelationId,
+        request: &ListVectorCollections,
+        now: u64,
+        request_id: &str,
+        operation_id: &str,
+    ) -> Result<VectorCollectionCatalogueSnapshot> {
+        request
+            .validate()
+            .map_err(|error| ServiceError::Vector(error.to_string()))?;
+        self.authorize(session_id, token, now, request_id, operation_id)?;
+        let scope = self.query_scope(&request.scope)?;
+        let catalogue = vyrm_vector::VectorCollectionRepository::new(&self.engine, scope)
+            .load()
+            .map_err(vector_collection_error)?;
+        Ok(VectorCollectionCatalogueSnapshot {
+            scope: request.scope.clone(),
+            revision: catalogue.revision,
+            collections: catalogue
+                .collections
+                .values()
+                .map(public_vector_collection)
+                .collect::<Result<_>>()?,
+        })
+    }
+
+    #[allow(clippy::too_many_arguments)]
     pub fn search_vectors(
         &self,
         session_id: &CorrelationId,
@@ -648,6 +735,48 @@ impl<E: Engine> RrdService<E> {
             return Err(ServiceError::WrongScope);
         }
         let scope = ScopeId::new(request.scope.clone()).map_err(core_vector)?;
+        let (field, metric, embedding_model) = if let (Some(collection_id), Some(vector_name)) =
+            (&request.collection_id, &request.vector_name)
+        {
+            let catalogue =
+                vyrm_vector::VectorCollectionRepository::new(&self.engine, scope.clone())
+                    .load()
+                    .map_err(vector_collection_error)?;
+            let collection = catalogue
+                .collections
+                .get(&ProjectionId::new(collection_id.as_str()).map_err(core_vector)?)
+                .ok_or_else(|| {
+                    ServiceError::Vector(format!("unknown vector collection {collection_id}"))
+                })?;
+            let vector = collection
+                .definition
+                .vectors
+                .get(&ProjectionId::new(vector_name.as_str()).map_err(core_vector)?)
+                .ok_or_else(|| {
+                    ServiceError::Vector(format!(
+                        "unknown named vector {vector_name} in collection {collection_id}"
+                    ))
+                })?;
+            validate_collection_query(vector, &request.query)?;
+            (
+                vector.field.clone(),
+                vector.metric,
+                vector.embedding_model.clone(),
+            )
+        } else {
+            let field = request
+                .field
+                .as_ref()
+                .ok_or_else(|| ServiceError::Vector("vector field is absent".into()))?;
+            let metric = request
+                .metric
+                .ok_or_else(|| ServiceError::Vector("vector metric is absent".into()))?;
+            (
+                field.as_str().to_owned(),
+                internal_vector_metric(metric),
+                None,
+            )
+        };
         let read = self.engine.runtime_read_stamp(&scope)?;
         let limit = usize::try_from(request.max_scanned_changes)
             .map_err(|_| ServiceError::Vector("vector scan budget exceeds usize".into()))?;
@@ -687,15 +816,10 @@ impl<E: Engine> RrdService<E> {
             scope,
             read: read.clone(),
             valid_at: request.valid_at,
-            field: request.field.as_str().into(),
+            field,
             query,
-            metric: match request.metric {
-                VectorSearchMetric::Cosine => vyrm_vector::ScoreMetric::Cosine,
-                VectorSearchMetric::Dot => vyrm_vector::ScoreMetric::Dot,
-                VectorSearchMetric::Euclidean => vyrm_vector::ScoreMetric::Euclidean,
-                VectorSearchMetric::Manhattan => vyrm_vector::ScoreMetric::Manhattan,
-            },
-            embedding_model: None,
+            metric,
+            embedding_model,
             top_k: usize::try_from(request.top_k)
                 .map_err(|_| ServiceError::Vector("vector top_k exceeds usize".into()))?,
             mode: vyrm_vector::SearchMode::Exact,
@@ -712,6 +836,8 @@ impl<E: Engine> RrdService<E> {
         };
         Ok(VectorSearchResult {
             scope: request.scope.clone(),
+            collection_id: request.collection_id.clone(),
+            vector_name: request.vector_name.clone(),
             read_manifest_sha256: read.manifest_id,
             known_at_cursor: read.commit_cursor,
             scanned_changes: page.validation.change_reads,
@@ -2091,6 +2217,142 @@ fn query_index_error(error: vyrm_mx::Error) -> ServiceError {
     } else {
         ServiceError::Query(error.to_string())
     }
+}
+
+fn vector_collection_error(error: vyrm_vector::CollectionError) -> ServiceError {
+    if matches!(error, vyrm_vector::CollectionError::IdempotencyConflict) {
+        ServiceError::IdempotencyConflict
+    } else {
+        ServiceError::Vector(error.to_string())
+    }
+}
+
+fn internal_vector_metric(metric: VectorSearchMetric) -> vyrm_vector::ScoreMetric {
+    match metric {
+        VectorSearchMetric::Cosine => vyrm_vector::ScoreMetric::Cosine,
+        VectorSearchMetric::Dot => vyrm_vector::ScoreMetric::Dot,
+        VectorSearchMetric::Euclidean => vyrm_vector::ScoreMetric::Euclidean,
+        VectorSearchMetric::Manhattan => vyrm_vector::ScoreMetric::Manhattan,
+    }
+}
+
+fn public_vector_metric(metric: vyrm_vector::ScoreMetric) -> VectorSearchMetric {
+    match metric {
+        vyrm_vector::ScoreMetric::Cosine => VectorSearchMetric::Cosine,
+        vyrm_vector::ScoreMetric::Dot => VectorSearchMetric::Dot,
+        vyrm_vector::ScoreMetric::Euclidean => VectorSearchMetric::Euclidean,
+        vyrm_vector::ScoreMetric::Manhattan => VectorSearchMetric::Manhattan,
+    }
+}
+
+fn internal_vector_collection(
+    request: &EnsureVectorCollection,
+) -> Result<vyrm_vector::VectorCollectionDefinition> {
+    let vectors = request
+        .vectors
+        .iter()
+        .map(|vector| {
+            let name = ProjectionId::new(vector.name.as_str()).map_err(core_vector)?;
+            Ok((
+                name.clone(),
+                vyrm_vector::NamedVectorConfig {
+                    name,
+                    field: vector.field.as_str().into(),
+                    kind: match vector.kind {
+                        VectorValueKind::Dense => vyrm_vector::VectorValueKind::Dense,
+                        VectorValueKind::Sparse => vyrm_vector::VectorValueKind::Sparse,
+                        VectorValueKind::MultiDense => vyrm_vector::VectorValueKind::MultiDense,
+                    },
+                    dimensions: vector.dimensions,
+                    metric: internal_vector_metric(vector.metric),
+                    embedding_model: vector.embedding_model.as_ref().map(|model| {
+                        vyrm_vector::EmbeddingModelBinding {
+                            name: model.name.clone(),
+                            digest: model.digest.clone(),
+                        }
+                    }),
+                    memory_tier: match vector.memory_tier {
+                        VectorMemoryTier::Pinned => vyrm_vector::VectorMemoryTier::Pinned,
+                        VectorMemoryTier::Cached => vyrm_vector::VectorMemoryTier::Cached,
+                        VectorMemoryTier::Cold => vyrm_vector::VectorMemoryTier::Cold,
+                    },
+                },
+            ))
+        })
+        .collect::<Result<BTreeMap<_, _>>>()?;
+    Ok(vyrm_vector::VectorCollectionDefinition {
+        id: ProjectionId::new(request.collection_id.as_str()).map_err(core_vector)?,
+        vectors,
+    })
+}
+
+fn public_vector_collection(
+    entry: &vyrm_vector::CollectionEntry,
+) -> Result<VectorCollectionSnapshot> {
+    Ok(VectorCollectionSnapshot {
+        collection_id: CanonicalId::new(entry.definition.id.as_str())
+            .map_err(|error| ServiceError::Vector(error.to_string()))?,
+        vectors: entry
+            .definition
+            .vectors
+            .values()
+            .map(|vector| {
+                Ok(NamedVectorDefinition {
+                    name: CanonicalId::new(vector.name.as_str())
+                        .map_err(|error| ServiceError::Vector(error.to_string()))?,
+                    field: CanonicalId::new(&vector.field)
+                        .map_err(|error| ServiceError::Vector(error.to_string()))?,
+                    kind: match vector.kind {
+                        vyrm_vector::VectorValueKind::Dense => VectorValueKind::Dense,
+                        vyrm_vector::VectorValueKind::Sparse => VectorValueKind::Sparse,
+                        vyrm_vector::VectorValueKind::MultiDense => VectorValueKind::MultiDense,
+                    },
+                    dimensions: vector.dimensions,
+                    metric: public_vector_metric(vector.metric),
+                    embedding_model: vector.embedding_model.as_ref().map(|model| {
+                        VectorEmbeddingModel {
+                            name: model.name.clone(),
+                            digest: model.digest.clone(),
+                        }
+                    }),
+                    memory_tier: match vector.memory_tier {
+                        vyrm_vector::VectorMemoryTier::Pinned => VectorMemoryTier::Pinned,
+                        vyrm_vector::VectorMemoryTier::Cached => VectorMemoryTier::Cached,
+                        vyrm_vector::VectorMemoryTier::Cold => VectorMemoryTier::Cold,
+                    },
+                })
+            })
+            .collect::<Result<_>>()?,
+        generation: entry.generation,
+        created_at_unix_ms: entry.created_at,
+        updated_at_unix_ms: entry.updated_at,
+        configuration_sha256: entry.configuration_digest.clone(),
+    })
+}
+
+fn validate_collection_query(
+    config: &vyrm_vector::NamedVectorConfig,
+    query: &VectorSearchQuery,
+) -> Result<()> {
+    let (kind, dimensions) = match query {
+        VectorSearchQuery::Dense { values } => (
+            vyrm_vector::VectorValueKind::Dense,
+            u32::try_from(values.len())
+                .map_err(|_| ServiceError::Vector("query dimensions exceed u32".into()))?,
+        ),
+        VectorSearchQuery::Sparse { dimensions, .. } => {
+            (vyrm_vector::VectorValueKind::Sparse, *dimensions)
+        }
+        VectorSearchQuery::MultiDense { dimensions, .. } => {
+            (vyrm_vector::VectorValueKind::MultiDense, *dimensions)
+        }
+    };
+    if config.kind != kind || config.dimensions != dimensions {
+        return Err(ServiceError::Vector(
+            "query vector kind or dimensions differ from the named-vector contract".into(),
+        ));
+    }
+    Ok(())
 }
 
 fn public_runtime_commit(

@@ -15,12 +15,13 @@ use rrd_contract::{
     AbortTransaction, AuditPage, BeginTransaction, CanonicalId, ChangefeedFollowResult,
     ChangefeedPage, CloseSession, CommitReceipt, CommitTransaction, CorrelationId,
     CreateInstanceBackup, CreateInstanceBackupResult, CreateSession, EndpointCatalogue, ErrorBody,
-    ErrorCode, EstateSnapshot, ExecuteQuery, FollowChangefeed, InstanceBackupCatalogueSnapshot,
-    ListInstanceBackups, PROTOCOL, PROTOCOL_VERSION, PreviewTransaction, QueryResult, ReadAudit,
-    ReadChangefeed, ReadEstate, RenewSession, RequestContext, RequestEnvelope, ResourceId,
-    ResourceKind, ResourcePath, ResponseEnvelope, ResponseOutcome, RestoreInstanceBackup,
-    RestoreInstanceBackupResult, SearchVectors, ServiceCapabilities, SessionLease,
-    SessionTermination, TransactionLease, TransactionPreview, VectorSearchResult,
+    ErrorCode, EstateSnapshot, EnsureVectorCollection, EnsureVectorCollectionResult, ExecuteQuery,
+    FollowChangefeed, InstanceBackupCatalogueSnapshot, ListInstanceBackups, ListVectorCollections,
+    PreviewTransaction, QueryResult, ReadAudit, ReadChangefeed, ReadEstate, RenewSession,
+    RequestContext, RequestEnvelope, ResourceId, ResourceKind, ResourcePath, ResponseEnvelope,
+    ResponseOutcome, RestoreInstanceBackup, RestoreInstanceBackupResult, SearchVectors,
+    ServiceCapabilities, SessionLease, SessionTermination, TransactionLease, TransactionPreview,
+    VectorCollectionCatalogueSnapshot, VectorSearchResult, PROTOCOL, PROTOCOL_VERSION,
 };
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -406,6 +407,40 @@ impl RrdClient {
         self.session_call(
             Method::POST,
             "/v1/vector/search",
+            session,
+            request,
+            options,
+            false,
+        )
+        .await
+    }
+
+    pub async fn ensure_vector_collection(
+        &self,
+        session: &Session,
+        request: EnsureVectorCollection,
+        options: RequestOptions,
+    ) -> Result<EnsureVectorCollectionResult> {
+        self.session_call(
+            Method::POST,
+            "/v1/vector/collections/ensure",
+            session,
+            request,
+            options,
+            true,
+        )
+        .await
+    }
+
+    pub async fn list_vector_collections(
+        &self,
+        session: &Session,
+        request: ListVectorCollections,
+        options: RequestOptions,
+    ) -> Result<VectorCollectionCatalogueSnapshot> {
+        self.session_call(
+            Method::POST,
+            "/v1/vector/collections/list",
             session,
             request,
             options,

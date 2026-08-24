@@ -8,11 +8,12 @@ use axum::Router;
 use rrd_contract::{
     AbortTransaction, AuditDecision, AuditPhase, BeginTransaction, CanonicalId,
     CapabilityDescriptor, CapabilityStatus, CloseSession, CommitTransaction, CorrelationId,
-    CreateInstanceBackup, CreateSession, DeploymentMode, EnsureQueryIndex, ErrorBody, ErrorCode,
-    ExecuteQuery, FollowChangefeed, ListInstanceBackups, ListQueryIndexes, Liveness, PollLiveQuery,
-    PreviewTransaction, ReadAudit, ReadChangefeed, ReadEstate, Readiness, RenewSession,
-    RequestContext, RequestEnvelope, ResourceId, ResourceKind, ResponseEnvelope, ResponseOutcome,
-    RestoreInstanceBackup, SearchVectors, ServiceCapabilities, PROTOCOL, PROTOCOL_VERSION,
+    CreateInstanceBackup, CreateSession, DeploymentMode, EnsureQueryIndex, EnsureVectorCollection,
+    ErrorBody, ErrorCode, ExecuteQuery, FollowChangefeed, ListInstanceBackups, ListQueryIndexes,
+    ListVectorCollections, Liveness, PollLiveQuery, PreviewTransaction, ReadAudit, ReadChangefeed,
+    ReadEstate, Readiness, RenewSession, RequestContext, RequestEnvelope, ResourceId, ResourceKind,
+    ResponseEnvelope, ResponseOutcome, RestoreInstanceBackup, SearchVectors, ServiceCapabilities,
+    PROTOCOL, PROTOCOL_VERSION,
 };
 use rrd_security::{Action as SecurityAction, AuditRecord, SecurityRepository};
 use serde::de::DeserializeOwned;
@@ -243,6 +244,12 @@ impl AppState {
             (Method::POST, "/v1/audit/read") => self.read_audit(&headers, &body, now),
             (Method::POST, "/v1/changes/read") => self.read_changefeed(&headers, &body, now),
             (Method::POST, "/v1/changes/follow") => self.follow_changefeed(&headers, &body, now),
+            (Method::POST, "/v1/vector/collections/ensure") => {
+                self.ensure_vector_collection(&headers, &body, now)
+            }
+            (Method::POST, "/v1/vector/collections/list") => {
+                self.list_vector_collections(&headers, &body, now)
+            }
             (Method::POST, "/v1/vector/search") => self.search_vectors(&headers, &body, now),
             (Method::POST, path) if estate_action(path, "read").is_some() => {
                 self.read_estate(&headers, &body, path, now)
@@ -665,6 +672,53 @@ impl AppState {
             |envelope, session, token| {
                 self.service
                     .search_vectors(
+                        session,
+                        token,
+                        &envelope.payload,
+                        now,
+                        envelope.context.request_id.as_str(),
+                        envelope.context.operation_id.as_str(),
+                    )
+                    .map_err(api_error)
+            },
+        )
+    }
+
+    fn ensure_vector_collection(&self, headers: &HeaderMap, body: &[u8], now: u64) -> HttpResponse {
+        self.with_authenticated_envelope::<EnsureVectorCollection, _, _>(
+            headers,
+            body,
+            now,
+            true,
+            SecurityAction::VectorCollectionEnsure,
+            None,
+            |envelope, session, token| {
+                self.service
+                    .ensure_vector_collection(
+                        session,
+                        token,
+                        required_idempotency(&envelope.context)?,
+                        &envelope.payload,
+                        now,
+                        envelope.context.request_id.as_str(),
+                        envelope.context.operation_id.as_str(),
+                    )
+                    .map_err(api_error)
+            },
+        )
+    }
+
+    fn list_vector_collections(&self, headers: &HeaderMap, body: &[u8], now: u64) -> HttpResponse {
+        self.with_authenticated_envelope::<ListVectorCollections, _, _>(
+            headers,
+            body,
+            now,
+            false,
+            SecurityAction::VectorCollectionList,
+            None,
+            |envelope, session, token| {
+                self.service
+                    .list_vector_collections(
                         session,
                         token,
                         &envelope.payload,
@@ -1830,7 +1884,7 @@ fn capabilities(
                 ),
             ]),
             limitation: Some(
-                "exact canonical dense, sparse, and multi-vector search; public filters and persisted HNSW/TurboQuant artifact serving remain open"
+                "journaled collection and named-vector administration plus exact canonical dense, sparse, and multi-vector search; point/payload administration, public filters, and persisted HNSW/TurboQuant artifact serving remain open"
                     .into(),
             ),
         },

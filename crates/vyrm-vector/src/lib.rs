@@ -5,6 +5,7 @@
 //! crate before a planner may select them.
 
 mod catalog;
+mod collection;
 mod compact;
 mod contract;
 mod exact;
@@ -27,6 +28,12 @@ pub use accelerator::{
 pub use catalog::{
     VectorArtifactCatalogEntry, VectorCatalog, VectorProjectionDescriptor,
     VECTOR_ARTIFACT_CATALOG_VERSION, VECTOR_ARTIFACT_RECORD_TYPE,
+};
+pub use collection::{
+    CollectionCatalogue, CollectionEntry, CollectionError, CollectionMutationContext,
+    CollectionOperationReceipt, NamedVectorConfig, VectorCollectionDefinition,
+    VectorCollectionRepository, VectorMemoryTier, VectorValueKind,
+    VECTOR_COLLECTION_CATALOGUE_VERSION,
 };
 pub use compact::{
     CompactDenseSegment, DenseKernel, DenseMemoryPlacement, COMPACT_DENSE_FORMAT_VERSION,

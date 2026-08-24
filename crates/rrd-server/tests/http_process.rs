@@ -1055,13 +1055,91 @@ fn data_transaction_atomically_commits_every_public_model_and_replays_after_rest
     assert_eq!(receipt["last_claim_sequence"], 1);
     assert_eq!(receipt["idempotent_replay"], false);
     assert_eq!(receipt["runtime_commit_sha256"].as_str().unwrap().len(), 64);
+    let ensure_collection = envelope(
+        json!({
+            "scope": "instance:socket-test",
+            "collection_id": "documents",
+            "vectors": [{
+                "name": "title",
+                "field": "title_embedding",
+                "kind": "dense",
+                "dimensions": 2,
+                "metric": "cosine",
+                "memory_tier": "cached"
+            }]
+        }),
+        Some("ensure-documents-collection"),
+        None,
+    );
+    let (status, denied) = post(
+        &server,
+        "/v1/vector/collections/ensure",
+        &ensure_collection,
+        None,
+    );
+    assert_eq!(status, 401, "{denied}");
+    let (status, ensured) = post(
+        &server,
+        "/v1/vector/collections/ensure",
+        &ensure_collection,
+        Some((&session_id, &token)),
+    );
+    assert_eq!(status, 200, "{ensured}");
+    assert_eq!(payload(&ensured)["collection"]["collection_id"], "documents");
+    assert_eq!(payload(&ensured)["collection"]["generation"], 1);
+    assert_eq!(payload(&ensured)["idempotent_replay"], false);
+    let (status, replayed) = post(
+        &server,
+        "/v1/vector/collections/ensure",
+        &ensure_collection,
+        Some((&session_id, &token)),
+    );
+    assert_eq!(status, 200, "{replayed}");
+    assert_eq!(payload(&replayed)["idempotent_replay"], true);
+    let collision = envelope(
+        json!({
+            "scope": "instance:socket-test",
+            "collection_id": "documents",
+            "vectors": [{
+                "name": "title",
+                "field": "title_embedding",
+                "kind": "dense",
+                "dimensions": 3,
+                "metric": "cosine",
+                "memory_tier": "cached"
+            }]
+        }),
+        Some("ensure-documents-collection"),
+        None,
+    );
+    let (status, collision) = post(
+        &server,
+        "/v1/vector/collections/ensure",
+        &collision,
+        Some((&session_id, &token)),
+    );
+    assert_eq!(status, 409, "{collision}");
+    let list_collections = envelope(
+        json!({"scope": "instance:socket-test"}),
+        None,
+        None,
+    );
+    let (status, listed) = post(
+        &server,
+        "/v1/vector/collections/list",
+        &list_collections,
+        Some((&session_id, &token)),
+    );
+    assert_eq!(status, 200, "{listed}");
+    assert_eq!(payload(&listed)["revision"], 1);
+    assert_eq!(payload(&listed)["collections"][0]["collection_id"], "documents");
     let vector_search = envelope(
         json!({
             "scope": "instance:socket-test",
             "valid_at": 100,
-            "field": "title_embedding",
+            "collection_id": "documents",
+            "vector_name": "title",
             "query": {"kind": "dense", "values": [0.6, 0.8]},
-            "metric": "cosine",
             "top_k": 1,
             "max_scanned_changes": 100
         }),
@@ -1078,6 +1156,8 @@ fn data_transaction_atomically_commits_every_public_model_and_replays_after_rest
     );
     assert_eq!(status, 200, "{searched}");
     let search = payload(&searched);
+    assert_eq!(search["collection_id"], "documents");
+    assert_eq!(search["vector_name"], "title");
     assert_eq!(search["known_at_cursor"], 11);
     assert_eq!(search["access_path"], "exact_scan");
     assert_eq!(search["exact"], true);
@@ -1085,6 +1165,26 @@ fn data_transaction_atomically_commits_every_public_model_and_replays_after_rest
     assert_eq!(search["hits"][0]["subject"]["id"], "alpha");
     assert_eq!(search["hits"][0]["source_cursor"], 8);
     assert!((search["hits"][0]["score"].as_f64().unwrap() - 1.0).abs() < 1e-9);
+    let wrong_dimensions = envelope(
+        json!({
+            "scope": "instance:socket-test",
+            "valid_at": 100,
+            "collection_id": "documents",
+            "vector_name": "title",
+            "query": {"kind": "dense", "values": [0.6, 0.8, 0.0]},
+            "top_k": 1,
+            "max_scanned_changes": 100
+        }),
+        None,
+        None,
+    );
+    let (status, mismatch) = post(
+        &server,
+        "/v1/vector/search",
+        &wrong_dimensions,
+        Some((&session_id, &token)),
+    );
+    assert_eq!(status, 400, "{mismatch}");
     for (query, identity, expected) in [
         (
             "FROM series:series AT VALID 100 KNOWN HEAD WHERE series_id = \"latency\" PROJECT observed_at, value",
@@ -1527,12 +1627,12 @@ fn real_socket_exercises_lifecycle_commit_and_restart_replay() {
     assert_eq!(payload(&catalogue)["protocol_version"], 1);
     assert_eq!(
         payload(&catalogue)["endpoints"].as_array().unwrap().len(),
-        24
+        26
     );
     let (status, openapi) = http(server.address, "GET", "/v1/schema/openapi", &[], &[]);
     assert_eq!(status, 200, "{openapi}");
     assert_eq!(payload(&openapi)["openapi"], "3.1.0");
-    assert_eq!(payload(&openapi)["x-rrd-endpoint-count"], 24);
+    assert_eq!(payload(&openapi)["x-rrd-endpoint-count"], 26);
     assert!(payload(&openapi)["paths"]["/v1/query"]["post"]["requestBody"]
         ["content"]["application/json"]["schema"]
         .is_object());

@@ -14,7 +14,7 @@ use std::fmt;
 pub const PROTOCOL: &str = "rrd";
 pub const PROTOCOL_VERSION: u16 = 1;
 pub const OPENAPI_DOCUMENT_SHA256: &str =
-    "03022f754ed41db19435b047589f83139ef294f0589a80231c3f47e3080b18d8";
+    "1d25005eeccb5d39ebd927ee842036e2d8fbf74d21a33e3887d73c8b6b0c3d50";
 pub const MAX_ID_BYTES: usize = 128;
 pub const MAX_MESSAGE_BYTES: usize = 4_096;
 pub const MAX_CAPABILITIES: usize = 512;
@@ -356,6 +356,137 @@ pub enum MultiVectorComparator {
     MaxSim,
 }
 
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum VectorValueKind {
+    Dense,
+    Sparse,
+    MultiDense,
+}
+
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum VectorMemoryTier {
+    Pinned,
+    Cached,
+    Cold,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct VectorEmbeddingModel {
+    pub name: String,
+    pub digest: String,
+}
+
+impl VectorEmbeddingModel {
+    fn validate(&self) -> Result<()> {
+        if self.name.trim().is_empty()
+            || self.name.len() > MAX_MESSAGE_BYTES
+            || self.name.contains('\0')
+        {
+            return invalid("vector embedding model name is invalid");
+        }
+        validate_sha256(&self.digest, "vector embedding model digest")
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct NamedVectorDefinition {
+    pub name: CanonicalId,
+    pub field: CanonicalId,
+    pub kind: VectorValueKind,
+    pub dimensions: u32,
+    pub metric: VectorSearchMetric,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub embedding_model: Option<VectorEmbeddingModel>,
+    pub memory_tier: VectorMemoryTier,
+}
+
+impl NamedVectorDefinition {
+    fn validate(&self) -> Result<()> {
+        if self.dimensions == 0 || u64::from(self.dimensions) > MAX_VECTOR_DIMENSIONS as u64 {
+            return invalid(format!(
+                "named-vector dimensions must be in 1..={MAX_VECTOR_DIMENSIONS}"
+            ));
+        }
+        if let Some(model) = &self.embedding_model {
+            model.validate()?;
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct EnsureVectorCollection {
+    pub scope: String,
+    pub collection_id: CanonicalId,
+    pub vectors: Vec<NamedVectorDefinition>,
+}
+
+impl EnsureVectorCollection {
+    pub fn validate(&self) -> Result<()> {
+        validate_vector_scope(&self.scope)?;
+        if self.vectors.is_empty() || self.vectors.len() > 64 {
+            return invalid("vector collection must contain 1..=64 named vectors");
+        }
+        let mut names = BTreeSet::new();
+        let mut fields = BTreeSet::new();
+        for vector in &self.vectors {
+            vector.validate()?;
+            if !names.insert(vector.name.as_str()) || !fields.insert(vector.field.as_str()) {
+                return invalid("vector collection names and fields must be unique");
+            }
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ListVectorCollections {
+    pub scope: String,
+}
+
+impl ListVectorCollections {
+    pub fn validate(&self) -> Result<()> {
+        validate_vector_scope(&self.scope)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct VectorCollectionSnapshot {
+    pub collection_id: CanonicalId,
+    pub vectors: Vec<NamedVectorDefinition>,
+    pub generation: u64,
+    pub created_at_unix_ms: u64,
+    pub updated_at_unix_ms: u64,
+    pub configuration_sha256: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct VectorCollectionCatalogueSnapshot {
+    pub scope: String,
+    pub revision: u64,
+    pub collections: Vec<VectorCollectionSnapshot>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct EnsureVectorCollectionResult {
+    pub collection: VectorCollectionSnapshot,
+    pub catalogue_revision: u64,
+    pub idempotent_replay: bool,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum VectorSearchQuery {
@@ -379,20 +510,31 @@ pub enum VectorSearchQuery {
 pub struct SearchVectors {
     pub scope: String,
     pub valid_at: u64,
-    pub field: CanonicalId,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub collection_id: Option<CanonicalId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub vector_name: Option<CanonicalId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub field: Option<CanonicalId>,
     pub query: VectorSearchQuery,
-    pub metric: VectorSearchMetric,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub metric: Option<VectorSearchMetric>,
     pub top_k: u64,
     pub max_scanned_changes: u64,
 }
 
 impl SearchVectors {
     pub fn validate(&self) -> Result<()> {
-        if self.scope.is_empty()
-            || self.scope.len() > MAX_ID_BYTES
-            || self.scope.as_bytes().contains(&0)
+        validate_vector_scope(&self.scope)?;
+        let collection_address = self.collection_id.is_some() && self.vector_name.is_some();
+        let legacy_address = self.field.is_some() && self.metric.is_some();
+        if collection_address == legacy_address
+            || self.collection_id.is_some() != self.vector_name.is_some()
+            || self.field.is_some() != self.metric.is_some()
         {
-            return invalid("vector search scope is invalid");
+            return invalid(
+                "vector search must use exactly one complete collection/vector or field/metric address",
+            );
         }
         if self.valid_at == 0 {
             return invalid("vector search valid_at must be greater than zero");
@@ -430,7 +572,7 @@ impl SearchVectors {
             },
         };
         validate_data_vector(&vector)?;
-        if self.metric == VectorSearchMetric::Cosine {
+        if self.metric == Some(VectorSearchMetric::Cosine) {
             let zero = match &self.query {
                 VectorSearchQuery::Dense { values } | VectorSearchQuery::Sparse { values, .. } => {
                     values.iter().all(|value| *value == 0.0)
@@ -460,6 +602,10 @@ pub struct VectorSearchHit {
 #[serde(deny_unknown_fields)]
 pub struct VectorSearchResult {
     pub scope: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub collection_id: Option<CanonicalId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub vector_name: Option<CanonicalId>,
     pub read_manifest_sha256: String,
     pub known_at_cursor: u64,
     pub scanned_changes: u64,
@@ -467,6 +613,13 @@ pub struct VectorSearchResult {
     pub access_path: CanonicalId,
     pub exact: bool,
     pub hits: Vec<VectorSearchHit>,
+}
+
+fn validate_vector_scope(scope: &str) -> Result<()> {
+    if scope.is_empty() || scope.len() > MAX_ID_BYTES || scope.as_bytes().contains(&0) {
+        return invalid("vector scope is invalid");
+    }
+    Ok(())
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -746,6 +899,8 @@ pub enum SecurityAction {
     TransactionAbort,
     ChangefeedRead,
     ChangefeedFollow,
+    VectorCollectionEnsure,
+    VectorCollectionList,
     VectorSearch,
     BackupCreate,
     BackupList,
@@ -1126,6 +1281,26 @@ pub fn endpoint_catalogue() -> EndpointCatalogue {
             "TransactionPreview",
         ),
         endpoint(
+            "vector-collection-ensure",
+            HttpMethod::Post,
+            "/v1/vector/collections/ensure",
+            EndpointAuthentication::SessionBearer,
+            true,
+            SecurityAction::VectorCollectionEnsure,
+            "EnsureVectorCollection",
+            "EnsureVectorCollectionResult",
+        ),
+        endpoint(
+            "vector-collection-list",
+            HttpMethod::Post,
+            "/v1/vector/collections/list",
+            EndpointAuthentication::SessionBearer,
+            false,
+            SecurityAction::VectorCollectionList,
+            "ListVectorCollections",
+            "VectorCollectionCatalogueSnapshot",
+        ),
+        endpoint(
             "vector-search",
             HttpMethod::Post,
             "/v1/vector/search",
@@ -1387,7 +1562,9 @@ fn request_envelope_schema(name: &str) -> Result<serde_json::Value> {
         "CreateSession" => schema_json::<RequestEnvelope<CreateSession>>(),
         "ExecuteQuery" => schema_json::<RequestEnvelope<ExecuteQuery>>(),
         "EnsureQueryIndex" => schema_json::<RequestEnvelope<EnsureQueryIndex>>(),
+        "EnsureVectorCollection" => schema_json::<RequestEnvelope<EnsureVectorCollection>>(),
         "ListQueryIndexes" => schema_json::<RequestEnvelope<ListQueryIndexes>>(),
+        "ListVectorCollections" => schema_json::<RequestEnvelope<ListVectorCollections>>(),
         "PollLiveQuery" => schema_json::<RequestEnvelope<PollLiveQuery>>(),
         "FollowChangefeed" => schema_json::<RequestEnvelope<FollowChangefeed>>(),
         "ListInstanceBackups" => schema_json::<RequestEnvelope<ListInstanceBackups>>(),
@@ -1422,6 +1599,9 @@ fn response_envelope_schema(name: &str) -> Result<serde_json::Value> {
         "OpenApiDocument" => schema_json::<ResponseEnvelope<serde_json::Value>>(),
         "QueryResult" => schema_json::<ResponseEnvelope<QueryResult>>(),
         "EnsureQueryIndexResult" => schema_json::<ResponseEnvelope<EnsureQueryIndexResult>>(),
+        "EnsureVectorCollectionResult" => {
+            schema_json::<ResponseEnvelope<EnsureVectorCollectionResult>>()
+        }
         "QueryIndexCatalogueSnapshot" => {
             schema_json::<ResponseEnvelope<QueryIndexCatalogueSnapshot>>()
         }
@@ -1434,6 +1614,9 @@ fn response_envelope_schema(name: &str) -> Result<serde_json::Value> {
         "SessionTermination" => schema_json::<ResponseEnvelope<SessionTermination>>(),
         "TransactionLease" => schema_json::<ResponseEnvelope<TransactionLease>>(),
         "TransactionPreview" => schema_json::<ResponseEnvelope<TransactionPreview>>(),
+        "VectorCollectionCatalogueSnapshot" => {
+            schema_json::<ResponseEnvelope<VectorCollectionCatalogueSnapshot>>()
+        }
         "VectorSearchResult" => schema_json::<ResponseEnvelope<VectorSearchResult>>(),
         _ => return invalid(format!("no public response schema for {name}")),
     };

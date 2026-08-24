@@ -138,6 +138,18 @@ export const endpoints = {
     "authentication": "session_bearer",
     "mutation": false
   },
+  "vector-collection-ensure": {
+    "method": "POST",
+    "path": "/v1/vector/collections/ensure",
+    "authentication": "session_bearer",
+    "mutation": true
+  },
+  "vector-collection-list": {
+    "method": "POST",
+    "path": "/v1/vector/collections/list",
+    "authentication": "session_bearer",
+    "mutation": false
+  },
   "vector-search": {
     "method": "POST",
     "path": "/v1/vector/search",

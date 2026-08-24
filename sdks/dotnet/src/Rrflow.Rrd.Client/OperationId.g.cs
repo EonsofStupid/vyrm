@@ -26,6 +26,8 @@ public enum OperationId
     TransactionBegin,
     TransactionCommit,
     TransactionPreview,
+    VectorCollectionEnsure,
+    VectorCollectionList,
     VectorSearch,
 }
 
@@ -45,7 +47,7 @@ public sealed record Endpoint(
 
 public static class EndpointCatalog
 {
-    public const int Count = 24;
+    public const int Count = 26;
 
     public static Endpoint Get(OperationId operation) => operation switch
     {
@@ -72,6 +74,8 @@ public static class EndpointCatalog
         OperationId.TransactionBegin => new("transaction-begin", "POST", "/v1/transactions", Authentication.SessionBearer, true),
         OperationId.TransactionCommit => new("transaction-commit", "POST", "/v1/transactions/{transaction}/commit", Authentication.SessionBearer, true),
         OperationId.TransactionPreview => new("transaction-preview", "POST", "/v1/transactions/{transaction}/preview", Authentication.SessionBearer, false),
+        OperationId.VectorCollectionEnsure => new("vector-collection-ensure", "POST", "/v1/vector/collections/ensure", Authentication.SessionBearer, true),
+        OperationId.VectorCollectionList => new("vector-collection-list", "POST", "/v1/vector/collections/list", Authentication.SessionBearer, false),
         OperationId.VectorSearch => new("vector-search", "POST", "/v1/vector/search", Authentication.SessionBearer, false),
         _ => throw new System.ArgumentOutOfRangeException(nameof(operation)),
     };
