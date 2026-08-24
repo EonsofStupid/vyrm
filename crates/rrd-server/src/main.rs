@@ -1,6 +1,9 @@
 use rrd_contract::CanonicalId;
-use rrd_server::{load_or_create_token_key, RrdHttpServer};
+use rrd_server::{load_or_create_token_key, RrdHttpServer, RrdMutualTlsServerConfig};
+use rustls::RootCertStore;
+use std::fs::File;
 use std::io;
+use std::io::BufReader;
 use std::net::SocketAddr;
 use std::path::Path;
 use std::path::PathBuf;
@@ -15,6 +18,9 @@ struct Args {
     token_key_file: Option<PathBuf>,
     shutdown_request_file: Option<PathBuf>,
     shutdown_complete_file: Option<PathBuf>,
+    tls_certificate_file: Option<PathBuf>,
+    tls_private_key_file: Option<PathBuf>,
+    tls_client_ca_file: Option<PathBuf>,
 }
 
 #[tokio::main]
@@ -39,8 +45,20 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         .token_key_file
         .unwrap_or_else(|| args.db.join("RRD.SERVER.SECRET"));
     let token_key = load_or_create_token_key(&key_path)?;
-    let server = RrdHttpServer::bind(engine, args.instance, token_key, args.bind)?;
-    eprintln!("rrd-server: http://{}", server.local_addr());
+    let tls = load_mtls(
+        args.tls_certificate_file,
+        args.tls_private_key_file,
+        args.tls_client_ca_file,
+    )?;
+    let server = match tls {
+        Some(tls) => RrdHttpServer::bind_mtls(engine, args.instance, token_key, args.bind, tls)?,
+        None => RrdHttpServer::bind(engine, args.instance, token_key, args.bind)?,
+    };
+    eprintln!(
+        "rrd-server: {}://{}",
+        if server.is_tls() { "https" } else { "http" },
+        server.local_addr()
+    );
     let shutdown_request_file = args.shutdown_request_file;
     let shutdown_complete_file = args.shutdown_complete_file;
     server
@@ -96,6 +114,9 @@ fn parse_args(arguments: impl Iterator<Item = String>) -> Result<Args, String> {
     let mut token_key_file = None;
     let mut shutdown_request_file = None;
     let mut shutdown_complete_file = None;
+    let mut tls_certificate_file = None;
+    let mut tls_private_key_file = None;
+    let mut tls_client_ca_file = None;
     let mut arguments = arguments;
     while let Some(argument) = arguments.next() {
         match argument.as_str() {
@@ -130,6 +151,24 @@ fn parse_args(arguments: impl Iterator<Item = String>) -> Result<Args, String> {
                     "--shutdown-complete-file",
                 )?));
             }
+            "--tls-cert" => {
+                tls_certificate_file = Some(PathBuf::from(required_value(
+                    &mut arguments,
+                    "--tls-cert",
+                )?));
+            }
+            "--tls-key" => {
+                tls_private_key_file = Some(PathBuf::from(required_value(
+                    &mut arguments,
+                    "--tls-key",
+                )?));
+            }
+            "--tls-client-ca" => {
+                tls_client_ca_file = Some(PathBuf::from(required_value(
+                    &mut arguments,
+                    "--tls-client-ca",
+                )?));
+            }
             "--help" | "-h" => return Err(usage().into()),
             value => return Err(format!("unknown argument {value:?}\n{}", usage())),
         }
@@ -137,6 +176,20 @@ fn parse_args(arguments: impl Iterator<Item = String>) -> Result<Args, String> {
     if shutdown_request_file.is_some() != shutdown_complete_file.is_some() {
         return Err(format!(
             "--shutdown-request-file and --shutdown-complete-file must be provided together\n{}",
+            usage()
+        ));
+    }
+    let tls_file_count = [
+        tls_certificate_file.is_some(),
+        tls_private_key_file.is_some(),
+        tls_client_ca_file.is_some(),
+    ]
+    .into_iter()
+    .filter(|present| *present)
+    .count();
+    if tls_file_count != 0 && tls_file_count != 3 {
+        return Err(format!(
+            "--tls-cert, --tls-key, and --tls-client-ca must be provided together\n{}",
             usage()
         ));
     }
@@ -152,7 +205,51 @@ fn parse_args(arguments: impl Iterator<Item = String>) -> Result<Args, String> {
         token_key_file,
         shutdown_request_file,
         shutdown_complete_file,
+        tls_certificate_file,
+        tls_private_key_file,
+        tls_client_ca_file,
     })
+}
+
+fn load_mtls(
+    certificate_file: Option<PathBuf>,
+    private_key_file: Option<PathBuf>,
+    client_ca_file: Option<PathBuf>,
+) -> Result<Option<RrdMutualTlsServerConfig>, Box<dyn std::error::Error + Send + Sync>> {
+    let (certificate_file, private_key_file, client_ca_file) = match (
+        certificate_file,
+        private_key_file,
+        client_ca_file,
+    ) {
+        (None, None, None) => return Ok(None),
+        (Some(certificate), Some(key), Some(ca)) => (certificate, key, ca),
+        _ => {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "--tls-cert, --tls-key, and --tls-client-ca are required together",
+            )
+            .into());
+        }
+    };
+    let certificate_chain = rustls_pemfile::certs(&mut BufReader::new(File::open(
+        certificate_file,
+    )?))
+    .collect::<std::result::Result<Vec<_>, _>>()?;
+    let private_key = rustls_pemfile::private_key(&mut BufReader::new(File::open(
+        private_key_file,
+    )?))?
+    .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "TLS private key is absent"))?;
+    let mut client_roots = RootCertStore::empty();
+    for certificate in rustls_pemfile::certs(&mut BufReader::new(File::open(client_ca_file)?)) {
+        client_roots
+            .add(certificate?)
+            .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+    }
+    Ok(Some(RrdMutualTlsServerConfig::new(
+        certificate_chain,
+        private_key,
+        client_roots,
+    )?))
 }
 
 fn required_value(
@@ -165,7 +262,7 @@ fn required_value(
 }
 
 fn usage() -> &'static str {
-    "usage: rrd-server --db PATH --instance ID [--bind 127.0.0.1:9477] [--token-key-file PATH] [--shutdown-request-file PATH --shutdown-complete-file PATH]"
+    "usage: rrd-server --db PATH --instance ID [--bind 127.0.0.1:9477] [--token-key-file PATH] [--tls-cert PATH --tls-key PATH --tls-client-ca PATH] [--shutdown-request-file PATH --shutdown-complete-file PATH]"
 }
 
 #[cfg(test)]
@@ -216,5 +313,18 @@ mod tests {
         ];
         let args = parse_args(arguments.into_iter()).unwrap();
         assert_eq!(args.shutdown_complete_file, Some(complete));
+    }
+
+    #[test]
+    fn mutual_tls_files_are_an_all_or_nothing_contract() {
+        let incomplete = [
+            "--db".into(),
+            "state".into(),
+            "--instance".into(),
+            "alpha".into(),
+            "--tls-cert".into(),
+            "server.pem".into(),
+        ];
+        assert!(parse_args(incomplete.into_iter()).is_err());
     }
 }

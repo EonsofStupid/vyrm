@@ -1,13 +1,14 @@
 //! Supported asynchronous Rust client for the public RRD v1 protocol.
 //!
 //! This crate depends on `rrd-contract`, never on Vyrm storage/query internals.
-//! The current transport is deliberately loopback HTTP while the F4 TLS gate
-//! remains closed.
+//! Loopback HTTP remains available for local development. Remote endpoints use
+//! an explicit mutually authenticated TLS configuration.
 
 use bytes::{BufMut, Bytes, BytesMut};
 use http_body_util::{BodyExt, Full};
 use hyper::header::CONTENT_TYPE;
 use hyper::{Method, Request, StatusCode, Uri};
+use hyper_rustls::{HttpsConnector, HttpsConnectorBuilder};
 use hyper_util::client::legacy::Client;
 use hyper_util::client::legacy::connect::HttpConnector;
 use hyper_util::rt::TokioExecutor;
@@ -26,6 +27,7 @@ use rrd_contract::{
 };
 use serde::Serialize;
 use serde::de::DeserializeOwned;
+use rustls::ClientConfig as RustlsClientConfig;
 use std::fmt;
 use std::net::SocketAddr;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -151,10 +153,16 @@ impl Default for ClientConfig {
 
 #[derive(Clone)]
 pub struct RrdClient {
-    transport: Client<HttpConnector, Full<Bytes>>,
-    address: SocketAddr,
+    transport: Transport,
+    endpoint: String,
     instance: CanonicalId,
     config: ClientConfig,
+}
+
+#[derive(Clone)]
+enum Transport {
+    Local(Client<HttpConnector, Full<Bytes>>),
+    MutualTls(Client<HttpsConnector<HttpConnector>, Full<Bytes>>),
 }
 
 impl RrdClient {
@@ -168,16 +176,45 @@ impl RrdClient {
                 "RRD Rust client permits only loopback HTTP before TLS qualification".into(),
             ));
         }
-        if config.request_timeout.is_zero() || config.max_attempts == 0 || config.max_attempts > 8 {
-            return Err(Error::Contract(
-                "request timeout must be nonzero and max_attempts must be in 1..=8".into(),
-            ));
-        }
+        validate_client_config(&config)?;
         let connector = HttpConnector::new();
         let transport = Client::builder(TokioExecutor::new()).build(connector);
         Ok(Self {
-            transport,
-            address,
+            transport: Transport::Local(transport),
+            endpoint: format!("http://{address}"),
+            instance,
+            config,
+        })
+    }
+
+    pub fn connect_mtls(
+        endpoint: impl Into<String>,
+        instance: CanonicalId,
+        tls: RustlsClientConfig,
+        config: ClientConfig,
+    ) -> Result<Self> {
+        validate_client_config(&config)?;
+        let endpoint = endpoint.into();
+        let parsed: Uri = endpoint
+            .parse()
+            .map_err(|error| Error::Contract(format!("invalid RRD TLS endpoint: {error}")))?;
+        if parsed.scheme_str() != Some("https")
+            || parsed.authority().is_none()
+            || parsed.path_and_query().is_some_and(|value| value.as_str() != "/")
+        {
+            return Err(Error::Contract(
+                "RRD TLS endpoint must be an https origin without a path or query".into(),
+            ));
+        }
+        let connector = HttpsConnectorBuilder::new()
+            .with_tls_config(tls)
+            .https_only()
+            .enable_http1()
+            .build();
+        let transport = Client::builder(TokioExecutor::new()).build(connector);
+        Ok(Self {
+            transport: Transport::MutualTls(transport),
+            endpoint: endpoint.trim_end_matches('/').into(),
             instance,
             config,
         })
@@ -743,7 +780,7 @@ impl RrdClient {
         body: Vec<u8>,
         headers: &[(&str, &str)],
     ) -> Result<ResponseEnvelope<O>> {
-        let uri: Uri = format!("http://{}{}", self.address, path)
+        let uri: Uri = format!("{}{path}", self.endpoint)
             .parse()
             .map_err(|error| Error::Contract(format!("invalid request URI: {error}")))?;
         let mut builder = Request::builder().method(method.clone()).uri(uri);
@@ -756,11 +793,11 @@ impl RrdClient {
         let request = builder
             .body(Full::new(Bytes::from(body)))
             .map_err(|error| Error::Contract(error.to_string()))?;
-        let response = self
-            .transport
-            .request(request)
-            .await
-            .map_err(|error| Error::Transport(error.to_string()))?;
+        let response = match &self.transport {
+            Transport::Local(transport) => transport.request(request).await,
+            Transport::MutualTls(transport) => transport.request(request).await,
+        }
+        .map_err(|error| Error::Transport(error.to_string()))?;
         let status = response.status();
         let mut incoming = response.into_body();
         let mut bytes = BytesMut::new();
@@ -827,6 +864,15 @@ fn request_timeout(configured: Duration, deadline_unix_ms: Option<u64>) -> Resul
         return Err(Error::Timeout);
     }
     Ok(configured.min(Duration::from_millis(deadline - now)))
+}
+
+fn validate_client_config(config: &ClientConfig) -> Result<()> {
+    if config.request_timeout.is_zero() || config.max_attempts == 0 || config.max_attempts > 8 {
+        return Err(Error::Contract(
+            "request timeout must be nonzero and max_attempts must be in 1..=8".into(),
+        ));
+    }
+    Ok(())
 }
 
 fn contract(error: impl fmt::Display) -> Error {

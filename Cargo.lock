@@ -1227,6 +1227,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "hyper-rustls"
+version = "0.27.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "33ca68d021ef39cf6463ab54c1d0f5daf03377b70561305bb89a8f83aab66e0f"
+dependencies = [
+ "http",
+ "hyper",
+ "hyper-util",
+ "rustls",
+ "tokio",
+ "tokio-rustls",
+ "tower-service",
+]
+
+[[package]]
 name = "hyper-util"
 version = "0.1.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2351,10 +2366,13 @@ dependencies = [
  "bytes",
  "http-body-util",
  "hyper",
+ "hyper-rustls",
  "hyper-util",
+ "rcgen",
  "rrd-contract",
  "rrd-security",
  "rrd-server",
+ "rustls",
  "serde",
  "serde_json",
  "tempfile",
@@ -2406,15 +2424,21 @@ dependencies = [
  "axum",
  "getrandom 0.3.4",
  "hmac",
+ "hyper",
+ "hyper-util",
+ "rcgen",
  "rrd-contract",
  "rrd-estate",
  "rrd-security",
+ "rustls",
+ "rustls-pemfile",
  "serde",
  "serde_json",
  "sha2",
  "sysinfo",
  "tempfile",
  "tokio",
+ "tokio-rustls",
  "tracing",
  "tracing-subscriber",
  "vyrm-core",
@@ -2490,6 +2514,15 @@ dependencies = [
  "rustls-webpki",
  "subtle",
  "zeroize",
+]
+
+[[package]]
+name = "rustls-pemfile"
+version = "2.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dce314e5fee3f39953d46bb63bb8a46d40c2f8fb7cc5a3b6cab2bde9721d6e50"
+dependencies = [
+ "rustls-pki-types",
 ]
 
 [[package]]

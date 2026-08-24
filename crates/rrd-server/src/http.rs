@@ -5,6 +5,9 @@ use axum::http::{header, HeaderMap, HeaderValue, Method, StatusCode};
 use axum::response::Response;
 use axum::routing::any;
 use axum::Router;
+use hyper::server::conn::http1;
+use hyper_util::rt::TokioIo;
+use hyper_util::service::TowerToHyperService;
 use rrd_contract::{
     AbortTransaction, AuditDecision, AuditPhase, BeginTransaction, CanonicalId,
     CapabilityDescriptor, CapabilityStatus, CloseSession, CommitTransaction, CorrelationId,
@@ -18,6 +21,9 @@ use rrd_contract::{
 use rrd_security::{Action as SecurityAction, AuditRecord, SecurityRepository};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
+use rustls::pki_types::{CertificateDer, PrivateKeyDer};
+use rustls::server::WebPkiClientVerifier;
+use rustls::{RootCertStore, ServerConfig};
 use std::collections::BTreeMap;
 use std::fmt;
 use std::fs::{File, OpenOptions};
@@ -28,6 +34,8 @@ use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
+use tokio::task::JoinSet;
+use tokio_rustls::TlsAcceptor;
 use vyrm_core::digest;
 use vyrm_store::{Engine, Error as StoreError, PersistentEngine};
 
@@ -40,9 +48,11 @@ pub type Result<T> = std::result::Result<T, HttpError>;
 #[derive(Debug)]
 pub enum HttpError {
     RemoteBindDenied(SocketAddr),
+    RemoteSecurityRequired,
     Bind(String),
     Io(io::Error),
     Contract(String),
+    Tls(String),
 }
 
 impl fmt::Display for HttpError {
@@ -51,7 +61,12 @@ impl fmt::Display for HttpError {
             Self::RemoteBindDenied(address) => {
                 write!(formatter, "remote bind {address} denied before F4 security")
             }
-            Self::Bind(error) | Self::Contract(error) => formatter.write_str(error),
+            Self::RemoteSecurityRequired => formatter.write_str(
+                "RRD mTLS listeners require an initialized application security authority",
+            ),
+            Self::Bind(error) | Self::Contract(error) | Self::Tls(error) => {
+                formatter.write_str(error)
+            }
             Self::Io(error) => error.fmt(formatter),
         }
     }
@@ -68,6 +83,41 @@ impl From<io::Error> for HttpError {
 pub struct RrdHttpServer {
     listener: TcpListener,
     app: Router,
+    tls: Option<TlsAcceptor>,
+}
+
+/// A server identity whose verifier requires a trusted client certificate.
+///
+/// The inner Rustls configuration is private so a remote RRD listener cannot
+/// accidentally be constructed with anonymous TLS.
+#[derive(Clone)]
+pub struct RrdMutualTlsServerConfig {
+    inner: Arc<ServerConfig>,
+}
+
+impl RrdMutualTlsServerConfig {
+    pub fn new(
+        certificate_chain: Vec<CertificateDer<'static>>,
+        private_key: PrivateKeyDer<'static>,
+        client_roots: RootCertStore,
+    ) -> Result<Self> {
+        if certificate_chain.is_empty() || client_roots.is_empty() {
+            return Err(HttpError::Tls(
+                "RRD mTLS requires a certificate chain and client trust roots".into(),
+            ));
+        }
+        let verifier = WebPkiClientVerifier::builder(Arc::new(client_roots))
+            .build()
+            .map_err(|error| HttpError::Tls(format!("RRD client verifier: {error}")))?;
+        let mut inner = ServerConfig::builder_with_protocol_versions(&[&rustls::version::TLS13])
+            .with_client_cert_verifier(verifier)
+            .with_single_cert(certificate_chain, private_key)
+            .map_err(|error| HttpError::Tls(format!("RRD server identity: {error}")))?;
+        inner.alpn_protocols = vec![b"http/1.1".to_vec()];
+        Ok(Self {
+            inner: Arc::new(inner),
+        })
+    }
 }
 
 struct AppState {
@@ -86,15 +136,45 @@ impl RrdHttpServer {
         if !bind.ip().is_loopback() {
             return Err(HttpError::RemoteBindDenied(bind));
         }
+        Self::bind_inner(engine, instance, token_key, bind, None)
+    }
+
+    pub fn bind_mtls(
+        engine: PersistentEngine,
+        instance: CanonicalId,
+        token_key: [u8; TOKEN_KEY_BYTES],
+        bind: SocketAddr,
+        tls: RrdMutualTlsServerConfig,
+    ) -> Result<Self> {
+        Self::bind_inner(
+            engine,
+            instance,
+            token_key,
+            bind,
+            Some(TlsAcceptor::from(tls.inner)),
+        )
+    }
+
+    fn bind_inner(
+        engine: PersistentEngine,
+        instance: CanonicalId,
+        token_key: [u8; TOKEN_KEY_BYTES],
+        bind: SocketAddr,
+        tls: Option<TlsAcceptor>,
+    ) -> Result<Self> {
         let backend = CanonicalId::new(engine.backend().as_str())
             .map_err(|error| HttpError::Contract(error.to_string()))?;
         let security_enforced = SecurityRepository::new(&engine, instance.clone())
             .is_initialized()
             .map_err(|error| HttpError::Contract(error.to_string()))?;
+        if tls.is_some() && !security_enforced {
+            return Err(HttpError::RemoteSecurityRequired);
+        }
+        let tls_enabled = tls.is_some();
         let listener =
             TcpListener::bind(bind).map_err(|error| HttpError::Bind(error.to_string()))?;
         listener.set_nonblocking(true)?;
-        let capabilities = capabilities(&instance, backend, security_enforced);
+        let capabilities = capabilities(&instance, backend, security_enforced, tls_enabled);
         capabilities
             .validate()
             .map_err(|error| HttpError::Contract(error.to_string()))?;
@@ -104,7 +184,7 @@ impl RrdHttpServer {
             security_enforced,
         });
         let app = Router::new().fallback(any(dispatch)).with_state(state);
-        Ok(Self { listener, app })
+        Ok(Self { listener, app, tls })
     }
 
     pub fn local_addr(&self) -> SocketAddr {
@@ -113,7 +193,14 @@ impl RrdHttpServer {
             .expect("bound RRD listener has a local address")
     }
 
+    pub fn is_tls(&self) -> bool {
+        self.tls.is_some()
+    }
+
     pub async fn serve(self) -> Result<()> {
+        if self.tls.is_some() {
+            return self.serve_until(std::future::pending()).await;
+        }
         let listener = tokio::net::TcpListener::from_std(self.listener)?;
         axum::serve(listener, self.app).await.map_err(HttpError::Io)
     }
@@ -123,11 +210,67 @@ impl RrdHttpServer {
         F: Future<Output = ()> + Send + 'static,
     {
         let listener = tokio::net::TcpListener::from_std(self.listener)?;
+        if let Some(acceptor) = self.tls {
+            return serve_mtls(listener, self.app, acceptor, shutdown).await;
+        }
         axum::serve(listener, self.app)
             .with_graceful_shutdown(shutdown)
             .await
             .map_err(HttpError::Io)
     }
+}
+
+async fn serve_mtls<F>(
+    listener: tokio::net::TcpListener,
+    app: Router,
+    acceptor: TlsAcceptor,
+    shutdown: F,
+) -> Result<()>
+where
+    F: Future<Output = ()> + Send + 'static,
+{
+    let mut connections = JoinSet::new();
+    tokio::pin!(shutdown);
+    loop {
+        tokio::select! {
+            _ = &mut shutdown => break,
+            accepted = listener.accept() => {
+                let (stream, _) = accepted?;
+                let acceptor = acceptor.clone();
+                let app = app.clone();
+                connections.spawn(async move {
+                    let stream = acceptor.accept(stream).await.map_err(io::Error::other)?;
+                    let service = TowerToHyperService::new(app);
+                    let mut builder = http1::Builder::new();
+                    builder.keep_alive(false);
+                    builder
+                        .serve_connection(TokioIo::new(stream), service)
+                        .await
+                        .map_err(io::Error::other)
+                });
+            }
+            completed = connections.join_next(), if !connections.is_empty() => {
+                match completed {
+                    Some(Ok(Err(error))) => {
+                        tracing::debug!(error = %error, "RRD TLS connection closed");
+                    }
+                    Some(Err(error)) => {
+                        tracing::warn!(error = %error, "RRD TLS connection task failed");
+                    }
+                    Some(Ok(Ok(()))) | None => {}
+                }
+            }
+        }
+    }
+    if tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        while connections.join_next().await.is_some() {}
+    })
+    .await
+    .is_err()
+    {
+        connections.abort_all();
+    }
+    Ok(())
 }
 
 async fn dispatch(State(state): State<Arc<AppState>>, request: Request) -> HttpResponse {
@@ -1754,6 +1897,7 @@ fn capabilities(
     instance: &CanonicalId,
     backend: CanonicalId,
     security_enforced: bool,
+    tls_enabled: bool,
 ) -> ServiceCapabilities {
     let mut capabilities = vec![
         CapabilityDescriptor {
@@ -1863,8 +2007,13 @@ fn capabilities(
                 RRD_MAX_BODY_BYTES as u64,
             )]),
             limitation: Some(if security_enforced {
-                "principal-authenticated policy-bound local sessions; TLS remote transport remains unavailable"
-                    .into()
+                if tls_enabled {
+                    "principal-authenticated policy-bound sessions over TLS 1.3 mutual authentication"
+                        .into()
+                } else {
+                    "principal-authenticated policy-bound loopback sessions; configure mTLS for remote transport"
+                        .into()
+                }
             } else {
                 "development availability leases; no security authority is initialized".into()
             }),
@@ -1882,9 +2031,19 @@ fn capabilities(
         CapabilityDescriptor {
             name: CanonicalId::new("remote-listen").unwrap(),
             contract_version: 1,
-            status: CapabilityStatus::Unavailable,
+            status: if tls_enabled {
+                CapabilityStatus::Experimental
+            } else {
+                CapabilityStatus::Unavailable
+            },
             limits: BTreeMap::new(),
-            limitation: Some("non-loopback bind denied until F4 security".into()),
+            limitation: Some(if tls_enabled {
+                "TLS 1.3 mTLS plus application policy are enforced; certificate reload/revocation and distributed qualification remain open"
+                    .into()
+            } else {
+                "plain HTTP is loopback-only; configure mTLS and initialize security for remote bind"
+                    .into()
+            }),
         },
         CapabilityDescriptor {
             name: CanonicalId::new("security-policy").unwrap(),

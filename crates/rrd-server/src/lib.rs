@@ -2,7 +2,10 @@
 
 mod http;
 
-pub use http::{load_or_create_token_key, HttpError, RrdHttpServer, RRD_MAX_BODY_BYTES};
+pub use http::{
+    load_or_create_token_key, HttpError, RrdHttpServer, RrdMutualTlsServerConfig,
+    RRD_MAX_BODY_BYTES,
+};
 
 use hmac::{Hmac, KeyInit, Mac};
 use rrd_contract::{

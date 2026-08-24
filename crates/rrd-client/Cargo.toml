@@ -13,7 +13,9 @@ serde_json = { workspace = true }
 bytes = "1"
 http-body-util = "0.1.5"
 hyper = { version = "1.11.0", features = ["client", "http1"] }
+hyper-rustls = { version = "0.27", default-features = false, features = ["http1", "ring"] }
 hyper-util = { version = "0.1.20", features = ["client", "client-legacy", "http1", "tokio"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
 tokio = { version = "1", features = ["net", "rt", "sync", "time"] }
 
 [dev-dependencies]
@@ -22,4 +24,5 @@ rrd-server = { path = "../rrd-server" }
 vyrm-core = { path = "../vyrm-core" }
 vyrm-store = { path = "../vyrm-store" }
 tempfile = "3"
+rcgen = "0.14"
 tokio = { version = "1", features = ["io-util", "macros", "net", "rt-multi-thread", "sync", "time"] }
