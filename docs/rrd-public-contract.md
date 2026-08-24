@@ -40,6 +40,10 @@ dimension drift before executing. `put_vector` mutations may carry the same
 collection/vector coordinates; the server validates their field, kind,
 dimensions, and required model provenance before committing them with all
 other record/graph/series/geo mutations and their payload properties.
+Search also accepts a depth/node-bounded typed payload filter covering equality,
+inequality, membership, range, existence, and recursive all/any/not. The filter
+is a canonical OpenAPI component so recursive generated SDK types do not depend
+on request-local schema definitions.
 
 The first vector-read contract supports bounded dense, sparse, and
 multi-dense/MaxSim queries across cosine, dot, Euclidean, and Manhattan

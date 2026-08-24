@@ -52,6 +52,14 @@ collision, list, denial, bound point commit, and exact search through the
 catalogue. Dedicated point lifecycle/scroll APIs, payload indexes, physical
 memory-tier enforcement, and persistent ANN artifact serving remain open.
 
+RRD search now exposes the oracle's complete bounded payload-filter algebra:
+equals/not-equals, membership, range, existence, and recursive all/any/not.
+The server lowers public values into the existing exact filter evaluator rather
+than maintaining transport-specific semantics. A real committed point proves a
+matching tenant filter returns it and a non-matching filter returns no hit.
+This is exact one-stage semantic filtering; persisted payload indexes and
+persisted filter-aware HNSW serving remain separate open gates.
+
 ## Rebuildable projections
 
 Two canonical JSON reference artifacts currently exist:

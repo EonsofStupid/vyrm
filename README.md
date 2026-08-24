@@ -106,8 +106,10 @@ resolves and validates that contract before executing the exact oracle. Atomic
 `put_vector` point writes can bind collection plus vector name; commit validates
 field, kind, dimensions, and model provenance while retaining payload
 properties in the unified multi-model transaction. Dedicated point lifecycle/
-scroll APIs, payload indexes, filtered persisted ANN serving, inference, and
-TurboQuant remain open.
+scroll APIs remain open. Search now exposes the same bounded typed equals,
+inequality, membership, range, existence, all/any/not payload-filter algebra as
+the exact oracle. Payload indexes, persisted one-stage filtered ANN serving,
+inference, and TurboQuant remain open.
 
 F3 now has its first authority artifact in
 [`rrd-estate`](crates/rrd-estate): a bounded, versioned estate document whose

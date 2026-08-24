@@ -183,8 +183,11 @@ Kubernetes operation, and authoritative Connectome management.
   field, kind, dimensions, and model provenance before commit while preserving
   payload properties. Native reopen, replay, collision, list, denial, bound
   point commit, and real-process exact search pass. Dedicated point lifecycle/
-  scroll APIs, payload indexes, persisted filtered ANN serving, inference,
-  physical tier enforcement, and TurboQuant remain F7 work.
+  scroll APIs remain open. The public search contract now includes a bounded
+  recursive payload-filter algebra and real-process matching/non-matching
+  evidence over committed point properties. Payload indexes, persisted
+  one-stage filtered ANN serving, inference, physical tier enforcement, and
+  TurboQuant remain F7 work.
 
 - The bi-temporal claim kernel has immutable supersession corrections,
   canonical SHA-256 identities covering provenance and validity, and atomic

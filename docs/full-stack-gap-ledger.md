@@ -573,7 +573,9 @@ before committing payload properties with the unified transaction. Native
 reopen plus real-process denial, replay, collision, list, bound point commit,
 mismatch, and search tests pass. Dedicated point lifecycle/scroll APIs, payload
 indexes, physical tier enforcement, filtered persisted ANN, inference, and
-TurboQuant remain open.
+TurboQuant remain open. Public exact search now includes bounded equality,
+inequality, membership, range, existence, and recursive all/any/not payload
+filters with matching/non-matching real-process evidence.
 
 **Deliverables**
 

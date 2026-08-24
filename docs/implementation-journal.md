@@ -955,3 +955,22 @@ index.
   a parallel point store. Dedicated retrieve/delete/scroll/batch point routes,
   payload-index administration, and collection-aware SDK convenience methods
   remain open.
+
+## 2026-08-24 — public typed vector payload filters
+
+- Commit: `8725f38` (`feat(vector): expose bounded payload filters`).
+- Contract: vector search now accepts equality, inequality, membership, range,
+  existence, and recursive all/any/not filters bounded to depth 32 and 4,096
+  nodes. Public `QueryValue` operands lower into the existing exact
+  `vyrm-vector` evaluator, avoiding a second transport-only semantics path.
+- Schema correction: recursive filter definitions initially exposed a genuine
+  OpenAPI generator defect. `VectorPayloadFilter` is now a canonical component
+  alongside `QueryValue`, all local references are rebased, and the reviewed
+  OpenAPI digest is
+  `a6809faf79e177c4196f9697c5b66ec26ecd9946c295a18c4eaa5f6aaa70807e`.
+- Evidence: the real collection-bound point carries a tenant payload; an exact
+  matching filter returns it and a non-matching filter returns zero hits.
+  Complete contract/server suites, focused process behavior, strict Clippy,
+  and TypeScript generation/Biome/types/tests pass.
+- Limit: exact filtering is public, but payload-index administration and
+  persisted filter-aware HNSW serving are not yet implemented.
