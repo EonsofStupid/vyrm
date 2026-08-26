@@ -2,12 +2,12 @@ use std::fs::OpenOptions;
 use std::io::{Seek, SeekFrom, Write};
 
 use fjall::{KeyspaceCreateOptions, SingleWriterTxDatabase};
+use rrd_core::{Claim, ClaimReader, Predicate, Producer, Subject};
 use rrd_store::{
     migrate_fjall_to_native, migrate_fjall_to_native_with_fault, rollback_fjall_migration, Engine,
     Error, InvocationInput, MigrationFault, MigrationPhase, Outcome, PersistentBackend,
     PersistentEngine, Store, Trigger,
 };
-use vyrm_core::{Claim, ClaimReader, Predicate, Producer, Subject};
 
 fn claim(object: &str, sequence: u64) -> Claim {
     Claim::new(
@@ -253,9 +253,17 @@ fn empty_archive_v1_matches_the_portable_golden_vector() {
     let report = rrd_store::migration_status(&path).unwrap().unwrap();
     let bytes = std::fs::read(&report.archive).unwrap();
     let encoded: String = bytes.iter().map(|byte| format!("{byte:02x}")).collect();
+    let fixture = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/fixtures/migration-v1-empty.hex"
+    );
+    if std::env::var_os("RRFLOW_UPDATE_GOLDENS").is_some() {
+        std::fs::write(fixture, format!("{encoded}\n")).unwrap();
+        return;
+    }
     assert_eq!(
         encoded,
-        include_str!("fixtures/migration-v1-empty.hex").trim(),
+        std::fs::read_to_string(fixture).unwrap().trim(),
         "archive format changed without a version/golden update"
     );
 }

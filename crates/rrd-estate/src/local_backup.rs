@@ -1,15 +1,15 @@
 use crate::{BackupDriverRequest, BackupResult, DriverError, EstateBackupDriver};
-use std::fs;
-use std::path::{Path, PathBuf};
-use vyrm_core::digest;
+use rrd_core::digest;
 use rrd_store::{
     create_logical_backup, verify_backup_catalogue, Error as StoreError, PersistentEngine,
 };
+use std::fs;
+use std::path::{Path, PathBuf};
 
 /// Executes estate backup jobs only inside one canonical local state root.
 ///
 /// Source and catalogue locations are deliberately not caller-controlled:
-/// `<state>/instances/<instance>/rrd-data` is archived into
+/// `<state>/instances/<instance>/.rrflow/rrd` is archived into
 /// `<state>/backups/<instance>`. A retained process record denies the effect.
 pub struct LocalEstateBackupDriver {
     state_root: PathBuf,
@@ -40,7 +40,7 @@ impl LocalEstateBackupDriver {
         self.state_root
             .join("instances")
             .join(request.instance_id.as_str())
-            .join("rrd-data")
+            .join(".rrflow/rrd")
     }
 
     pub fn catalogue_path(&self, request: &BackupDriverRequest) -> PathBuf {

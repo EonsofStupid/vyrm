@@ -111,6 +111,7 @@ pub(in crate::http) fn api_error(error: ServiceError) -> ApiError {
         ServiceErrorKind::Conflict => ErrorCode::Conflict,
         ServiceErrorKind::FailedPrecondition => ErrorCode::FailedPrecondition,
         ServiceErrorKind::ResourceExhausted => ErrorCode::ResourceExhausted,
+        ServiceErrorKind::DeadlineExceeded => ErrorCode::DeadlineExceeded,
         ServiceErrorKind::Internal => ErrorCode::Internal,
     };
     ApiError::new(code, message, retryable)

@@ -1,10 +1,15 @@
+use rrd_core::{
+    Claim, DataTransaction, Predicate, Producer, RuntimeCommit, RuntimeMutation, RuntimeProperties,
+    RuntimeRecord, RuntimeRecordSchema, RuntimeRef, RuntimeSchemaRegistry, RuntimeType, ScopeId,
+    Subject,
+};
 use rrd_store::{
-    create_logical_backup, load_backup_catalogue, restore_catalogued_backup,
-    verify_backup_catalogue, BackupCoverage, Engine, NativeEngine,
+    create_application_backup, create_logical_backup, load_backup_catalogue,
+    restore_catalogued_backup, verify_backup_catalogue, BackupCoverage, DataRuntime, Engine,
+    LocalObjectStore, NativeEngine,
 };
 use std::fs::OpenOptions;
 use std::io::{Seek, SeekFrom, Write};
-use vyrm_core::{Claim, Predicate, Producer, Subject};
 
 fn claim(name: &str, at: u64) -> Claim {
     Claim::new(
@@ -85,4 +90,88 @@ fn archive_or_catalogue_corruption_fails_closed() {
     bytes[position] = b'e';
     std::fs::write(&catalogue, bytes).unwrap();
     assert!(load_backup_catalogue(&catalogue_root).is_err());
+}
+
+#[test]
+fn application_backup_payload_corruption_fails_before_restore_publication() {
+    let root = tempfile::tempdir().unwrap();
+    let runtime = DataRuntime::new(
+        NativeEngine::open(&root.path().join("source")).unwrap(),
+        LocalObjectStore::open(root.path().join("source-objects")).unwrap(),
+    );
+    let scope = ScopeId::new("instance:complete-backup").unwrap();
+    let mut schema = RuntimeSchemaRegistry::empty(1, "backup object schema");
+    schema.records.insert(
+        RuntimeType::new("document").unwrap(),
+        RuntimeRecordSchema::default(),
+    );
+    runtime
+        .engine()
+        .commit_runtime(&RuntimeCommit {
+            scope: scope.clone(),
+            at: 10,
+            actor: "backup-test".into(),
+            expected_cursor: 0,
+            mutations: vec![
+                RuntimeMutation::Schema { registry: schema },
+                RuntimeMutation::Record {
+                    record: RuntimeRecord {
+                        reference: RuntimeRef::new("document", "one").unwrap(),
+                        valid_from: 10,
+                        valid_to: None,
+                        properties: RuntimeProperties::new(),
+                    },
+                },
+            ],
+        })
+        .unwrap();
+    let object = runtime
+        .stage_object(
+            "document-one-payload",
+            Some(RuntimeRef::new("document", "one").unwrap()),
+            "application/octet-stream",
+            b"authenticated backup payload",
+        )
+        .unwrap();
+    let read = runtime.engine().runtime_read_stamp(&scope).unwrap();
+    runtime
+        .commit(
+            &DataTransaction::new(
+                read.clone(),
+                RuntimeCommit {
+                    scope,
+                    at: 20,
+                    actor: "backup-test".into(),
+                    expected_cursor: read.commit_cursor,
+                    mutations: vec![RuntimeMutation::Object {
+                        object: object.clone(),
+                    }],
+                },
+            )
+            .unwrap(),
+        )
+        .unwrap();
+    let catalogue_root = root.path().join("catalogue");
+    let entry = create_application_backup(
+        runtime.engine(),
+        runtime.objects(),
+        &catalogue_root,
+        "complete",
+        100,
+    )
+    .unwrap();
+    assert_eq!(entry.object_payloads, BackupCoverage::Included);
+    assert_eq!(entry.catalogues, BackupCoverage::Included);
+    assert!(entry.application_complete);
+    verify_backup_catalogue(&catalogue_root).unwrap();
+
+    let retained = catalogue_root.join("payloads").join(&object.receipt.key);
+    let mut file = OpenOptions::new().write(true).open(retained).unwrap();
+    file.seek(SeekFrom::End(-1)).unwrap();
+    file.write_all(&[0x7f]).unwrap();
+    file.sync_all().unwrap();
+    assert!(verify_backup_catalogue(&catalogue_root).is_err());
+    let target = root.path().join("must-not-publish");
+    assert!(restore_catalogued_backup(&catalogue_root, &entry.backup_id, &target, 200).is_err());
+    assert!(!target.exists());
 }

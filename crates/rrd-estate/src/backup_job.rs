@@ -4,10 +4,10 @@ use super::{
     Result,
 };
 use rrd_contract::CanonicalId;
+use rrd_core::digest;
+use rrd_store::{ControlTransition, Engine};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
-use vyrm_core::digest;
-use rrd_store::{ControlTransition, Engine};
 
 pub const MAX_BACKUP_JOBS: usize = 4_096;
 pub const MAX_BACKUP_IDEMPOTENCY_BINDINGS: usize = 4_096;

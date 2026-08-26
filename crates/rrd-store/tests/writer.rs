@@ -1,9 +1,9 @@
 //! Group-commit writer behaviour. `SPEC.md` §8.1.
 
+use rrd_core::{Claim, ClaimReader, Predicate, Producer, Subject};
 use rrd_store::{Store, Writer, WriterConfig};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use vyrm_core::{Claim, ClaimReader, Predicate, Producer, Subject};
 
 fn claim(i: usize) -> Claim {
     Claim::new(

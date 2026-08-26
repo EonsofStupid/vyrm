@@ -8,7 +8,7 @@ copy Anytype's branding or source.
 | Anytype pattern | Connectome translation |
 |---|---|
 | Objects accumulate properties and relationships | Claims, runs, evidence, files, and invocations are inspectable objects with stable identities |
-| A Channel/Space owns its objects and sidebar | A vyrm instance owns its runtime state and navigation; an umbrella must still name members explicitly |
+| A Channel/Space owns its objects and sidebar | A rrflow instance owns its runtime state and navigation; an umbrella must still name members explicitly |
 | Sidebar widgets provide persistent lenses | Estates, Tables, Data models, and Visuals are stable operator workspaces; the deeper runtime labs remain directly reachable |
 | Types, Queries, and Collections can render through different Views | The same runtime snapshot can render as graph, timeline, table, route result, or inspector |
 | Global and local graph navigation | Global instance map exists, but local selection-centered graphs are the default |

@@ -13,8 +13,7 @@ impl AppState {
             headers,
             body,
             now,
-            false,
-            SecurityAction::EstateRead,
+            RrdOperation::EstateRead,
             None,
             |envelope, session, token| {
                 let estate = CanonicalId::new(estate).map_err(|error| {
@@ -60,8 +59,7 @@ impl AppState {
             headers,
             body,
             now,
-            false,
-            SecurityAction::QueryExecute,
+            RrdOperation::QueryExecute,
             None,
             |envelope, session, token| {
                 self.service
@@ -88,8 +86,7 @@ impl AppState {
             headers,
             body,
             now,
-            false,
-            SecurityAction::QueryLivePoll,
+            RrdOperation::QueryLivePoll,
             None,
             |envelope, session, token| {
                 if envelope.context.deadline_unix_ms.is_some_and(|deadline| {
@@ -126,8 +123,7 @@ impl AppState {
             headers,
             body,
             now,
-            true,
-            SecurityAction::QueryIndexEnsure,
+            RrdOperation::QueryIndexEnsure,
             None,
             |envelope, session, token| {
                 let idempotency_key = envelope
@@ -160,8 +156,7 @@ impl AppState {
             headers,
             body,
             now,
-            false,
-            SecurityAction::QueryIndexList,
+            RrdOperation::QueryIndexList,
             None,
             |envelope, session, token| {
                 self.service

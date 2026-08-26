@@ -2,12 +2,12 @@
 //! rule 3): the Fjall engine and the reference engine must be
 //! indistinguishable through the trait — same recall, same projection, same
 //! grounding stamp digest. This test is what makes "fold in storage" a
-//! contract rather than a promise: a bbolt engine in Go, or a vyrm-native
+//! contract rather than a promise: a bbolt engine in Go, or a rrflow-native
 //! engine in Rust, is correct exactly when this differential (and the
-//! golden key vectors in vyrm-core) holds for it.
+//! golden key vectors in rrd-core) holds for it.
 
+use rrd_core::{recall, Claim, ClaimReader, Predicate, Producer, RecallQuery, Subject};
 use rrd_store::{Engine, GroundingReport, MemoryEngine, NativeEngine, Store};
-use vyrm_core::{recall, Claim, ClaimReader, Predicate, Producer, RecallQuery, Subject};
 
 fn claim(subject: &str, predicate: &str, object: &str, from: u64) -> Claim {
     Claim::new(

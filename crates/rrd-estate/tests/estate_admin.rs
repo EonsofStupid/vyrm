@@ -4,11 +4,11 @@ use rrd_estate::{
     ObservationRequest, ObservedPhase, ReceiptBoundary, ReceiptRequest,
     LOCAL_OPERATOR_POLICY_FORMAT,
 };
+use rrd_store::{Engine, PersistentEngine};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 use std::process::{Command, Output};
-use rrd_store::{Engine, PersistentEngine};
 
 fn run(arguments: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_rrd-estate-admin"))

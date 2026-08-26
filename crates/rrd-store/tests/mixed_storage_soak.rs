@@ -4,9 +4,9 @@
 //! runtime contract does not yet define referentially safe entity deletion.
 
 use fjall::{KeyspaceCreateOptions, PersistMode, Readable, SingleWriterTxDatabase};
+use rrd_core::digest::Sha256;
+use rrd_lsm::{Database, Durability, Mutation, WriteBatch};
 use std::collections::BTreeMap;
-use vyrm_core::digest::Sha256;
-use vyrm_kv::{Database, Durability, Mutation, WriteBatch};
 
 const OPERATIONS: usize = 20_000;
 const BATCH: usize = 250;
@@ -88,7 +88,7 @@ fn mixed_put_update_delete_reopen_compaction_matches_fjall_and_model() {
     assert_all_equal(&native, &fjall, &keyspace, &model);
     let digest = model_digest(&model);
     let actual = serde_json::json!({
-        "contract": "vyrmkv-fjall-mixed-storage-soak-v1",
+        "contract": "rrd-lsm-fjall-mixed-storage-soak-v1",
         "seed": format!("0x{SEED:016x}"),
         "operations": OPERATIONS,
         "inserts": puts,
@@ -153,7 +153,10 @@ fn assert_all_equal(
             (key.to_vec(), value.to_vec())
         })
         .collect();
-    assert_eq!(&native_values, model, "vyrmKV differs from reference model");
+    assert_eq!(
+        &native_values, model,
+        "RRD LSM differs from reference model"
+    );
     assert_eq!(&fjall_values, model, "Fjall differs from reference model");
 }
 

@@ -1,6 +1,6 @@
+use rrd_store::PersistentEngine;
 use std::net::SocketAddr;
 use std::path::PathBuf;
-use rrd_store::PersistentEngine;
 
 fn main() {
     if let Err(error) = run() {
@@ -30,7 +30,7 @@ fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             "--enable-runners" => enable_runners = true,
             "--help" | "-h" => {
                 println!(
-                    "connectome [--root PATH] [--db PATH] [--bind 127.0.0.1:4387] [--allow-remote] [--enable-runners]\n\nLocal developer workbench for a vyrm instance. Prompt flights are recorded; frontier CLI execution stays disabled unless --enable-runners is explicit."
+                    "connectome [--root PATH] [--db PATH] [--bind 127.0.0.1:4387] [--allow-remote] [--enable-runners]\n\nLocal developer workbench for an RRFlow instance. Prompt flights are recorded; frontier CLI execution stays disabled unless --enable-runners is explicit."
                 );
                 return Ok(());
             }

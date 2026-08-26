@@ -98,7 +98,7 @@ test('capability handshake separates executable evidence from roadmap claims', a
   const response = await request.get(`${baseURL}/api/runtime/capabilities`);
   expect(response.ok()).toBeTruthy();
   const capabilities = await response.json();
-  expect(capabilities.protocol).toBe('vyrm-diagnostics');
+  expect(capabilities.protocol).toBe('rrd-diagnostics');
   expect(capabilities.version).toBe(1);
   expect(capabilities.replay).toMatchObject({
     persisted: true,
@@ -334,7 +334,7 @@ test('query lab exposes exact plan evidence and deterministic rows', async ({ pa
   expect(seed.ok()).toBeTruthy();
 
   await page.goto(`${baseURL}/#query`);
-  await expect(page.getByRole('heading', { name: 'vyrmQL contract lab' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'RRFlowQL contract lab' })).toBeVisible();
   await page.locator('#query-source').fill(
     `FROM record:prompt_flight AT VALID ${Date.now()} KNOWN HEAD PROJECT id, status LIMIT 5 EXPLAIN CONTRACT`,
   );

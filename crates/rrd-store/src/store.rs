@@ -9,16 +9,16 @@ use crate::gc::{build_report, RemovalReport, Tally};
 use crate::invocation::{self, Invocation, InvocationInput};
 use crate::keyspaces::{self, Durability};
 use fjall::{KeyspaceCreateOptions, Readable, SingleWriterTxDatabase, SingleWriterTxKeyspace};
-use serde::de::DeserializeOwned;
-use std::collections::{BTreeMap, BTreeSet};
-use std::path::{Path, PathBuf};
-use vyrm_core::{
+use rrd_core::{
     key, projection_family, AuditEnvelope, Claim, ClaimSource, Millis, Predicate, ProjectionWork,
     ReadStamp, Reader, RetentionPin, RuntimeChange, RuntimeChangePage, RuntimeCommit,
     RuntimeCommitOutcome, RuntimeLogAccumulator, RuntimeMerkleNode, RuntimeMutation, RuntimeRecord,
     RuntimeRef, RuntimeRelation, RuntimeSchemaRegistry, ScopeId, SnapshotHandle, SnapshotId,
     Subject,
 };
+use serde::de::DeserializeOwned;
+use std::collections::{BTreeMap, BTreeSet};
+use std::path::{Path, PathBuf};
 
 /// Sequences assigned by an append.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -165,7 +165,7 @@ impl Store {
     }
 
     /// Writes one durable, cross-keyspace snapshot for the explicit
-    /// Fjall-to-vyrmKV migration path. Kept crate-private so ordinary runtime
+    /// Fjall-to-RRD LSM migration path. Kept crate-private so ordinary runtime
     /// code cannot accidentally treat the compatibility adapter as an export
     /// API.
     pub(crate) fn export_migration_archive(
@@ -296,7 +296,7 @@ impl Store {
     }
 
     /// Persists a leased read stamp in the same transaction that observes its
-    /// cursor and schema. The current log is append-only; native `vyrmKV` will
+    /// cursor and schema. The current log is append-only; native `RRD LSM` will
     /// additionally use this catalog to pin physical manifest objects.
     pub fn open_runtime_snapshot(
         &self,
@@ -386,12 +386,12 @@ impl Store {
 
     /// Logical GC roots derived from the authoritative snapshot catalog.
     /// The compatibility adapter never reclaims runtime changes; native
-    /// `vyrmKV` binds these identities to its physical object graph.
+    /// `RRD LSM` binds these identities to its physical object graph.
     pub fn runtime_retention_pins(&self, now: Millis) -> Result<Vec<RetentionPin>> {
         self.runtime_snapshots(now)?
             .iter()
             .map(RetentionPin::from_snapshot)
-            .collect::<vyrm_core::Result<Vec<_>>>()
+            .collect::<rrd_core::Result<Vec<_>>>()
             .map_err(Error::from)
     }
 
@@ -1086,6 +1086,11 @@ impl Store {
         Ok(entries)
     }
 
+    pub fn control_sequence(&self) -> Result<u64> {
+        let snapshot = self.db.read_tx();
+        decode_optional_sequence(snapshot.get(&self.meta, keyspaces::CONTROL_JOURNAL_SEQUENCE)?)
+    }
+
     /// Appends a single claim. Equivalent to a batch of one; provided for call
     /// sites that genuinely have one claim, not as the preferred write path.
     pub fn assert(&self, claim: &Claim) -> Result<AppendOutcome> {
@@ -1464,7 +1469,7 @@ fn validate_read_stamp_with<R: Readable>(
     changes_keyspace: &SingleWriterTxKeyspace,
     schemas: &SingleWriterTxKeyspace,
     read: &ReadStamp,
-) -> Result<vyrm_core::RuntimeReadValidation> {
+) -> Result<rrd_core::RuntimeReadValidation> {
     read.validate()?;
     let current = decode_optional_sequence(reader.get(meta, keyspaces::RUNTIME_CURSOR)?)?;
     if read.commit_cursor > current {
@@ -1496,7 +1501,7 @@ fn validate_read_stamp_with<R: Readable>(
         {
             return Err(Error::ReadStampMismatch(read.manifest_id.clone()));
         }
-        return Ok(vyrm_core::RuntimeReadValidation::new(
+        return Ok(rrd_core::RuntimeReadValidation::new(
             "authenticated_current_head",
             0,
             0,
@@ -1547,7 +1552,7 @@ fn validate_read_stamp_with<R: Readable>(
     {
         return Err(Error::ReadStampMismatch(read.manifest_id.clone()));
     }
-    Ok(vyrm_core::RuntimeReadValidation::new(
+    Ok(rrd_core::RuntimeReadValidation::new(
         "full_hash_chain_replay",
         read.commit_cursor,
         0,
@@ -1635,11 +1640,7 @@ fn authenticated_point_page<R: Readable>(
         requested_after: cursor - 1,
         through_cursor: cursor,
         head_cursor: read.commit_cursor,
-        validation: vyrm_core::RuntimeReadValidation::new(
-            "rfc9162_inclusion_proof",
-            1,
-            proof_nodes,
-        ),
+        validation: rrd_core::RuntimeReadValidation::new("rfc9162_inclusion_proof", 1, proof_nodes),
         changes: selected.into_iter().collect(),
     })
 }
@@ -1649,16 +1650,16 @@ fn read_fjall_accumulator_node<R: Readable>(
     meta: &SingleWriterTxKeyspace,
     level: u8,
     index: u64,
-) -> vyrm_core::Result<Option<String>> {
+) -> rrd_core::Result<Option<String>> {
     let value = reader
         .get(meta, keyspaces::runtime_accumulator_node_key(level, index))
-        .map_err(|error| vyrm_core::Error::InvalidRuntime {
+        .map_err(|error| rrd_core::Error::InvalidRuntime {
             reason: format!("cannot read runtime accumulator node: {error}"),
         })?;
     value
         .map(|bytes| String::from_utf8(bytes.to_vec()))
         .transpose()
-        .map_err(|error| vyrm_core::Error::InvalidRuntime {
+        .map_err(|error| rrd_core::Error::InvalidRuntime {
             reason: format!("runtime accumulator node is not UTF-8: {error}"),
         })
 }
@@ -1681,7 +1682,7 @@ fn runtime_change_page<R: Readable>(
             requested_after: after,
             through_cursor: after,
             head_cursor: head,
-            validation: vyrm_core::RuntimeReadValidation::new("bounded_hash_chain_page", 0, 0),
+            validation: rrd_core::RuntimeReadValidation::new("bounded_hash_chain_page", 0, 0),
             changes: Vec::new(),
         });
     }
@@ -1732,7 +1733,7 @@ fn runtime_change_page<R: Readable>(
         requested_after: after,
         through_cursor: through,
         head_cursor: head,
-        validation: vyrm_core::RuntimeReadValidation::new(
+        validation: rrd_core::RuntimeReadValidation::new(
             "bounded_hash_chain_page",
             through.saturating_sub(after),
             0,

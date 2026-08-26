@@ -11,8 +11,7 @@ impl AppState {
             headers,
             body,
             now,
-            false,
-            SecurityAction::VectorSearch,
+            RrdOperation::VectorSearch,
             None,
             |envelope, session, token| {
                 self.service
@@ -39,8 +38,7 @@ impl AppState {
             headers,
             body,
             now,
-            true,
-            SecurityAction::VectorCollectionEnsure,
+            RrdOperation::VectorCollectionEnsure,
             None,
             |envelope, session, token| {
                 self.service
@@ -66,8 +64,7 @@ impl AppState {
             headers,
             body,
             now,
-            false,
-            SecurityAction::VectorCollectionList,
+            RrdOperation::VectorCollectionList,
             None,
             |envelope, session, token| {
                 self.service
@@ -94,8 +91,7 @@ impl AppState {
             headers,
             body,
             now,
-            false,
-            SecurityAction::VectorPointScroll,
+            RrdOperation::VectorPointScroll,
             None,
             |envelope, session, token| {
                 self.service
@@ -122,8 +118,7 @@ impl AppState {
             headers,
             body,
             now,
-            false,
-            SecurityAction::VectorPointRetrieve,
+            RrdOperation::VectorPointRetrieve,
             None,
             |envelope, session, token| {
                 self.service

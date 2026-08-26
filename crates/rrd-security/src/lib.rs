@@ -4,11 +4,11 @@
 //! Connectome only renders and administers it through authorized APIs.
 
 use rrd_contract::{CanonicalId, ResourcePath};
+use rrd_core::digest;
+use rrd_store::{ControlJournalEntry, ControlTransition, Engine};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
-use vyrm_core::digest;
-use rrd_store::{ControlJournalEntry, ControlTransition, Engine};
 
 pub const SECURITY_FORMAT: u16 = 1;
 pub const MAX_PRINCIPALS: usize = 4_096;
@@ -249,6 +249,23 @@ impl<'a, E: Engine> SecurityRepository<'a, E> {
         resource: &ResourcePath,
         at: u64,
     ) -> Result<Authorization> {
+        self.authenticate_principal(principal_id, credential)?;
+        let state = self.load()?.ok_or(Error::NotInitialized)?;
+        let principal = state
+            .principals
+            .get(principal_id)
+            .ok_or(Error::PrincipalNotFound)?;
+        authorize(&state, principal, action, resource, at)
+    }
+
+    /// Authenticates identity without granting an action. This split allows
+    /// callers to retain a proven principal on a subsequent policy denial
+    /// while never attributing a failed credential attempt to that principal.
+    pub fn authenticate_principal(
+        &self,
+        principal_id: &CanonicalId,
+        credential: &[u8],
+    ) -> Result<()> {
         let state = self.load()?.ok_or(Error::NotInitialized)?;
         let principal = state
             .principals
@@ -258,7 +275,7 @@ impl<'a, E: Engine> SecurityRepository<'a, E> {
         if !constant_time_equal(supplied.as_bytes(), principal.credential_sha256.as_bytes()) {
             return Err(Error::Unauthenticated);
         }
-        authorize(&state, principal, action, resource, at)
+        Ok(())
     }
 
     /// Re-evaluates current policy for a principal whose credential was

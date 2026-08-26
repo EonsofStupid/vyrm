@@ -11,10 +11,10 @@
 //! cargo run --release -p rrd-store --example throughput -- <path-on-ext4>
 //! ```
 
+use rrd_core::{Claim, ClaimReader, Predicate, Producer, Reader, Subject};
 use rrd_store::{Store, Writer, WriterConfig};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use vyrm_core::{Claim, ClaimReader, Predicate, Producer, Reader, Subject};
 
 fn producer() -> Producer {
     Producer {

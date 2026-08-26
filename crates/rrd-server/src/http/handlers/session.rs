@@ -11,8 +11,7 @@ impl AppState {
             headers,
             body,
             now,
-            true,
-            SecurityAction::SessionCreate,
+            RrdOperation::SessionCreate,
             |envelope, identity| {
                 let idempotency_key = required_idempotency(&envelope.context)?;
                 match identity {
@@ -50,8 +49,7 @@ impl AppState {
             headers,
             body,
             now,
-            true,
-            SecurityAction::SessionRenew,
+            RrdOperation::SessionRenew,
             Some(path_id),
             |envelope, session, token| {
                 let idempotency_key = required_idempotency(&envelope.context)?;
@@ -82,8 +80,7 @@ impl AppState {
             headers,
             body,
             now,
-            true,
-            SecurityAction::SessionClose,
+            RrdOperation::SessionClose,
             Some(path_id),
             |envelope, session, token| {
                 let idempotency_key = required_idempotency(&envelope.context)?;
@@ -112,8 +109,7 @@ impl AppState {
             headers,
             body,
             now,
-            true,
-            SecurityAction::TransactionBegin,
+            RrdOperation::TransactionBegin,
             None,
             |envelope, session, token| {
                 self.service
@@ -135,8 +131,7 @@ impl AppState {
             headers,
             body,
             now,
-            false,
-            SecurityAction::TransactionPreview,
+            RrdOperation::TransactionPreview,
             None,
             |envelope, session, token| {
                 let transaction = parse_correlation(transaction)?;
@@ -167,8 +162,7 @@ impl AppState {
             headers,
             body,
             now,
-            true,
-            SecurityAction::TransactionCommit,
+            RrdOperation::TransactionCommit,
             None,
             |envelope, session, token| {
                 if envelope.context.deadline_unix_ms.is_none() {
@@ -208,8 +202,7 @@ impl AppState {
             headers,
             body,
             now,
-            true,
-            SecurityAction::TransactionAbort,
+            RrdOperation::TransactionAbort,
             None,
             |envelope, session, token| {
                 let transaction = parse_correlation(transaction)?;

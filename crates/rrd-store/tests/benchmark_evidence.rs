@@ -37,26 +37,40 @@ fn assert_legacy_evidence(
 fn legacy_native_matrix_remains_structurally_valid_but_is_not_current_promotion_evidence() {
     let root = concat!(env!("CARGO_MANIFEST_DIR"), "/../../eval/results/");
     for (name, trials, operations, batch, reads, width) in [
-        ("2026-08-19-vyrmkv-baseline.json", 5, 2_048, 64, 512, 32),
+        ("2026-08-19-rrd-lsm-baseline.json", 5, 2_048, 64, 512, 32),
         (
-            "2026-08-19-vyrmkv-small-batch.json",
+            "2026-08-19-rrd-lsm-small-batch.json",
             9,
             2_048,
             16,
             1_024,
             16,
         ),
-        ("2026-08-19-vyrmkv-standard.json", 9, 2_048, 64, 1_024, 32),
-        ("2026-08-19-vyrmkv-read-heavy.json", 9, 4_096, 64, 4_096, 64),
+        ("2026-08-19-rrd-lsm-standard.json", 9, 2_048, 64, 1_024, 32),
         (
-            "2026-08-19-vyrmkv-sustained.json",
+            "2026-08-19-rrd-lsm-read-heavy.json",
+            9,
+            4_096,
+            64,
+            4_096,
+            64,
+        ),
+        (
+            "2026-08-19-rrd-lsm-sustained.json",
             9,
             16_384,
             128,
             2_048,
             64,
         ),
-        ("2026-08-20-vyrmkv-extended.json", 3, 70_000, 128, 2_048, 64),
+        (
+            "2026-08-20-rrd-lsm-extended.json",
+            3,
+            70_000,
+            128,
+            2_048,
+            64,
+        ),
     ] {
         assert_legacy_evidence(
             &format!("{root}{name}"),
@@ -74,49 +88,49 @@ fn checked_in_ai_read_matrix_is_structurally_valid_and_green() {
     let root = concat!(env!("CARGO_MANIFEST_DIR"), "/../../eval/results/");
     for (name, workload, payload, items_per_sample) in [
         (
-            "2026-08-22-vyrmkv-ai-current-hot-hit.json",
+            "2026-08-22-rrd-lsm-ai-current-hot-hit.json",
             "current_hot_hit",
             "repeated_byte",
             1,
         ),
         (
-            "2026-08-22-vyrmkv-ai-cold-hit.json",
+            "2026-08-22-rrd-lsm-ai-cold-hit.json",
             "cold_hit",
             "repeated_byte",
             1,
         ),
         (
-            "2026-08-22-vyrmkv-ai-point-miss.json",
+            "2026-08-22-rrd-lsm-ai-point-miss.json",
             "point_miss",
             "repeated_byte",
             1,
         ),
         (
-            "2026-08-22-vyrmkv-ai-historical-hot-hit.json",
+            "2026-08-22-rrd-lsm-ai-historical-hot-hit.json",
             "historical_hot_hit",
             "repeated_byte",
             1,
         ),
         (
-            "2026-08-22-vyrmkv-ai-metadata-fanout.json",
+            "2026-08-22-rrd-lsm-ai-metadata-fanout.json",
             "metadata_fanout",
             "repeated_byte",
             32,
         ),
         (
-            "2026-08-22-vyrmkv-ai-metadata-fanout-structured-json.json",
+            "2026-08-22-rrd-lsm-ai-metadata-fanout-structured-json.json",
             "metadata_fanout",
             "structured_json",
             32,
         ),
         (
-            "2026-08-22-vyrmkv-ai-metadata-fanout-deterministic-entropy.json",
+            "2026-08-22-rrd-lsm-ai-metadata-fanout-deterministic-entropy.json",
             "metadata_fanout",
             "deterministic_entropy",
             32,
         ),
         (
-            "2026-08-23-vyrmkv-ai-embedding-batch-v2.json",
+            "2026-08-23-rrd-lsm-ai-embedding-batch-v2.json",
             "metadata_fanout",
             "embedding_f32",
             32,
@@ -196,7 +210,7 @@ fn checked_in_ai_read_matrix_is_structurally_valid_and_green() {
 fn corrected_standard_evidence_records_a_bounded_strict_promotion() {
     let file = concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/../../eval/results/2026-08-23-vyrmkv-standard-streaming-scan-v4.json"
+        "/../../eval/results/2026-08-23-rrd-lsm-standard-streaming-scan-v4.json"
     );
     let evidence: serde_json::Value =
         serde_json::from_slice(&std::fs::read(file).unwrap()).unwrap();
@@ -252,19 +266,19 @@ fn streaming_scan_scale_evidence_retains_the_one_extended_rss_failure() {
     let root = concat!(env!("CARGO_MANIFEST_DIR"), "/../../eval/results/");
     for (name, operations, maximum_rss_ratio, should_pass) in [
         (
-            "2026-08-23-vyrmkv-read-heavy-streaming-scan-v4.json",
+            "2026-08-23-rrd-lsm-read-heavy-streaming-scan-v4.json",
             4_096,
             1.0,
             true,
         ),
         (
-            "2026-08-23-vyrmkv-sustained-streaming-scan-v4.json",
+            "2026-08-23-rrd-lsm-sustained-streaming-scan-v4.json",
             16_384,
             1.0,
             true,
         ),
         (
-            "2026-08-23-vyrmkv-extended-streaming-scan-v4.json",
+            "2026-08-23-rrd-lsm-extended-streaming-scan-v4.json",
             70_000,
             1.03,
             false,
@@ -319,22 +333,22 @@ fn compact_keyspace_format_closes_extended_rss_and_retains_read_heavy_tail_failu
     let root = concat!(env!("CARGO_MANIFEST_DIR"), "/../../eval/results/");
     for (name, operations, should_pass) in [
         (
-            "2026-08-23-vyrmkv-standard-keyspace-tag-v2-v4.json",
+            "2026-08-23-rrd-lsm-standard-keyspace-tag-v2-v4.json",
             2_048,
             true,
         ),
         (
-            "2026-08-23-vyrmkv-sustained-keyspace-tag-v2-v4.json",
+            "2026-08-23-rrd-lsm-sustained-keyspace-tag-v2-v4.json",
             16_384,
             true,
         ),
         (
-            "2026-08-23-vyrmkv-extended-keyspace-tag-v2-v4.json",
+            "2026-08-23-rrd-lsm-extended-keyspace-tag-v2-v4.json",
             70_000,
             true,
         ),
         (
-            "2026-08-23-vyrmkv-read-heavy-direct-tag-v2-v4.json",
+            "2026-08-23-rrd-lsm-read-heavy-direct-tag-v2-v4.json",
             4_096,
             false,
         ),
@@ -366,14 +380,14 @@ fn compact_keyspace_format_closes_extended_rss_and_retains_read_heavy_tail_failu
 
     let compact: serde_json::Value = serde_json::from_slice(
         &std::fs::read(format!(
-            "{root}2026-08-23-vyrmkv-extended-keyspace-tag-v2-v4.json"
+            "{root}2026-08-23-rrd-lsm-extended-keyspace-tag-v2-v4.json"
         ))
         .unwrap(),
     )
     .unwrap();
     let textual: serde_json::Value = serde_json::from_slice(
         &std::fs::read(format!(
-            "{root}2026-08-23-vyrmkv-extended-streaming-scan-v4.json"
+            "{root}2026-08-23-rrd-lsm-extended-streaming-scan-v4.json"
         ))
         .unwrap(),
     )
@@ -389,7 +403,7 @@ fn compact_keyspace_format_closes_extended_rss_and_retains_read_heavy_tail_failu
     );
     let read_heavy: serde_json::Value = serde_json::from_slice(
         &std::fs::read(format!(
-            "{root}2026-08-23-vyrmkv-read-heavy-direct-tag-v2-v4.json"
+            "{root}2026-08-23-rrd-lsm-read-heavy-direct-tag-v2-v4.json"
         ))
         .unwrap(),
     )
@@ -404,11 +418,11 @@ fn compact_keyspace_format_closes_extended_rss_and_retains_read_heavy_tail_failu
 fn surrealdb_claim_diagnostic_records_bounded_wins_and_the_disk_loss() {
     let file = concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/../../eval/results/2026-08-23-vyrm-surrealdb-3.0.5-claim-diagnostic-v1.json"
+        "/../../eval/results/2026-08-23-rrflow-surrealdb-3.0.5-claim-diagnostic-v1.json"
     );
     let evidence: serde_json::Value =
         serde_json::from_slice(&std::fs::read(file).unwrap()).unwrap();
-    assert_eq!(evidence["schema"], "vyrm.surrealdb-claim-differential.v1");
+    assert_eq!(evidence["schema"], "rrflow.surrealdb-claim-differential.v1");
     assert_eq!(evidence["config"]["trials"], 3);
     assert_eq!(evidence["config"]["operations"], 2_048);
     assert_eq!(
@@ -422,31 +436,31 @@ fn surrealdb_claim_diagnostic_records_bounded_wins_and_the_disk_loss() {
     assert_eq!(evidence["native"]["correctness_verified"], true);
     assert_eq!(evidence["surreal"]["correctness_verified"], true);
     for ratio in [
-        "vyrm_to_surreal_write_throughput",
-        "vyrm_to_surreal_read_throughput",
-        "vyrm_to_surreal_server_write_throughput",
-        "vyrm_to_surreal_server_read_throughput",
+        "rrflow_to_surreal_write_throughput",
+        "rrflow_to_surreal_read_throughput",
+        "rrflow_to_surreal_server_write_throughput",
+        "rrflow_to_surreal_server_read_throughput",
     ] {
         assert!(evidence["ratios"][ratio].as_f64().unwrap() > 1.0, "{ratio}");
     }
     for ratio in [
-        "vyrm_to_surreal_write_p95",
-        "vyrm_to_surreal_read_p95",
-        "vyrm_to_surreal_server_write_p95",
-        "vyrm_to_surreal_server_read_p95",
-        "vyrm_to_surreal_recovery",
-        "vyrm_to_surreal_peak_rss",
+        "rrflow_to_surreal_write_p95",
+        "rrflow_to_surreal_read_p95",
+        "rrflow_to_surreal_server_write_p95",
+        "rrflow_to_surreal_server_read_p95",
+        "rrflow_to_surreal_recovery",
+        "rrflow_to_surreal_peak_rss",
     ] {
         assert!(evidence["ratios"][ratio].as_f64().unwrap() < 1.0, "{ratio}");
     }
     assert!(
-        evidence["ratios"]["vyrm_to_surreal_reopened_allocated"]
+        evidence["ratios"]["rrflow_to_surreal_reopened_allocated"]
             .as_f64()
             .unwrap()
             > 1.0
     );
     assert_eq!(
-        evidence["bounded_verdict"]["all_measured_cells_favor_vyrm"],
+        evidence["bounded_verdict"]["all_measured_cells_favor_rrflow"],
         false
     );
     assert_eq!(

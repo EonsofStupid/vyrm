@@ -52,7 +52,8 @@ One RRD custom resource deterministically owns:
 1. a headless Service for stable StatefulSet identity;
 2. a ClusterIP client Service on TCP 9477;
 3. a one-replica StatefulSet with retained PVC, `OrderedReady`, operator-
-   controlled `OnDelete` upgrades, security-bootstrap init container, TLS 1.3
+   controlled `OnDelete` upgrades, project-authority and security-bootstrap
+   init containers, TLS 1.3
    mTLS RRD container, non-root execution, read-only root filesystem, dropped
    capabilities, resource bounds, and no service-account token;
 4. a `maxUnavailable: 0` PodDisruptionBudget;
@@ -75,7 +76,7 @@ it is not yet a backup-before-delete or restore workflow.
 
 ## Honest boundary
 
-This does not claim Multi-AZ RRD. `vyrm-cluster` has a real Raft baseline, but
+This does not claim Multi-AZ RRD. `rrd-cluster` has a real Raft baseline, but
 the public RRD service is not yet backed by that replicated state machine.
 Running three independent `rrd-server` pods would create three databases, not
 one database, so v1alpha1 renders exactly one replica and exposes no replica

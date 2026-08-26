@@ -2,12 +2,12 @@ use std::collections::BTreeMap;
 use std::sync::{Arc, Barrier};
 use std::thread;
 
-use rrd_store::{Engine, Error, MemoryEngine, NativeEngine, Store};
-use vyrm_core::{
+use rrd_core::{
     DataTransaction, ReadStamp, RuntimeCommit, RuntimeEvent, RuntimeEventSchema,
     RuntimeGraphSnapshot, RuntimeMutation, RuntimeProperties, RuntimeRecord, RuntimeRecordSchema,
     RuntimeRef, RuntimeSchemaRegistry, RuntimeType, ScopeId,
 };
+use rrd_store::{Engine, Error, MemoryEngine, NativeEngine, Store};
 
 fn schema() -> RuntimeSchemaRegistry {
     let mut registry = RuntimeSchemaRegistry::empty(1, "snapshot test schema");

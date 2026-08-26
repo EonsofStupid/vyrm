@@ -1,0 +1,23 @@
+[package]
+name = "rrd-operator-knowledge"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Project-scoped external operator-knowledge contracts and adapter port for Rrd."
+
+[features]
+default = []
+pgvector-postgres = ["dep:native-tls", "dep:postgres", "dep:postgres-native-tls"]
+
+[dependencies]
+rrd-core = { path = "../rrd-core" }
+rrd-vector = { path = "../rrd-vector" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+native-tls = { version = "0.2.14", optional = true }
+postgres = { version = "0.19.14", features = ["with-serde_json-1"], optional = true }
+postgres-native-tls = { version = "0.5.3", optional = true }
+
+[dev-dependencies]
+tempfile = "3"

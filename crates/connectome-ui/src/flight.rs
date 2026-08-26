@@ -3,6 +3,16 @@
 //! A flight records only externally observable runtime/provider events. It does
 //! not request, infer, or persist hidden chain-of-thought.
 
+use rrd_core::{
+    Reader, RuntimeCommit, RuntimeEvent, RuntimeEventSchema, RuntimeMutation, RuntimeProperties,
+    RuntimePropertySchema, RuntimeRecord, RuntimeRecordSchema, RuntimeRef, RuntimeSchemaRegistry,
+    RuntimeTraceEvent, RuntimeType, RuntimeValue, RuntimeValueType, ScopeId, TraceDataClass,
+    TraceDomain, TraceLink, TraceOutcome,
+};
+use rrd_engine::{
+    record_runtime_trace, DurableTraceSpan, HookContext, HookEvent, InstanceBinding, TraceIdentity,
+};
+use rrd_store::{Engine, PersistentEngine};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, BTreeSet};
@@ -10,16 +20,6 @@ use std::io::{BufRead, BufReader, Read};
 use std::process::{Command, Stdio};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
-use vyrm_core::{
-    Reader, RuntimeCommit, RuntimeEvent, RuntimeEventSchema, RuntimeMutation, RuntimeProperties,
-    RuntimePropertySchema, RuntimeRecord, RuntimeRecordSchema, RuntimeRef, RuntimeSchemaRegistry,
-    RuntimeTraceEvent, RuntimeType, RuntimeValue, RuntimeValueType, ScopeId, TraceDataClass,
-    TraceDomain, TraceLink, TraceOutcome,
-};
-use vyrm_node::{
-    record_runtime_trace, DurableTraceSpan, HookContext, HookEvent, InstanceBinding, TraceIdentity,
-};
-use rrd_store::{Engine, PersistentEngine};
 
 const FLIGHT_LEDGER: &str = "connectome-flight-ledger-v1";
 const FLIGHT_SCOPE: &str = "instance:default";
@@ -33,7 +33,7 @@ const MAX_EVENT_DETAIL_BYTES: usize = 16 * 1024;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ContextMode {
-    /// A new ephemeral provider session with no Vyrm context injected.
+    /// A new ephemeral provider session with no Rrd context injected.
     Fresh,
     /// Only claims matched by the submitted prompt, within the declared budget.
     Pruned,
@@ -236,7 +236,7 @@ impl FlightRecorder {
         self.binding.require_runtime_ready()?;
         self.binding.verify_store_path(self.store.path())?;
 
-        let cohort_id = vyrm_core::digest::sha256_hex(request.prompt.trim().as_bytes());
+        let cohort_id = rrd_core::digest::sha256_hex(request.prompt.trim().as_bytes());
         let id = format!("flight-{at}-{}", &cohort_id[..10]);
         let flight = Flight {
             id: id.clone(),
@@ -361,7 +361,7 @@ impl FlightRecorder {
                 "context",
                 "fresh_baseline",
                 "Baseline context purged",
-                "Ephemeral provider session; zero Vyrm context is injected. Authoritative history is preserved outside the prompt.",
+                "Ephemeral provider session; zero Rrd context is injected. Authoritative history is preserved outside the prompt.",
                 json!({"context_tokens": 0}),
             ))?;
             return Ok((String::new(), 0));
@@ -379,7 +379,7 @@ impl FlightRecorder {
         let mut segments = Vec::new();
         let mut tokens = 0_u64;
         if request.context_mode == ContextMode::Full {
-            let preflight = vyrm_node::handle(&ctx, HookEvent::SessionStart, &json!({}))?;
+            let preflight = rrd_engine::handle(&ctx, HookEvent::SessionStart, &json!({}))?;
             tokens = tokens.saturating_add(
                 preflight
                     .effectiveness
@@ -405,7 +405,7 @@ impl FlightRecorder {
                 ),
             )?;
         }
-        let recalled = vyrm_node::handle(
+        let recalled = rrd_engine::handle(
             &ctx,
             HookEvent::UserPromptSubmit,
             &json!({"prompt": request.prompt}),
@@ -452,7 +452,7 @@ impl FlightRecorder {
         started: &Instant,
     ) -> Result<(), Box<dyn std::error::Error>> {
         let ready =
-            vyrm_node::ensure_routing_fresh(self.store.as_ref(), &self.binding.project_root)?;
+            rrd_engine::ensure_routing_fresh(self.store.as_ref(), &self.binding.project_root)?;
         self.append_event(
             id,
             event(
@@ -465,7 +465,7 @@ impl FlightRecorder {
                 Value::Null,
             ),
         )?;
-        let files = vyrm_node::load_routing(self.store.as_ref(), &self.binding.project_root)?
+        let files = rrd_engine::load_routing(self.store.as_ref(), &self.binding.project_root)?
             .map(|index| {
                 index
                     .route(prompt, 6)
@@ -521,7 +521,7 @@ impl FlightRecorder {
             ),
             (
                 "prompt_digest".into(),
-                RuntimeValue::Digest(vyrm_core::digest::sha256_hex(request.prompt.as_bytes())),
+                RuntimeValue::Digest(rrd_core::digest::sha256_hex(request.prompt.as_bytes())),
             ),
         ]);
         let span = match DurableTraceSpan::start(
@@ -621,7 +621,7 @@ impl FlightRecorder {
             request.prompt.clone()
         } else {
             format!(
-                "[VYRM CONTEXT]\n{context}\n\n[USER PROMPT]\n{}",
+                "[RRFLOW CONTEXT]\n{context}\n\n[USER PROMPT]\n{}",
                 request.prompt
             )
         };
@@ -802,7 +802,7 @@ impl FlightRecorder {
             ),
             (
                 "envelope_digest".into(),
-                RuntimeValue::Digest(vyrm_core::digest::sha256_hex(encoded_envelope.as_bytes())),
+                RuntimeValue::Digest(rrd_core::digest::sha256_hex(encoded_envelope.as_bytes())),
             ),
         ]);
         let trace_event = if stage == "tools" {
@@ -949,7 +949,7 @@ fn demo_flight(at: u64, comparison_id: &str, role: &str) -> Flight {
     } else {
         "Make this better."
     };
-    let cohort_id = vyrm_core::digest::sha256_hex(prompt.as_bytes());
+    let cohort_id = rrd_core::digest::sha256_hex(prompt.as_bytes());
     let specifications: &[(&str, &str, &str, &str, u64, Value)] = if strong {
         &[
             ("prompt", "prompt_received", "Bounded prompt entered", "Objective, safety boundary, evidence requirements, and measurable outcome arrived together.", 0, json!({"constraints": 5, "ambiguity": 0})),
@@ -1501,7 +1501,7 @@ mod tests {
 
     #[test]
     fn reasoning_profiles_map_to_exact_runner_arguments() {
-        let root = std::path::Path::new("/tmp/vyrm-profile-test");
+        let root = std::path::Path::new("/tmp/rrflow-profile-test");
         let codex = provider_command("codex", root, "inspect", ReasoningProfile::Extreme).unwrap();
         let codex_args = codex
             .get_args()
@@ -1533,9 +1533,9 @@ mod tests {
     #[test]
     fn provider_envelopes_emit_privacy_bounded_model_and_tool_traces() {
         let root = tempfile::tempdir().unwrap();
-        vyrm_node::InstanceManifest::ensure_dedicated(root.path()).unwrap();
+        rrd_engine::InstanceManifest::ensure_dedicated(root.path()).unwrap();
         let store =
-            Arc::new(PersistentEngine::open(&root.path().join(vyrm_node::STORE_DIR)).unwrap());
+            Arc::new(PersistentEngine::open(&root.path().join(rrd_engine::STORE_DIR)).unwrap());
         let binding = InstanceBinding::discover(root.path()).unwrap();
         let recorder = FlightRecorder::new(Arc::clone(&store), binding, false);
         let identity = TraceIdentity::derive(&[b"provider-envelope-test"]).unwrap();
@@ -1576,7 +1576,7 @@ mod tests {
             .iter()
             .filter_map(|change| match &change.mutation {
                 RuntimeMutation::Event { event }
-                    if event.kind.as_str() == vyrm_core::RUNTIME_TRACE_EVENT_TYPE =>
+                    if event.kind.as_str() == rrd_core::RUNTIME_TRACE_EVENT_TYPE =>
                 {
                     Some(event)
                 }
@@ -1605,13 +1605,13 @@ mod tests {
 
     #[test]
     fn fresh_and_pruned_arms_preserve_history_but_change_injected_context() {
-        use vyrm_core::{Claim, Predicate, Producer, Subject};
+        use rrd_core::{Claim, Predicate, Producer, Subject};
 
         let root = tempfile::tempdir().unwrap();
         std::fs::write(root.path().join("lib.rs"), "pub fn runtime() {}\n").unwrap();
-        vyrm_node::InstanceManifest::ensure_dedicated(root.path()).unwrap();
+        rrd_engine::InstanceManifest::ensure_dedicated(root.path()).unwrap();
         let store =
-            Arc::new(PersistentEngine::open(&root.path().join(vyrm_node::STORE_DIR)).unwrap());
+            Arc::new(PersistentEngine::open(&root.path().join(rrd_engine::STORE_DIR)).unwrap());
         Engine::assert(
             store.as_ref(),
             &Claim::new(
@@ -1679,9 +1679,9 @@ mod tests {
     fn weak_and_strong_demos_are_one_comparable_runtime_burst() {
         let root = tempfile::tempdir().unwrap();
         std::fs::write(root.path().join("lib.rs"), "pub fn runtime() {}\n").unwrap();
-        vyrm_node::InstanceManifest::ensure_dedicated(root.path()).unwrap();
+        rrd_engine::InstanceManifest::ensure_dedicated(root.path()).unwrap();
         let store =
-            Arc::new(PersistentEngine::open(&root.path().join(vyrm_node::STORE_DIR)).unwrap());
+            Arc::new(PersistentEngine::open(&root.path().join(rrd_engine::STORE_DIR)).unwrap());
         let binding = InstanceBinding::discover(root.path()).unwrap();
         let recorder = FlightRecorder::new(Arc::clone(&store), binding, false);
 
@@ -1722,8 +1722,8 @@ mod tests {
     fn prompt_flights_survive_store_and_recorder_restart() {
         let root = tempfile::tempdir().unwrap();
         std::fs::write(root.path().join("lib.rs"), "pub fn runtime() {}\n").unwrap();
-        vyrm_node::InstanceManifest::ensure_dedicated(root.path()).unwrap();
-        let db = root.path().join(vyrm_node::STORE_DIR);
+        rrd_engine::InstanceManifest::ensure_dedicated(root.path()).unwrap();
+        let db = root.path().join(rrd_engine::STORE_DIR);
         let binding = InstanceBinding::discover(root.path()).unwrap();
         let store = Arc::new(PersistentEngine::open(&db).unwrap());
         let recorder = FlightRecorder::new(Arc::clone(&store), binding.clone(), false);

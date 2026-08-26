@@ -21,8 +21,8 @@ fn connectome_projects_persisted_estate_authority_without_mutating_it() {
     let temporary = tempfile::tempdir().unwrap();
     let root = temporary.path().join("estate-a");
     std::fs::create_dir(&root).unwrap();
-    vyrm_node::InstanceManifest::ensure_dedicated(&root).unwrap();
-    let store = rrd_store::PersistentEngine::open(&root.join(vyrm_node::STORE_DIR)).unwrap();
+    rrd_engine::InstanceManifest::ensure_dedicated(&root).unwrap();
+    let store = rrd_store::PersistentEngine::open(&root.join(rrd_engine::STORE_DIR)).unwrap();
     let repository = EstateRepository::new(&store, id("estate-a"));
     repository.create(&context(10, "create-estate")).unwrap();
     repository
@@ -39,7 +39,7 @@ fn connectome_projects_persisted_estate_authority_without_mutating_it() {
         })
         .unwrap();
     let revision_before = repository.load().unwrap().unwrap().revision;
-    let binding = vyrm_node::InstanceBinding::discover(&root).unwrap();
+    let binding = rrd_engine::InstanceBinding::discover(&root).unwrap();
 
     let snapshot = connectome_ui::snapshot(&store, &binding, 30).unwrap();
     let estate = &snapshot.estates[0];

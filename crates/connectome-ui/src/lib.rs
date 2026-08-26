@@ -17,6 +17,20 @@ pub use flight::{
     ContextMode, Flight, FlightEvent, FlightMetrics, FlightStatus, LaunchFlight, ReasoningProfile,
 };
 
+use rrd_cluster::RRFLOW_NODE_MAX_CONTROL_LINE_BYTES;
+use rrd_core::{
+    resolve_as_of, AuditEnvelope, Claim, ClaimSource, ReasoningEvent, ReasoningPayload,
+    RetentionPin, RuntimeGraphSnapshot, RuntimeMutation, RuntimeSchemaRegistry, RuntimeValue,
+    ScopeId, SnapshotHandle,
+};
+use rrd_engine::{
+    load_attunement_receipt, product_capability_catalogue, runtime_tool_catalogue, InstanceBinding,
+    InstanceMode, ProjectAttunementReceipt,
+};
+use rrd_query::Query;
+use rrd_query::{BoundQuery, Catalog, ExecutionBudget, Parameters, PhysicalPlan, QueryExecution};
+use rrd_store::{Engine, Invocation, PersistentEngine, ProjectionStatus};
+use rrd_vector::VectorArtifactCatalogEntry;
 use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::Read;
@@ -24,17 +38,6 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tiny_http::{Header, Method, Request, Response, Server, StatusCode};
-use vyrm_cluster::VYRM_NODE_MAX_CONTROL_LINE_BYTES;
-use vyrm_core::{
-    resolve_as_of, AuditEnvelope, Claim, ClaimSource, ReasoningEvent, ReasoningPayload,
-    RetentionPin, RuntimeGraphSnapshot, RuntimeMutation, RuntimeSchemaRegistry, RuntimeValue,
-    ScopeId, SnapshotHandle,
-};
-use vyrm_mx::{BoundQuery, Catalog, ExecutionBudget, Parameters, PhysicalPlan, QueryExecution};
-use vyrm_node::{InstanceBinding, InstanceMode};
-use vyrm_ql::Query;
-use rrd_store::{Engine, Invocation, PersistentEngine, ProjectionStatus};
-use vyrm_vector::VectorArtifactCatalogEntry;
 
 const INDEX: &str = include_str!("../static/index.html");
 const CSS: &str = include_str!("../static/app.css");
@@ -58,6 +61,7 @@ pub struct Snapshot {
     pub cluster: ClusterHistoryView,
     pub vector_artifacts: Vec<VectorArtifactCatalogEntry>,
     pub schema: Option<RuntimeSchemaRegistry>,
+    pub attunement: Option<ProjectAttunementReceipt>,
     pub capabilities: CapabilitiesView,
     pub graph: GraphView,
 }
@@ -70,7 +74,16 @@ pub struct CapabilitiesView {
     pub runners_enabled: bool,
     pub providers: Vec<&'static str>,
     pub replay: ReplayCapabilitiesView,
+    pub mcp_tools: Vec<RuntimeToolView>,
+    pub surfaces: rrd_contract::ProductCapabilityCatalogue,
     pub engine: Vec<EngineCapabilityView>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct RuntimeToolView {
+    pub name: &'static str,
+    pub description: &'static str,
+    pub mutation: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -108,7 +121,7 @@ pub struct EngineCapabilityView {
 /// executable, persisted path and its verification evidence exist.
 pub fn capabilities(runners_enabled: bool) -> CapabilitiesView {
     CapabilitiesView {
-        protocol: "vyrm-diagnostics",
+        protocol: "rrd-diagnostics",
         version: 1,
         developer_diagnostics: true,
         runners_enabled,
@@ -125,6 +138,15 @@ pub fn capabilities(runners_enabled: bool) -> CapabilitiesView {
             speeds: vec![0.5, 1.0, 2.0, 4.0, 8.0],
             lenses: vec!["prompt_flights", "temporal_stream", "causal_traces", "cluster_history"],
         },
+        mcp_tools: runtime_tool_catalogue()
+            .into_iter()
+            .map(|definition| RuntimeToolView {
+                name: definition.name,
+                description: definition.description,
+                mutation: definition.mutation,
+            })
+            .collect(),
+        surfaces: product_capability_catalogue(),
         engine: vec![
             EngineCapabilityView {
                 id: "multi_model_engine",
@@ -132,8 +154,8 @@ pub fn capabilities(runners_enabled: bool) -> CapabilitiesView {
                 category: "data",
                 maturity: CapabilityMaturity::Alpha,
                 summary: "One atomic runtime commit spans records, relations, events, claims, vectors, series, geo values, and object references.",
-                evidence: "Memory, Fjall compatibility, and native VyrmKV share mixed-family rollback and reopen differentials.",
-                limitation: "Index and VyrmQL coverage is not yet equally mature for every canonical value family.",
+                evidence: "Memory, Fjall compatibility, and native RRD LSM share mixed-family rollback and reopen differentials.",
+                limitation: "Index and RRFlowQL coverage is not yet equally mature for every canonical value family.",
             },
             EngineCapabilityView {
                 id: "frontier_reasoning_runtime",
@@ -154,8 +176,8 @@ pub fn capabilities(runners_enabled: bool) -> CapabilitiesView {
                 limitation: "No native subscription protocol or backpressure contract is shipped yet.",
             },
             EngineCapabilityView {
-                id: "vyrmql_security",
-                label: "VyrmQL granular security",
+                id: "rrflowql_security",
+                label: "RRFlowQL granular security",
                 category: "query",
                 maturity: CapabilityMaturity::Partial,
                 summary: "Strict parse, bind, resource budget, scope, and read-stamp enforcement.",
@@ -177,7 +199,7 @@ pub fn capabilities(runners_enabled: bool) -> CapabilitiesView {
                 category: "deployment",
                 maturity: CapabilityMaturity::Experimental,
                 summary: "One logical runtime contract spans embedded engines and a typed Raft adapter slice.",
-                evidence: "Memory, Fjall compatibility, native VyrmKV, and the M7 consensus simulation share differentials.",
+                evidence: "Memory, Fjall compatibility, native RRD LSM, and the M7 consensus simulation share differentials.",
                 limitation: "Production Multi-AZ operation and remote lifecycle automation are not certified.",
             },
             EngineCapabilityView {
@@ -543,7 +565,7 @@ pub fn snapshot(
             .then_with(|| a.claim.predicate.as_str().cmp(b.claim.predicate.as_str()))
     });
 
-    let runs = vyrm_node::reasoning_runs(store)?
+    let runs = rrd_engine::reasoning_runs(store)?
         .into_iter()
         .map(|run| RunView {
             id: run.id().to_owned(),
@@ -557,7 +579,7 @@ pub fn snapshot(
         .find(|run| !run.complete)
         .map(|run| run.id.clone());
 
-    let routing = vyrm_node::load_routing(store, &binding.project_root)?;
+    let routing = rrd_engine::load_routing(store, &binding.project_root)?;
     let files = routing
         .as_ref()
         .map(|index| {
@@ -588,7 +610,7 @@ pub fn snapshot(
     let traces = runtime_traces(store, &binding.manifest.id, 512, &["control"])?;
     let cluster = cluster::cluster_history(store, binding, 256)?;
     let instance_scope = ScopeId::new(binding.manifest.id.clone())?;
-    let vector_artifacts = vyrm_node::vector_artifact_catalog_entries(store, &instance_scope)?;
+    let vector_artifacts = rrd_engine::vector_artifact_catalog_entries(store, &instance_scope)?;
     let graph = build_graph(
         &binding.manifest.id,
         &claims,
@@ -597,7 +619,7 @@ pub fn snapshot(
         &invocations,
         &flights,
     );
-    let reasoning_scope = ScopeId::new(vyrm_node::REASONING_SCOPE)?;
+    let reasoning_scope = ScopeId::new(rrd_engine::REASONING_SCOPE)?;
     let schema = store.runtime_schema(&reasoning_scope)?;
     let models = scoped_models(store, [&reasoning_scope, &instance_scope])?;
     let retention = runtime_retention(store, at)?;
@@ -704,6 +726,7 @@ pub fn snapshot(
         cluster,
         vector_artifacts,
         schema,
+        attunement: load_attunement_receipt(store, &binding.project_root)?,
         capabilities: capabilities(false),
         graph,
     })
@@ -956,7 +979,7 @@ pub fn runtime_traces(
         let RuntimeMutation::Event { event } = &change.mutation else {
             continue;
         };
-        if event.kind.as_str() != vyrm_core::RUNTIME_TRACE_EVENT_TYPE {
+        if event.kind.as_str() != rrd_core::RUNTIME_TRACE_EVENT_TYPE {
             continue;
         }
         let Some(data_class) = runtime_string(&event.properties, "data_class") else {
@@ -988,7 +1011,7 @@ pub fn runtime_traces(
     events.sort_by_key(|event| event.cursor);
     let traces = analyze_traces(&events);
     Ok(TraceExportView {
-        format: "vyrm-trace-export-v1",
+        format: "rrflow-trace-export-v1",
         instance_id: instance_id.to_owned(),
         runtime_head: head,
         truncated_before_cursor: (after > 0).then_some(after.saturating_add(1)),
@@ -1001,8 +1024,8 @@ pub fn runtime_traces(
 }
 
 fn trace_event_view(
-    change: &vyrm_core::RuntimeChange,
-    event: &vyrm_core::RuntimeEvent,
+    change: &rrd_core::RuntimeChange,
+    event: &rrd_core::RuntimeEvent,
     audit: Option<&AuditEnvelope>,
 ) -> Result<TraceEventView, String> {
     let required_string = |name| {
@@ -1260,7 +1283,8 @@ fn span_duration(
 fn describe_mutation(mutation: &RuntimeMutation) -> (&'static str, String, String, String) {
     match mutation {
         RuntimeMutation::Claim { claim } if claim.subject.as_str().starts_with("package:") => {
-            let observation = serde_json::from_str::<vyrm_node::WorkflowObservation>(&claim.object);
+            let observation =
+                serde_json::from_str::<rrd_engine::WorkflowObservation>(&claim.object);
             let detail = observation.map_or_else(
                 |_| format!("{} = {}", claim.predicate, claim.object),
                 |observation| {
@@ -1403,14 +1427,14 @@ fn describe_mutation(mutation: &RuntimeMutation) -> (&'static str, String, Strin
     }
 }
 
-fn runtime_string(properties: &vyrm_core::RuntimeProperties, name: &str) -> Option<String> {
+fn runtime_string(properties: &rrd_core::RuntimeProperties, name: &str) -> Option<String> {
     match properties.get(name) {
         Some(RuntimeValue::String(value) | RuntimeValue::Digest(value)) => Some(value.clone()),
         _ => None,
     }
 }
 
-fn runtime_unsigned(properties: &vyrm_core::RuntimeProperties, name: &str) -> Option<u64> {
+fn runtime_unsigned(properties: &rrd_core::RuntimeProperties, name: &str) -> Option<u64> {
     match properties.get(name) {
         Some(RuntimeValue::Unsigned(value)) => Some(*value),
         _ => None,
@@ -1425,7 +1449,7 @@ pub fn runtime_retention(
     let pins = snapshots
         .iter()
         .map(RetentionPin::from_snapshot)
-        .collect::<vyrm_core::Result<Vec<_>>>()?;
+        .collect::<rrd_core::Result<Vec<_>>>()?;
     Ok(RuntimeRetentionView {
         observed_at: at,
         snapshots,
@@ -1442,12 +1466,12 @@ pub fn runtime_query(
     source: &str,
     budget: &ExecutionBudget,
 ) -> Result<RuntimeQueryView, Box<dyn std::error::Error>> {
-    let query = vyrm_ql::parse(source)?;
+    let query = rrd_query::parse(source)?;
     let canonical = query.canonical();
     let catalog = Catalog::capture(store, &scope)?;
-    let bound = vyrm_mx::bind(&query, &Parameters::new(), &catalog)?;
-    let plan = vyrm_mx::plan(&bound)?;
-    let execution = vyrm_mx::execute(store, &plan, budget)?;
+    let bound = rrd_query::bind(&query, &Parameters::new(), &catalog)?;
+    let plan = rrd_query::plan(&bound)?;
+    let execution = rrd_query::execute(store, &plan, budget)?;
     Ok(RuntimeQueryView {
         canonical,
         query,
@@ -1579,8 +1603,8 @@ fn build_graph(
                     .iter()
                     .flat_map(|check| {
                         let state = match check.status {
-                            vyrm_core::CheckStatus::Passed => "passed",
-                            vyrm_core::CheckStatus::Failed => "failed",
+                            rrd_core::CheckStatus::Passed => "passed",
+                            rrd_core::CheckStatus::Failed => "failed",
                         };
                         check.evidence.iter().map(move |item| (item, state))
                     })
@@ -1780,11 +1804,11 @@ fn respond(
         let mut bytes = Vec::new();
         let parsed = request
             .as_reader()
-            .take((VYRM_NODE_MAX_CONTROL_LINE_BYTES + 1) as u64)
+            .take((RRFLOW_NODE_MAX_CONTROL_LINE_BYTES + 1) as u64)
             .read_to_end(&mut bytes)
             .map_err(|error| error.to_string())
             .and_then(|_| {
-                if bytes.len() > VYRM_NODE_MAX_CONTROL_LINE_BYTES {
+                if bytes.len() > RRFLOW_NODE_MAX_CONTROL_LINE_BYTES {
                     Err("cluster telemetry request exceeds 1 MiB".into())
                 } else {
                     serde_json::from_slice::<RecordClusterTelemetry>(&bytes)
@@ -1969,7 +1993,7 @@ fn respond(
             let params = query_params(query);
             match requested_scope(&params, Some(&binding.manifest.id))
                 .and_then(required_scope)
-                .and_then(|scope| vyrm_node::vector_artifact_catalog_entries(store, &scope))
+                .and_then(|scope| rrd_engine::vector_artifact_catalog_entries(store, &scope))
             {
                 Ok(entries) => json_response(StatusCode(200), &entries),
                 Err(error) => json_response(
@@ -1979,7 +2003,7 @@ fn respond(
             }
         }
         "/api/runtime/schema" => {
-            match requested_scope(&query_params(query), Some(vyrm_node::REASONING_SCOPE))
+            match requested_scope(&query_params(query), Some(rrd_engine::REASONING_SCOPE))
                 .and_then(required_scope)
                 .and_then(|scope| {
                     store
@@ -2027,7 +2051,7 @@ fn respond(
                     &serde_json::json!({"error":"ql query parameter is required"}),
                 )
             } else {
-                match requested_scope(&params, Some(vyrm_node::REASONING_SCOPE))
+                match requested_scope(&params, Some(rrd_engine::REASONING_SCOPE))
                     .and_then(required_scope)
                     .and_then(|scope| runtime_query(store, scope, source, &budget))
                 {
@@ -2046,7 +2070,7 @@ fn respond(
                 .and_then(|value| value.parse().ok())
                 .unwrap_or_else(now);
             let cursor = params.get("cursor").and_then(|value| value.parse().ok());
-            match requested_scope(&params, Some(vyrm_node::REASONING_SCOPE))
+            match requested_scope(&params, Some(rrd_engine::REASONING_SCOPE))
                 .and_then(required_scope)
                 .and_then(|scope| runtime_graph(store, scope, valid_at, cursor))
             {
@@ -2068,7 +2092,7 @@ fn respond(
                 .and_then(|value| value.parse().ok())
                 .unwrap_or(0);
             let to = params.get("to").and_then(|value| value.parse().ok());
-            let result = requested_scope(&params, Some(vyrm_node::REASONING_SCOPE))
+            let result = requested_scope(&params, Some(rrd_engine::REASONING_SCOPE))
                 .and_then(required_scope)
                 .and_then(|scope| {
                     let before = runtime_graph(store, scope.clone(), valid_at, Some(from))?;
@@ -2090,7 +2114,7 @@ fn respond(
                 .get("limit")
                 .and_then(|value| value.parse().ok())
                 .unwrap_or(8);
-            match vyrm_node::load_routing(store, &binding.project_root) {
+            match rrd_engine::load_routing(store, &binding.project_root) {
                 Ok(Some(index)) => json_response(StatusCode(200), &index.route(term, limit)),
                 Ok(None) => json_response(
                     StatusCode(409),

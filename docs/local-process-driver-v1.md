@@ -1,4 +1,4 @@
-# RRD local process driver v1
+# RRD local process driver
 
 Status: F3 alpha driver. The typed driver, bounded managed-child shutdown, real
 controller crash matrix, and Linux/Windows/macOS qualification are implemented.
@@ -7,7 +7,7 @@ per-instance backup/restore remain open.
 
 ## Trust and launch boundary
 
-`LocalDeploymentCatalog` is an operator-trusted, strict JSON document capped at
+`LocalDeploymentCatalog` format 2 is an operator-trusted, strict JSON document capped at
 one MiB. Each entry binds a canonical deployment ID and version to:
 
 - an already-canonical absolute executable path;
@@ -15,6 +15,14 @@ one MiB. Each entry binds a canonical deployment ID and version to:
 - typed arguments (`literal`, instance ID/root/path, desired version, or
   configuration digest); and
 - a bounded explicit environment.
+
+An entry may declare bounded idempotent preparation arguments for the same
+authenticated executable. The RRD catalogue invokes `rrd-server initialize`
+with the typed instance root and desired instance identity before every start;
+the operation creates or verifies `.rrflow/instance.toml` and refuses a
+different existing identity. Preparation has a ten-second deadline and writes
+to the same retained diagnostic logs. The serve arguments then pass only the
+instance root; they do not repeat a database path or instance identity.
 
 The driver authenticates the executable before each start. It uses
 `std::process::Command` with one argument per value, clears the inherited
@@ -106,7 +114,7 @@ child already gone, retains its data directory, and completes exactly once.
 These debug-only hold points are rejected in release builds.
 
 GitHub Actions run
-[`32667681611`](https://github.com/EonsofStupid/vyrm/actions/runs/32667681611)
+[`32667681611`](https://github.com/EonsofStupid/rrflow/actions/runs/32667681611)
 passes the persistent authority, RRD process contracts, real child/controller
 recovery, and strict-clippy steps on Ubuntu, Windows, and macOS. Its aggregate
 job also passes all workspace tests and clippy, controlled evaluation evidence,

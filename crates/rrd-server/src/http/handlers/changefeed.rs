@@ -11,8 +11,7 @@ impl AppState {
             headers,
             body,
             now,
-            false,
-            SecurityAction::ChangefeedRead,
+            RrdOperation::ChangefeedRead,
             None,
             |envelope, session, token| {
                 self.service
@@ -39,8 +38,7 @@ impl AppState {
             headers,
             body,
             now,
-            false,
-            SecurityAction::ChangefeedFollow,
+            RrdOperation::ChangefeedFollow,
             None,
             |envelope, session, token| {
                 if envelope.context.deadline_unix_ms.is_some_and(|deadline| {

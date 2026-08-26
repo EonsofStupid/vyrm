@@ -56,11 +56,14 @@ fn one_secured_durable_instance_is_rendered_deterministically() {
     let pod = &stateful_set.body["spec"]["template"]["spec"];
     assert_eq!(pod["automountServiceAccountToken"], false);
     assert_eq!(pod["securityContext"]["runAsNonRoot"], true);
+    assert_eq!(pod["initContainers"][0]["command"][0], "rrd-server");
+    assert_eq!(pod["initContainers"][0]["args"][0], "initialize");
     assert_eq!(
-        pod["initContainers"][0]["command"][0],
+        pod["initContainers"][1]["command"][0],
         "rrd-security-bootstrap"
     );
     assert_eq!(pod["containers"][0]["command"][0], "rrd-server");
+    assert_eq!(pod["containers"][0]["args"][0], "--root");
     assert!(pod["containers"][0]["args"]
         .as_array()
         .unwrap()

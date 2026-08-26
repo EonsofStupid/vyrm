@@ -1,10 +1,10 @@
 use rrd_contract::{CanonicalId, ResourceId, ResourceKind, ResourcePath};
 use rrd_security::SecurityRepository;
+use rrd_store::PersistentEngine;
 use serde_json::json;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use rrd_store::PersistentEngine;
 
 #[test]
 fn bootstrap_is_private_idempotent_restart_safe_and_drift_denying() {

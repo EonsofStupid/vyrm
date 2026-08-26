@@ -1,9 +1,8 @@
 # RRFlow alpha → Clyffy kernel handoff
 
-Status: historical execution contract under the 2026-08-24 RRFlow/RRD naming
-migration. Current product boundaries are authoritative in
-`rrflow-rrd-architecture.md`; Vyrm names below identify pre-migration code and
-evidence. This document remains release-gated rather than calendar-gated.
+Status: historical execution contract aligned to the RRFlow/RRD V1 identity.
+Current product boundaries are authoritative in `rrflow-rrd-architecture.md`.
+This document remains release-gated rather than calendar-gated.
 
 ## Product boundary
 
@@ -15,14 +14,14 @@ The canonical umbrella is **RRFlow**:
   Ready Daemon, is its one native engine/runtime: persistence, transactions,
   catalogue, query, indexes, reasoning, lifecycle, security, audit, and
   recovery compose there.
-- Existing Vyrm-named LSM/MVCC code is migration input to RRD, not a permanent
-  engine brand or product boundary. RRD is the actual Fjall competitor; Fjall
+- RRD LSM/MVCC code is the native persistence implementation, not a separate
+  product boundary. RRD is the actual Fjall competitor; Fjall
   remains only a compatibility reader and differential oracle. Arrow/DataFusion
   is target architecture and must not be implied by the current bespoke row
   executor.
 - Connectome Panel records, explains, visualizes, and controls those contracts.
 - PostgreSQL/pgvector is project-scoped shared operator knowledge behind the
-  external adapter; it is neither Vyrm's canonical persistence nor LFG's JIT
+  external adapter; it is neither RRFlow's canonical persistence nor LFG's JIT
   compiler.
 - Clyffy will package RRFlow into installable per-platform and umbrella
   deployments. It consumes versioned RRFlow/RRD interfaces; it does not fork
@@ -30,7 +29,7 @@ The canonical umbrella is **RRFlow**:
 
 The Clyffy repository should not be created by pooling old repositories. It
 starts from a release manifest that pins reviewed versions of Automaton, LFG,
-Connectome/Vyrm, provider adapters, schemas, migrations, and benchmark evidence.
+Connectome/RRFlow, provider adapters, schemas, migrations, and benchmark evidence.
 
 ## Canonical lifecycle event model
 
@@ -71,13 +70,13 @@ differential are documented in `docs/package-workflows.md`.
 
 ## Alpha release gates
 
-Vyrm becomes a firm local alpha only when all of these are machine-verifiable:
+RRFlow becomes a firm local alpha only when all of these are machine-verifiable:
 
 | Gate | Required evidence |
 |---|---|
 | Portable contract | Versioned golden JSON for read, transaction, plan, projection, audit, workflow event, and error envelopes |
 | Transaction semantics | Reference/compatibility/native differential, conflict matrix, read-your-writes, repeatable paging, crash/restart, lease and retention-pin tests |
-| Query/runtime | `vyrmQL` parser corpus and fuzzing; typed-SDK equivalence; deterministic `vyrmMX` plans and budgets |
+| Query/runtime | `RRFlowQL` parser corpus and fuzzing; typed-SDK equivalence; deterministic `RRD query executor` plans and budgets |
 | Native storage | WAL/MVCC/manifest crash matrix, compaction with pinned snapshots, corruption handling, recovery idempotency, and no acknowledged-write loss |
 | Unified data | Atomic record/edge/claim/event/vector/series/geo/blob-reference mutations plus local/S3 object differential |
 | Search | Exact dense/sparse/multivector oracle; ANN recall/latency/memory matrix; filtered update/delete/reopen/compaction soak |
@@ -95,7 +94,7 @@ distributed durability merely because its interfaces reserve shard fields.
 | Tier | Shape | Update behavior |
 |---|---|---|
 | Developer | One embedded instance per major checkout; explicit umbrella membership for small related projects | Opt-in stable/beta channel, signed manifest, local migration backup and health rollback |
-| Workstation | `vyrmd` owns multiple isolated instances and provider adapters | Staged daemon restart, schema compatibility check, per-instance rollback |
+| Workstation | `rrflow-mcp` owns multiple isolated instances and provider adapters | Staged daemon restart, schema compatibility check, per-instance rollback |
 | Team | Authenticated service with explicit tenant/shard placement and object storage | Rolling update only after mixed-version simulation and migration fencing |
 | Edge | Offline, resource-capped exact/ANN search with no required network | Side-loaded signed bundle and atomic slot switch |
 
@@ -108,7 +107,7 @@ reasoning as observed data.
 ## Competitive proof, not a blanket claim
 
 “Beats SurrealDB” and “beats Qdrant” are two separate benchmark hypotheses.
-They become publishable only after the corresponding Vyrm subsystem exists.
+They become publishable only after the corresponding RRFlow subsystem exists.
 
 - Against SurrealDB: fixed hardware and durability; transactional mixed
   record/edge/time queries; conflict rate; p50/p95/p99 latency; throughput;
@@ -116,7 +115,7 @@ They become publishable only after the corresponding Vyrm subsystem exists.
 - Against Qdrant: exact oracle first; dense/sparse/multivector and filtered ANN;
   recall@k/NDCG; p50/p95/p99 latency; build/update/delete/reopen/compaction;
   CPU/GPU build cost; RSS/VRAM/disk; and stale-generation behavior.
-- Vyrm-specific frontier-runtime value is measured separately: task success,
+- RRFlow-specific frontier-runtime value is measured separately: task success,
   stale-action denials, retries/regressions, provider/context/reasoning tokens,
   latency, compaction recovery, and trace completeness.
 
@@ -127,17 +126,17 @@ measured local results, never universal superiority.
 
 ## Immediate execution order
 
-1. **Complete:** exact `vyrmQL`/`vyrmMX` over the frozen M0/M1 port and live
+1. **Complete:** exact `RRFlowQL`/`RRD query executor` over the frozen M0/M1 port and live
    snapshot/retention-pin inspection in Connectome.
 2. **Complete:** atomic hash-chained audit/runtime commits and deny-by-default
    reasoning/lifecycle differentials.
-3. **Local gate passed:** native `vyrmKV` behind the same semantic, query,
+3. **Local gate passed:** native `RRD LSM` behind the same semantic, query,
    crash, storage-full, compaction, and benchmark harness. Its 20,000-operation
    mixed physical mutation differential and resumable/rollback-safe 18-keyspace
    migration rehearsal pass locally. Reproduce the strict Fjall performance
    matrix remotely before retiring the compatibility oracle. New
    CLI/MCP/workbench stores select native; existing non-native directories move
-   only through `vyrm storage migrate`.
+   only through `rrflow storage migrate`.
 4. **Complete at the local M4 gate:** unified vector/series/geo/object
    mutations, verified content-addressed publication, atomic outbox/audit, and
    idempotent retry. Live S3 endpoint certification remains deployment evidence.
@@ -153,11 +152,11 @@ measured local results, never universal superiority.
 7. **M7 protocol and first real-consensus gate complete:** canonical placement,
    consistency, snapshot-vector, route, transfer, and reshard contracts;
    deterministic single-term fault simulation; and a feature-gated OpenRaft
-   adapter over native VyrmKV with storage conformance and real four-node
+   adapter over native RRD LSM with storage conformance and real four-node
    election/failover/snapshot/membership evidence. Typed canonical
    `RuntimeCommit` application now shares one WAL frame with Raft state and is
    reopened identically across three voters. Adapter v4 separates local Raft
-   history from canonical state and uses physical VyrmKV snapshot-bundle v1 to
+   history from canonical state and uses physical RRD LSM snapshot-bundle v1 to
    catch up a fresh learner after log purge with the runtime truth intact. It
    also makes placement epochs explicit/membership-bound, invalidates stale
    bindings after Raft voter identity/zone changes, and deterministically bounds
@@ -211,5 +210,5 @@ measured local results, never universal superiority.
     and reconnect proof in CI. Payload filters, certificate-backed TLS endpoint,
     process restart/concurrency failure injection, and retained performance
     evidence remain required before the pgvector row can be fully promoted.
-11. Cut the Vyrm alpha manifest; only then scaffold the separate Clyffy master
+11. Cut the RRFlow alpha manifest; only then scaffold the separate Clyffy master
    repository and its signed tier/update system.

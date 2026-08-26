@@ -12,7 +12,7 @@ use fjall::PersistMode;
 pub const CLAIMS: &str = "claims";
 /// Sequence index: append sequence to canonical claim key. Current native and
 /// Fjall writes use the compact key reference; native still reads the legacy
-/// inline `VYRNSI01` claim envelope during format transition.
+/// inline `RRDNSI01` claim envelope during format transition.
 ///
 /// Replaces the `events` keyspace carried over from the prior runtime, which was
 /// allocated for a term the specification never defined and which nothing wrote
@@ -51,7 +51,7 @@ pub const RUNTIME_COMMITS: &str = "runtime_commits";
 /// Latest authoritative schema registry for each runtime scope. Every update
 /// is also present in the hash-chained runtime change log.
 pub const RUNTIME_SCHEMAS: &str = "runtime_schemas";
-/// Persisted leased read stamps. Native `vyrmKV` uses the same catalog to pin
+/// Persisted leased read stamps. Native `RRD LSM` uses the same catalog to pin
 /// physical manifests; the append-only compatibility engine needs no further
 /// retention machinery yet.
 pub const RUNTIME_SNAPSHOTS: &str = "runtime_snapshots";
@@ -84,7 +84,7 @@ pub const ALL: [&str; 18] = [
 /// Manifest-authenticated native logical-key encoding. Format 1 stores the
 /// UTF-8 keyspace name followed by NUL. Format 2 stores one stable non-zero tag;
 /// the archive remains logical and therefore independent of either encoding.
-pub(crate) const NATIVE_KEYSPACE_TAG_FORMAT_V2: u64 = 0x5659_5253_4b30_3032; // `VYRSK002`
+pub(crate) const NATIVE_KEYSPACE_TAG_FORMAT_V2: u64 = 0x5252_4453_4b30_3032; // `RRDSK002`
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum NativeKeyCodec {

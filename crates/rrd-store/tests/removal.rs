@@ -1,7 +1,7 @@
 //! Removal candidacy by query. `SPEC.md` §7 and §12; `PLAN.md` Step 2.
 
+use rrd_core::{Claim, Predicate, Producer, Reader, Subject};
 use rrd_store::{Store, Verdict};
-use vyrm_core::{Claim, Predicate, Producer, Reader, Subject};
 
 fn producer() -> Producer {
     Producer {

@@ -3,10 +3,10 @@ use rrd_estate::{
     DriverEffect, DriverError, DriverObservation, DriverRequest, EstateDriver,
     LocalDeploymentCatalog, LocalProcessDriver, Reconciler,
 };
+use rrd_store::PersistentEngine;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
-use rrd_store::PersistentEngine;
 
 const HOLD_AFTER_EFFECT_ENV: &str = "RRD_ESTATE_TEST_HOLD_AFTER_EFFECT_FILE";
 const HOLD_AFTER_STEP_ENV: &str = "RRD_ESTATE_TEST_HOLD_AFTER_STEP_FILE";

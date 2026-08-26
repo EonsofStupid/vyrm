@@ -1,7 +1,7 @@
-//! Native `vyrmKV` implementation of the semantic [`Engine`] port.
+//! Native `RRD LSM` implementation of the semantic [`Engine`] port.
 //!
 //! Logical keyspaces are encoded as stable byte prefixes inside one atomic
-//! native database. One semantic commit becomes one `vyrmKV` write batch; the
+//! native database. One semantic commit becomes one `RRD LSM` write batch; the
 //! database's physical MVCC sequence is deliberately independent of claim and
 //! runtime cursors stored in the batch.
 
@@ -15,24 +15,24 @@ use crate::gc::{build_report, RemovalReport, Tally};
 use crate::invocation::{self, Invocation, InvocationInput, RecallOutcome};
 use crate::keyspaces::{self, Durability};
 use crate::store::{AppendOutcome, IdempotentAppendOutcome};
-use serde::de::DeserializeOwned;
-use std::collections::{BTreeMap, BTreeSet};
-use std::path::{Path, PathBuf};
-use std::sync::{Mutex, MutexGuard};
-use vyrm_core::{
+use rrd_core::{
     key, projection_family, AuditEnvelope, Claim, ClaimSource, Millis, ObjectReference, Predicate,
     ProjectionWork, ReadStamp, Reader, RetentionPin, RuntimeChange, RuntimeChangePage,
     RuntimeCommit, RuntimeCommitOutcome, RuntimeLogAccumulator, RuntimeMerkleNode, RuntimeMutation,
     RuntimeRecord, RuntimeRef, RuntimeRelation, RuntimeSchemaRegistry, ScopeId, SnapshotHandle,
     SnapshotId, Subject,
 };
-use vyrm_kv::{
+use rrd_lsm::{
     CompactionOutcome, Database, DatabaseOptions, GarbageCollectionReport, Manifest, Mutation,
     Snapshot, SnapshotBundleFile, WriteBatch,
 };
+use serde::de::DeserializeOwned;
+use std::collections::{BTreeMap, BTreeSet};
+use std::path::{Path, PathBuf};
+use std::sync::{Mutex, MutexGuard};
 
 const RUNTIME_CHECKPOINT_PREFIX: &str = "runtime-";
-const NATIVE_SEQUENCE_VALUE_MAGIC: &[u8; 8] = b"VYRNSI01";
+const NATIVE_SEQUENCE_VALUE_MAGIC: &[u8; 8] = b"RRDNSI01";
 
 pub struct NativeEngine {
     path: PathBuf,
@@ -323,7 +323,7 @@ impl Engine for NativeEngine {
         let maintenance_stats = database.maintenance_stats();
         let memtable = database.memtable().profile();
         Ok(PhysicalStoreEvidence {
-            backend: "vyrmkv_native".into(),
+            backend: "rrd_lsm".into(),
             evidence_level: "native_counters".into(),
             physical_sequence: Some(database.snapshot().sequence),
             manifest_generation: Some(manifest.generation),
@@ -572,6 +572,15 @@ impl Engine for NativeEngine {
         .collect::<Result<Vec<ControlJournalEntry>>>()?;
         verify_control_page(after, anchor_digest, &entries)?;
         Ok(entries)
+    }
+
+    fn control_sequence(&self) -> Result<u64> {
+        let database = self.lock()?;
+        read_sequence(
+            &database,
+            database.snapshot(),
+            keyspaces::CONTROL_JOURNAL_SEQUENCE,
+        )
     }
 
     fn sequence(&self) -> Result<u64> {
@@ -847,7 +856,7 @@ impl Engine for NativeEngine {
         self.runtime_snapshots(now)?
             .iter()
             .map(RetentionPin::from_snapshot)
-            .collect::<vyrm_core::Result<Vec<_>>>()
+            .collect::<rrd_core::Result<Vec<_>>>()
             .map_err(Error::from)
     }
 
@@ -971,7 +980,7 @@ fn decode_native_sequence_value(value: &[u8]) -> Result<Option<&[u8]>> {
 
 /// A validated native runtime transaction that has not yet crossed the WAL
 /// durability boundary. The caller may append metadata operations and publish
-/// the combined vector as one VyrmKV [`WriteBatch`].
+/// the combined vector as one RRD LSM [`WriteBatch`].
 ///
 /// Planning reads the supplied database's current snapshot. Correct callers
 /// therefore hold the database's exclusive writer guard from planning through
@@ -1033,7 +1042,7 @@ impl NativeRuntimeCommitPlan {
     }
 }
 
-/// Validates and lowers one canonical [`RuntimeCommit`] into native VyrmKV
+/// Validates and lowers one canonical [`RuntimeCommit`] into native RRD LSM
 /// mutations without writing them. This is the composition boundary used when
 /// a coordinator must atomically include its own durable metadata.
 pub fn prepare_native_runtime_commit(
@@ -1620,7 +1629,7 @@ fn validate_native_read_stamp(
     database: &Database,
     snapshot: Snapshot,
     read: &ReadStamp,
-) -> Result<vyrm_core::RuntimeReadValidation> {
+) -> Result<rrd_core::RuntimeReadValidation> {
     read.validate()?;
     let current = read_sequence(database, snapshot, keyspaces::RUNTIME_CURSOR)?;
     if read.commit_cursor > current {
@@ -1658,7 +1667,7 @@ fn validate_native_read_stamp(
         {
             return Err(Error::ReadStampMismatch(read.manifest_id.clone()));
         }
-        return Ok(vyrm_core::RuntimeReadValidation::new(
+        return Ok(rrd_core::RuntimeReadValidation::new(
             "authenticated_current_head",
             0,
             0,
@@ -1714,7 +1723,7 @@ fn validate_native_read_stamp(
     {
         return Err(Error::ReadStampMismatch(read.manifest_id.clone()));
     }
-    Ok(vyrm_core::RuntimeReadValidation::new(
+    Ok(rrd_core::RuntimeReadValidation::new(
         "full_hash_chain_replay",
         read.commit_cursor,
         0,
@@ -1806,11 +1815,7 @@ fn native_authenticated_point_page(
         requested_after: cursor - 1,
         through_cursor: cursor,
         head_cursor: read.commit_cursor,
-        validation: vyrm_core::RuntimeReadValidation::new(
-            "rfc9162_inclusion_proof",
-            1,
-            proof_nodes,
-        ),
+        validation: rrd_core::RuntimeReadValidation::new("rfc9162_inclusion_proof", 1, proof_nodes),
         changes: selected.into_iter().collect(),
     })
 }
@@ -1820,19 +1825,19 @@ fn read_native_accumulator_node(
     snapshot: Snapshot,
     level: u8,
     index: u64,
-) -> vyrm_core::Result<Option<String>> {
+) -> rrd_core::Result<Option<String>> {
     get(
         database,
         snapshot,
         keyspaces::META,
         &keyspaces::runtime_accumulator_node_key(level, index),
     )
-    .map_err(|error| vyrm_core::Error::InvalidRuntime {
+    .map_err(|error| rrd_core::Error::InvalidRuntime {
         reason: format!("cannot read runtime accumulator node: {error}"),
     })?
     .map(String::from_utf8)
     .transpose()
-    .map_err(|error| vyrm_core::Error::InvalidRuntime {
+    .map_err(|error| rrd_core::Error::InvalidRuntime {
         reason: format!("runtime accumulator node is not UTF-8: {error}"),
     })
 }
@@ -1855,7 +1860,7 @@ fn native_change_page(
             requested_after: after,
             through_cursor: after,
             head_cursor: head,
-            validation: vyrm_core::RuntimeReadValidation::new("bounded_hash_chain_page", 0, 0),
+            validation: rrd_core::RuntimeReadValidation::new("bounded_hash_chain_page", 0, 0),
             changes: Vec::new(),
         });
     }
@@ -1907,7 +1912,7 @@ fn native_change_page(
         requested_after: after,
         through_cursor: through,
         head_cursor: head,
-        validation: vyrm_core::RuntimeReadValidation::new(
+        validation: rrd_core::RuntimeReadValidation::new(
             "bounded_hash_chain_page",
             through.saturating_sub(after),
             0,
@@ -2130,8 +2135,8 @@ fn write(
     database.write_owned(
         WriteBatch::new(operations)?,
         match durability {
-            Durability::Authoritative => vyrm_kv::Durability::Authoritative,
-            Durability::Buffered => vyrm_kv::Durability::Buffered,
+            Durability::Authoritative => rrd_lsm::Durability::Authoritative,
+            Durability::Buffered => rrd_lsm::Durability::Buffered,
         },
     )?;
     Ok(())
@@ -2308,12 +2313,12 @@ fn prefix_end(prefix: &[u8]) -> Option<Vec<u8>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use vyrm_core::{ObjectReceipt, Producer};
+    use rrd_core::{ObjectReceipt, Producer};
 
     fn claim() -> Claim {
         Claim::new(
-            vyrm_core::Subject::new("legacy-subject").unwrap(),
-            vyrm_core::Predicate::new("legacy-predicate").unwrap(),
+            rrd_core::Subject::new("legacy-subject").unwrap(),
+            rrd_core::Predicate::new("legacy-predicate").unwrap(),
             "legacy-value",
             10,
             11,
@@ -2373,7 +2378,7 @@ mod tests {
                     },
                 ])
                 .unwrap(),
-                vyrm_kv::Durability::Authoritative,
+                rrd_lsm::Durability::Authoritative,
             )
             .unwrap();
         drop(database);
@@ -2470,7 +2475,7 @@ mod tests {
         let first_scope = ScopeId::new("project:first").unwrap();
         let second_scope = ScopeId::new("project:second").unwrap();
         let object = |id: &str, bytes: &[u8]| {
-            let sha256 = vyrm_core::digest::sha256_hex(bytes);
+            let sha256 = rrd_core::digest::sha256_hex(bytes);
             ObjectReference::for_bytes(
                 id,
                 None,
@@ -2506,7 +2511,7 @@ mod tests {
                     },
                 ])
                 .unwrap(),
-                vyrm_kv::Durability::Authoritative,
+                rrd_lsm::Durability::Authoritative,
             )
             .unwrap();
         let spool = directory.path().join("multi-project.snapshot");

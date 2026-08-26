@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Bounded Vyrm/native versus SurrealDB claim-log differential.
+"""Bounded RRFlow/native versus SurrealDB claim-log differential.
 
 This is deliberately not a general database benchmark. It compares one
 frontier-AI runtime primitive: atomic durable claim batches, an authoritative
 sequence watermark, bounded ordered replay, full-corpus verification, and a
-clean restart. Vyrm runs embedded in its benchmark child; SurrealDB runs as a
+clean restart. RRFlow runs embedded in its benchmark child; SurrealDB runs as a
 local SurrealKV server and is measured end-to-end over its HTTP SQL endpoint.
 """
 
@@ -47,9 +47,9 @@ def arguments() -> argparse.Namespace:
     parser.add_argument("--read-width", type=positive, default=32)
     parser.add_argument("--surreal", default=shutil.which("surreal"))
     parser.add_argument(
-        "--vyrm-benchmark",
+        "--rrflow-benchmark",
         default=os.environ.get(
-            "VYRM_ENGINE_BENCHMARK",
+            "RRFLOW_ENGINE_BENCHMARK",
             "/workspace/warden-storage/cache/wardenop/cargo-target/release/examples/engine_benchmark",
         ),
     )
@@ -107,7 +107,7 @@ class SurrealProcess:
                 "-u",
                 "root",
                 "-p",
-                "vyrm-benchmark",
+                "rrflow-benchmark",
                 f"surrealkv://{self.storage}",
             ],
             stdin=subprocess.DEVNULL,
@@ -126,8 +126,8 @@ class SurrealProcess:
             try:
                 self._connect()
                 self.query(
-                    "DEFINE NAMESPACE IF NOT EXISTS vyrm;"
-                    "USE NS vyrm;"
+                    "DEFINE NAMESPACE IF NOT EXISTS rrflow;"
+                    "USE NS rrflow;"
                     "DEFINE DATABASE IF NOT EXISTS claim_benchmark;",
                     scoped=False,
                 )
@@ -153,14 +153,14 @@ class SurrealProcess:
         if self.connection is None:
             self._connect()
         assert self.connection is not None
-        authorization = base64.b64encode(b"root:vyrm-benchmark").decode("ascii")
+        authorization = base64.b64encode(b"root:rrflow-benchmark").decode("ascii")
         headers = {
             "Authorization": f"Basic {authorization}",
             "Accept": "application/json",
             "Content-Type": "text/plain",
         }
         if scoped:
-            headers["Surreal-NS"] = "vyrm"
+            headers["Surreal-NS"] = "rrflow"
             headers["Surreal-DB"] = "claim_benchmark"
         self.connection.request(
             "POST",
@@ -428,7 +428,7 @@ def surreal_trial(binary: Path, root: Path, config: dict[str, int]) -> dict[str,
     }
 
 
-def vyrm_trial(binary: Path, root: Path, config: dict[str, int]) -> dict[str, Any]:
+def rrflow_trial(binary: Path, root: Path, config: dict[str, int]) -> dict[str, Any]:
     command = [
         str(binary),
         "--child",
@@ -465,12 +465,12 @@ def median_backend(backend: str, trials: list[dict[str, Any]]) -> dict[str, Any]
         "peak_rss_kib": metric(("peak_rss_kib",)),
         "reopened_allocated_bytes": statistics.median(
             trial["footprint"]["reopened"]["allocated_bytes"]
-            if backend == "vyrm_native_embedded"
+            if backend == "rrflow_native_embedded"
             else trial["reopened_footprint"]["allocated_bytes"]
             for trial in trials
         ),
     }
-    if backend != "vyrm_native_embedded":
+    if backend != "rrflow_native_embedded":
         aggregated.update(
             {
                 "server_write_operations_per_second": metric(
@@ -489,9 +489,9 @@ def median_backend(backend: str, trials: list[dict[str, Any]]) -> dict[str, Any]
 def main() -> None:
     args = arguments()
     surreal_binary = Path(args.surreal).resolve()
-    vyrm_binary = Path(args.vyrm_benchmark).resolve()
-    if not surreal_binary.is_file() or not vyrm_binary.is_file():
-        raise SystemExit("both --surreal and --vyrm-benchmark must name existing binaries")
+    rrflow_binary = Path(args.rrflow_benchmark).resolve()
+    if not surreal_binary.is_file() or not rrflow_binary.is_file():
+        raise SystemExit("both --surreal and --rrflow-benchmark must name existing binaries")
     config = {
         "trials": args.trials,
         "operations": args.operations,
@@ -501,62 +501,62 @@ def main() -> None:
     }
     native_trials: list[dict[str, Any]] = []
     surreal_trials: list[dict[str, Any]] = []
-    with tempfile.TemporaryDirectory(prefix="vyrm-surreal-differential-") as temporary:
+    with tempfile.TemporaryDirectory(prefix="rrflow-surreal-differential-") as temporary:
         root = Path(temporary)
         for trial in range(args.trials):
             trial_root = root / f"trial-{trial}"
             trial_root.mkdir()
             if trial % 2 == 0:
-                native_trials.append(vyrm_trial(vyrm_binary, trial_root, config))
+                native_trials.append(rrflow_trial(rrflow_binary, trial_root, config))
                 surreal_trials.append(surreal_trial(surreal_binary, trial_root, config))
             else:
                 surreal_trials.append(surreal_trial(surreal_binary, trial_root, config))
-                native_trials.append(vyrm_trial(vyrm_binary, trial_root, config))
-    native = median_backend("vyrm_native_embedded", native_trials)
+                native_trials.append(rrflow_trial(rrflow_binary, trial_root, config))
+    native = median_backend("rrflow_native_embedded", native_trials)
     surreal = median_backend("surrealdb_surrealkv_http", surreal_trials)
     ratios = {
-        "vyrm_to_surreal_write_throughput": native["write_operations_per_second"]
+        "rrflow_to_surreal_write_throughput": native["write_operations_per_second"]
         / surreal["write_operations_per_second"],
-        "vyrm_to_surreal_read_throughput": native["read_operations_per_second"]
+        "rrflow_to_surreal_read_throughput": native["read_operations_per_second"]
         / surreal["read_operations_per_second"],
-        "vyrm_to_surreal_write_p95": native["write_p95_ns"] / surreal["write_p95_ns"],
-        "vyrm_to_surreal_read_p95": native["read_p95_ns"] / surreal["read_p95_ns"],
-        "vyrm_to_surreal_recovery": native["recovery_ns"] / surreal["recovery_ns"],
-        "vyrm_to_surreal_peak_rss": native["peak_rss_kib"] / surreal["peak_rss_kib"],
-        "vyrm_to_surreal_reopened_allocated": native["reopened_allocated_bytes"]
+        "rrflow_to_surreal_write_p95": native["write_p95_ns"] / surreal["write_p95_ns"],
+        "rrflow_to_surreal_read_p95": native["read_p95_ns"] / surreal["read_p95_ns"],
+        "rrflow_to_surreal_recovery": native["recovery_ns"] / surreal["recovery_ns"],
+        "rrflow_to_surreal_peak_rss": native["peak_rss_kib"] / surreal["peak_rss_kib"],
+        "rrflow_to_surreal_reopened_allocated": native["reopened_allocated_bytes"]
         / surreal["reopened_allocated_bytes"],
-        "vyrm_to_surreal_server_write_throughput": native["write_operations_per_second"]
+        "rrflow_to_surreal_server_write_throughput": native["write_operations_per_second"]
         / surreal["server_write_operations_per_second"],
-        "vyrm_to_surreal_server_read_throughput": native["read_operations_per_second"]
+        "rrflow_to_surreal_server_read_throughput": native["read_operations_per_second"]
         / surreal["server_read_operations_per_second"],
-        "vyrm_to_surreal_server_write_p95": native["write_p95_ns"]
+        "rrflow_to_surreal_server_write_p95": native["write_p95_ns"]
         / surreal["server_write_p95_ns"],
-        "vyrm_to_surreal_server_read_p95": native["read_p95_ns"]
+        "rrflow_to_surreal_server_read_p95": native["read_p95_ns"]
         / surreal["server_read_p95_ns"],
     }
-    all_measured_cells_favor_vyrm = (
+    all_measured_cells_favor_rrflow = (
         native["correctness_verified"]
         and surreal["correctness_verified"]
-        and ratios["vyrm_to_surreal_write_throughput"] >= 1
-        and ratios["vyrm_to_surreal_read_throughput"] >= 1
-        and ratios["vyrm_to_surreal_server_write_throughput"] >= 1
-        and ratios["vyrm_to_surreal_server_read_throughput"] >= 1
+        and ratios["rrflow_to_surreal_write_throughput"] >= 1
+        and ratios["rrflow_to_surreal_read_throughput"] >= 1
+        and ratios["rrflow_to_surreal_server_write_throughput"] >= 1
+        and ratios["rrflow_to_surreal_server_read_throughput"] >= 1
         and all(
             ratios[name] <= 1
             for name in (
-                "vyrm_to_surreal_write_p95",
-                "vyrm_to_surreal_read_p95",
-                "vyrm_to_surreal_recovery",
-                "vyrm_to_surreal_peak_rss",
-                "vyrm_to_surreal_reopened_allocated",
-                "vyrm_to_surreal_server_write_p95",
-                "vyrm_to_surreal_server_read_p95",
+                "rrflow_to_surreal_write_p95",
+                "rrflow_to_surreal_read_p95",
+                "rrflow_to_surreal_recovery",
+                "rrflow_to_surreal_peak_rss",
+                "rrflow_to_surreal_reopened_allocated",
+                "rrflow_to_surreal_server_write_p95",
+                "rrflow_to_surreal_server_read_p95",
             )
         )
     )
     evidence = {
         "format_version": FORMAT_VERSION,
-        "schema": "vyrm.surrealdb-claim-differential.v1",
+        "schema": "rrflow.surrealdb-claim-differential.v1",
         "measured_at_unix_ms": time.time_ns() // 1_000_000,
         "platform": {"architecture": os.uname().machine, "operating_system": os.uname().sysname},
         "config": config,
@@ -570,7 +570,7 @@ def main() -> None:
         },
         "contract": (
             "same claim fields, atomic authoritative batch and sequence watermark, ordered bounded "
-            "replay, complete paged object verification, clean restart; Vyrm is embedded while "
+            "replay, complete paged object verification, clean restart; RRFlow is embedded while "
             "SurrealDB is a local server, and client RSS is excluded only for SurrealDB"
         ),
         "aggregation": "median of isolated alternating trials",
@@ -580,7 +580,7 @@ def main() -> None:
         "surreal": surreal,
         "ratios": ratios,
         "bounded_verdict": {
-            "all_measured_cells_favor_vyrm": all_measured_cells_favor_vyrm,
+            "all_measured_cells_favor_rrflow": all_measured_cells_favor_rrflow,
             "general_database_superiority": False,
         },
     }

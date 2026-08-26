@@ -14,6 +14,7 @@ fn transition(expected: Option<&[u8]>, replacement: Option<&[u8]>, at: u64) -> C
 }
 
 fn assert_journal(engine: &dyn Engine) {
+    assert_eq!(engine.control_sequence().unwrap(), 0);
     let created = engine
         .commit_control_transition(&transition(None, Some(b"open"), 10))
         .unwrap();
@@ -44,6 +45,7 @@ fn assert_journal(engine: &dyn Engine) {
     let journal = engine.control_journal_since(0, 10).unwrap();
     assert_eq!(journal, vec![created, renewed, deleted]);
     assert!(journal.iter().all(|entry| entry.verify()));
+    assert_eq!(engine.control_sequence().unwrap(), 3);
 }
 
 #[test]
@@ -74,6 +76,7 @@ fn materialized_state_and_hash_chain_survive_restart() {
                 Some(b"open".to_vec())
             );
             assert_eq!(reopened.control_journal_since(0, 10).unwrap().len(), 1);
+            assert_eq!(reopened.control_sequence().unwrap(), 1);
         } else {
             let engine = Store::open(&path).unwrap();
             engine
@@ -88,6 +91,7 @@ fn materialized_state_and_hash_chain_survive_restart() {
                 Some(b"open".to_vec())
             );
             assert_eq!(reopened.control_journal_since(0, 10).unwrap().len(), 1);
+            assert_eq!(reopened.control_sequence().unwrap(), 1);
         }
     }
 }

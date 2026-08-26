@@ -4,6 +4,7 @@
 //! The parent emits one versioned JSON evidence document; it does not turn a
 //! single machine run into a universal performance claim.
 
+use rrd_core::{Claim, Predicate, Producer, Subject};
 use rrd_store::{
     measure_storage_footprint, Engine, FootprintBytes, NativeEngine, StorageFootprint, Store,
 };
@@ -14,7 +15,6 @@ use std::hint::black_box;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
-use vyrm_core::{Claim, Predicate, Producer, Subject};
 
 const FORMAT_VERSION: u16 = 4;
 

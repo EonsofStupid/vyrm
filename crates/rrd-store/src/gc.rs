@@ -8,8 +8,8 @@
 //! a retired claim, and how removal interacts with promotion, are not settled.
 //! The report states what is unreferenced; the decision remains the operator's.
 
+use rrd_core::{Millis, Predicate, Reader, Subject};
 use std::collections::BTreeMap;
-use vyrm_core::{Millis, Predicate, Reader, Subject};
 
 /// Whether a subject-predicate pair is unreferenced over the interval.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -119,7 +119,7 @@ pub(crate) fn build_report(
     tallies: BTreeMap<(String, String), Tally>,
     since: Millis,
     evaluated_at: Millis,
-) -> vyrm_core::Result<RemovalReport> {
+) -> rrd_core::Result<RemovalReport> {
     let mut pairs = Vec::with_capacity(tallies.len());
     for ((subject, predicate), tally) in tallies {
         // A pair present only in access records, with no stored claim, is not

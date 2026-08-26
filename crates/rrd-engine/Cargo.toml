@@ -1,0 +1,58 @@
+[package]
+name = "rrd-engine"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "RRFlow composition root and authoritative embedded RRD engine API."
+
+[features]
+default = ["full"]
+edge = [
+    "dep:rrd-core",
+    "dep:rrd-inference",
+    "dep:rrd-vector",
+    "dep:serde",
+    "dep:serde_json",
+]
+full = [
+    "edge",
+    "dep:rrd-cluster",
+    "dep:rrd-contract",
+    "dep:rrd-estate",
+    "dep:rrd-graph",
+    "dep:rrd-operator-knowledge",
+    "dep:rrd-query",
+    "dep:rrd-security",
+    "dep:rrd-store",
+    "dep:getrandom",
+    "dep:hmac",
+    "dep:schemars",
+    "dep:sha2",
+    "dep:toml",
+    "dep:tracing",
+]
+
+[dependencies]
+rrd-contract = { path = "../rrd-contract", optional = true }
+rrd-estate = { path = "../rrd-estate", optional = true }
+rrd-security = { path = "../rrd-security", optional = true }
+rrd-core = { path = "../rrd-core", optional = true }
+rrd-query = { path = "../rrd-query", optional = true }
+rrd-store = { path = "../rrd-store", optional = true }
+rrd-vector = { path = "../rrd-vector", optional = true }
+rrd-graph = { path = "../rrd-graph", optional = true }
+rrd-inference = { path = "../rrd-inference", optional = true }
+rrd-operator-knowledge = { path = "../rrd-operator-knowledge", optional = true }
+rrd-cluster = { path = "../rrd-cluster", features = ["object-transfer"], optional = true }
+serde = { workspace = true, optional = true }
+serde_json = { workspace = true, optional = true }
+tracing = { workspace = true, optional = true }
+toml = { workspace = true, optional = true }
+schemars = { version = "1.2", optional = true }
+hmac = { version = "0.13", optional = true }
+sha2 = { version = "0.11", optional = true }
+getrandom = { version = "0.3", optional = true }
+
+[dev-dependencies]
+tempfile = "3"

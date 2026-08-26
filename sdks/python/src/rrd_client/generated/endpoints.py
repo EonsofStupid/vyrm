@@ -8,6 +8,7 @@ OperationId = Literal[
     "capabilities-read",
     "changefeed-follow",
     "changefeed-read",
+    "diagnostics-read",
     "endpoint-catalogue",
     "estate-read",
     "health-live",
@@ -18,6 +19,8 @@ OperationId = Literal[
     "query-index-list",
     "query-live-poll",
     "restore-create",
+    "runtime-tool-catalogue-read",
+    "runtime-tool-invoke",
     "session-close",
     "session-create",
     "session-renew",
@@ -76,6 +79,12 @@ ENDPOINTS: Final[dict[OperationId, Endpoint]] = {
         "method": "POST",
         "mutation": False,
         "path": "/v1/changes/read",
+    },
+    "diagnostics-read": {
+        "authentication": "session_bearer",
+        "method": "POST",
+        "mutation": False,
+        "path": "/v1/diagnostics/read",
     },
     "endpoint-catalogue": {
         "authentication": "public",
@@ -136,6 +145,18 @@ ENDPOINTS: Final[dict[OperationId, Endpoint]] = {
         "method": "POST",
         "mutation": True,
         "path": "/v1/restores",
+    },
+    "runtime-tool-catalogue-read": {
+        "authentication": "session_bearer",
+        "method": "POST",
+        "mutation": False,
+        "path": "/v1/runtime/tools/list",
+    },
+    "runtime-tool-invoke": {
+        "authentication": "session_bearer",
+        "method": "POST",
+        "mutation": True,
+        "path": "/v1/runtime/tools/invoke",
     },
     "session-close": {
         "authentication": "session_bearer",

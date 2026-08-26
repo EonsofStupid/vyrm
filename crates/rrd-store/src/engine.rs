@@ -1,6 +1,6 @@
 //! The storage port. `PLAN.md` Step S: the ability to fold in storage.
 //!
-//! vyrm's value is the semantic layer — bi-temporal claims, durability
+//! rrflow's value is the semantic layer — bi-temporal claims, durability
 //! classes, projections that ground against their log, recall, the ledger.
 //! The engine underneath is a *port*: eight primitives (append, sequence,
 //! range, subjects, observe, projection get/put, and the `ClaimSource`
@@ -10,11 +10,11 @@
 //! inherits the semantics. That layering is the contract a parity
 //! implementation follows in another language: the Go/bbolt engine
 //! implements these same primitives over the same key encodings
-//! (`vyrm-core/fixtures/golden-vectors.json` is the cross-language proof)
+//! (`rrd-core/fixtures/golden-vectors.json` is the cross-language proof)
 //! and the semantic layer above it is a translation, not a redesign.
 //!
 //! Three engines ship in Rust today: [`Store`] (the transitional Fjall
-//! compatibility adapter), [`crate::NativeEngine`] (the Vyrm-native target),
+//! compatibility adapter), [`crate::NativeEngine`] (the Rrd-native target),
 //! and [`MemoryEngine`] (the reference, for conformance differentials per
 //! standing rule 3). Cache tiers (Moka in-process, Dragonfly shared)
 //! compose *around* an engine rather than implementing this trait: they
@@ -31,10 +31,8 @@ use crate::projection::{
     CURRENT_PROJECTION,
 };
 use crate::store::{AppendOutcome, IdempotentAppendOutcome, Store};
-use std::collections::{BTreeMap, BTreeSet};
-use std::sync::Mutex;
-use vyrm_core::reference::MemoryClaims;
-use vyrm_core::{
+use rrd_core::reference::MemoryClaims;
+use rrd_core::{
     projection_family, resolve_as_of, AuditEnvelope, Claim, ClaimSource, DataTransaction,
     DataTransactionView, Millis, ObjectReference, Predicate, ProjectionWork, ReadStamp, Reader,
     RetentionPin, RuntimeChange, RuntimeChangePage, RuntimeCommit, RuntimeCommitOutcome,
@@ -42,6 +40,8 @@ use vyrm_core::{
     RuntimeRef, RuntimeRelation, RuntimeSchemaRegistry, RuntimeSeriesSample, RuntimeVector,
     ScopeId, SnapshotHandle, SnapshotId, Subject,
 };
+use std::collections::{BTreeMap, BTreeSet};
+use std::sync::Mutex;
 
 /// A read-only physical counter snapshot used to attribute bounded storage
 /// work to one logical operation. Counters are cumulative; callers difference
@@ -182,6 +182,11 @@ pub trait Engine: ClaimSource<Error = Error> {
     ) -> Result<(u64, ControlJournalEntry)>;
 
     fn control_journal_since(&self, after: u64, limit: usize) -> Result<Vec<ControlJournalEntry>>;
+
+    /// Current authoritative control-journal head. Callers use this with a
+    /// runtime read stamp when one logical observation spans data and control
+    /// catalogues.
+    fn control_sequence(&self) -> Result<u64>;
 
     /// Current claim sequence watermark.
     fn sequence(&self) -> Result<u64>;
@@ -326,7 +331,7 @@ pub trait Engine: ClaimSource<Error = Error> {
         let previous = resolve_as_of(&candidates, claim.valid_from).cloned();
         match previous {
             Some(previous) if previous.valid_from < claim.valid_from => {
-                let pair = vyrm_core::supersede(&previous, claim.clone())?;
+                let pair = rrd_core::supersede(&previous, claim.clone())?;
                 self.append_batch(&pair)
             }
             _ => self.append_batch(std::slice::from_ref(claim)),
@@ -486,6 +491,9 @@ impl Engine for Store {
     }
     fn control_journal_since(&self, after: u64, limit: usize) -> Result<Vec<ControlJournalEntry>> {
         Store::control_journal_since(self, after, limit)
+    }
+    fn control_sequence(&self) -> Result<u64> {
+        Store::control_sequence(self)
     }
     fn sequence(&self) -> Result<u64> {
         Store::sequence(self)
@@ -804,6 +812,17 @@ impl Engine for MemoryEngine {
         Ok(entries)
     }
 
+    fn control_sequence(&self) -> Result<u64> {
+        u64::try_from(
+            self.inner
+                .lock()
+                .expect("engine mutex")
+                .control_journal
+                .len(),
+        )
+        .map_err(|_| Error::SequenceOverflow)
+    }
+
     fn sequence(&self) -> Result<u64> {
         Ok(self.inner.lock().expect("engine mutex").order.len() as u64)
     }
@@ -953,7 +972,7 @@ impl Engine for MemoryEngine {
         self.runtime_snapshots(now)?
             .iter()
             .map(RetentionPin::from_snapshot)
-            .collect::<vyrm_core::Result<Vec<_>>>()
+            .collect::<rrd_core::Result<Vec<_>>>()
             .map_err(Error::from)
     }
 
@@ -1302,7 +1321,7 @@ fn memory_read_stamp(inner: &MemoryEngineInner, scope: &ScopeId) -> Result<ReadS
 fn memory_validate_read_stamp(
     inner: &MemoryEngineInner,
     read: &ReadStamp,
-) -> Result<vyrm_core::RuntimeReadValidation> {
+) -> Result<rrd_core::RuntimeReadValidation> {
     read.validate()?;
     if read.commit_cursor > inner.runtime_changes.len() as u64 {
         return Err(Error::ReadStampUnavailable(read.manifest_id.clone()));
@@ -1328,7 +1347,7 @@ fn memory_validate_read_stamp(
         {
             return Err(Error::ReadStampMismatch(read.manifest_id.clone()));
         }
-        return Ok(vyrm_core::RuntimeReadValidation::new(
+        return Ok(rrd_core::RuntimeReadValidation::new(
             "authenticated_current_head",
             0,
             0,
@@ -1369,7 +1388,7 @@ fn memory_validate_read_stamp(
     {
         return Err(Error::ReadStampMismatch(read.manifest_id.clone()));
     }
-    Ok(vyrm_core::RuntimeReadValidation::new(
+    Ok(rrd_core::RuntimeReadValidation::new(
         "full_hash_chain_replay",
         read.commit_cursor,
         0,
@@ -1467,11 +1486,7 @@ fn memory_authenticated_point_page(
         requested_after: cursor - 1,
         through_cursor: cursor,
         head_cursor: read.commit_cursor,
-        validation: vyrm_core::RuntimeReadValidation::new(
-            "rfc9162_inclusion_proof",
-            1,
-            proof_nodes,
-        ),
+        validation: rrd_core::RuntimeReadValidation::new("rfc9162_inclusion_proof", 1, proof_nodes),
         changes: selected.into_iter().collect(),
     })
 }
@@ -1488,7 +1503,7 @@ fn memory_change_page(
             requested_after: after,
             through_cursor: after,
             head_cursor: head,
-            validation: vyrm_core::RuntimeReadValidation::new("bounded_hash_chain_page", 0, 0),
+            validation: rrd_core::RuntimeReadValidation::new("bounded_hash_chain_page", 0, 0),
             changes: Vec::new(),
         };
     }
@@ -1505,7 +1520,7 @@ fn memory_change_page(
         requested_after: after,
         through_cursor: end as u64,
         head_cursor: head,
-        validation: vyrm_core::RuntimeReadValidation::new(
+        validation: rrd_core::RuntimeReadValidation::new(
             "bounded_hash_chain_page",
             end.saturating_sub(after as usize) as u64,
             0,

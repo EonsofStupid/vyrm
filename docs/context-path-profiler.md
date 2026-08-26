@@ -1,8 +1,8 @@
 # Context path profiler concept
 
 Status: captured product boundary for a separate public repository after the
-native Vyrm baseline is reproduced remotely. It may ship as an RRFlow module
-and surface through Connectome, but it is not part of the Vyrm storage kernel.
+native RRFlow baseline is reproduced remotely. It may ship as an RRFlow module
+and surface through Connectome, but it is not part of the RRFlow storage kernel.
 
 ## Product gap
 
@@ -44,7 +44,7 @@ Typed event families cover:
 - decision, verification, regression, and final outcome;
 - proposed documentation consolidation, approval, application, and rollback.
 
-Raw provider events remain immutable. Vyrm stores the temporal log and derived
+Raw provider events remain immutable. RRFlow stores the temporal log and derived
 graph/time-series projections; it does not pretend a projection is canonical.
 OpenTelemetry/OpenInference ingestion and native Claude, Codex, local-model,
 Automaton, and later LFG adapters all lower into this contract.
@@ -88,13 +88,13 @@ Pruning follows a reversible transaction:
 6. grow from the consolidated SSOT rather than recreating parallel notes.
 
 Clyffy can later enforce this lifecycle, while LFG compiles the selected
-context into the just-in-time model input. Vyrm provides durable memory and
+context into the just-in-time model input. RRFlow provides durable memory and
 time travel; neither component is allowed to silently rewrite operator truth.
 
 ## Delivery gates
 
 1. Freeze the event schema and ingest one Claude/Codex-compatible trace.
-2. Prove deterministic replay and time travel over Vyrm.
+2. Prove deterministic replay and time travel over RRFlow.
 3. Ship the weak/strong prompt comparison and path/SSOT diagnostics locally.
 4. Validate metric attribution against raw traces and known documentation
    faults in multiple repositories.

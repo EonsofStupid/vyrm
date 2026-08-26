@@ -1,7 +1,7 @@
 //! # rrd-store
 //!
 //! Storage port and transitional Fjall compatibility adapter. The port is the
-//! contract the Vyrm-native substrate will implement and eventually replace.
+//! contract the Rrd-native substrate will implement and eventually replace.
 //!
 //! ## Corrections applied
 //!
@@ -44,15 +44,17 @@ mod writer;
 
 pub use archive::{
     export_logical_archive, inspect_logical_archive, restore_logical_archive_to_new_root,
-    LogicalArchiveInventory, LogicalRestoreReport, LOGICAL_ARCHIVE_VERSION,
+    restore_logical_archive_to_new_root_with, LogicalArchiveInventory, LogicalRestoreReport,
+    LOGICAL_ARCHIVE_VERSION,
 };
 pub use backup::{
-    create_logical_backup, load_backup_catalogue, restore_catalogued_backup,
-    verify_backup_catalogue, BackupCatalogue, BackupCoverage, BackupEntry,
-    BACKUP_CATALOGUE_VERSION,
+    create_application_backup, create_logical_backup, load_backup_catalogue,
+    restore_catalogued_backup, verify_backup_catalogue, verify_restored_backup_objects,
+    BackupCatalogue, BackupCoverage, BackupEntry, CatalogueManifestInventory,
+    ObjectPayloadManifestInventory, BACKUP_CATALOGUE_VERSION,
 };
 pub use control::{ControlJournalEntry, ControlTransition};
-pub use ds::{DataRuntime, DataRuntimeStep};
+pub use ds::{DataRuntime, DataRuntimeAccess, DataRuntimeRef, DataRuntimeStep};
 pub use engine::{Engine, MemoryEngine, PhysicalStoreEvidence};
 pub use error::{Error, Result};
 pub use footprint::{measure_storage_footprint, FootprintBytes, StorageFootprint};
@@ -78,14 +80,14 @@ pub use projection::{
     CurrentProjection, GroundedStamp, GroundingReport, ProjectionStatus, RebuildOutcome,
     CURRENT_PROJECTION,
 };
+pub use rrd_core::{
+    DataTransaction, DataTransactionView, ReadStamp, RetentionPin, RetentionPinId,
+    RuntimeChangePage, RuntimeCommitOutcome, SnapshotHandle, SnapshotId,
+};
 pub use s3::{ConditionalPut, S3CompatibleObjectStore, S3ObjectClient, S3ObjectMetadata};
 pub use store::{AppendOutcome, IdempotentAppendOutcome, Store};
 pub use upgrade::{
     migrate_native_format, migrate_native_format_with_fault, native_format_migration_status,
     FormatMigrationFault, FormatMigrationLedger, FormatMigrationPhase,
-};
-pub use vyrm_core::{
-    DataTransaction, DataTransactionView, ReadStamp, RetentionPin, RetentionPinId,
-    RuntimeChangePage, RuntimeCommitOutcome, SnapshotHandle, SnapshotId,
 };
 pub use writer::{Writer, WriterConfig, WriterStats};

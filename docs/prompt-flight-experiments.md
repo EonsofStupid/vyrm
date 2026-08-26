@@ -1,11 +1,11 @@
 # Prompt-flight experiment contract
 
 Connectome prompt flights answer one narrow question: what observable effect
-does Vyrm context have on a frontier model for the same prompt and repository
+does RRFlow context have on a frontier model for the same prompt and repository
 state?
 
 They are an optimization instrument, not a chain-of-thought viewer. The ledger
-captures only events exposed by Vyrm, the provider CLI, and tool-result
+captures only events exposed by RRFlow, the provider CLI, and tool-result
 envelopes.
 
 ## Unit of comparison
@@ -28,7 +28,7 @@ shows the flights under the same prompt digest.
 
 ### Fresh
 
-A fresh flight starts a provider session with no Vyrm context. Codex uses an
+A fresh flight starts a provider session with no RRFlow context. Codex uses an
 ephemeral read-only invocation; Claude uses a non-persistent plan-mode
 invocation. Existing claims and flight evidence are not deleted. "Fresh" is an
 input condition, not a storage operation.
@@ -76,14 +76,14 @@ aids only. Runtime metrics begin only after the operator launches the flight.
 
 The four UI profiles map to exact provider arguments:
 
-| Vyrm profile | Requested provider effort |
+| RRFlow profile | Requested provider effort |
 |---|---|
 | Default | `medium` |
 | High | `high` |
 | Extreme | `xhigh` |
 | Ultra | `max` |
 
-These names are experiment controls. Ultra is Vyrm's quality-first label for
+These names are experiment controls. Ultra is RRFlow's quality-first label for
 provider `max`, not Codex's separate multi-agent ultra mode. The mapping follows
 the current [OpenAI model guidance](https://developers.openai.com/api/docs/guides/latest-model)
 and is recorded on the flight and its provider-spawn event.
@@ -97,7 +97,7 @@ chain-of-thought.
 
 ## Metrics
 
-- `context_tokens`: Vyrm's declared rendered-context estimate;
+- `context_tokens`: RRFlow's declared rendered-context estimate;
 - `input_tokens` and `output_tokens`: provider-reported values when available;
 - `cached_input_tokens`: provider-reported cached input when available;
 - `reasoning_tokens`: provider-reported reasoning-token count when available;

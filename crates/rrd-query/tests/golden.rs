@@ -1,0 +1,72 @@
+use rrd_core::{
+    ReadStamp, RuntimeEventSchema, RuntimeRecordSchema, RuntimeSchemaRegistry, RuntimeType, ScopeId,
+};
+use rrd_query::parse;
+use rrd_query::{
+    bind, plan, Catalog, IndexCatalogueRepository, Parameters, SchemaVersion, SourceWatermarks,
+};
+use rrd_store::MemoryEngine;
+use serde::Serialize;
+use std::collections::BTreeMap;
+
+#[derive(Serialize)]
+struct Vector {
+    source: &'static str,
+    plan: rrd_query::PhysicalPlan,
+}
+
+#[test]
+fn physical_plan_matches_golden_vector() {
+    let scope = ScopeId::new("instance:golden").unwrap();
+    let read = ReadStamp::new(scope, Some(1), 1, 4, Some("11".repeat(32))).unwrap();
+    let mut schema = RuntimeSchemaRegistry::empty(1, "golden query contract");
+    schema.records.insert(
+        RuntimeType::new("document").unwrap(),
+        RuntimeRecordSchema {
+            allow_additional_properties: false,
+            properties: BTreeMap::new(),
+            ..RuntimeRecordSchema::default()
+        },
+    );
+    schema.events.insert(
+        RuntimeType::new("tool_result").unwrap(),
+        RuntimeEventSchema::default(),
+    );
+    let engine = MemoryEngine::new();
+    let catalog = Catalog {
+        read,
+        schemas: vec![SchemaVersion {
+            cursor: 1,
+            registry: schema,
+        }],
+        indexes: IndexCatalogueRepository::new(&engine, ScopeId::new("instance:golden").unwrap())
+            .load()
+            .unwrap(),
+        source_watermarks: SourceWatermarks {
+            schema: 1,
+            ..SourceWatermarks::default()
+        },
+    };
+    let vectors = [
+        "FROM record:document AT VALID 100 KNOWN 4 PROJECT id LIMIT 5 EXPLAIN CONTRACT",
+        "FROM event:tool_result AT VALID 100 KNOWN 4 WHERE cursor = 4 PROJECT cursor EXPLAIN CONTRACT",
+    ]
+    .into_iter()
+    .map(|source| {
+        let query = parse(source).unwrap();
+        Vector {
+            source,
+            plan: plan(&bind(&query, &Parameters::new(), &catalog).unwrap()).unwrap(),
+        }
+    })
+    .collect::<Vec<_>>();
+    let actual = format!("{}\n", serde_json::to_string_pretty(&vectors).unwrap());
+    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/fixtures/plan-vectors.json");
+    if std::env::var_os("RRFLOW_UPDATE_GOLDENS").is_some() {
+        std::fs::create_dir_all(format!("{}/fixtures", env!("CARGO_MANIFEST_DIR"))).unwrap();
+        std::fs::write(path, &actual).unwrap();
+    }
+    let expected = std::fs::read_to_string(path)
+        .unwrap_or_else(|_| panic!("missing {path}; run with RRFLOW_UPDATE_GOLDENS=1"));
+    assert_eq!(actual, expected);
+}

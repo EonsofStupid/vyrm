@@ -1,7 +1,7 @@
 //! Capability-explicit S3-compatible immutable object adapter.
 //!
 //! Authentication, HTTP, retries, and endpoint policy stay in a transport
-//! implementation. This layer owns Vyrm semantics: deterministic keys,
+//! implementation. This layer owns Rrd semantics: deterministic keys,
 //! conditional creation, post-write verification, and no read-check-write
 //! fallback when the backend cannot provide `If-None-Match` behavior.
 
@@ -9,9 +9,9 @@ use crate::{
     Error, ImmutableObjectStore, ObjectInventory, ObjectInventoryEntry, ObjectInventoryState,
     Result, VerifiedObject,
 };
+use rrd_core::{digest, ObjectReceipt, ObjectReference};
 use std::collections::BTreeSet;
 use std::io::{Cursor, Read};
-use vyrm_core::{digest, ObjectReceipt, ObjectReference};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct S3ObjectMetadata {

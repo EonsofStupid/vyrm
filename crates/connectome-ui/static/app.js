@@ -272,6 +272,11 @@
   function renderCapabilities() {
     const capabilities = state.data.capabilities;
     const engine = capabilities.engine || [];
+    const tools = capabilities.mcp_tools || [];
+    const surfaceCatalogue = capabilities.surfaces || { capabilities: [] };
+    const surfaceNames = ['engine', 'rrd_http', 'mcp', 'cli', 'connectome'];
+    const surfaceRows = surfaceCatalogue.capabilities || [];
+    const attunement = state.data.attunement;
     const count = (maturity) => engine.filter((item) => item.maturity === maturity).length;
     const replay = capabilities.replay || {};
     $('#main').innerHTML = pageHead('Runtime capabilities', 'The executable diagnostics handshake. Alpha and partial features expose evidence and limits; planned features are never presented as shipped.', `<span class="badge ready">${escapeHtml(capabilities.protocol)} v${human(capabilities.version)}</span>`) + `
@@ -289,6 +294,29 @@
           <div><span>Recovery</span><strong>${replay.restart_recoverable ? 'restart recoverable' : 'process local'}</strong><small>${replay.persisted ? 'authoritative events survive restart' : 'not retained'}</small></div>
           <div><span>Lenses</span><strong>${human((replay.lenses || []).length)}</strong><small>${(replay.lenses || []).map((lens) => lens.replaceAll('_', ' ')).join(' · ')}</small></div>
         </div>
+      </section>
+      <section class="attunement-panel panel">
+        <div class="panel-head"><h2>Durable planning attunement</h2><span>${attunement ? 'RECORDED' : 'REQUIRED BEFORE MUTATION'}</span></div>
+        ${attunement ? `<div class="attunement-grid">
+          <div><span>Receipt</span><code>${escapeHtml(attunement.receipt_sha256)}</code></div>
+          <div><span>Source tree</span><code>${escapeHtml(attunement.source_tree_sha256)}</code><small>${human(attunement.source_files)} files · generation ${human(attunement.routing_generation)}</small></div>
+          <div><span>Planning inputs</span><strong>${human((attunement.planning_sources || []).length)}</strong><small>${(attunement.planning_sources || []).map((source) => escapeHtml(source.path)).join(' · ') || 'source tree only'}</small></div>
+          <div><span>RRD read stamp</span><code>${escapeHtml(attunement.read.manifest_id)}</code><small>cursor ${human(attunement.read.commit_cursor)} · catalogue ${human(attunement.read.catalog_revision)}</small></div>
+          <div><span>Reasoning bind</span><strong>${escapeHtml(attunement.reasoning_run_id || 'unbound')}</strong><small>${attunement.authorized_tool_sha256 ? `tool ${escapeHtml(attunement.authorized_tool_sha256)}` : 'no outstanding tool authorization'}</small></div>
+          <div><span>Prompt bind</span><code>${escapeHtml(attunement.prompt_sha256 || 'session preflight')}</code><small>issued ${time(attunement.issued_at)}</small></div>
+        </div>` : `<div class="empty-state"><div><strong>No planning receipt</strong><span>Run RRFlow preflight or submit a prompt through a lifecycle adapter before requesting mutation.</span></div></div>`}
+      </section>
+      <section class="tool-catalogue panel">
+        <div class="panel-head"><h2>Executable MCP catalogue</h2><span>${human(tools.length)} ENGINE-GENERATED TOOLS</span></div>
+        <div class="tool-catalogue-grid">
+          ${tools.map((tool) => `<article class="tool-row"><div><code>${escapeHtml(tool.name)}</code><p>${escapeHtml(tool.description)}</p></div><b class="badge ${tool.mutation ? 'attention' : 'ready'}">${tool.mutation ? 'mutation' : 'read'}</b></article>`).join('')}
+        </div>
+      </section>
+      <section class="surface-matrix panel">
+        <div class="panel-head"><h2>One-product surface matrix</h2><span>${human(surfaceRows.length)} DECLARED CAPABILITIES</span></div>
+        <div class="surface-table-wrap"><table class="surface-table"><thead><tr><th>Capability</th>${surfaceNames.map((surface) => `<th>${escapeHtml(surface.replace('_', ' '))}</th>`).join('')}</tr></thead><tbody>
+          ${surfaceRows.map((capability) => `<tr><td><strong>${escapeHtml(capability.label)}</strong><small>${escapeHtml(capability.id)} · ${escapeHtml(capability.category)}</small></td>${surfaceNames.map((surface) => { const binding = (capability.bindings || []).find((candidate) => candidate.surface === surface) || { disposition: 'planned' }; return `<td><span class="surface-state state-${escapeHtml(binding.disposition)}">${escapeHtml(binding.disposition)}</span>${binding.entrypoint ? `<code title="${escapeHtml(binding.entrypoint)}">${escapeHtml(binding.entrypoint)}</code>` : ''}</td>`; }).join('')}</tr>`).join('')}
+        </tbody></table></div>
       </section>
       <section class="capability-grid">
         ${engine.map((item) => `<article class="capability-card maturity-${escapeHtml(item.maturity)}"><header><div><span>${escapeHtml(item.category)}</span><h2>${escapeHtml(item.label)}</h2></div><b>${escapeHtml(item.maturity)}</b></header><p>${escapeHtml(item.summary)}</p><dl><div><dt>Evidence</dt><dd>${escapeHtml(item.evidence)}</dd></div><div><dt>Current limit</dt><dd>${escapeHtml(item.limitation)}</dd></div></dl><footer><code>${escapeHtml(item.id)}</code></footer></article>`).join('')}
@@ -311,7 +339,7 @@
     const estates = state.data.estates || [];
     const estate = estates[0];
     if (!estate) {
-      $('#main').innerHTML = pageHead('Estates', 'Project-owned runtime boundaries and the instances observed inside them.') + empty('No estate bound', 'Connectome is not attached to a Vyrm instance.');
+      $('#main').innerHTML = pageHead('Estates', 'Project-owned runtime boundaries and the instances observed inside them.') + empty('No estate bound', 'Connectome is not attached to a RRFlow instance.');
       return;
     }
     const nodes = state.data.cluster?.nodes || [];
@@ -562,7 +590,7 @@
       </section>
       <section class="flight-metrics">
         ${flightMetric('Effort', profile.effort, flight.provider === 'observe' ? `${profile.title} · not executed` : profile.title)}
-        ${flightMetric('Vyrm context', metrics.context_tokens ?? 0, 'tokens injected')}
+        ${flightMetric('RRFlow context', metrics.context_tokens ?? 0, 'tokens injected')}
         ${flightMetric('Input / output', metrics.input_tokens == null ? '—' : `${human(metrics.input_tokens)} / ${human(metrics.output_tokens || 0)}`, metrics.input_tokens == null ? 'unreported' : 'tokens')}
         ${flightMetric('Reasoning', metrics.reasoning_tokens ?? '—', metrics.reasoning_tokens == null ? 'provider did not report' : 'tokens')}
         ${flightMetric('Cache read', metrics.cached_input_tokens ?? '—', metrics.cached_input_tokens == null ? 'unreported' : 'tokens')}
@@ -667,7 +695,7 @@
   }
 
   function comparison(flights, selected) {
-    if (flights.length < 2) return `<section class="comparison-empty"><span class="eyebrow">SAME-PROMPT EFFORT BASELINE</span><p>Run this exact prompt again at High, Extreme, or Ultra. Vyrm will compare only observed cost and outcome evidence.</p></section>`;
+    if (flights.length < 2) return `<section class="comparison-empty"><span class="eyebrow">SAME-PROMPT EFFORT BASELINE</span><p>Run this exact prompt again at High, Extreme, or Ultra. RRFlow will compare only observed cost and outcome evidence.</p></section>`;
     const maxima = {
       context: Math.max(...flights.map((flight) => flight.metrics.context_tokens || 0), 1),
       tools: Math.max(...flights.map((flight) => flight.metrics.tool_calls || 0), 1),
@@ -1074,9 +1102,9 @@
   function renderQuery() {
     const firstType = Object.keys(state.data.schema?.records || {})[0] || 'reasoning_run';
     const sample = `FROM record:${firstType} AT VALID ${Date.now()} KNOWN HEAD PROJECT * LIMIT 25 EXPLAIN CONTRACT`;
-    $('#main').innerHTML = pageHead('vyrmQL contract lab', 'Run an explicit bi-temporal query and inspect the binding, chosen physical path, rejected alternatives, budgets, and exact result.') + `
+    $('#main').innerHTML = pageHead('RRFlowQL contract lab', 'Run an explicit bi-temporal query and inspect the binding, chosen physical path, rejected alternatives, budgets, and exact result.') + `
       <form id="query-form" class="query-composer">
-        <textarea id="query-source" spellcheck="false" aria-label="vyrmQL query">${escapeHtml(sample)}</textarea>
+        <textarea id="query-source" spellcheck="false" aria-label="RRFlowQL query">${escapeHtml(sample)}</textarea>
         <div><span>Read-only · scope instance:default · exact path required</span><button class="primary-button">Plan and execute</button></div>
       </form>
       <div id="query-result">${empty('Ready to inspect', 'The planner will expose its evidence contract before showing deterministic batches.')}</div>`;

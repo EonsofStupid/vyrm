@@ -6,12 +6,12 @@
 //! reclamation make that asymmetry explicit.
 
 use crate::{Error, Result};
+use rrd_core::{digest, ObjectReceipt, ObjectReference};
 use std::collections::BTreeSet;
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
-use vyrm_core::{digest, ObjectReceipt, ObjectReference};
 
 static STAGE_ORDINAL: AtomicU64 = AtomicU64::new(1);
 

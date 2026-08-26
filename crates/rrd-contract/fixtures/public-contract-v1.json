@@ -2,7 +2,7 @@
   "service": {
     "protocol": "rrd",
     "protocol_version": 1,
-    "implementation": "vyrm",
+    "implementation": "rrflow",
     "implementation_version": "0.1.0-alpha.1",
     "deployment_mode": "embedded",
     "instance": {

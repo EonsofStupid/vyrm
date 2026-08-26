@@ -85,12 +85,12 @@ pub(super) fn capabilities(
                 rrd_contract::MAX_TRANSACTION_CLAIMS as u64,
             )]),
             limitation: Some(
-                "atomic schema, claim, record, relation, event, vector, series, geo, and pre-staged object-reference commits; mutating VyrmQL and read-your-writes remain open"
+                "atomic schema, claim, record, relation, event, vector, series, geo, and pre-staged object-reference commits; mutating RRFlowQL and read-your-writes remain open"
                     .into(),
             ),
         },
         CapabilityDescriptor {
-            name: CanonicalId::new("exact-vyrmql-query").unwrap(),
+            name: CanonicalId::new("exact-rrflowql-query").unwrap(),
             contract_version: 1,
             status: CapabilityStatus::Experimental,
             limits: BTreeMap::from([
@@ -104,7 +104,7 @@ pub(super) fn capabilities(
                 ),
             ]),
             limitation: Some(
-                "exact session-scoped VyrmQL/VyrmMX reads; mutating VyrmQL and live queries remain open"
+                "exact session-scoped RRFlowQL/RRD query engine reads; mutating RRFlowQL and live queries remain open"
                     .into(),
             ),
         },
@@ -244,7 +244,7 @@ pub(super) fn capabilities(
     ServiceCapabilities {
         protocol: PROTOCOL.into(),
         protocol_version: PROTOCOL_VERSION,
-        implementation: CanonicalId::new("vyrm").unwrap(),
+        implementation: CanonicalId::new("rrflow").unwrap(),
         implementation_version: env!("CARGO_PKG_VERSION").into(),
         deployment_mode: DeploymentMode::LocalServer,
         instance: ResourceId {

@@ -1,12 +1,17 @@
 use rrd_contract::{transaction_operation_sha256, CanonicalId, CorrelationId, TransactionMutation};
+use rrd_core::{
+    RuntimeCommit, RuntimeEventSchema, RuntimeMutation, RuntimeProperties, RuntimePropertySchema,
+    RuntimeRecord, RuntimeRecordSchema, RuntimeRef, RuntimeSchemaRegistry, RuntimeType,
+    RuntimeValue, RuntimeValueType, ScopeId,
+};
+use rrd_engine::{load_or_create_token_key, InstanceManifest, RrdEngine};
 use rrd_security::{
     Action as SecurityAction, Principal, PrincipalKind, ResourceGrant, SecurityRepository,
     SecurityState, SECURITY_FORMAT,
 };
-use rrd_server::{load_or_create_token_key, HttpError, RrdHttpServer, RRD_MAX_BODY_BYTES};
+use rrd_server::{HttpError, RrdHttpServer, RRD_MAX_BODY_BYTES};
 use rrd_store::Engine;
 use rrd_store::PersistentEngine;
-use rrflow_engine::RrflowEngine;
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
 use std::io::{Read, Write};
@@ -15,11 +20,6 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::thread::JoinHandle;
 use std::time::Duration;
-use vyrm_core::{
-    RuntimeCommit, RuntimeEventSchema, RuntimeMutation, RuntimeProperties, RuntimePropertySchema,
-    RuntimeRecord, RuntimeRecordSchema, RuntimeRef, RuntimeSchemaRegistry, RuntimeType,
-    RuntimeValue, RuntimeValueType, ScopeId,
-};
 
 fn estate_context(at: u64, operation: &str) -> rrd_estate::MutationContext {
     rrd_estate::MutationContext {
@@ -57,7 +57,7 @@ impl Drop for RunningServer {
 fn start(root: &Path) -> RunningServer {
     let token_key = load_or_create_token_key(&root.join("RRD.SERVER.SECRET")).unwrap();
     let engine =
-        RrflowEngine::open(root, CanonicalId::new("socket-test").unwrap(), token_key).unwrap();
+        RrdEngine::open(root, CanonicalId::new("socket-test").unwrap(), token_key).unwrap();
     let server = RrdHttpServer::bind(engine, "127.0.0.1:0".parse().unwrap()).unwrap();
     let address = server.local_addr();
     let (shutdown, receiver) = tokio::sync::oneshot::channel();
@@ -271,7 +271,7 @@ fn initialized_security_authority_binds_sessions_and_denies_ungranted_routes() {
     let principal = Principal {
         id: CanonicalId::new("connectome-local").unwrap(),
         kind: PrincipalKind::User,
-        credential_sha256: vyrm_core::digest::sha256_hex(b"local-api-key"),
+        credential_sha256: rrd_core::digest::sha256_hex(b"local-api-key"),
         not_before_unix_ms: 1,
         expires_at_unix_ms: u64::MAX,
         disabled: false,
@@ -378,7 +378,7 @@ fn initialized_security_authority_binds_sessions_and_denies_ungranted_routes() {
     assert_eq!(status, 401, "{unauthenticated}");
 
     let mut invalid_query = query.clone();
-    invalid_query["payload"]["query"] = json!("NOT VYRMQL");
+    invalid_query["payload"]["query"] = json!("NOT RRFLOWQL");
     let (status, failed) = post(&server, "/v1/query", &invalid_query, Some((session, token)));
     assert_eq!(status, 400, "{failed}");
 
@@ -438,7 +438,7 @@ fn initialized_security_authority_binds_sessions_and_denies_ungranted_routes() {
 }
 
 #[test]
-fn authenticated_query_exposes_exact_vyrmql_vyrmmx_contract() {
+fn authenticated_query_exposes_exact_rrflowql_rrd_query_executor_contract() {
     let temporary = tempfile::tempdir().unwrap();
     let root = temporary.path().join("instance");
     seed_query_fixture(&root);
@@ -775,11 +775,9 @@ fn managed_backup_and_restore_are_authenticated_replay_safe_and_path_closed() {
         payload(&backed_up)["backup"]["archive"]["runtime_cursor"],
         2
     );
-    assert_eq!(
-        payload(&backed_up)["backup"]["object_payloads"],
-        "referenced_only"
-    );
-    assert_eq!(payload(&backed_up)["backup"]["application_complete"], false);
+    assert_eq!(payload(&backed_up)["backup"]["object_payloads"], "included");
+    assert_eq!(payload(&backed_up)["backup"]["catalogues"], "included");
+    assert_eq!(payload(&backed_up)["backup"]["application_complete"], true);
     let backup_id = payload(&backed_up)["backup"]["backup_sha256"]
         .as_str()
         .unwrap()
@@ -1401,7 +1399,7 @@ fn data_transaction_atomically_commits_every_public_model_and_replays_after_rest
     assert_eq!(status, 200, "{ensured}");
     assert_eq!(payload(&ensured)["idempotent_replay"], false);
     assert_eq!(payload(&ensured)["index"]["state"], "ready");
-    assert_eq!(payload(&ensured)["index"]["source_cursor"], 11);
+    assert_eq!(payload(&ensured)["index"]["source_cursor"], 4);
     assert_eq!(payload(&ensured)["index"]["artifact_rows"], 2);
     let (status, replayed) = post(
         &server,
@@ -1411,6 +1409,21 @@ fn data_transaction_atomically_commits_every_public_model_and_replays_after_rest
     );
     assert_eq!(status, 200, "{replayed}");
     assert_eq!(payload(&replayed)["idempotent_replay"], true);
+    let independently_ensured = envelope(
+        ensure_index["payload"].clone(),
+        Some("ensure-document-title-second"),
+        None,
+    );
+    let (status, independently_ensured) = post(
+        &server,
+        "/v1/query/indexes/ensure",
+        &independently_ensured,
+        Some((&session_id, &token)),
+    );
+    assert_eq!(status, 200, "{independently_ensured}");
+    assert_eq!(payload(&independently_ensured)["idempotent_replay"], false);
+    assert_eq!(payload(&independently_ensured)["index"]["generation"], 1);
+    assert_eq!(payload(&independently_ensured)["index"]["source_cursor"], 4);
     let mut collision = ensure_index.clone();
     collision["payload"]["definition_query"] =
         json!("FROM record:document AT VALID 101 KNOWN HEAD PROJECT title");
@@ -1654,7 +1667,7 @@ fn authenticated_estate_read_returns_the_public_snapshot_only() {
 #[test]
 fn server_denies_remote_bind_before_opening_a_listener() {
     let temporary = tempfile::tempdir().unwrap();
-    let engine = RrflowEngine::open(
+    let engine = RrdEngine::open(
         &temporary.path().join("instance"),
         CanonicalId::new("socket-test").unwrap(),
         [7; 32],
@@ -1667,16 +1680,11 @@ fn server_denies_remote_bind_before_opening_a_listener() {
 #[test]
 fn binary_refuses_remote_bind() {
     let temporary = tempfile::tempdir().unwrap();
-    let database = temporary.path().join("instance");
+    let project = temporary.path().join("project");
+    std::fs::create_dir(&project).unwrap();
+    InstanceManifest::ensure_dedicated(&project).unwrap();
     let output = Command::new(env!("CARGO_BIN_EXE_rrd-server"))
-        .args([
-            "--db",
-            database.to_str().unwrap(),
-            "--instance",
-            "socket-test",
-            "--bind",
-            "0.0.0.0:0",
-        ])
+        .args(["--root", project.to_str().unwrap(), "--bind", "0.0.0.0:0"])
         .output()
         .unwrap();
     assert!(!output.status.success());
@@ -1727,12 +1735,12 @@ fn real_socket_exercises_lifecycle_commit_and_restart_replay() {
     assert_eq!(payload(&catalogue)["protocol_version"], 1);
     assert_eq!(
         payload(&catalogue)["endpoints"].as_array().unwrap().len(),
-        28
+        31
     );
     let (status, openapi) = http(server.address, "GET", "/v1/schema/openapi", &[], &[]);
     assert_eq!(status, 200, "{openapi}");
     assert_eq!(payload(&openapi)["openapi"], "3.1.0");
-    assert_eq!(payload(&openapi)["x-rrd-endpoint-count"], 28);
+    assert_eq!(payload(&openapi)["x-rrd-endpoint-count"], 31);
     assert!(
         payload(&openapi)["paths"]["/v1/query"]["post"]["requestBody"]["content"]
             ["application/json"]["schema"]

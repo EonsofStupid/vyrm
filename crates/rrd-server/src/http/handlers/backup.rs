@@ -11,8 +11,7 @@ impl AppState {
             headers,
             body,
             now,
-            true,
-            SecurityAction::BackupCreate,
+            RrdOperation::BackupCreate,
             None,
             |envelope, session, token| {
                 self.service
@@ -40,8 +39,7 @@ impl AppState {
             headers,
             body,
             now,
-            false,
-            SecurityAction::BackupList,
+            RrdOperation::BackupList,
             None,
             |envelope, session, token| {
                 self.service
@@ -68,8 +66,7 @@ impl AppState {
             headers,
             body,
             now,
-            true,
-            SecurityAction::RestoreCreate,
+            RrdOperation::RestoreCreate,
             None,
             |envelope, session, token| {
                 self.service

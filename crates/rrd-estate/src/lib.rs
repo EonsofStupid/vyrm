@@ -37,11 +37,11 @@ pub use reconcile::{
 };
 
 use rrd_contract::CanonicalId;
+use rrd_core::digest;
+use rrd_store::{ControlTransition, Engine};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fmt;
-use vyrm_core::digest;
-use rrd_store::{ControlTransition, Engine};
 
 pub const ESTATE_FORMAT: u16 = 1;
 pub const MAX_INSTANCES: usize = 1_024;

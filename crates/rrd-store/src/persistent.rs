@@ -1,6 +1,6 @@
 //! Canonical durable engine selector.
 //!
-//! New stores use native `vyrmKV`. A directory carrying native's authenticated
+//! New stores use native `RRD LSM`. A directory carrying native's authenticated
 //! `CURRENT` pointer reopens as native; any other existing directory remains on
 //! the Fjall compatibility adapter. Selection is therefore stable across
 //! restart and never guesses that an existing store can be reinterpreted.
@@ -9,12 +9,12 @@ use crate::{
     migration_status, Durability, Engine, Error, Invocation, InvocationInput, MigrationPhase,
     NativeEngine, PhysicalStoreEvidence, RecallOutcome, RemovalReport, Result, Store,
 };
-use std::path::Path;
-use vyrm_core::{
+use rrd_core::{
     AuditEnvelope, Claim, ClaimSource, DataTransaction, DataTransactionView, Millis, Predicate,
     ProjectionWork, ReadStamp, Reader, RetentionPin, RuntimeChangePage, RuntimeCommit,
     RuntimeCommitOutcome, RuntimeSchemaRegistry, ScopeId, SnapshotHandle, SnapshotId, Subject,
 };
+use std::path::Path;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PersistentBackend {
@@ -25,7 +25,7 @@ pub enum PersistentBackend {
 impl PersistentBackend {
     pub const fn as_str(self) -> &'static str {
         match self {
-            Self::Native => "vyrmkv_native",
+            Self::Native => "rrd_lsm",
             Self::FjallCompatibility => "fjall_compatibility",
         }
     }
@@ -226,6 +226,13 @@ impl Engine for PersistentEngine {
         match self {
             Self::Native(engine) => Engine::control_journal_since(engine, after, limit),
             Self::FjallCompatibility(engine) => Engine::control_journal_since(engine, after, limit),
+        }
+    }
+
+    fn control_sequence(&self) -> Result<u64> {
+        match self {
+            Self::Native(engine) => Engine::control_sequence(engine),
+            Self::FjallCompatibility(engine) => Engine::control_sequence(engine),
         }
     }
 

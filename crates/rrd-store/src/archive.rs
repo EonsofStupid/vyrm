@@ -1,13 +1,13 @@
 //! Backend-independent, content-authenticated logical archive and native restore.
 
 use crate::{Engine, Error, NativeEngine, Result};
+use rrd_core::digest::Sha256;
+use rrd_core::{Claim, RuntimeChange, RuntimeCommit, RuntimeMutation};
 use serde::{Deserialize, Serialize};
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
-use vyrm_core::digest::Sha256;
-use vyrm_core::{Claim, RuntimeChange, RuntimeCommit, RuntimeMutation};
 
 const MAGIC: &[u8; 8] = b"RRDLAR01";
 pub const LOGICAL_ARCHIVE_VERSION: u16 = 1;
@@ -83,6 +83,22 @@ pub fn restore_logical_archive_to_new_root(
     target: &Path,
     at: u64,
 ) -> Result<LogicalRestoreReport> {
+    restore_logical_archive_to_new_root_with(archive, target, at, |_| Ok(()))
+}
+
+/// Restores one logical archive and lets the caller populate additional
+/// durable tiers inside the hidden staging root before it becomes visible.
+///
+/// The callback is part of the restore activation boundary: any error removes
+/// the staging root and leaves `target` absent. This is used by application-
+/// complete backups to rehydrate immutable payloads before publishing the
+/// restored RRD root.
+pub fn restore_logical_archive_to_new_root_with(
+    archive: &Path,
+    target: &Path,
+    at: u64,
+    populate_staging: impl FnOnce(&Path) -> Result<()>,
+) -> Result<LogicalRestoreReport> {
     let expected = inspect_logical_archive(archive)?;
     if target.exists() {
         return Err(Error::Archive(format!(
@@ -131,13 +147,14 @@ pub fn restore_logical_archive_to_new_root(
         let reopened = NativeEngine::open(&staging)?;
         verify_watermarks(&reopened, &expected)?;
         drop(reopened);
+        populate_staging(&staging)?;
         if target.exists() {
             return Err(Error::Archive(format!(
                 "restore target appeared before publication: {}",
                 target.display()
             )));
         }
-        vyrm_kv::publish_rename(parent, &staging, target).map_err(archive_io)?;
+        rrd_lsm::publish_rename(parent, &staging, target).map_err(archive_io)?;
         Ok(LogicalRestoreReport {
             archive: archive.to_owned(),
             target: target.to_owned(),
@@ -343,7 +360,7 @@ fn write_archive(
             writer.action(action)?;
         }
         let inventory = writer.finish(claim_sequence, runtime_cursor)?;
-        vyrm_kv::publish_rename(parent, &temporary, path).map_err(archive_io)?;
+        rrd_lsm::publish_rename(parent, &temporary, path).map_err(archive_io)?;
         Ok(inventory)
     })();
     if result.is_err() && temporary.exists() {

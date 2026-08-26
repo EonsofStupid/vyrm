@@ -1,0 +1,134 @@
+{
+  "comment": "M4 portable values; changes require an explicit wire-version decision",
+  "commit": {
+    "actor": "agent:golden",
+    "at": 1100,
+    "expected_cursor": 7,
+    "mutations": [
+      {
+        "mutation": "vector",
+        "vector": {
+          "field": "title",
+          "id": "doc-1-title",
+          "kind": "embedding",
+          "properties": {},
+          "subject": {
+            "id": "doc-1",
+            "kind": "entity"
+          },
+          "valid_from": 1000,
+          "value": {
+            "kind": "dense",
+            "values": [
+              0.25,
+              -0.5,
+              0.75
+            ]
+          }
+        }
+      },
+      {
+        "mutation": "series_sample",
+        "sample": {
+          "id": "doc-1-score-1000",
+          "kind": "sample",
+          "observed_at": 1000,
+          "properties": {},
+          "series": {
+            "id": "doc-1",
+            "kind": "entity"
+          },
+          "value": {
+            "type": "decimal",
+            "value": "42.125"
+          }
+        }
+      },
+      {
+        "geo": {
+          "field": "region",
+          "id": "doc-1-region",
+          "kind": "location",
+          "properties": {},
+          "subject": {
+            "id": "doc-1",
+            "kind": "entity"
+          },
+          "valid_from": 1000,
+          "valid_to": 2000,
+          "value": {
+            "kind": "bounding_box",
+            "northeast": {
+              "latitude": 38.0,
+              "longitude": -122.0
+            },
+            "southwest": {
+              "latitude": 37.0,
+              "longitude": -123.0
+            }
+          }
+        },
+        "mutation": "geo"
+      },
+      {
+        "mutation": "object",
+        "object": {
+          "id": "source",
+          "kind": "object",
+          "length": 19,
+          "media_type": "text/plain",
+          "properties": {},
+          "receipt": {
+            "backend": "local",
+            "etag": "6b94be64314982ce8c55d1580e305112d36ae3eee6f85446f8b95c4b9b1df880",
+            "key": "objects/sha256/6b/6b94be64314982ce8c55d1580e305112d36ae3eee6f85446f8b95c4b9b1df880"
+          },
+          "sha256": "6b94be64314982ce8c55d1580e305112d36ae3eee6f85446f8b95c4b9b1df880",
+          "subject": {
+            "id": "doc-1",
+            "kind": "entity"
+          }
+        }
+      }
+    ],
+    "scope": "instance:golden"
+  },
+  "commit_digest": "561682f2a29fbfa9a6cf436ea38a29e89d62c0963aeaaf4fa19d650c58fed4ab",
+  "first_projection_work": {
+    "commit_id": "561682f2a29fbfa9a6cf436ea38a29e89d62c0963aeaaf4fa19d650c58fed4ab",
+    "commit_ordinal": 0,
+    "contract_version": 1,
+    "family": "vector",
+    "id": "b7cb05e465201b2f101f3cd165b9b75ab61c9f439c7cf6c266e62eea6f2e0ad5",
+    "scope": "instance:golden",
+    "source_cursor": 8
+  },
+  "multi_vector": {
+    "dimensions": 2,
+    "kind": "multi_dense",
+    "vectors": [
+      [
+        1.0,
+        0.0
+      ],
+      [
+        0.0,
+        1.0
+      ]
+    ]
+  },
+  "sparse_vector": {
+    "dimensions": 8,
+    "indices": [
+      1,
+      4,
+      7
+    ],
+    "kind": "sparse",
+    "values": [
+      0.5,
+      -1.0,
+      2.0
+    ]
+  }
+}

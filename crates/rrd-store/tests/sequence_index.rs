@@ -4,10 +4,10 @@
 //! It is written in the transaction that writes the claim, so it cannot diverge
 //! from the watermark.
 
+use rrd_core::reference::MemoryClaims;
+use rrd_core::{Claim, Predicate, Producer, Subject};
 use rrd_store::{Store, Writer, WriterConfig};
 use std::sync::Arc;
-use vyrm_core::reference::MemoryClaims;
-use vyrm_core::{Claim, Predicate, Producer, Subject};
 
 fn producer() -> Producer {
     Producer {

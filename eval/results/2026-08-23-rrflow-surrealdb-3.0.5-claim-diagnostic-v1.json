@@ -1,0 +1,640 @@
+{
+  "format_version": 1,
+  "schema": "rrflow.surrealdb-claim-differential.v1",
+  "measured_at_unix_ms": 1787456903572,
+  "platform": {
+    "architecture": "x86_64",
+    "operating_system": "Linux"
+  },
+  "config": {
+    "trials": 3,
+    "operations": 2048,
+    "batch_size": 64,
+    "reads": 512,
+    "read_width": 32
+  },
+  "surrealdb": {
+    "version": "3.0.5 for linux on x86_64",
+    "binary_sha256": "a9a5e9e36e4f6fe922e1991a4fb0ea1ee4fe90819c5e3a8dce238a56666e8cec",
+    "storage": "surrealkv",
+    "transport": "persistent localhost HTTP SQL",
+    "timing": "end-to-end client timing plus summed server-reported statement execution time",
+    "durability": "SurrealDB 3.x default disk sync"
+  },
+  "contract": "same claim fields, atomic authoritative batch and sequence watermark, ordered bounded replay, complete paged object verification, clean restart; RRFlow is embedded while SurrealDB is a local server, and client RSS is excluded only for SurrealDB",
+  "aggregation": "median of isolated alternating trials",
+  "native_trials": [
+    {
+      "backend": "native",
+      "correctness_verified": true,
+      "write_operations_per_second": 83339.33894731753,
+      "write_batch_latency": {
+        "samples": 32,
+        "minimum_ns": 653831,
+        "p50_ns": 746431,
+        "p95_ns": 1036645,
+        "p99_ns": 1106039,
+        "maximum_ns": 1106039
+      },
+      "read_operations_per_second": 21313.00871539711,
+      "read_latency": {
+        "samples": 512,
+        "minimum_ns": 44362,
+        "p50_ns": 45934,
+        "p95_ns": 54456,
+        "p99_ns": 59475,
+        "maximum_ns": 77890
+      },
+      "maintained_read_operations_per_second": 13904.396681574515,
+      "maintained_read_latency": {
+        "samples": 512,
+        "minimum_ns": 67867,
+        "p50_ns": 70143,
+        "p95_ns": 79797,
+        "p99_ns": 82762,
+        "maximum_ns": 93811
+      },
+      "recovery_ns": 2793145,
+      "maintained_recovery_ns": 3581408,
+      "uncompacted_recovery_ns": 2793145,
+      "maintenance_ns": 26092519,
+      "write_peak_rss_kib": 7144,
+      "peak_rss_kib": 6232,
+      "maintenance_peak_rss_kib": 8600,
+      "footprint": {
+        "active": {
+          "apparent_bytes": 918472,
+          "allocated_bytes": 1056768,
+          "allocated_bytes_source": "unix_st_blocks_times_512",
+          "files": 4,
+          "by_class": {
+            "manifest": {
+              "apparent_bytes": 430,
+              "allocated_bytes": 8192,
+              "files": 2
+            },
+            "metadata": {
+              "apparent_bytes": 0,
+              "allocated_bytes": 0,
+              "files": 1
+            },
+            "wal": {
+              "apparent_bytes": 918042,
+              "allocated_bytes": 1048576,
+              "files": 1
+            }
+          }
+        },
+        "reopened": {
+          "apparent_bytes": 918472,
+          "allocated_bytes": 1056768,
+          "allocated_bytes_source": "unix_st_blocks_times_512",
+          "files": 4,
+          "by_class": {
+            "manifest": {
+              "apparent_bytes": 430,
+              "allocated_bytes": 8192,
+              "files": 2
+            },
+            "metadata": {
+              "apparent_bytes": 0,
+              "allocated_bytes": 0,
+              "files": 1
+            },
+            "wal": {
+              "apparent_bytes": 918042,
+              "allocated_bytes": 1048576,
+              "files": 1
+            }
+          }
+        },
+        "maintained": {
+          "apparent_bytes": 232731,
+          "allocated_bytes": 245760,
+          "allocated_bytes_source": "unix_st_blocks_times_512",
+          "files": 5,
+          "by_class": {
+            "manifest": {
+              "apparent_bytes": 1081,
+              "allocated_bytes": 8192,
+              "files": 2
+            },
+            "metadata": {
+              "apparent_bytes": 0,
+              "allocated_bytes": 0,
+              "files": 1
+            },
+            "segment": {
+              "apparent_bytes": 231634,
+              "allocated_bytes": 233472,
+              "files": 1
+            },
+            "wal": {
+              "apparent_bytes": 16,
+              "allocated_bytes": 4096,
+              "files": 1
+            }
+          }
+        },
+        "maintained_actions": [
+          "flush_active_memtable",
+          "compact_unpinned_history",
+          "collect_unreachable_files",
+          "clean_reopen"
+        ]
+      },
+      "semantic_sequence": 2048,
+      "native_maintenance": {
+        "wal_payload_bytes": 917002,
+        "wal_payload_max_bytes": 67108864,
+        "memtable_versions": 4128,
+        "memtable_max_versions": 524288,
+        "memtable_bytes": 982538,
+        "memtable_keys": 4097,
+        "memtable_key_payload_bytes": 192538,
+        "memtable_value_payload_bytes": 690122,
+        "memtable_tombstones": 0,
+        "memtable_spilled_chains": 1,
+        "memtable_spilled_version_capacity": 32,
+        "memtable_version_record_bytes": 24,
+        "memtable_owned_bytes_lower_bound": 1080084,
+        "automatic_flushes": 0,
+        "write_stalls": 0,
+        "failed_flushes": 0,
+        "oversized_batches": 0
+      }
+    },
+    {
+      "backend": "native",
+      "correctness_verified": true,
+      "write_operations_per_second": 73626.1047106291,
+      "write_batch_latency": {
+        "samples": 32,
+        "minimum_ns": 628187,
+        "p50_ns": 721400,
+        "p95_ns": 1643887,
+        "p99_ns": 2041130,
+        "maximum_ns": 2041130
+      },
+      "read_operations_per_second": 21316.445379481436,
+      "read_latency": {
+        "samples": 512,
+        "minimum_ns": 44703,
+        "p50_ns": 45938,
+        "p95_ns": 53224,
+        "p99_ns": 57101,
+        "maximum_ns": 131520
+      },
+      "maintained_read_operations_per_second": 14306.799250457843,
+      "maintained_read_latency": {
+        "samples": 512,
+        "minimum_ns": 66102,
+        "p50_ns": 68322,
+        "p95_ns": 77113,
+        "p99_ns": 81246,
+        "maximum_ns": 87262
+      },
+      "recovery_ns": 2756142,
+      "maintained_recovery_ns": 3566190,
+      "uncompacted_recovery_ns": 2756142,
+      "maintenance_ns": 25400052,
+      "write_peak_rss_kib": 7316,
+      "peak_rss_kib": 6324,
+      "maintenance_peak_rss_kib": 8668,
+      "footprint": {
+        "active": {
+          "apparent_bytes": 918472,
+          "allocated_bytes": 1056768,
+          "allocated_bytes_source": "unix_st_blocks_times_512",
+          "files": 4,
+          "by_class": {
+            "manifest": {
+              "apparent_bytes": 430,
+              "allocated_bytes": 8192,
+              "files": 2
+            },
+            "metadata": {
+              "apparent_bytes": 0,
+              "allocated_bytes": 0,
+              "files": 1
+            },
+            "wal": {
+              "apparent_bytes": 918042,
+              "allocated_bytes": 1048576,
+              "files": 1
+            }
+          }
+        },
+        "reopened": {
+          "apparent_bytes": 918472,
+          "allocated_bytes": 1056768,
+          "allocated_bytes_source": "unix_st_blocks_times_512",
+          "files": 4,
+          "by_class": {
+            "manifest": {
+              "apparent_bytes": 430,
+              "allocated_bytes": 8192,
+              "files": 2
+            },
+            "metadata": {
+              "apparent_bytes": 0,
+              "allocated_bytes": 0,
+              "files": 1
+            },
+            "wal": {
+              "apparent_bytes": 918042,
+              "allocated_bytes": 1048576,
+              "files": 1
+            }
+          }
+        },
+        "maintained": {
+          "apparent_bytes": 232731,
+          "allocated_bytes": 245760,
+          "allocated_bytes_source": "unix_st_blocks_times_512",
+          "files": 5,
+          "by_class": {
+            "manifest": {
+              "apparent_bytes": 1081,
+              "allocated_bytes": 8192,
+              "files": 2
+            },
+            "metadata": {
+              "apparent_bytes": 0,
+              "allocated_bytes": 0,
+              "files": 1
+            },
+            "segment": {
+              "apparent_bytes": 231634,
+              "allocated_bytes": 233472,
+              "files": 1
+            },
+            "wal": {
+              "apparent_bytes": 16,
+              "allocated_bytes": 4096,
+              "files": 1
+            }
+          }
+        },
+        "maintained_actions": [
+          "flush_active_memtable",
+          "compact_unpinned_history",
+          "collect_unreachable_files",
+          "clean_reopen"
+        ]
+      },
+      "semantic_sequence": 2048,
+      "native_maintenance": {
+        "wal_payload_bytes": 917002,
+        "wal_payload_max_bytes": 67108864,
+        "memtable_versions": 4128,
+        "memtable_max_versions": 524288,
+        "memtable_bytes": 982538,
+        "memtable_keys": 4097,
+        "memtable_key_payload_bytes": 192538,
+        "memtable_value_payload_bytes": 690122,
+        "memtable_tombstones": 0,
+        "memtable_spilled_chains": 1,
+        "memtable_spilled_version_capacity": 32,
+        "memtable_version_record_bytes": 24,
+        "memtable_owned_bytes_lower_bound": 1080084,
+        "automatic_flushes": 0,
+        "write_stalls": 0,
+        "failed_flushes": 0,
+        "oversized_batches": 0
+      }
+    },
+    {
+      "backend": "native",
+      "correctness_verified": true,
+      "write_operations_per_second": 70827.26837382287,
+      "write_batch_latency": {
+        "samples": 32,
+        "minimum_ns": 566040,
+        "p50_ns": 672135,
+        "p95_ns": 1576923,
+        "p99_ns": 1788818,
+        "maximum_ns": 1788818
+      },
+      "read_operations_per_second": 21294.928816501473,
+      "read_latency": {
+        "samples": 512,
+        "minimum_ns": 44105,
+        "p50_ns": 45784,
+        "p95_ns": 55216,
+        "p99_ns": 59132,
+        "maximum_ns": 77896
+      },
+      "maintained_read_operations_per_second": 14176.655694248964,
+      "maintained_read_latency": {
+        "samples": 512,
+        "minimum_ns": 66413,
+        "p50_ns": 68259,
+        "p95_ns": 79617,
+        "p99_ns": 95052,
+        "maximum_ns": 174515
+      },
+      "recovery_ns": 2828811,
+      "maintained_recovery_ns": 3624865,
+      "uncompacted_recovery_ns": 2828811,
+      "maintenance_ns": 24992184,
+      "write_peak_rss_kib": 7032,
+      "peak_rss_kib": 6208,
+      "maintenance_peak_rss_kib": 8640,
+      "footprint": {
+        "active": {
+          "apparent_bytes": 918472,
+          "allocated_bytes": 1056768,
+          "allocated_bytes_source": "unix_st_blocks_times_512",
+          "files": 4,
+          "by_class": {
+            "manifest": {
+              "apparent_bytes": 430,
+              "allocated_bytes": 8192,
+              "files": 2
+            },
+            "metadata": {
+              "apparent_bytes": 0,
+              "allocated_bytes": 0,
+              "files": 1
+            },
+            "wal": {
+              "apparent_bytes": 918042,
+              "allocated_bytes": 1048576,
+              "files": 1
+            }
+          }
+        },
+        "reopened": {
+          "apparent_bytes": 918472,
+          "allocated_bytes": 1056768,
+          "allocated_bytes_source": "unix_st_blocks_times_512",
+          "files": 4,
+          "by_class": {
+            "manifest": {
+              "apparent_bytes": 430,
+              "allocated_bytes": 8192,
+              "files": 2
+            },
+            "metadata": {
+              "apparent_bytes": 0,
+              "allocated_bytes": 0,
+              "files": 1
+            },
+            "wal": {
+              "apparent_bytes": 918042,
+              "allocated_bytes": 1048576,
+              "files": 1
+            }
+          }
+        },
+        "maintained": {
+          "apparent_bytes": 232731,
+          "allocated_bytes": 245760,
+          "allocated_bytes_source": "unix_st_blocks_times_512",
+          "files": 5,
+          "by_class": {
+            "manifest": {
+              "apparent_bytes": 1081,
+              "allocated_bytes": 8192,
+              "files": 2
+            },
+            "metadata": {
+              "apparent_bytes": 0,
+              "allocated_bytes": 0,
+              "files": 1
+            },
+            "segment": {
+              "apparent_bytes": 231634,
+              "allocated_bytes": 233472,
+              "files": 1
+            },
+            "wal": {
+              "apparent_bytes": 16,
+              "allocated_bytes": 4096,
+              "files": 1
+            }
+          }
+        },
+        "maintained_actions": [
+          "flush_active_memtable",
+          "compact_unpinned_history",
+          "collect_unreachable_files",
+          "clean_reopen"
+        ]
+      },
+      "semantic_sequence": 2048,
+      "native_maintenance": {
+        "wal_payload_bytes": 917002,
+        "wal_payload_max_bytes": 67108864,
+        "memtable_versions": 4128,
+        "memtable_max_versions": 524288,
+        "memtable_bytes": 982538,
+        "memtable_keys": 4097,
+        "memtable_key_payload_bytes": 192538,
+        "memtable_value_payload_bytes": 690122,
+        "memtable_tombstones": 0,
+        "memtable_spilled_chains": 1,
+        "memtable_spilled_version_capacity": 32,
+        "memtable_version_record_bytes": 24,
+        "memtable_owned_bytes_lower_bound": 1080084,
+        "automatic_flushes": 0,
+        "write_stalls": 0,
+        "failed_flushes": 0,
+        "oversized_batches": 0
+      }
+    }
+  ],
+  "surreal_trials": [
+    {
+      "backend": "surrealdb_surrealkv_http",
+      "correctness_verified": true,
+      "write_operations_per_second": 1289.9133346721433,
+      "write_batch_latency": {
+        "samples": 32,
+        "minimum_ns": 47288124,
+        "p50_ns": 48810844,
+        "p95_ns": 51460636,
+        "p99_ns": 52678562,
+        "maximum_ns": 52678562
+      },
+      "server_write_batch_latency": {
+        "samples": 32,
+        "minimum_ns": 8467599,
+        "p50_ns": 8805553,
+        "p95_ns": 9456050,
+        "p99_ns": 9485803,
+        "maximum_ns": 9485803
+      },
+      "server_write_operations_per_second": 7223.230674495863,
+      "read_operations_per_second": 24.03719679021349,
+      "read_latency": {
+        "samples": 512,
+        "minimum_ns": 36514550,
+        "p50_ns": 41851508,
+        "p95_ns": 44133175,
+        "p99_ns": 46437185,
+        "maximum_ns": 51533722
+      },
+      "server_read_latency": {
+        "samples": 512,
+        "minimum_ns": 662948,
+        "p50_ns": 819604,
+        "p95_ns": 924354,
+        "p99_ns": 976077,
+        "maximum_ns": 1331043
+      },
+      "server_read_operations_per_second": 1225.3350113785757,
+      "recovery_ns": 557506702,
+      "write_peak_rss_kib": 106068,
+      "peak_rss_kib": 104724,
+      "reopened_footprint": {
+        "apparent_bytes": 757801,
+        "allocated_bytes": 765952,
+        "files": 3
+      },
+      "semantic_sequence": 2048
+    },
+    {
+      "backend": "surrealdb_surrealkv_http",
+      "correctness_verified": true,
+      "write_operations_per_second": 1310.2863182896854,
+      "write_batch_latency": {
+        "samples": 32,
+        "minimum_ns": 45830414,
+        "p50_ns": 47976340,
+        "p95_ns": 52439706,
+        "p99_ns": 54643264,
+        "maximum_ns": 54643264
+      },
+      "server_write_batch_latency": {
+        "samples": 32,
+        "minimum_ns": 8274124,
+        "p50_ns": 8800936,
+        "p95_ns": 10720248,
+        "p99_ns": 10847994,
+        "maximum_ns": 10847994
+      },
+      "server_write_operations_per_second": 7052.643423734402,
+      "read_operations_per_second": 23.715632467008447,
+      "read_latency": {
+        "samples": 512,
+        "minimum_ns": 36586553,
+        "p50_ns": 41887298,
+        "p95_ns": 44574394,
+        "p99_ns": 56732611,
+        "maximum_ns": 59286899
+      },
+      "server_read_latency": {
+        "samples": 512,
+        "minimum_ns": 671352,
+        "p50_ns": 812122,
+        "p95_ns": 942091,
+        "p99_ns": 1155304,
+        "maximum_ns": 1360024
+      },
+      "server_read_operations_per_second": 1217.714925738999,
+      "recovery_ns": 561715314,
+      "write_peak_rss_kib": 107876,
+      "peak_rss_kib": 103816,
+      "reopened_footprint": {
+        "apparent_bytes": 757801,
+        "allocated_bytes": 765952,
+        "files": 3
+      },
+      "semantic_sequence": 2048
+    },
+    {
+      "backend": "surrealdb_surrealkv_http",
+      "correctness_verified": true,
+      "write_operations_per_second": 1283.3006364038242,
+      "write_batch_latency": {
+        "samples": 32,
+        "minimum_ns": 46706445,
+        "p50_ns": 49158959,
+        "p95_ns": 51502862,
+        "p99_ns": 52274521,
+        "maximum_ns": 52274521
+      },
+      "server_write_batch_latency": {
+        "samples": 32,
+        "minimum_ns": 8500760,
+        "p50_ns": 8674487,
+        "p95_ns": 8958912,
+        "p99_ns": 9137788,
+        "maximum_ns": 9137788
+      },
+      "server_write_operations_per_second": 7333.869634486992,
+      "read_operations_per_second": 23.797175622859655,
+      "read_latency": {
+        "samples": 512,
+        "minimum_ns": 37529385,
+        "p50_ns": 42013724,
+        "p95_ns": 44120471,
+        "p99_ns": 45696654,
+        "maximum_ns": 49598703
+      },
+      "server_read_latency": {
+        "samples": 512,
+        "minimum_ns": 679200,
+        "p50_ns": 836253,
+        "p95_ns": 917690,
+        "p99_ns": 984156,
+        "maximum_ns": 1085772
+      },
+      "server_read_operations_per_second": 1208.9936366013112,
+      "recovery_ns": 585442645,
+      "write_peak_rss_kib": 105696,
+      "peak_rss_kib": 104852,
+      "reopened_footprint": {
+        "apparent_bytes": 757801,
+        "allocated_bytes": 765952,
+        "files": 3
+      },
+      "semantic_sequence": 2048
+    }
+  ],
+  "native": {
+    "backend": "rrflow_native_embedded",
+    "correctness_verified": true,
+    "write_operations_per_second": 73626.1047106291,
+    "write_p95_ns": 1576923,
+    "read_operations_per_second": 21313.00871539711,
+    "read_p95_ns": 54456,
+    "recovery_ns": 2793145,
+    "peak_rss_kib": 6232,
+    "reopened_allocated_bytes": 1056768
+  },
+  "surreal": {
+    "backend": "surrealdb_surrealkv_http",
+    "correctness_verified": true,
+    "write_operations_per_second": 1289.9133346721433,
+    "write_p95_ns": 51502862,
+    "read_operations_per_second": 23.797175622859655,
+    "read_p95_ns": 44133175,
+    "recovery_ns": 561715314,
+    "peak_rss_kib": 104724,
+    "reopened_allocated_bytes": 765952,
+    "server_write_operations_per_second": 7223.230674495863,
+    "server_write_p95_ns": 9456050,
+    "server_read_operations_per_second": 1217.714925738999,
+    "server_read_p95_ns": 924354
+  },
+  "ratios": {
+    "rrflow_to_surreal_write_throughput": 57.07833443658648,
+    "rrflow_to_surreal_read_throughput": 895.6108511853716,
+    "rrflow_to_surreal_write_p95": 0.03061816254017107,
+    "rrflow_to_surreal_read_p95": 0.0012339017077289364,
+    "rrflow_to_surreal_recovery": 0.004972527774095901,
+    "rrflow_to_surreal_peak_rss": 0.0595088040945724,
+    "rrflow_to_surreal_reopened_allocated": 1.3796791443850267,
+    "rrflow_to_surreal_server_write_throughput": 10.192960467203651,
+    "rrflow_to_surreal_server_read_throughput": 17.502461590066172,
+    "rrflow_to_surreal_server_write_p95": 0.16676339486360583,
+    "rrflow_to_surreal_server_read_p95": 0.058912494563771026
+  },
+  "bounded_verdict": {
+    "all_measured_cells_favor_rrflow": false,
+    "general_database_superiority": false
+  }
+}

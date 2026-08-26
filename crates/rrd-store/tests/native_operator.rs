@@ -1,10 +1,10 @@
-use rrd_store::{
-    Effectiveness, Engine, InvocationInput, NativeEngine, Outcome, RecallOutcome, Store, Trigger,
-};
-use vyrm_core::{Claim, Predicate, Producer, Reader, Subject};
-use vyrm_kv::{
+use rrd_core::{Claim, Predicate, Producer, Reader, Subject};
+use rrd_lsm::{
     DatabaseOptions, MaintenancePolicy, DEFAULT_MEMTABLE_MAX_VERSIONS,
     DEFAULT_WAL_PAYLOAD_MAX_BYTES,
+};
+use rrd_store::{
+    Effectiveness, Engine, InvocationInput, NativeEngine, Outcome, RecallOutcome, Store, Trigger,
 };
 
 fn claim(subject: &str, object: &str) -> Claim {

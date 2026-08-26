@@ -49,11 +49,11 @@
 
 use crate::error::{Error, Result};
 use crate::store::Store;
+use rrd_core::Claim;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread::JoinHandle;
 use std::time::Duration;
-use vyrm_core::Claim;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct WriterConfig {
@@ -151,7 +151,7 @@ impl Writer {
 
         let thread_shared = Arc::clone(&shared);
         let handle = std::thread::Builder::new()
-            .name("vyrm-writer".into())
+            .name("rrflow-writer".into())
             .spawn(move || commit_loop(store, thread_shared, config))
             .expect("spawn writer thread");
 

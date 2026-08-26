@@ -10,7 +10,7 @@ the network listener never has an unauthenticated bootstrap mode.
 
 ```text
 rrd-security-bootstrap \
-  --db /var/lib/rrd/data \
+  --db /var/lib/rrd/project/.rrflow/rrd \
   --instance project-a \
   --manifest /etc/rrd/bootstrap/bootstrap.json \
   --at-unix-ms 1787529600000
@@ -52,7 +52,7 @@ SHA-256 digests enter the persistent principal state.
 ## Replay and drift
 
 The complete materialized `SecurityState` is validated before storage opens.
-An absent authority is initialized through the authenticated Vyrm control
+An absent authority is initialized through the authenticated RRFlow control
 transition. Repeating the identical manifest and credential bytes reports
 `unchanged`; any policy or credential drift fails without mutation. The
 bootstrap manifest digest supplies deterministic request/operation identities,

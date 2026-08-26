@@ -18,6 +18,7 @@
 # Local substrate instances created by ad-hoc runs
 *.fjall
 /store
+/.rrflow/dev/
 
 # chatmirror — local AI session mirrors (never commit: may contain tokens)
 .chat/

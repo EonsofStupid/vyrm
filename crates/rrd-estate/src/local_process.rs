@@ -3,6 +3,7 @@ use crate::{
     OperationKind,
 };
 use rrd_contract::CanonicalId;
+use rrd_core::digest;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
@@ -13,12 +14,12 @@ use std::process::{Command, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
 use sysinfo::{Pid, ProcessRefreshKind, ProcessStatus, ProcessesToUpdate, System, UpdateKind};
-use vyrm_core::digest;
 
-pub const LOCAL_DEPLOYMENT_FORMAT: u16 = 1;
+pub const LOCAL_DEPLOYMENT_FORMAT: u16 = 2;
 const PROCESS_RECORD_FORMAT: u16 = 1;
 const PROCESS_DISCOVERY_TIMEOUT: Duration = Duration::from_secs(3);
 const PROCESS_START_STABILITY: Duration = Duration::from_millis(250);
+const PROCESS_PREPARATION_TIMEOUT: Duration = Duration::from_secs(10);
 const PROCESS_STOP_TIMEOUT: Duration = Duration::from_secs(5);
 const PROCESS_STDOUT_LOG: &str = "RRD.PROCESS.STDOUT.LOG";
 const PROCESS_STDERR_LOG: &str = "RRD.PROCESS.STDERR.LOG";
@@ -53,6 +54,8 @@ pub struct LocalDeployment {
     pub version: String,
     pub executable: PathBuf,
     pub executable_sha256: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub preparation_arguments: Vec<LocalArgument>,
     pub arguments: Vec<LocalArgument>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub environment: BTreeMap<String, String>,
@@ -65,6 +68,7 @@ impl LocalDeployment {
         id: CanonicalId,
         version: impl Into<String>,
         executable: impl AsRef<Path>,
+        preparation_arguments: Vec<LocalArgument>,
         arguments: Vec<LocalArgument>,
         environment: BTreeMap<String, String>,
         shutdown: LocalShutdown,
@@ -81,6 +85,7 @@ impl LocalDeployment {
             version: version.into(),
             executable,
             executable_sha256,
+            preparation_arguments,
             arguments,
             environment,
             shutdown,
@@ -162,12 +167,19 @@ impl LocalDeploymentCatalog {
                     "deployment {key} cannot use a Windows batch or cmd target"
                 ));
             }
-            if deployment.arguments.len() > 256 || deployment.environment.len() > 128 {
+            if deployment.preparation_arguments.len() > 256
+                || deployment.arguments.len() > 256
+                || deployment.environment.len() > 128
+            {
                 return Err(format!(
                     "deployment {key} launch configuration is oversized"
                 ));
             }
-            for argument in &deployment.arguments {
+            for argument in deployment
+                .preparation_arguments
+                .iter()
+                .chain(&deployment.arguments)
+            {
                 match argument {
                     LocalArgument::Literal(value) => validate_argument(value)?,
                     LocalArgument::InstancePath(path) => validate_relative_path(path)?,
@@ -362,6 +374,28 @@ impl LocalProcessDriver {
                 format!("cannot create instance directory: {error}"),
             )
         })?;
+        let stdout_path = instance_root.join(PROCESS_STDOUT_LOG);
+        let stdout = open_process_log(&stdout_path).map_err(|error| {
+            retryable(
+                request,
+                format!("cannot open managed process stdout log: {error}"),
+            )
+        })?;
+        let stderr_path = instance_root.join(PROCESS_STDERR_LOG);
+        let stderr = open_process_log(&stderr_path).map_err(|error| {
+            retryable(
+                request,
+                format!("cannot open managed process stderr log: {error}"),
+            )
+        })?;
+        run_preparation(
+            request,
+            deployment,
+            &instance_root,
+            &stdout,
+            &stderr,
+            &stderr_path,
+        )?;
         prepare_shutdown_artifacts(&instance_root, &deployment.shutdown).map_err(|error| {
             retryable(
                 request,
@@ -373,20 +407,6 @@ impl LocalProcessDriver {
             .iter()
             .map(|argument| resolve_argument(argument, request, &instance_root))
             .collect::<std::result::Result<Vec<_>, _>>()?;
-        let stdout =
-            open_process_log(&instance_root.join(PROCESS_STDOUT_LOG)).map_err(|error| {
-                retryable(
-                    request,
-                    format!("cannot open managed process stdout log: {error}"),
-                )
-            })?;
-        let stderr_path = instance_root.join(PROCESS_STDERR_LOG);
-        let stderr = open_process_log(&stderr_path).map_err(|error| {
-            retryable(
-                request,
-                format!("cannot open managed process stderr log: {error}"),
-            )
-        })?;
         let mut command = Command::new(&deployment.executable);
         command
             .args(&arguments)
@@ -708,6 +728,76 @@ enum ProcessIdentity {
     Owned,
     Exited,
     Foreign,
+}
+
+fn run_preparation(
+    request: &DriverRequest,
+    deployment: &LocalDeployment,
+    instance_root: &Path,
+    stdout: &File,
+    stderr: &File,
+    stderr_path: &Path,
+) -> std::result::Result<(), DriverError> {
+    if deployment.preparation_arguments.is_empty() {
+        return Ok(());
+    }
+    let arguments = deployment
+        .preparation_arguments
+        .iter()
+        .map(|argument| resolve_argument(argument, request, instance_root))
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+    let stdout = stdout
+        .try_clone()
+        .map_err(|error| retryable(request, format!("cannot clone preparation stdout: {error}")))?;
+    let stderr = stderr
+        .try_clone()
+        .map_err(|error| retryable(request, format!("cannot clone preparation stderr: {error}")))?;
+    let mut command = Command::new(&deployment.executable);
+    command
+        .args(arguments)
+        .current_dir(instance_root)
+        .env_clear()
+        .envs(&deployment.environment)
+        .stdin(Stdio::null())
+        .stdout(Stdio::from(stdout))
+        .stderr(Stdio::from(stderr));
+    configure_platform_environment(&mut command, request)?;
+    let mut child = command.spawn().map_err(|error| {
+        retryable(
+            request,
+            format!("cannot run deployment preparation: {error}"),
+        )
+    })?;
+    let deadline = Instant::now() + PROCESS_PREPARATION_TIMEOUT;
+    loop {
+        if let Some(status) = child.try_wait().map_err(|error| {
+            retryable(
+                request,
+                format!("cannot inspect deployment preparation: {error}"),
+            )
+        })? {
+            return if status.success() {
+                Ok(())
+            } else {
+                Err(retryable(
+                    request,
+                    format!(
+                        "deployment preparation failed: {}",
+                        spawned_exit_message(status, stderr_path)
+                    ),
+                ))
+            };
+        }
+        if Instant::now() >= deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(retryable(
+                request,
+                "deployment preparation exceeded its ten-second deadline",
+            ));
+        }
+        thread::sleep(Duration::from_millis(10));
+    }
 }
 
 fn resolve_argument(

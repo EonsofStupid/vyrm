@@ -1,4 +1,5 @@
 use rrd_contract::CanonicalId;
+use rrd_core::digest;
 use rrd_estate::{
     BackupCompleteRequest, BackupDriverRequest, BackupJobState, BackupLeaseRequest,
     BackupReconcileBoundary, BackupReconcileOutcome, BackupReconciler, BackupResult, DesiredPhase,
@@ -6,10 +7,9 @@ use rrd_estate::{
     LocalEstateBackupDriver, MutationContext, ObservationRequest, ObservedPhase, ReceiptBoundary,
     ReceiptRequest, ScheduleBackup, SetDesired,
 };
+use rrd_store::{verify_backup_catalogue, Engine, NativeEngine, PersistentEngine};
 use std::fs;
 use std::path::{Path, PathBuf};
-use vyrm_core::digest;
-use rrd_store::{verify_backup_catalogue, Engine, NativeEngine, PersistentEngine};
 
 fn id(value: &str) -> CanonicalId {
     CanonicalId::new(value).unwrap()
@@ -291,7 +291,7 @@ fn create_state_root(parent: &Path) -> PathBuf {
 fn local_driver_creates_one_authenticated_catalogue_entry_on_replay() {
     let temporary = tempfile::tempdir().unwrap();
     let state_root = create_state_root(temporary.path());
-    let source = state_root.join("instances/instance-a/rrd-data");
+    let source = state_root.join("instances/instance-a/.rrflow/rrd");
     let engine = PersistentEngine::open(&source).unwrap();
     drop(engine);
     let request = local_request("instance-a", "backup-daily");
@@ -310,7 +310,7 @@ fn local_driver_creates_one_authenticated_catalogue_entry_on_replay() {
 fn local_driver_denies_process_record_before_catalogue_creation() {
     let temporary = tempfile::tempdir().unwrap();
     let state_root = create_state_root(temporary.path());
-    let source = state_root.join("instances/instance-a/rrd-data");
+    let source = state_root.join("instances/instance-a/.rrflow/rrd");
     let engine = PersistentEngine::open(&source).unwrap();
     drop(engine);
     fs::write(state_root.join("processes/instance-a.json"), b"retained").unwrap();

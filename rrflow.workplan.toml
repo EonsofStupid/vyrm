@@ -1,0 +1,525 @@
+schema_version = 1
+plan_id = "rrflow-foundation"
+title = "RRFlow/RRD cohesive foundation and qualification"
+authority = "RRD Reason Ready Daemon"
+status_policy = "RRD runtime state is authoritative; this file defines scope, dependencies, and acceptance evidence."
+
+[[gate]]
+id = "G00"
+title = "Enforced work control"
+depends_on = []
+
+[[gate]]
+id = "G01"
+title = "V1 identity and one-engine cohesion"
+depends_on = ["G00"]
+
+[[gate]]
+id = "G02"
+title = "Durable storage and recovery"
+depends_on = ["G01"]
+
+[[gate]]
+id = "G03"
+title = "Unified multi-model query and realtime"
+depends_on = ["G02"]
+
+[[gate]]
+id = "G04"
+title = "Vector, retrieval, compression, and inference"
+depends_on = ["G02", "G03"]
+
+[[gate]]
+id = "G05"
+title = "Service, transactions, security, and audit"
+depends_on = ["G01", "G02"]
+
+[[gate]]
+id = "G06"
+title = "Generated public surfaces"
+depends_on = ["G03", "G04", "G05"]
+
+[[gate]]
+id = "G07"
+title = "Provider-neutral Clyffy runtime enforcement"
+depends_on = ["G00", "G03", "G05", "G06"]
+
+[[gate]]
+id = "G08"
+title = "Estate, distributed, and Kubernetes operation"
+depends_on = ["G02", "G05", "G06"]
+
+[[gate]]
+id = "G09"
+title = "Connectome native developer and operator client"
+depends_on = ["G06", "G07", "G08"]
+
+[[gate]]
+id = "G10"
+title = "Persistent end-to-end qualification"
+depends_on = ["G02", "G03", "G04", "G05", "G06", "G07", "G09"]
+
+[[gate]]
+id = "G11"
+title = "Bounded competitive evidence"
+depends_on = ["G10"]
+
+[[gate]]
+id = "G12"
+title = "Firm-alpha release"
+depends_on = ["G08", "G09", "G10", "G11"]
+
+[[item]]
+id = "G00-W01"
+gate = "G00"
+title = "Validate and persist this work-plan contract"
+depends_on = []
+acceptance = ["strict V1 parse rejects unknown fields, duplicate IDs, cycles, and missing dependencies", "plan digest and active revision survive RRD reopen"]
+
+[[item]]
+id = "G00-W02"
+gate = "G00"
+title = "Persist provider-neutral lifecycle envelopes and state transitions"
+depends_on = ["G00-W01"]
+acceptance = ["canonical session through outcome events are hash-chained in RRD", "invalid and unknown transitions fail closed", "replay after reopen yields the identical aggregate"]
+
+[[item]]
+id = "G00-W03"
+gate = "G00"
+title = "Bind planning and every mutation to one active work item"
+depends_on = ["G00-W02"]
+acceptance = ["plan.recorded carries plan ID, revision, work-item ID, and source-tree digest", "mutation without a fresh actionable work item and planning permit is denied", "one authorization is consumed once"]
+
+[[item]]
+id = "G00-W04"
+gate = "G00"
+title = "Make verification evidence the only completion transition"
+depends_on = ["G00-W03"]
+acceptance = ["work-item verification records exact commands, results, artifacts, revision, and platform", "failed, missing, or stale evidence cannot mark verified", "dependent items remain blocked until prerequisites verify"]
+
+[[item]]
+id = "G00-W05"
+gate = "G00"
+title = "Expose work-plan state through generated RRD, CLI, MCP, and Connectome contracts"
+depends_on = ["G00-W04"]
+acceptance = ["one engine catalogue generates discovery on every surface", "surface parity test rejects missing, extra, or handwritten work-plan operations"]
+
+[[item]]
+id = "G01-W01"
+gate = "G01"
+title = "Finish the in-place RRFlow/RRD V1 identity cutover"
+depends_on = []
+acceptance = ["case-insensitive active-tree gate finds no retired identity", "no aliases, forwarding crates, dual readers, or compatibility shims", "V1 fixtures reopen under canonical RRD bytes"]
+
+[[item]]
+id = "G01-W02"
+gate = "G01"
+title = "Establish rrd-engine as the single composition and authority boundary"
+depends_on = ["G01-W01"]
+acceptance = ["one catalogue, transaction coordinator, read stamp, security authority, event log, and audit root", "physical query, graph, vector, inference, LSM, and store crates are internal operators only"]
+
+[[item]]
+id = "G01-W03"
+gate = "G01"
+title = "Remove outward physical-engine bypasses without deleting behavior"
+depends_on = ["G01-W02"]
+acceptance = ["CLI, MCP, SDKs, server, and Connectome use rrd-engine or rrd-client only", "behavior parity passes before each direct dependency is removed"]
+
+[[item]]
+id = "G01-W04"
+gate = "G01"
+title = "Make one capability catalogue authoritative"
+depends_on = ["G01-W02"]
+acceptance = ["every engine capability has executable, planned, denied, or unavailable disposition per surface", "CI rejects undisposed capabilities and hardcoded surface registries"]
+
+[[item]]
+id = "G02-W01"
+gate = "G02"
+title = "Qualify native WAL, MVCC, LSM, transactions, compaction, and restart recovery"
+depends_on = []
+acceptance = ["crash, torn-write, corruption, disk-full, concurrent-writer, snapshot, compaction, and reopen matrices pass", "atomic multi-family commit retains one read stamp and audit identity"]
+
+[[item]]
+id = "G02-W02"
+gate = "G02"
+title = "Complete object-closed authenticated logical archives"
+depends_on = ["G02-W01"]
+acceptance = ["schema, records, relations, events, vectors, objects, catalogue, and audit coordinates are portable", "streaming export/import has checksums, resumable receipts, and bounded resources"]
+
+[[item]]
+id = "G02-W03"
+gate = "G02"
+title = "Complete backup catalogue, retention, and restore-to-new-root"
+depends_on = ["G02-W02"]
+acceptance = ["estate-owned backup identity and retention pins persist", "restore verifies before publish and never overwrites the active root", "RPO and RTO evidence is retained"]
+
+[[item]]
+id = "G02-W04"
+gate = "G02"
+title = "Complete resumable schema/data migrations and cross-version recovery"
+depends_on = ["G02-W02"]
+acceptance = ["exact successor matrix, retry, rollback, and cutover rules are explicit", "every supported source fixture restores and reopens on the target version"]
+
+[[item]]
+id = "G02-W05"
+gate = "G02"
+title = "Expose audited time travel and forward rollback"
+depends_on = ["G02-W01", "G02-W03"]
+acceptance = ["valid-time and known-at reads are stable", "rollback creates a new audited state and never rewrites history"]
+
+[[item]]
+id = "G02-W06"
+gate = "G02"
+title = "Qualify object storage and tiered persistence"
+depends_on = ["G02-W02", "G02-W03"]
+acceptance = ["S3-compatible archive/artifact operations are authenticated and resumable", "local loss and remote retry/corruption scenarios pass"]
+
+[[item]]
+id = "G03-W01"
+gate = "G03"
+title = "Freeze one schema and catalogue for every logical model"
+depends_on = []
+acceptance = ["document, relational, graph, vector, event, time-series, geo, reasoning, and lifecycle identities share one revisioned catalogue", "cross-model schema changes are transactional"]
+
+[[item]]
+id = "G03-W02"
+gate = "G03"
+title = "Complete concurrent multi-model CRUD and transactions"
+depends_on = ["G03-W01"]
+acceptance = ["create/read/update/retire for documents, records, relations, native edges, events, series, geo, vectors, and objects", "mixed-model commit and reopen produce identical reads"]
+
+[[item]]
+id = "G03-W03"
+gate = "G03"
+title = "Complete RRFlowQL grammar, binding, planning, and execution"
+depends_on = ["G03-W01", "G03-W02"]
+acceptance = ["mutating and multi-statement transactions are supported", "joins, graph traversal, temporal, geo, and bounded streaming semantics have exact oracles"]
+
+[[item]]
+id = "G03-W04"
+gate = "G03"
+title = "Make Arrow and DataFusion the shared execution plane"
+depends_on = ["G03-W03"]
+acceptance = ["typed stamped batches preserve RRD semantics", "pushdown, streaming, spill, budgets, and EXPLAIN ANALYZE are governed", "reference executor differentials pass"]
+
+[[item]]
+id = "G03-W05"
+gate = "G03"
+title = "Complete scalar, compound, unique, count, geo, and full-text indexes"
+depends_on = ["G03-W03"]
+acceptance = ["incremental lifecycle and freshness are durable", "full-text analyzers and BM25 replacement pass fixed correctness/relevance corpora", "stale artifacts fail closed to authoritative execution"]
+
+[[item]]
+id = "G03-W06"
+gate = "G03"
+title = "Complete push live queries and retained changefeeds"
+depends_on = ["G03-W02", "G03-W03"]
+acceptance = ["commit-ordered subscriptions support resume, backpressure, bounded retention, and reconnect", "permissions, restart, and distributed ordering tests pass"]
+
+[[item]]
+id = "G03-W07"
+gate = "G03"
+title = "Add governed triggers and functions"
+depends_on = ["G03-W05", "G03-W06", "G05-W04"]
+acceptance = ["capability sandbox, deterministic limits, security, audit, retry, and failure semantics pass"]
+
+[[item]]
+id = "G04-W01"
+gate = "G04"
+title = "Complete collection, named-vector, point, payload, and deletion administration"
+depends_on = []
+acceptance = ["dense, sparse, and multi-vector addresses persist", "batch upsert/retrieve/scroll/delete and payload-index lifecycle pass reopen and authorization tests"]
+
+[[item]]
+id = "G04-W02"
+gate = "G04"
+title = "Serve persistent HNSW with one-stage filtering"
+depends_on = ["G04-W01"]
+acceptance = ["collection-bound mutable HNSW survives reopen", "filter predicates participate during traversal", "exact-oracle recall passes fixed selectivity corpora"]
+
+[[item]]
+id = "G04-W03"
+gate = "G04"
+title = "Complete sparse, hybrid, multivector, and late-interaction retrieval"
+depends_on = ["G03-W05", "G04-W01", "G04-W02"]
+acceptance = ["dense+sparse fusion, prefetch/multistage, and ColBERT MaxSim require no application middleware", "query algebra covers nearest, recommend, discover, context, group, facet, and matrix"]
+
+[[item]]
+id = "G04-W04"
+gate = "G04"
+title = "Promote TurboQuant to a production artifact lifecycle"
+depends_on = ["G04-W01", "G04-W02"]
+acceptance = ["public build/list/activate/retire operations are authenticated", "SIMD, mmap, corruption, update, recovery, bias, recall, memory, and latency matrices pass", "exact reranking remains available"]
+
+[[item]]
+id = "G04-W05"
+gate = "G04"
+title = "Implement enforced pinned, cached, and cold memory tiers"
+depends_on = ["G04-W02", "G04-W04"]
+acceptance = ["placement and eviction are physical behavior, not catalogue labels", "resource-pressure and restart tests retain correctness"]
+
+[[item]]
+id = "G04-W06"
+gate = "G04"
+title = "Add native embedding and governed inference"
+depends_on = ["G04-W01", "G04-W05"]
+acceptance = ["model registry, digest provenance, batching, resource limits, and atomic embed-and-query are public", "local/offline and provider inference have explicit trust boundaries"]
+
+[[item]]
+id = "G04-W07"
+gate = "G04"
+title = "Qualify GPU indexing with CPU differential and fallback"
+depends_on = ["G04-W02", "G04-W04"]
+acceptance = ["byte/semantic differential passes", "device failure falls back without corrupting authoritative state", "build and search resource evidence is retained"]
+
+[[item]]
+id = "G05-W01"
+gate = "G05"
+title = "Complete embedded, local-daemon, and remote RRD behavior parity"
+depends_on = []
+acceptance = ["same logical conformance corpus passes all modes", "one process owns each persistent root"]
+
+[[item]]
+id = "G05-W02"
+gate = "G05"
+title = "Complete authenticated sessions and client transactions"
+depends_on = ["G05-W01"]
+acceptance = ["lease, prepare, commit, abort, timeout, cancellation, idempotency, and read-your-writes survive restart", "tokens never enter logs or ordinary state"]
+
+[[item]]
+id = "G05-W03"
+gate = "G05"
+title = "Complete identity, credentials, TLS, and deny-by-default authorization"
+depends_on = ["G05-W01", "G05-W02"]
+acceptance = ["users, service principals, scoped grants, capability policy, rotation, and revocation persist", "non-loopback transport requires authenticated TLS"]
+
+[[item]]
+id = "G05-W04"
+gate = "G05"
+title = "Make comprehensive structured audit unavoidable"
+depends_on = ["G05-W02", "G05-W03"]
+acceptance = ["queries, mutations, denials, deletes, collection/schema/security/estate operations, and admin actions produce JSON audit", "audit is hash-chained, redacted, queryable, exportable, and restart-safe"]
+
+[[item]]
+id = "G06-W01"
+gate = "G06"
+title = "Generate API, MCP, CLI, SDK, and Connectome dispositions from one catalogue"
+depends_on = []
+acceptance = ["no surface owns a handwritten capability list", "generation and executable-dispatch parity fail CI on drift"]
+
+[[item]]
+id = "G06-W02"
+gate = "G06"
+title = "Expose the complete task-level MCP foundation"
+depends_on = ["G06-W01"]
+acceptance = ["memory, ingest, semantic code search, CRUD, schema, graph, vector, query, live, transaction, backup, restore, estate, security, audit, and diagnostics tools have explicit dispositions", "every advertised tool executes through RRD policy and audit"]
+
+[[item]]
+id = "G06-W03"
+gate = "G06"
+title = "Complete embedded and authenticated daemon MCP modes"
+depends_on = ["G05-W03", "G06-W02"]
+acceptance = ["daemon mode uses rrd-client and never opens storage", "caller identity and granular action reach the engine", "cooperative enforcement is reported honestly"]
+
+[[item]]
+id = "G06-W04"
+gate = "G06"
+title = "Complete RRFlow CLI over the same generated operations"
+depends_on = ["G05-W01", "G06-W01"]
+acceptance = ["embedded/daemon modes share behavior", "offline recovery commands are separately typed and exclusive", "no direct physical store composition remains"]
+
+[[item]]
+id = "G06-W05"
+gate = "G06"
+title = "Qualify supported SDKs from one schema"
+depends_on = ["G05-W03", "G06-W01"]
+acceptance = ["Rust, TypeScript, Python, Go edge, Java, and .NET pass the same black-box fixtures", "auth, sessions, transactions, query, CRUD, vectors, live feeds, backup, estate, retries, cancellation, versions, and typed errors are covered"]
+
+[[item]]
+id = "G07-W01"
+gate = "G07"
+title = "Materialize deterministic project topology and attunement profiles"
+depends_on = []
+acceptance = ["Cargo, Bun, pnpm, npm, uv, Go, JVM, .NET, CMake, CI, and mixed workspaces retain all capabilities", "manual and automatic full/incremental refresh produce the same digest", "unreadable evidence fails closed"]
+
+[[item]]
+id = "G07-W02"
+gate = "G07"
+title = "Implement task-specific preflight and context assembly"
+depends_on = ["G00-W02", "G07-W01"]
+acceptance = ["receipt binds topology, profile, tree, route, pattern, policy, projection, and RRD read stamps", "stale or truncated evidence is explicit"]
+
+[[item]]
+id = "G07-W03"
+gate = "G07"
+title = "Implement golden patterns and architecture assessment"
+depends_on = ["G07-W01", "G07-W02"]
+acceptance = ["seven required architecture answers are typed", "existing-boundary, justified-new-boundary, and polyglot fixtures select deterministic reviewed patterns"]
+
+[[item]]
+id = "G07-W04"
+gate = "G07"
+title = "Implement planning permits and exact-argv command proxy"
+depends_on = ["G00-W03", "G07-W02", "G07-W03"]
+acceptance = ["patch, shell, generated-code, and external mutations fail closed without the full permit chain", "Cargo and JavaScript commands pass through one cross-platform proxy", "observation, invalidation, refresh, and verification are durable"]
+
+[[item]]
+id = "G07-W05"
+gate = "G07"
+title = "Qualify provider and local-runtime adapters"
+depends_on = ["G07-W04"]
+acceptance = ["Claude, Codex, Gemini, Copilot, OpenAI/xAI orchestrators, MCP, and local adapters emit canonical fixtures", "planning and mutation coverage vectors expose every uncovered path", "unknown payloads fail closed for mutations"]
+
+[[item]]
+id = "G08-W01"
+gate = "G08"
+title = "Complete persistent estate authority and reconciliation"
+depends_on = []
+acceptance = ["organisations, accounts, entitlements, projects, environments, instances, nodes, shards, jobs, assignments, health, secret references, desired/observed state, and receipts persist", "reconciler is fenced, idempotent, restart-safe, and audited"]
+
+[[item]]
+id = "G08-W02"
+gate = "G08"
+title = "Integrate RRD data plane with distributed consensus"
+depends_on = ["G08-W01"]
+acceptance = ["shard/replica operations, consistency modes, transfer, rebalance, reshard, snapshot, and leader failure use the public RRD authority", "independent-host fault tests pass"]
+
+[[item]]
+id = "G08-W03"
+gate = "G08"
+title = "Qualify Multi-AZ Kubernetes and hybrid-cloud operation"
+depends_on = ["G02-W03", "G05-W03", "G08-W02"]
+acceptance = ["operator, CRDs, rolling upgrades, PDB, CSI recovery, network policy, certificate rotation, and outbound-only agent pass real-cluster tests", "zone-loss RPO, RTO, availability, and consistency are published"]
+
+[[item]]
+id = "G09-W01"
+gate = "G09"
+title = "Build and launch the real native Connectome application"
+depends_on = []
+acceptance = ["Linux AppImage/deb, macOS ARM, and Windows artifacts build", "native launch smoke and artifact checksums are retained"]
+
+[[item]]
+id = "G09-W02"
+gate = "G09"
+title = "Remove SurrealDB compatibility dependencies and temporary RRFlow UI"
+depends_on = ["G06-W01", "G09-W01"]
+acceptance = ["Connectome uses canonical RRFlowQL/RRD packages and generated client", "no Surreal aliases, handwritten RRD protocol, or duplicate temporary panel remains"]
+
+[[item]]
+id = "G09-W03"
+gate = "G09"
+title = "Implement embedded, local, and remote RRD connection profiles"
+depends_on = ["G05-W03", "G09-W02"]
+acceptance = ["capability negotiation, auth references, TLS, rotation, selection, and failure UX use authoritative APIs", "Connectome never opens a daemon-owned store"]
+
+[[item]]
+id = "G09-W04"
+gate = "G09"
+title = "Build complete data and operations workspaces"
+depends_on = ["G09-W03"]
+acceptance = ["tables/collections, documents, relations, graph, vectors, schema, indexes, queries, live feeds, backups, estates, security, audit, cluster, and capabilities are functional", "every write uses RRD auth, idempotency, and audit"]
+
+[[item]]
+id = "G09-W05"
+gate = "G09"
+title = "Build faithful replay, NodeTrace, and optimization diagnostics"
+depends_on = ["G07-W05", "G09-W03"]
+acceptance = ["freeze, step, rewind, forward, speed, causal neighborhood, diffs, and weak/strong prompt cohorts use retained RRD events", "tokens, latency, retries, recall, memory, IO, index, model, and provider evidence share one cursor", "missing evidence is visible and never simulated"]
+
+[[item]]
+id = "G09-W06"
+gate = "G09"
+title = "Render and operate the enforced work plan in Connectome"
+depends_on = ["G00-W05", "G09-W03"]
+acceptance = ["dependency graph, active item, progress, blockers, evidence, notes, and override requests are live RRD projections", "UI cannot self-verify work or bypass policy"]
+
+[[item]]
+id = "G10-W01"
+gate = "G10"
+title = "Pass the persistent runtime-control scenario matrix"
+depends_on = []
+acceptance = ["at least 14 lifecycle scenarios in the foundation cheat sheet close and reopen RRD before final assertions", "100 percent pass; no skipped, flaky, or in-memory substitutes"]
+
+[[item]]
+id = "G10-W02"
+gate = "G10"
+title = "Pass the persistent cohesive-data scenario matrix"
+depends_on = ["G10-W01"]
+acceptance = ["at least 10 independent create-query-restart-recover scenarios cover every logical model, cross-model transactions, indexes, live feeds, vectors, security, audit, backup, and diagnostics", "100 percent pass on fresh roots"]
+
+[[item]]
+id = "G10-W03"
+gate = "G10"
+title = "Pass the full process and surface matrix"
+depends_on = ["G10-W02"]
+acceptance = ["real RRD process plus MCP, CLI, each SDK, and Connectome execute the same fixture", "embedded/local/remote semantics and capability catalogues match"]
+
+[[item]]
+id = "G10-W04"
+gate = "G10"
+title = "Pass recovery, security, and destructive fault qualification"
+depends_on = ["G10-W02", "G10-W03"]
+acceptance = ["power loss, corruption, disk full, network loss, process kill, token rotation, denial, retry, and restore failure preserve declared invariants", "artifacts and logs are retained"]
+
+[[item]]
+id = "G11-W01"
+gate = "G11"
+title = "Freeze reproducible competitor fixtures and claim policy"
+depends_on = []
+acceptance = ["versions, editions, configs, datasets, hardware, warmup, resources, correctness oracle, and raw results are pinned", "every losing cell and limitation is reported"]
+
+[[item]]
+id = "G11-W02"
+gate = "G11"
+title = "Run capability-appropriate SurrealDB differentials"
+depends_on = ["G11-W01"]
+acceptance = ["document/relational/graph/vector/temporal/geo transactions, RRFlowQL equivalents, indexes, live feeds, security, backup, and deployment are compared separately", "correctness/recovery precede performance"]
+
+[[item]]
+id = "G11-W03"
+gate = "G11"
+title = "Run capability-appropriate Qdrant differentials"
+depends_on = ["G11-W01"]
+acceptance = ["filtered HNSW, payloads, sparse/hybrid, multivector, quantization, inference, tiers, update, recovery, recall, latency, memory, and build cost are compared separately"]
+
+[[item]]
+id = "G11-W04"
+gate = "G11"
+title = "Run RRD LSM versus Fjall storage differentials"
+depends_on = ["G11-W01"]
+acceptance = ["identical durable workloads compare correctness, crash recovery, throughput, latency, amplification, memory, and disk", "bounded claims remain bounded"]
+
+[[item]]
+id = "G11-W05"
+gate = "G11"
+title = "Publish evidence-backed comparison reports"
+depends_on = ["G11-W02", "G11-W03", "G11-W04"]
+acceptance = ["raw machine-readable artifacts and commands are public", "no blanket dominance wording unless every defined matrix cell supports it"]
+
+[[item]]
+id = "G12-W01"
+gate = "G12"
+title = "Pass repository quality and architecture gates"
+depends_on = []
+acceptance = ["format, locked metadata/check/test, strict Clippy, generated drift, architecture, license, dependency, and documentation checks pass"]
+
+[[item]]
+id = "G12-W02"
+gate = "G12"
+title = "Pass Linux, macOS ARM, Windows, edge, and browser matrices"
+depends_on = ["G12-W01"]
+acceptance = ["every required remote job completes green on the same commit", "local success is never substituted for remote evidence"]
+
+[[item]]
+id = "G12-W03"
+gate = "G12"
+title = "Package, sign, install, upgrade, and rollback firm alpha"
+depends_on = ["G12-W02"]
+acceptance = ["RRD, RRFlow CLI/MCP, SDKs, Connectome, images, SBOMs, signatures, install, update, and rollback are reproducible", "release notes state exact supported and incomplete capabilities"]
+
+[[item]]
+id = "G12-W04"
+gate = "G12"
+title = "Declare the foundation complete only from retained evidence"
+depends_on = ["G12-W03"]
+acceptance = ["all prerequisite gates are verified by RRD runtime state", "README, status, ledger, capability catalogue, and Connectome show the same truth"]

@@ -25,9 +25,9 @@
 //!    crash could silently forget would defeat the detection.
 
 use crate::error::{Error, Result};
+use rrd_core::{Claim, Millis, Predicate, Subject};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
-use vyrm_core::{Claim, Millis, Predicate, Subject};
 
 /// Name the projection is stored under in the projections keyspace.
 pub const CURRENT_PROJECTION: &str = "current";

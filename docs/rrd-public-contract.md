@@ -1,7 +1,7 @@
 # RRD public contract v1
 
 `rrd-contract` is the first F0 boundary. It is transport-neutral and does not
-depend on Vyrm storage, query, cluster, node, or Connectome crates.
+depend on RRFlow storage, query, cluster, node, or Connectome crates.
 
 Version 1 freezes:
 
@@ -26,7 +26,7 @@ samples, WGS84 geo values, and pre-staged immutable object references.
 `ExecuteQuery` defines strict query, parameter, scan, row, batch, and
 encoded-output bounds; its typed result carries the canonical query, read
 coordinates, plan evidence, execution counters, and rows. These types remain
-independent of `vyrm_core`; the server performs an explicit lowering into the
+independent of `rrd_core`; the server performs an explicit lowering into the
 authoritative runtime rather than serializing private runtime structs.
 
 The vector boundary now includes journaled collection administration. A named
@@ -79,9 +79,10 @@ authenticated control-journal coordinate, so readers advance safely across
 unrelated control transitions.
 
 F5 begins from `EndpointCatalogue`, not handwritten per-language route lists.
-It currently freezes 28 sorted operation identities with HTTP method/path template,
-authentication mode, mutation/idempotency classification, security action, and
-public request/response type names. `GET /v1/schema/endpoints` serves the exact
+It currently freezes 31 sorted operation identities with HTTP method/path template,
+authentication mode, mutation/idempotency classification, fixed or
+descriptor-derived security action, and public request/response type names.
+`GET /v1/schema/endpoints` serves the exact
 catalogue used by the server. Duplicate operations/routes, GET mutations,
 private Rust paths, invalid names, and ordering drift fail contract tests.
 The first consumer is `rrd-client`; it imports these public types directly and

@@ -1,8 +1,291 @@
-# Vyrm implementation journal
+# RRFlow implementation journal
 
-This is the durable engineering record for dependency-critical RRD/Vyrm work.
+## 2026-08-26 — enforced foundation work plan and first runtime gate
+
+- Commit: `pending`. Evidence is local to the current dirty pre-release tree;
+  no full-workspace or remote-platform qualification is claimed.
+- Scope: added the checked-in `rrflow.workplan.toml` as one machine-readable
+  dependency graph with 13 gates and 65 stable items covering cohesive RRD,
+  persistence/recovery, multi-model query, vector/inference, service/security,
+  generated surfaces, provider-neutral runtime enforcement, estate/cluster,
+  Connectome, persistent end-to-end tests, competitor evidence, and firm-alpha
+  release. `docs/full-stack-gap-ledger.md` now projects those gates and states
+  that RRD—not Markdown—owns completion.
+- Public contract: `rrd-contract` now owns strict V1 work-plan definitions,
+  status snapshots, and sealed hash-chained event envelopes. Validation rejects
+  unknown fields, unsupported versions, duplicate IDs, unsorted dependencies,
+  missing dependencies, cycles, empty acceptance evidence, invalid digests,
+  and tampered events.
+- RRD authority: `rrd-engine::runtime::workplan` persists the exact plan and
+  digest through the existing control-state CAS and authenticated journal. It
+  enforces dependency-ready single-item activation, an attunement/tree-bound
+  recorded plan, one exact outstanding tool authorization, exact post-tool
+  consumption, all-passing verification evidence, and verified-only
+  completion. An unreviewed source-plan change is denied rather than silently
+  treated as a new revision. Close/reopen reconstructs the same aggregate and
+  consumed authorization state.
+- Lifecycle integration: preflight installs and renders a checked-in plan.
+  User-prompt hooks inject its current status. Pre-tool hooks deny a project
+  mutation when the plan has no active item, no recorded plan, stale tree or
+  attunement evidence, or another outstanding authorization. Post-tool hooks
+  close the exact authorization and persist an observation. Generated Claude
+  wiring now observes Edit, Write, NotebookEdit, and Bash completion rather
+  than Bash alone.
+- Operator path: `rrflow work-plan sync|status|activate|record|verify` exposes
+  the first trusted control flow. `record` reads the reviewed plan file and
+  exact verification argv arrays while deriving source-tree and attunement
+  digests itself. `verify` executes stored argv without a shell, with a
+  15-minute time limit and 16-MiB combined output limit; binds exit status and
+  output digests to the unchanged tree, repository revision (or explicit tree
+  identity for a non-Git project), and platform; then requests the engine's
+  verified transition. A model cannot provide a boolean success flag.
+- Setup correction: the RRFlow CLI default database path is now the same
+  canonical `.rrflow/rrd` used by instance binding, RRD server startup, and
+  generated hook wiring. The previous `.rrflow/dev/rrd` default could split
+  one project across two authorities.
+- Executable evidence: the real compiled CLI test runs session preflight,
+  sync, activate, record, pre-tool, post-tool, bounded verification, process
+  reopen, and status; it observes `[x]` only after verification. A separate
+  hook test proves an unscoped mutation is denied and a bound mutation is
+  allowed. Persistent engine tests prove dependency denial, stale-evidence
+  denial, one-shot authorization, failed-verification denial, unreviewed-plan
+  denial, verification, and exact reopen replay.
+- Verification: `cargo fmt --all -- --check`; all targets for `rrd-contract`,
+  `rrd-engine`, and `rrflow-cli` (139 tests, 139 passed, zero failed); strict
+  all-target Clippy for the same packages with `-D warnings`; and
+  `git diff --check` passed locally.
+- Open G00 gates: the full provider-neutral session/turn/planning lifecycle is
+  not yet represented by one canonical state machine; automatic work-plan
+  generation for projects without a checked-in plan is absent; the exact-argv
+  proxy does not yet govern every runner/tool path; MCP, SDK, and Connectome
+  work-plan projections are not generated; provider conformance and the remote
+  Linux/macOS ARM/Windows matrix are not run. Consequently G00 remains open
+  and no full-foundation completion claim is made.
+- Next dependency-critical item: G00-W02, complete the canonical lifecycle
+  envelope and transition machine over the same RRD journal, then bind the
+  existing work-plan events to session/turn/preflight/planning identities.
+
+## 2026-08-25 — MCP foundation correction and reviewed expansion map
+
+- State at the start of this correction: A1-A7 were implemented locally while
+  A8-A17 lacked executable evidence. The later A8-A12 and A13-A17 journal
+  entries supersede that point-in-time count.
+- Finding: MCP discovery is generated correctly, but only from the 11-entry
+  reasoning/runtime catalogue. The 28 public RRD endpoint operations are
+  represented in the product capability catalogue with MCP disposition
+  `planned`; they were never adapted to MCP. Therefore the current MCP is a
+  partial runtime surface, not the full RRFlow foundation.
+- Decision: do not expose raw session renewal or transaction lease plumbing as
+  model tools. `docs/rrflow-mcp-foundation.md` freezes 17 task-level adapters
+  over already executable RRD capabilities, producing 28 executable tools when
+  complete. It also records 12 additional engine gaps that may not be
+  advertised early.
+- Security invariant: embedded and daemon modes are explicit and mutually
+  exclusive for one database. Initialized security denies uncredentialed MCP;
+  process credentials use operator-owned references/files and never
+  model-authored arguments. Every mutation requires the ordinary RRD policy,
+  idempotency, transaction, audit, and preflight path.
+- Environment evidence: local Tailscale is online as
+  `warden-devstation-01.tail7934c8.ts.net` and already serves HTTPS port 4387;
+  Rust/Cargo 1.98.0, Git, Tailscale, and Cloudflare tooling are installed. No
+  additional host installation is required for the private development route.
+- A1 implementation: `rrflow_service_status` is now generated from a typed
+  schema and executable through the engine-owned registry. It returns the real
+  RRD readiness, initialized-security state, all 28 public endpoint
+  descriptors, the executable MCP registry, and the shared product capability
+  catalogue. This makes 12 executable MCP tools; it does not complete the
+  A-series.
+- Security correction: governed embedded runtime tools now fail
+  unauthenticated when the persistent security authority is initialized.
+  Public service status remains readable, matching RRD's public health and
+  capability endpoints. Credentialed daemon mode remains required before
+  governed MCP works against a secured instance.
+- Verification: all three `rrflow-mcp` stdio tests passed, including a real
+  A1 call reporting 28 endpoints and exact executable-tool count; the engine
+  capability-catalogue tests passed; the dedicated initialized-security test
+  proved governed-tool denial and public-status allowance; strict Clippy for
+  `rrd-engine` and `rrflow-mcp` passed; `git diff --check` passed.
+- A1 checkpoint gate: build A2 atomic multi-model commit on the shared
+  generated-schema/authorization adapter contract. That gate is satisfied in
+  the immediately following entry. No independent handwritten MCP list is
+  permitted.
+
+### A2 atomic multi-model MCP adapter
+
+- Capability: `rrflow_data_commit` is the thirteenth executable MCP tool. Its
+  generated input schema consumes the public ordered `TransactionMutation`
+  vocabulary and maps to the existing `transaction-commit` product capability
+  instead of creating a second MCP-specific feature row.
+- Cohesion: the adapter owns only high-level lease plumbing and calls the
+  ordinary `RrdEngine` session/begin/commit path. Schema, claim, document/
+  record, relation/native-edge, event, vector, time-series, geo, and object-
+  reference mutations share one read stamp and durable commit. No second
+  database, transaction coordinator, catalogue, or token surface was added.
+- Lifecycle: application data commits require a fresh project-attunement
+  receipt bound to the exact tool name and arguments. RRD automatically closes
+  the authorization and records the post-tool observation. Missing/mismatched
+  authorization fails before execution; initialized security denies the
+  uncredentialed adapter before lifecycle or data mutation.
+- Recovery correction: exact transaction-begin replay is now resolved before
+  session liveness is applied. A committed transaction can therefore be found
+  and replayed after its session has been durably expired, without allowing a
+  new transaction on an expired session.
+- Evidence: `rrd-engine`'s 26 library tests passed; focused capability,
+  security, and two A2 integration tests passed; the latter commits nine
+  schema/document/edge/event/vector/series/geo mutations, queries four models,
+  reopens the database, and proves an idempotent replay. All three real-process
+  `rrflow-mcp` stdio tests passed with generated 13-tool discovery. All-target,
+  all-feature `rrd-engine` tests, strict Clippy for engine/MCP, formatting, and
+  `git diff --check` passed. Full workspace and remote CI are not yet recorded
+  for this slice.
+- Next gate: A3 query-index ensure through the same typed capability mapping,
+  security, exact-attunement, idempotency, reopen, and stdio evidence contract.
+
+### A3 governed query-index ensure adapter
+
+- Capability: `rrflow_query_index_ensure` is the fourteenth generated MCP tool
+  and binds to the existing `query-index-ensure` product capability. Its schema
+  flattens the public `EnsureQueryIndex` contract beside the required adapter
+  idempotency key and optional operation time.
+- Internal boundary: high-level adapters now share one domain-separated
+  `AdapterSession` implementation. It derives stable internal session/request/
+  operation identities, keeps tokens out of schemas and results, and calls the
+  ordinary RRD session authority. A2 was migrated onto the same helper before
+  A3 was added.
+- Recovery: query-index ensure now checks persistent authorization policy and
+  an exact stored operation receipt before lease liveness. This permits only a
+  completed exact replay after expiry; a new index create/rebuild still expires
+  the session and fails closed.
+- Evidence: the multi-model integration commits two documents, builds a ready
+  title index with two artifact rows, reopens RRD, advances beyond the session's
+  maximum absolute lease, and receives an idempotent replay. All-target,
+  all-feature engine tests, all MCP stdio tests, capability conformance, strict
+  engine/MCP Clippy and `git diff --check` passed locally. Workspace and remote
+  CI remain unrecorded.
+- Next gate: A4 authorized query-index catalogue list using the same generated
+  capability mapping and shared adapter-session boundary.
+
+### A4 governed query-index catalogue adapter
+
+- Capability: `rrflow_query_index_list` is the fifteenth generated MCP tool and
+  maps to `query-index-list`. It consumes `ListQueryIndexes` and invokes the
+  existing engine catalogue read without duplicating catalogue state.
+- Lease boundary: non-idempotent reads do not ask the model to manufacture an
+  operation key. The adapter creates at most one internal read session per
+  operation and maximum-lease window; tokens and leases remain internal.
+- Evidence: the A2/A3 integration reopens RRD and lists the real ready index;
+  initialized-security coverage proves the uncredentialed governed read is
+  denied; capability parity, MCP stdio discovery, focused engine tests, strict
+  Clippy, formatting, and `git diff --check` passed locally. Workspace and
+  remote CI remain unrecorded.
+- Next gate: A5 bounded live-query poll over the existing RRD engine operation.
+
+### A5-A7 governed realtime adapters
+
+- Capabilities: generated MCP discovery now has 18 executable tools. A5 maps
+  live RRFlowQL delta polling to `query-live-poll`; A6/A7 map retained page read
+  and bounded follow to `changefeed-read`/`changefeed-follow`.
+- Real behavior: the integration reports both committed documents as live-query
+  additions. Its retained changefeed identifies exactly nine mutations under
+  the A2 commit digest while also retaining RRD reasoning/lifecycle/trace
+  events. The page carries bounded hash-chain validation evidence, and follow
+  from head returns an explicit bounded timeout. Existing real-server coverage
+  proves a waiting follow wakes on a concurrent commit.
+- Security and bounds: all three are governed reads; initialized security
+  denies the uncredentialed adapter. Request schemas retain the public query,
+  row, page, scan, output and maximum five-second wait constraints.
+- Evidence: focused adapter, capability and security tests; all three MCP stdio
+  tests; strict engine/MCP Clippy; formatting; and `git diff --check` pass
+  locally. Full workspace and remote CI remain unrecorded.
+- Next gate: A8 governed vector-collection ensure.
+
+## 2026-08-25 — Executable development-topology gate
+
+- State: implemented and locally verified; not committed or remotely
+  qualified.
+- Capability: added the repository-native `cargo rrflow-dev doctor --root .`
+  command. It parses the real workspace/package manifests, checks canonical
+  package identity and surface dependency boundaries, proves the RRD health and
+  capability routes exist, verifies isolated developer state and required
+  toolchains, reports optional remote-exposure tooling, emits JSON or readable
+  output, and exits nonzero while any required topology invariant is blocked.
+- Current evidence: the expanded report has 13 passing checks and five
+  blockers. The blockers are Connectome's direct dependencies on seven
+  physical/internal RRD crates, the CLI's direct dependencies on `rrd-core` and
+  `rrd-store`, the absent exact-argv command proxy, the absent lifecycle
+  supervisor, and the absent full-topology CI smoke test. `rrd-server`,
+  `rrflow-mcp`, package identity, readiness routes, isolated state, the pinned
+  local/CI Rust toolchain, the Cargo lock, Cargo, Rust, Git, Tailscale, and
+  Cloudflare tooling pass their present checks.
+- Verification:
+  `cargo test -p rrflow-cli dev::tests::current_workspace_reports_real_boundary_blockers --offline`
+  passed; `cargo clippy -p rrflow-cli --all-targets --offline -- -D warnings`
+  passed; `cargo rrflow-dev doctor --root . --json` emitted the expected report
+  and exited 1; `git diff --check` passed.
+- Invariant: the canonical integration topology is one `rrd-server` authority;
+  every other process is a protocol client. Embedded topology is a separate
+  one-process profile. A supervisor may not start the current direct-store
+  Connectome beside the daemon and call that integration.
+- Next gate: define the contract-backed operator/diagnostic projection needed
+  by Connectome, serve it from RRD, consume it through `rrd-client`, and remove
+  Connectome's production physical-crate dependencies before implementing
+  `rrflow dev up/status/logs/stop`.
+
+### Development-topology truth correction
+
+- Finding: report v1 accepted `surface.mcp-engine-boundary` because MCP had no
+  physical-layer dependencies. That proved dependency hygiene only; it did not
+  prove the report's canonical daemon-client topology. The binary still opened
+  `RrdEngine` directly and accepted only `--db`/`--root`.
+- Correction: report v2 preserves the passing dependency-boundary check and
+  adds required `surface.mcp-daemon-mode`. The new gate requires the
+  `rrd-client` dependency plus explicit `RuntimeMode` and `--url` daemon path.
+  Current evidence is 13 passed, six blocked, zero warnings. No additional host
+  tools are missing.
+- Contract: `docs/rrflow-mcp-daemon-mode.md` freezes mutually exclusive
+  embedded/daemon profiles, server-owned project binding, caller-preserving
+  granular authorization, one generated catalogue/dispatcher, failure/replay
+  semantics, conformance tests, and D0-D5 dependency order. It explicitly
+  forbids a URL-only shortcut, duplicate registry, anonymous server execution,
+  and a second database opener.
+- Verification:
+  `cargo test -p rrflow-cli dev::tests::current_workspace_reports_real_boundary_blockers --offline`,
+  strict all-target CLI Clippy, and report-v2 execution passed locally. Doctor
+  correctly exited 1 because the six blockers are real. Full workspace and
+  remote CI remain unrecorded.
+
+### D0 runtime invocation and granular policy contract
+
+- Contract: added strict, bounded, versioned `RuntimeToolCatalogue`,
+  `RuntimeToolDescriptor`, `RuntimeToolInvocation`, and
+  `RuntimeToolInvocationResult` types. Invocation arguments and returned
+  content carry verified SHA-256 digests; unknown fields, non-object arguments,
+  oversize values, unsorted/duplicate catalogues, unsafe public actions, and
+  version drift fail closed.
+- Policy: replaced the runtime catalogue's binary-only policy description with
+  an explicit engine-owned `SecurityAction` for all 28 tools. Existing query,
+  transaction, vector, changefeed, backup, restore, estate, and audit actions
+  are reused. Memory context/inspect/recall/retire/write, lifecycle, project
+  attunement/routing, and reasoning read/write receive dedicated actions; no
+  blanket runtime-invoke grant was added.
+- Single registry: `runtime_tool_contract_catalogue()` projects the same 28
+  executable definitions into the public wire representation and validates it
+  before returning. Its test freezes every exact name-to-action pair and the
+  sole public service-status operation.
+- Schema review: the intentional `SecurityAction` expansion changed the
+  generated OpenAPI digest to
+  `5032de567b8ecdd08e99e5e0fe2b2c95250ba6100d517a7533d3b1213df64e1d`;
+  the TypeScript OpenAPI types were regenerated and their drift check passes.
+- Verification: all `rrd-contract` and `rrd-engine` targets passed, including
+  the new contract and 28-action exhaustiveness tests. Strict all-target Clippy
+  passed for contract, engine, MCP, and Connectome. This is local D0 evidence,
+  not a daemon-mode, workspace, or remote-matrix claim.
+- Next gate: D1 binds `rrd-server` to one persisted `InstanceBinding` and
+  authoritative canonical project root before any runtime endpoint is added.
+
+This is the durable engineering record for dependency-critical RRFlow/RRD work.
 It complements, but does not replace, the authenticated runtime and control
-journals stored by Vyrm itself.
+journals stored by RRD itself.
 
 ## Journal protocol
 
@@ -21,6 +304,92 @@ evidence invalidates an entry, append a correction that links back to it rather
 than silently rewriting the historical conclusion. Git remains the source of
 truth for the exact diff; this journal is the reviewable narrative and evidence
 index.
+
+## 2026-08-25 — engine-generated MCP memory surface and Connectome projection
+
+- Commit: `pending`; this is verified local slice evidence, not a landed or
+  cross-platform product checkpoint.
+- Gate: R1 plus the first R2 increment from the active recovery board. The handwritten MCP catalogue was
+  removed from `rrflow-mcp`; `rrd-engine::runtime` now owns each tool's name,
+  description, JSON input schema, mutability classification, allow-list check,
+  and executable dispatch.
+- Memory operations: added claim-backed `rrflow_remember`, bounded
+  `rrflow_context`, provenance/history `rrflow_inspect`, and history-preserving
+  `rrflow_forget`. Forget appends a bitemporal retirement correction; it does
+  not erase prior facts. Existing preflight, exact recall, route, RRFlowQL,
+  reasoning, and lifecycle tools remain in the same generated catalogue.
+- Conformance: MCP `tools/list` serializes the engine catalogue directly.
+  Connectome's Capabilities screen consumes the same catalogue and shows every
+  executable tool with its read/mutation classification. The stdio test asserts
+  exact advertised/executable name parity and executes remember, inspect,
+  context, forget, and post-retirement recall through a real MCP process.
+- Cross-surface contract: `rrd-contract` now defines the five canonical product
+  surfaces and their available/experimental/planned/not-applicable
+  dispositions. `rrd-engine` generates 47 validated capability rows from all
+  28 RRD HTTP operations, all 11 executable MCP tools, and eight explicit
+  planned gaps. Validation requires sorted unique IDs, every surface on every
+  capability, a real entrypoint for every available disposition, and no
+  entrypoint for not-applicable dispositions. Connectome renders the generated
+  matrix directly.
+- Local evidence: `cargo test -p connectome-ui --test capabilities --offline`,
+  `cargo test -p rrflow-mcp --all-targets --offline`, and `cargo clippy -p
+  rrd-engine -p rrflow-mcp -p connectome-ui --all-targets --offline -- -D
+  warnings` passed. `cargo test -p rrd-engine --test capability_catalogue
+  --offline` also passed coverage for every HTTP operation, every executable
+  runtime tool, and all eight planned foundation rows. The rebuilt local UI at
+  `/api/runtime/capabilities` returned 11 tools and 47 capability rows.
+- Limits: exact-subject recall is not hybrid lexical/vector recall. Document
+  ingestion, collection deletion, reflection/synthesis, full CRUD/schema/graph
+  administration, and the remaining RRD server operations are not advertised
+  as executable MCP tools. Connectome's higher-level capability cards still
+  require migration into the authoritative cross-surface catalogue.
+- Next gate: implement the persisted file-tree attunement receipt required by
+  R3, bind it to the shared mutation authorization path, and test stale/absent
+  receipt denial before expanding R2 further.
+
+## 2026-08-25 — durable planning attunement and one-tool authorization
+
+- Commit: `pending`; local evidence only.
+- Gate: R3. Preflight and user-prompt lifecycle events now record a hash-sealed
+  `ProjectAttunementReceipt` through RRD's authoritative control-state CAS and
+  hash-chained journal.
+- Bound evidence: canonical project root, serialized project profile, stable
+  source-tree digest, source-file count, routing generation/symbol count,
+  content fingerprints for manifests, lockfiles, Biome config, project agent
+  instructions, RRFlow instance/workflow policy, and GitHub Actions workflows,
+  plus the RRD read stamp, issuing actor/time, and optional prompt digest.
+- Enforcement: pre-tool refreshes the real source projection and compares it
+  with the previously recorded receipt. Source edits, additions/removals,
+  manifest-only drift, missing/corrupt receipts, and routing corruption fail
+  closed until a new preflight. An allowed mutation atomically binds the
+  receipt to one reasoning run and one exact tool-name/tool-input digest; a
+  competing request is denied until matching post-tool observation consumes
+  the authorization.
+- Persistence: a native `PersistentEngine` test closes and reopens RRD between
+  preflight and pre-tool authorization. The durable receipt remains valid and
+  the gate allows the unchanged project after reopen.
+- UI: Connectome's Capabilities view renders the receipt, source-tree digest,
+  planning inputs, routing generation, RRD read stamp, prompt digest, reasoning
+  binding, and any outstanding tool authorization. The local demo snapshot
+  reported a verified receipt, 11 engine-generated MCP tools, and 47 declared
+  product capability rows.
+- Local evidence: `cargo test -p rrd-engine --all-targets --all-features
+  --offline`, `cargo test -p rrflow-mcp --all-targets --offline`, `cargo test -p
+  connectome-ui --all-targets --offline`, and strict Clippy over contract,
+  engine, MCP, and Connectome passed. `git diff --check` passed.
+- Contract correction: the broader audit caught a frozen public fixture still
+  expecting implementation `rrflow` and a stale OpenAPI digest after the
+  pre-release RRFlow contract cutover. The fixture now records `rrflow`, the
+  reviewed OpenAPI SHA-256 is
+  `7b10be80754894895996fbcc7de8b421b975b9224b19368df45c65b7a98674c2`,
+  and all 18 `rrd-contract` tests plus strict Clippy pass.
+- Limits: provider-neutral session/turn envelope work is still incomplete;
+  arbitrary shell execution still needs the canonical exact-argv command proxy
+  and environment/working-directory binding; Connectome and CLI still bypass
+  lower physical crates. The current worktree is not a remote-matrix checkpoint.
+- Next gate: R4/R5—move remaining Connectome capability cards behind the
+  generated catalogue, then eliminate Connectome and CLI lower-crate bypasses
+  before workspace-wide qualification.
 
 ## 2026-08-23 — F0/F1 public contract and operable recovery baseline
 
@@ -115,7 +484,7 @@ index.
   `CARGO_BUILD_JOBS=1 CARGO_INCREMENTAL=0 cargo test -p rrd-server --test local_estate_driver --locked -- --nocapture`
   passed locally; `cargo clippy -p rrd-estate -p rrd-server --all-targets --locked -- -D warnings`
   passed locally. GitHub Actions run
-  [`32666043965`](https://github.com/EonsofStupid/vyrm/actions/runs/32666043965)
+  [`32666043965`](https://github.com/EonsofStupid/rrflow/actions/runs/32666043965)
   passed persistent authority, RRD binary contracts, real child/controller
   recovery, and strict clippy on Ubuntu, Windows, and macOS.
 - Evidence: a normal stop requires RRD's durable completion marker after Axum
@@ -139,13 +508,13 @@ index.
   and native process qualification” above.
 - Commit: `130b8c5` (`fix(cluster): lower atomic runtime plans to storage format`).
 - Capability: an external coordinator can now combine a prepared native
-  runtime transaction with its own metadata in one VyrmKV batch only after the
+  runtime transaction with its own metadata in one RRD LSM batch only after the
   plan lowers canonical staged keys to the target database's authenticated
   application format. The raw staged-parts method is no longer public.
 - Verification:
-  `CARGO_BUILD_JOBS=1 CARGO_INCREMENTAL=0 cargo test -p rrd-store -p vyrm-cluster --all-features --locked`
+  `CARGO_BUILD_JOBS=1 CARGO_INCREMENTAL=0 cargo test -p rrd-store -p rrd-cluster --all-features --locked`
   passed; strict all-target/all-feature clippy passed. GitHub Actions run
-  [`32667681611`](https://github.com/EonsofStupid/vyrm/actions/runs/32667681611)
+  [`32667681611`](https://github.com/EonsofStupid/rrflow/actions/runs/32667681611)
   is green across the full workspace verification job and the Ubuntu, Windows,
   and macOS estate-process matrix.
 - Evidence: the four-node real OpenRaft test commits canonical runtime truth,
@@ -170,7 +539,7 @@ index.
   existing catalogue.
 - Verification: all `rrd-estate` and `rrd-server` tests passed locally; strict
   all-target clippy passed. GitHub Actions run
-  [`32668383982`](https://github.com/EonsofStupid/vyrm/actions/runs/32668383982)
+  [`32668383982`](https://github.com/EonsofStupid/rrflow/actions/runs/32668383982)
   passed the real generator, authority, server process, child/controller crash,
   and strict-clippy matrix on Ubuntu, Windows, and macOS.
 - Evidence: the black-box generator test uses the actual built sibling
@@ -191,7 +560,7 @@ index.
   added the `rrd-estate-admin` process and frozen `EstateMutationResult` output.
 - Verification: all `rrd-contract`, `rrd-estate`, and `rrd-server` tests passed
   locally with strict all-target clippy. GitHub Actions run
-  [`32671973317`](https://github.com/EonsofStupid/vyrm/actions/runs/32671973317)
+  [`32671973317`](https://github.com/EonsofStupid/rrflow/actions/runs/32671973317)
   passed the full workspace and the real process/admin matrix on Ubuntu,
   Windows, and macOS. Earlier red runs exposed and drove fixes for a
   Windows-only test warning, transient executable inspection, hard-link path
@@ -284,7 +653,7 @@ index.
 - Commit: `2e3d558` (`feat(rrd): expose exact query service`).
 - Capability: added the transport-neutral, strictly bounded `ExecuteQuery`
   contract and the authenticated `POST /v1/query` service path. It uses the
-  real VyrmQL parser and VyrmMX catalogue, binder, planner, and executor rather
+  real RRFlowQL parser and RRD query executor catalogue, binder, planner, and executor rather
   than a parallel HTTP query implementation.
 - Evidence: the public response retains typed values, canonical query, read
   manifest, cursor, schema revision, planner candidates and exactness/order/
@@ -295,7 +664,7 @@ index.
   `cargo test -p rrd-contract -p rrd-server --all-features --locked`, strict
   all-target/all-feature clippy for both crates, and `git diff --check` passed.
 - Limit: this is the read-only service skeleton. It does not yet provide
-  mutating VyrmQL, typed public multi-model transactions, live subscriptions,
+  mutating RRFlowQL, typed public multi-model transactions, live subscriptions,
   remote F4 identity, SDKs, or durable query spans; request-level JSON tracing
   is currently ephemeral.
 - Next gate: extend the same persistent RRD transaction boundary with typed
@@ -325,7 +694,7 @@ index.
   `cargo test -p rrd-contract -p rrd-server --all-features --locked`, strict
   all-target/all-feature clippy for both crates, and `git diff --check` passed.
 - Limit: prospective data preview currently validates the public mutations but
-  is not yet a complete read-your-writes graph projection. Mutating VyrmQL,
+  is not yet a complete read-your-writes graph projection. Mutating RRFlowQL,
   object upload/staging, live subscriptions, model-specific administration,
   data-scope process-kill qualification, F4 identity, and SDKs remain open.
 - Next gate: expose retained runtime changefeeds/live subscriptions and the
@@ -340,7 +709,7 @@ index.
   cosine, dot, Euclidean, or Manhattan scoring.
 - Evidence: the service captures an authoritative runtime read stamp, denies
   incomplete scans rather than returning partial truth, builds the canonical
-  candidate set, and runs the existing Vyrm vector planner and exact oracle.
+  candidate set, and runs the existing RRFlow vector planner and exact oracle.
   Responses carry manifest/cursor, scan count, plan digest, selected access
   path, exactness, typed vector/subject references, source cursor, and score.
 - Verification: the multi-model real-socket fixture proves unauthenticated
@@ -440,7 +809,7 @@ index.
 
 - Commit: `3bc71f9` (`feat(security): establish persistent policy authority`).
 - Ownership: introduced `rrd-security` as the RRD identity, authorization, and
-  audit owner instead of placing policy inside VyrmKV, query execution, RRO,
+  audit owner instead of placing policy inside RRD LSM, query execution, RRO,
   or Connectome.
 - Capability: persistent bounded user/service/node principals carry only
   credential SHA-256 verifiers, validity/disable state, and exact closed-action
@@ -475,7 +844,7 @@ index.
   explicitly advertised loopback development mode. Security capability state
   is visible in negotiation. Non-loopback bind remains denied in every mode.
 - Evidence: a real-socket differential denies missing and wrong API keys,
-  allows the granted exact VyrmQL query, denies an ungranted backup with 403,
+  allows the granted exact RRFlowQL query, denies an ungranted backup with 403,
   and verifies the runtime cursor did not change.
 - Verification: all `rrd-security` and `rrd-server` tests passed, including 16
   real-socket cases and existing process-kill matrices; strict all-target/all-
@@ -542,7 +911,7 @@ index.
   public `rrd-contract`; its release graph does not depend on storage, query,
   server, estate, or security implementation crates.
 - Surface: typed async methods cover capability/catalogue negotiation, session
-  lifecycle, transactions, VyrmQL, vector search, changefeed, managed backup/
+  lifecycle, transactions, RRFlowQL, vector search, changefeed, managed backup/
   restore, estate projection, and protected audit.
 - Safety: the client rejects remote cleartext, validates request envelopes and
   response identity, caps response accumulation at four MiB, applies per-attempt
@@ -705,9 +1074,9 @@ index.
   conformance, examples/reference output, and publication remain open. The next
   breadth slice moves to F6 multi-model/query/index/realtime foundations.
 
-## 2026-08-24 — VyrmQL series and geospatial read foundation
+## 2026-08-24 — RRFlowQL series and geospatial read foundation
 
-- Commit: `9ca9d1f` (`feat(query): expose series and geo in VyrmQL`).
+- Commit: `9ca9d1f` (`feat(query): expose series and geo in RRFlowQL`).
 - Corrected boundary: public transactions already atomically persist every
   current data family. F6 therefore extends missing read semantics instead of
   adding a parallel mutation path or wrapper.
@@ -720,18 +1089,18 @@ index.
   field, validity, geometry kind, and canonical decimal point/bounding-box
   coordinates. Custom properties remain visible through `PROJECT *`, while
   filtering/explicit projection is intentionally limited to frozen built-ins.
-- Evidence: parser corpus/canonicalization, eight VyrmMX tests, three-engine
+- Evidence: parser corpus/canonicalization, eight RRD query executor tests, three-engine
   series/geo differentials, pre-observation/pre-validity exclusion, the secured
   real-RRD atomic-data test, and strict Clippy pass.
 - Limit: recursive traversal, general numeric/spatial operators, indexes and
-  statistics, full text, mutating/multi-statement VyrmQL, streaming batches,
+  statistics, full text, mutating/multi-statement RRFlowQL, streaming batches,
   and push live subscriptions remain open F6 breadth.
 
 ## 2026-08-24 — bounded recursive graph traversal
 
 - Commit: `4740d7f` (`feat(query): add bounded graph traversal`).
 - Grammar: added `traverse:<relation> START <kind>:<id> DIRECTION
-  <OUTGOING|INCOMING|BOTH> DEPTH <1..32>` as a typed VyrmQL source. Canonical
+  <OUTGOING|INCOMING|BOTH> DEPTH <1..32>` as a typed RRFlowQL source. Canonical
   rendering round-trips and malformed direction/depth inputs fail with offsets.
 - Binding: the relation and start record kinds must exist at the captured schema
   revision and the start kind must be an allowed relation endpoint.
@@ -739,7 +1108,7 @@ index.
   snapshot, processes relations in canonical identity order, tracks visited
   nodes to terminate cycles, and emits the deterministic first shortest path
   with depth, node, edge, endpoint, and complete path fields.
-- Evidence: nine VyrmMX tests, parser corpus/mutation tests, strict Clippy, a
+- Evidence: nine RRD query executor tests, parser corpus/mutation tests, strict Clippy, a
   cyclic graph fixture, outgoing/incoming three-engine differentials, and the
   secured real-RRD atomic-data/query test pass.
 - Limit: traversal currently returns nodes/paths for one relation type and does
@@ -750,7 +1119,7 @@ index.
 
 - Commit: `bfa4e15` (`feat(query): add typed comparison predicates`).
 - Contract: filters now retain `=`, `!=`, `<`, `<=`, `>`, or `>=` through the
-  typed VyrmQL AST, canonical text, bound logical plan, physical-plan digest,
+  typed RRFlowQL AST, canonical text, bound logical plan, physical-plan digest,
   and reference executor. Older serialized equality filters remain readable
   through an equality default.
 - Safety: equality and inequality use exact typed values. Ordering accepts only
@@ -781,14 +1150,14 @@ index.
   generation, lifecycle, freshness, and matched-prefix evidence. It remains
   explicitly unselected/non-exact until a verified artifact reader exists, so
   the authoritative log stays the only answer path.
-- Integration correction: the full workspace run found that `vyrm-node` trace
+- Integration correction: the full workspace run found that `rrd-engine` trace
   identity had not been extended for the earlier series, geo, and traversal
   sources. Those source identities are now explicit rather than hidden behind
   a wildcard.
 - Evidence: lifecycle differentials pass on memory, Fjall compatibility, and
-  native VyrmKV; stale-generation/invalid-field denial, hash-chain verification,
+  native RRD LSM; stale-generation/invalid-field denial, hash-chain verification,
   planner rejection evidence, and native reopen pass. Strict Clippy passes for
-  VyrmMX/Vyrm Node, and the complete workspace test suite is green.
+  RRD query executor/RRFlow Node, and the complete workspace test suite is green.
 - Limit: no scalar artifact is built or read yet, uniqueness is not enforced,
   and no public RRD index route exists. Those are the next index slices before
   live-query delivery.
@@ -806,7 +1175,7 @@ index.
   snapshots, duplicate identities, and oversized deltas fail closed.
 - Evidence: additions, updates, removals, empty replay, cursor validation, and
   budget behavior are identical on memory, Fjall compatibility, and native
-  VyrmKV; all VyrmMX tests and strict Clippy pass.
+  RRD LSM; all RRD query executor tests and strict Clippy pass.
 - Limit: this is the semantic engine, not yet public realtime. The authenticated
   RRD route, changefeed wakeup, streaming/backpressure, retained subscriptions,
   and all six SDK surfaces remain the next delivery slice.
@@ -815,7 +1184,7 @@ index.
 
 - Commit: `28a4362` (`feat(rrd): expose semantic live query polling`).
 - Public boundary: `POST /v1/query/live/poll` now accepts one strict bounded
-  resume request and returns the VyrmMX added/updated/removed delta through one
+  resume request and returns the RRD query executor added/updated/removed delta through one
   captured head. Scope, query, parameters, execution budget, and delta budget
   are validated before execution.
 - Security: the route requires a live session and the distinct
@@ -850,9 +1219,9 @@ index.
   valid-time, and row count before reapplying the shared filter/projection
   evaluator.
 - Evidence: real open/closed document rows select and execute through the
-  artifact identically on memory, Fjall compatibility, and native VyrmKV; a
+  artifact identically on memory, Fjall compatibility, and native RRD LSM; a
   subsequent write proves stale fallback; native reopen serves the artifact;
-  corrupted bytes fail closed. VyrmMX strict Clippy and the full workspace test
+  corrupted bytes fail closed. RRD query executor strict Clippy and the full workspace test
   suite pass.
 - Limit: this is an exact snapshot artifact, not incremental maintenance.
   Uniqueness, public RRD administration, count/spatial/full-text index families,
@@ -861,7 +1230,7 @@ index.
 ## 2026-08-24 — authenticated query-index administration
 
 - Commit: `95be4ed` (`feat(rrd): add query index administration`).
-- Public surface: `POST /v1/query/indexes/ensure` parses a restricted VyrmQL
+- Public surface: `POST /v1/query/indexes/ensure` parses a restricted RRFlowQL
   definition, synchronously creates/rebuilds the content-addressed exact
   artifact, and returns its generation, source cursor, valid-time, row count,
   configuration digest, artifact digest, and lifecycle state.
@@ -877,7 +1246,7 @@ index.
 - Evidence: a real RRD process denies unauthenticated ensure, builds over the
   atomic multi-model fixture, replays the result, rejects collision, lists it,
   and then returns a query plan selecting `index:document-title` with the exact
-  row. Contract/security/server/client/VyrmMX tests, strict Clippy, all five
+  row. Contract/security/server/client/RRD query executor tests, strict Clippy, all five
   non-Rust SDK gates, and workspace all-target compilation pass.
 - Limit: ensure is synchronous and exact-snapshot only. Incremental maintenance,
   concurrent same-key convergence, uniqueness, background jobs, and broader
@@ -907,7 +1276,7 @@ index.
 ## 2026-08-24 — persistent vector collections and named spaces
 
 - Commit: `e7945bb` (`feat(vector): add persistent collection administration`).
-- Authority: `vyrm-vector` now owns a versioned per-scope collection catalogue
+- Authority: `rrd-vector` now owns a versioned per-scope collection catalogue
   in CAS-protected control state. Each transition enters the authenticated
   control journal; bounded idempotency receipts survive reopen, exact retries
   replay, changed payloads conflict, and concurrent same-operation losers
@@ -962,7 +1331,7 @@ index.
 - Contract: vector search now accepts equality, inequality, membership, range,
   existence, and recursive all/any/not filters bounded to depth 32 and 4,096
   nodes. Public `QueryValue` operands lower into the existing exact
-  `vyrm-vector` evaluator, avoiding a second transport-only semantics path.
+  `rrd-vector` evaluator, avoiding a second transport-only semantics path.
 - Schema correction: recursive filter definitions initially exposed a genuine
   OpenAPI generator defect. `VectorPayloadFilter` is now a canonical component
   alongside `QueryValue`, all local references are rebased, and the reviewed
@@ -978,7 +1347,7 @@ index.
 ## 2026-08-24 — deterministic collection point scrolling
 
 - Commit: `6b86963` (`feat(vector): add deterministic point scrolling`).
-- Shared semantics: `vyrm-vector` now exposes one validated visibility request
+- Shared semantics: `rrd-vector` now exposes one validated visibility request
   and `materialize_visible` primitive. Exact search and point scroll both use
   it for read-stamp scope, latest transaction-visible version, valid time,
   field, model binding, retirement, and payload filtering.
@@ -1147,8 +1516,8 @@ index.
   test passed four consecutive focused executions; all `rrd-estate` tests, the
   complete four-test `local_estate_driver` suite, and strict Clippy for
   `rrd-estate` plus `rrd-server` passed.
-- Remote evidence: [push CI 32752929744](https://github.com/EonsofStupid/vyrm/actions/runs/32752929744)
-  and [pull-request CI 32752934173](https://github.com/EonsofStupid/vyrm/actions/runs/32752934173)
+- Remote evidence: [push CI 32752929744](https://github.com/EonsofStupid/rrflow/actions/runs/32752929744)
+  and [pull-request CI 32752934173](https://github.com/EonsofStupid/rrflow/actions/runs/32752934173)
   passed the full verification job and Linux, macOS, and Windows process
   matrix, including the formerly flaky child/controller recovery test.
 - Limit: `cargo fmt --all -- --check` remains blocked by unrelated existing and
@@ -1159,10 +1528,10 @@ index.
 
 - Commit: `pending` (this checkpoint).
 - Identity: the physical persistence package and Rust namespace moved from
-  `vyrm-store`/`vyrm_store` to `rrd-store`/`rrd_store`. No alias package or
+  `rrd-store`/`rrflow_store` to `rrd-store`/`rrd_store`. No alias package or
   forwarding namespace remains. Existing durable byte magics and digest
   domains were deliberately not rewritten without a versioned recovery plan.
-- Composition: `rrflow-engine` is the concrete embedded composition root and
+- Composition: `rrd-engine` is the concrete embedded composition root and
   `rrd-server` now depends in production only on that engine and the public RRD
   contract. Server HTTP and command implementations were split into bounded
   responsibility modules; estate and security commands moved to their owning
@@ -1186,9 +1555,609 @@ index.
   cursors, changed manifests, and stale-read rejection.
 - Limits: HTTP still duplicates parts of security policy and completion-audit
   orchestration; Connectome, CLI, and MCP still have frozen direct-component
-  dependency debt; remaining Vyrm-named packages and durable format identities
+  dependency debt; remaining RRFlow-named packages and durable format identities
   require dependency-ordered migration. The postponed `rrd-maintenance` work
   was excluded from this checkpoint and was not staged.
 - Next gate: introduce the transport-neutral invocation boundary using the
   existing RRD `RequestContext`, then move policy decisions and durable audit
-  completion wholly into `rrflow-engine` before removing HTTP authority.
+  completion wholly into `rrd-engine` before removing HTTP authority.
+
+## 2026-08-25 — named-vector persistence and MCP A8-A12
+
+- Scope: completed the existing-engine vector adapter slice without creating a
+  second MCP catalogue or vector store. Generated MCP discovery now contains 23
+  executable tools; A13-A17 remain planned.
+- Persistence correction: `RuntimeVector` now carries an optional validated
+  collection/vector address. Transaction lowering retains the public
+  `collection_id`/`vector_name` pair, collection reads filter on that exact
+  address before temporal visibility, and compact-dense/TurboQuant metadata
+  preserve it. Legacy rows deserialize with no address and remain readable
+  through legacy field search, but do not match a named collection.
+- Executable adapters: collection ensure/list, exact point retrieve,
+  deterministic point scroll, and exact dense/sparse/multi-dense search all use
+  the engine-owned typed catalogue, ordinary RRD session/security boundaries,
+  and the existing endpoint capability rows. Mutation attunement and
+  idempotency remain mandatory for collection ensure; read-session mechanics
+  are internal and bounded.
+- Cohesive evidence: one integration commits multi-model data, creates
+  `documents/title`, commits a collection-bound point through the shared
+  transaction authority, reopens RRD, and retrieves, scrolls, and searches it.
+  A legacy unbound vector sharing `title-embedding` is explicitly missing and
+  excluded. Exact replay after lease expiry/reopen remains covered for the
+  collection mutation.
+- Verification: all `rrd-core`, `rrd-vector`, and `rrd-engine` targets pass;
+  MCP's three stdio integration tests and initialized-security denial test pass;
+  strict Clippy with `-D warnings` passes for core, vector, engine, and MCP. The
+  renamed core golden fixture was regenerated because its visible command had
+  changed from `rrd-core` to `rrd-core` while its downstream hash-chain
+  digests had not been recomputed.
+- Limit: this is focused local evidence, not a workspace or remote matrix
+  checkpoint. MCP search truthfully reports the exact path. Collection-bound
+  HNSW/TurboQuant selection, full-text/hybrid retrieval, A13-A17, daemon-mode
+  MCP, Connectome zero-bypass, and the development supervisor remain open.
+
+## 2026-08-25 — MCP A13-A17 administration adapters
+
+- Scope: completed the reviewed existing-engine adapter map. The sole dynamic
+  MCP catalogue now contains 28 executable tools; a conformance test freezes
+  that reviewed count and each A13-A17 capability mapping.
+- Backup: `rrflow_backup_create` requires exact attunement and idempotency and
+  calls the existing authenticated logical archive/catalogue authority.
+  `rrflow_backup_list` optionally verifies every catalogued archive before
+  returning it.
+- Restore: `rrflow_restore` requires exact attunement, idempotency, and the
+  literal `restore_to_new_root` acknowledgement. Only a canonical restore ID is
+  accepted; RRD derives the isolated root and the model cannot provide a path
+  or overwrite the active database.
+- Operations: `rrflow_estate_read` exposes a persistent estate's desired,
+  observed, activity, lease, operation, and receipt state.
+  `rrflow_audit_read` exposes a bounded page of the persistent security audit
+  journal. Neither adapter owns a second control-plane document or log.
+- Cohesive evidence: the integration stores a fact, creates a logical backup,
+  reopens and replays it, verifies the catalogue, restores to a new root, opens
+  the restored engine, and reads the fact. It also reads a persisted estate and
+  a persisted audit event. All engine targets, MCP's three stdio tests,
+  initialized-security denial, and strict engine/MCP Clippy pass locally.
+- Limit: the 28-tool adapter map is locally executable, but the full A-series
+  exit gate remains open. A subsequent interactive stdio test now calls every
+  implemented domain, and Connectome parity passes against the same generated
+  catalogues. Initialized security has denial evidence but MCP lacks
+  credentialed daemon-mode allowance, and no full workspace or remote platform
+  matrix was run for this worktree.
+
+### Process-level MCP and Connectome parity closure
+
+- The new interactive stdio harness executes data commit, query-index ensure/
+  list, live query, changefeed, vector collection/point/retrieve/scroll/search,
+  logical backup/list, dependent restore-to-new-root, estate read, and audit
+  read through the actual `rrflow-mcp` binary.
+- The harness reads each JSON-RPC response before issuing dependent work; the
+  restore request uses the actual backup digest instead of fixture knowledge or
+  a direct engine bypass.
+- Connectome's capability test passes against the exact 28-entry runtime
+  catalogue and validates the engine-owned product surface catalogue. Strict
+  Clippy passes for MCP and Connectome.
+- Daemon-mode MCP cannot be implemented as a URL flag alone: `rrd-client`
+  covers public data operations, while preflight/reasoning currently require a
+  project root and have no `rrd-server` protocol. Opening an embedded runtime
+  store beside the daemon would create two authorities and is prohibited. The
+  daemon runtime protocol therefore requires a reviewed project binding,
+  authenticated runtime invocation contract, and granular tool authorization.
+
+## 2026-08-25 — D1 project-bound server and deployment authority
+
+- Server authority: the production `rrd-server` binary now requires one
+  project `--root`, discovers its `InstanceBinding`, opens only the canonical
+  `.rrflow/rrd` store, and persists an immutable project/store binding in RRD.
+  An ordinary restart verifies that binding; copying or moving the project and
+  database cannot silently establish a new authority.
+- Explicit provisioning: `rrd-server initialize --root PROJECT --instance ID`
+  atomically creates or verifies a dedicated instance manifest. It refuses an
+  existing different identity and is an explicit deployment action rather than
+  a side effect of serving.
+- Estate integration: local deployment catalogue format 2 authenticates one
+  executable and declares bounded typed preparation arguments. The driver runs
+  project initialization with a ten-second deadline and retained logs, then
+  launches the same executable with `--root`; the deleted server `--db` and
+  `--instance` launch path is no longer generated.
+- Kubernetes integration: the StatefulSet now initializes project authority,
+  runs security bootstrap against the canonical project store, and serves the
+  same project root. This is deterministic manifest evidence, not a live
+  cluster or distributed qualification claim.
+- Evidence: all eight runtime-instance tests pass; all `rrd-estate` and
+  `rrd-server` all-target tests pass, including the four 96-second real child,
+  graceful fallback, forged-PID, and controller crash/reopen tests; all
+  `rrd-kubernetes` contract/CRD tests pass; strict all-target Clippy with
+  `-D warnings` passes for engine, estate, server, and Kubernetes.
+- Remaining daemon sequence: D2 caller-preserving dispatch, D3 authenticated
+  runtime protocol/client routes, D4 mutually exclusive MCP embedded/daemon
+  modes, then D5 Connectome/CLI attachment and supervised topology. No full
+  workspace or remote platform matrix was run for this worktree.
+
+## 2026-08-25 — D2 caller-preserving runtime dispatch
+
+- Engine authority: every one of the 28 runtime tools now resolves to a typed
+  `RrdOperation` and exact `SecurityAction`. API-key callers create
+  principal-bound nested sessions; session callers retain their existing
+  session identity; unsecured embedded calls remain explicitly anonymous.
+- Audit: successful allowance, execution completion, authenticated policy
+  denial, and nested execution preserve the original principal. Failed
+  credentials never manufacture a trusted principal. Exact serialized payload
+  digests are checked before execution.
+- Evidence: all `rrd-security` and `rrd-engine` targets pass, including the
+  exhaustive name/action/mutation mapping and API-key/session/denial/digest
+  integration tests. Strict all-target Clippy passes for both crates.
+
+## 2026-08-25 — D3 authenticated runtime protocol and Rust client
+
+- Public contract: the endpoint catalogue now contains 30 operations. The
+  governed catalogue read has a dedicated `RuntimeToolCatalogueRead` action.
+  Runtime invocation uses an explicit `EndpointAction::RuntimeToolDescriptor`
+  policy source; there is no grantable generic dispatch action.
+- Server boundary: `POST /v1/runtime/tools/list` and
+  `POST /v1/runtime/tools/invoke` require session transport. Invocation
+  independently resolves the selected engine-owned descriptor, revalidates
+  its mutation/idempotency requirement, preserves the session principal, and
+  uses only the server's persisted project root.
+- Rust client: catalogue fetch returns a validated versioned descriptor set.
+  Invocation requires that fetched catalogue and derives its client-side
+  mutation requirement from the selected descriptor; the server resolves it
+  again rather than trusting the client.
+- Security evidence: a project-bound real-server test permits catalogue read
+  and `rrflow_service_status` with exact grants, denies `rrflow_context`
+  without `memory_context_read`, and observes the denied `rust-sdk` principal
+  in durable audit. Server, client, contract, engine, security, and MCP target
+  suites pass locally; the real child-process server/estate suite also passes.
+- Generated surfaces: TypeScript, Python, Go, Java, and .NET maps now contain
+  both runtime operations. TypeScript, Python, and Go drift/format/type/test
+  gates pass. Java and .NET drift checks pass, but their build/test gates were
+  not run because this host lacks `mvn` and `dotnet`.
+- Remaining daemon sequence: D4 mutually exclusive MCP modes, then D5 outward
+  client attachment/supervision. This is targeted local evidence, not a full
+  workspace or remote-platform checkpoint.
+
+## 2026-08-25 — D4 mutually exclusive MCP authorities
+
+- Mode contract: `rrflow-mcp` now requires either `embedded --db PATH --root
+  PROJECT` or `daemon --url http://LOOPBACK:PORT --instance ID --principal ID
+  --api-key-file ABSOLUTE_PATH`. Missing, mixed, duplicate, unknown, and
+  cross-mode arguments fail before MCP protocol processing. No compatibility
+  parser or inferred mode remains.
+- Single authority: embedded mode validates and opens the project-bound engine.
+  Daemon mode accepts no database/project path and uses only `rrd-client` over
+  the D3 routes. Both render `tools/list` from the same validated public
+  28-tool catalogue.
+- Credential/session boundary: daemon API-key bytes come only from a bounded,
+  owner-only absolute file and must be visible ASCII without whitespace. The
+  process creates a principal-bound session, rejects initial or renewed
+  catalogue drift, derives idempotency from the tool descriptor, refreshes an
+  expired session, and closes it on ordinary stdin shutdown.
+- Process evidence: a black-box test starts one secured project-bound server,
+  launches MCP with URL/instance/principal/key-file only, proves exact tool
+  name parity and authenticated service-status execution, then verifies the
+  MCP principal in durable audit after clean close. Existing embedded stdio and
+  full-foundation process suites still pass.
+- Architecture/doctor evidence: MCP's only production workspace dependencies
+  are `rrd-engine`, `rrd-contract`, and `rrd-client`; physical bypass remains
+  absent. Doctor report v3 now reports `surface.mcp-daemon-mode` passing and
+  moves from 13/6 to 14/5 pass/block counts. Strict MCP Clippy and diff checks
+  pass.
+- Remaining: D5 Connectome/CLI attachment, exact-argv proxy, supervisor,
+  every-domain daemon differentials, response-loss replay, remote mTLS, and
+  full-topology CI. No full workspace or remote matrix was run.
+
+## 2026-08-25 — D5.1a coherent diagnostic projection
+
+- Public contract: `POST /v1/diagnostics/read` is operation 31 and has its own
+  `DiagnosticsRead` security action. Its strict bounded request accepts only a
+  project scope plus changefeed/audit cursors and limits; it accepts no path or
+  physical-storage selector.
+- Cross-authority stamp: the response records claim sequence,
+  control-journal sequence, runtime cursor, schema revision, catalogue
+  revision, and authenticated runtime-manifest digest. The storage `Engine`
+  trait now exposes the authoritative control-journal head with matching
+  Memory, native, Fjall-compatibility, persistent-delegation, and reopen
+  behavior.
+- Engine assembly: RRD reads product/runtime-tool catalogues, query-index and
+  vector-collection catalogues, estate state, bounded changefeed, and bounded
+  audit, then compares the complete monotonic stamp before and after. It
+  retries up to three times and returns a retryable storage conflict instead
+  of presenting mixed-time data as one snapshot.
+- Transport/client: `rrd-server` authenticates the exact operation and
+  `rrd-client::read_diagnostic_snapshot` validates the returned contract. The
+  project-bound real-server test exercises the path and verifies instance,
+  runtime/control coordinates, manifest identity, section catalogue, and
+  unchanged 28-tool registry. A separate engine test proves that a session
+  without `DiagnosticsRead` cannot call it.
+- Generated surfaces: TypeScript OpenAPI types and TypeScript/Python/Go/Java/
+  .NET endpoint maps contain operation 31. TypeScript, Python, and Go full
+  local gates pass; Java and .NET generator drift passes, but this host lacks
+  Java/Maven and .NET for their build/test gates.
+- Rust evidence: the focused control-journal differential/reopen test, all
+  contract/engine/server/client targets, real child-process estate/server
+  tests, architecture tests, and strict all-target Clippy pass locally.
+- Remaining D5.1: schema/model/table views, graph-at-time/diff,
+  reasoning/routing/trace summaries, retention, vector artifact catalogue,
+  and cluster diagnostics still live behind Connectome physical reads. This
+  is not D5.1 completion and no full-workspace or remote-matrix claim is made.
+
+## 2026-08-25 — D5.1b schema/model and bounded temporal graph diagnostics
+
+- Schema/model lens: the diagnostic response now carries the authoritative
+  public schema registry plus stable record/relation/event summaries with
+  property, required-property, and constraint counts bound to the captured
+  schema revision. Bounded table rows remain the query plane's responsibility;
+  Connectome is not given a second ad hoc table authority.
+- Temporal graph lens: the request names valid time, optional known cursor,
+  comparison cursor, and a replay ceiling. RRD reconstructs records and native
+  typed edges from the exact authenticated read stamp and returns a lossless
+  added/removed/changed differential. It rejects future/reversed coordinates
+  instead of preserving Connectome's old silent head clamp.
+- Boundedness: graph replay is capped by an explicit caller budget no greater
+  than one million source changes. This is correct for the current log-backed
+  implementation but not the final large-history design; checkpointed graph
+  projections remain a recorded follow-up rather than an unbounded scan.
+- Contract evidence: graph identities, validity intervals, ordering,
+  difference category separation, and read-stamp coordinates are validated.
+  The generated OpenAPI digest is
+  `e8503d7be13079b4b81b689bd97af576571e009eeef805dee89a8213c0f8d335`.
+- Runtime evidence: all targets for `rrd-contract`, `rrd-engine`, `rrd-server`,
+  and `rrd-client` pass, including the project-bound real-server test and the
+  real child-process estate/server tests. Strict all-target Clippy with
+  `-D warnings` passes for `rrd-store` and those four public/engine packages.
+- SDK evidence: TypeScript generation/Biome/typecheck/tests, Python generation/
+  Ruff/mypy/pytest, and Go generation/vet/race tests pass. Java and .NET
+  generation drift passes; their build/test gates remain host-blocked by the
+  previously recorded missing JDK/Maven and .NET SDK.
+- Remaining D5.1: reasoning/routing/trace, retention, vector-artifact, and
+  cluster diagnostic lenses. Connectome still opens physical crates and this
+  work is not a cohesive product, workspace, or remote-platform checkpoint.
+
+## 2026-08-25 — D5.1c verified snapshot-retention diagnostics
+
+- Public lens: the diagnostic snapshot now includes each live persisted
+  snapshot lease and its exactly derived semantic retention pin, including
+  scope, owner, lifetime, runtime/schema/catalogue coordinates, manifest
+  identity, and the oldest cursor that must remain serviceable.
+- Consistency correction: snapshot leases do not advance the runtime cursor or
+  control journal. RRD therefore hashes the canonical complete live set into a
+  separate `retention_sha256` read-stamp coordinate, reads it before/during/
+  after assembly, and retries if those identities differ.
+- Contract checks require sorted unique SHA-256 identities, one pin per live
+  lease, exact lease/pin scope/manifest/cursor/expiry agreement, active
+  lifetimes at the fixed observation time, and digest agreement with the read
+  stamp.
+- Reopen evidence: the real project-bound server fixture persists a snapshot
+  lease before closing the physical setup handle, reopens through RRD, and
+  verifies the lease, pin, owner, and retained cursor through `rrd-client`.
+- Verification: all affected contract/engine/server/client targets, including
+  the real child-process estate/server suite, and strict all-target Clippy pass.
+  TypeScript, Python, and Go complete local gates pass; Java and .NET generation
+  drift passes. The current OpenAPI digest is
+  `1d12d4ca0f5429b8cfe6d4dad78e03141ccd91e144f765d6a6be26b4971ebe22`.
+- Remaining D5.1: reasoning/routing/trace, vector-artifact, and cluster lenses.
+  Connectome physical access and the cohesive workspace/remote gates remain
+  open.
+
+## 2026-08-25 — Q1–Q3 typed Arrow, DataFusion 55, and BM25 execution
+
+- Dependency baseline: `rrd-query` pins the current Apache DataFusion release,
+  `55.0.0`; its resolved Arrow family is `59.2.0`. The dependency update and
+  affected compile were completed before executor work.
+- Arrow boundary: every RRFlowQL source is materialized as an immutable typed
+  `RecordBatch` with a hidden stable RRD identity. Boolean, signed, unsigned,
+  text, decimal, digest, null, mixed, list, and map values have reversible RRD
+  semantics rather than a lossy JSON table representation.
+- DataFusion boundary: non-lexical predicates, deterministic identity order,
+  projection, and limit now execute through a registered DataFusion `MemTable`
+  and its logical/physical planners. Physical plan evidence names
+  `data_fusion_evaluate`; the former bespoke row evaluator has been removed.
+  RRFlow null-inequality behavior is explicitly lowered instead of inheriting
+  SQL three-valued behavior accidentally.
+- BM25 boundary: the shared query catalogue supports deterministic,
+  content-addressed BM25 artifacts and `MATCH`. The scorer uses the Qdrant
+  reference equation, survives engine reopen, invalidates only on relevant
+  source changes, and retains exact authoritative fallback behavior.
+- Verification: all `rrd-query` unit, golden, parser, query, index catalogue,
+  and live-query tests pass; the `rrd-engine` multi-model transaction/reopen
+  test passes; strict all-target Clippy for `rrd-query` and `rrd-engine` passes
+  with `-D warnings`.
+- Remaining foundation gate: the public engine vector path still constructs an
+  exact-only runtime. Durable HNSW/TurboQuant catalogue code exists below the
+  composition root, but RRD does not yet own its object store, build contract,
+  approximate-search policy, and reopen selection as one operation. Hybrid
+  retrieval and the required ten-or-more engine-only persistent scenario
+  matrix therefore remain open. No full-workspace, remote-matrix, or competitor
+  superiority claim is made.
+
+## 2026-08-25 — Linux workspace gate and edge-profile correction
+
+- Exact workspace evidence: with the CI-pinned pgvector container and
+  disposable database contract enabled, `cargo test --workspace
+  --all-features --locked` passes. This includes the real OpenRaft process and
+  mutual-TLS suites, native/Fjall differential and migration suites,
+  DataFusion/BM25 execution, pgvector live integration, RRD server process
+  tests, CLI lifecycle tests, MCP embedded/daemon tests, and the long estate
+  child-process kill/restart matrix.
+- Warning gate: `cargo clippy --workspace --all-targets --all-features
+  --locked -- -D warnings` passes. Formatting is clean under `cargo fmt --all
+  --check`. The architecture ownership test remains 8/8.
+- Feature-unification defects fixed: public OpenAPI and checked-in core/operator
+  golden JSON are now canonical across standalone and unified DataFusion
+  builds. The current generated OpenAPI digest is
+  `83f71f1fb825f8c9a8bf6cc252a23a9ac60f4cc5893c689cf9d627ae2ee8e433`.
+- Index freshness correction: BM25/scalar index artifacts use the query
+  source's watermark, but the engine had still compared that coordinate to the
+  global transaction cursor. RRD now compares the same source-specific
+  coordinate at build and reuse. A second independent idempotency key proves
+  unrelated model mutations do not rebuild generation 1; the HTTP fixture's
+  document index correctly names source cursor 4 inside an 11-mutation unified
+  transaction.
+- Lifecycle/surface corrections: CLI process tests now exercise explicit
+  preflight, source-change re-attunement, exact pre/post-tool digest closure,
+  and the typed decision-before-verification transition. Generated MCP tests
+  derive counts from the authoritative catalogue instead of freezing 30 after
+  operation 31 landed. Runtime-written harness instructions and control-plane
+  command recognition use RRFlow/RRD terminology in the touched surface.
+- Distributed-test correction: the mutual-TLS snapshot test now follows the
+  leader legitimately elected at the highest Raft term instead of attempting
+  to force node 1 and timing out while node 3 was healthy and authoritative.
+- Edge regression found and fixed: composing the full engine into
+  `rrflow-edge` raised the release binary to 7,990,736 bytes, violating the
+  2,097,152-byte gate. `rrd-engine` now exposes one minimal `edge` feature and
+  one default `full` feature; the edge binary still consumes the engine API but
+  excludes DataFusion, server, cluster, and network stacks. Its verified
+  release size is 1,733,720 bytes. Edge offline build/query/reopen tests and
+  strict Clippy pass.
+- Remaining local CI-equivalent evidence also passes: controlled evaluation
+  evidence is 8/8 with zero recorded regressions; the one-dependency
+  `rrd-core` kernel boundary passes; edge and local-inference network dependency
+  denials pass; and the exact default-feature estate/server build, tests,
+  process recovery, and strict Clippy sequence used by the three-OS job passes
+  on Linux.
+- This is a local Linux checkpoint only. macOS/ARM and Windows remain
+  unverified until a reviewed change set is pushed and every required remote
+  job completes. The RRD-owned HNSW/TurboQuant public lifecycle, unified hybrid
+  retrieval, and ten-or-more independent persistent end-to-end scenario gate
+  remain open; no database-superiority claim is authorized by this checkpoint.
+
+## 2026-08-25 — RRD-owned persistent HNSW lifecycle
+
+- Composition correction: `RrdEngine` now owns both the one selected persistent
+  engine and its local immutable object tier. A borrowed `DataRuntimeRef` uses
+  the same stage, content verification, transaction, and idempotent commit
+  coordinator as the owning data runtime; RRD does not reopen storage or create
+  a second vector transaction authority.
+- Public search contract: vector searches explicitly select `exact`,
+  `allow_approximate`, or `require_approximate`. Approximate requests bind
+  `top_k <= exact_rerank <= ef_search` under the existing bounded-search limit.
+  Exact remains the serde/default behavior for existing clients. This reviewed
+  wire change advances the generated OpenAPI digest to
+  `9d3490d2b24d3b96ff0d941a1a2a1400221299be662862770b81bdcebcae37f9`.
+- Build contract: the engine accepts one bounded HNSW configuration for a
+  declared dense named vector, reads canonical vectors at one authenticated
+  stamp, builds deterministic immutable graph bytes, and atomically commits the
+  typed artifact-catalogue record plus verified object reference. A
+  content-equivalent ensure returns the existing generation; a changed source
+  builds exactly the next generation.
+- Freshness correction: planning compares an artifact to the newest relevant
+  vector mutation cursor, not the global runtime cursor. Catalogue publication,
+  trace, or unrelated model mutations therefore do not make the graph stale;
+  a later mutation of the addressed vector family does.
+- Search composition: ordinary `RrdEngine::search_vectors` reconstructs its
+  serving view from canonical vectors plus the authoritative object-backed
+  catalogue. Required approximate search fails closed when no fresh artifact
+  qualifies. Allow-approximate may select the exact oracle as an explicit
+  fallback; every HNSW candidate set is exactly reranked.
+- Persistence evidence: the engine test commits three named vectors, publishes
+  generation 1, proves content-idempotent ensure, selects HNSW, closes and
+  reopens RRD, reproduces the plan, commits a fourth vector, proves stale HNSW
+  denial and exact fallback, publishes generation 2, and selects HNSW again.
+  Existing missing/corrupt-object and atomic-record/object tests remain green.
+- Verification: all targets for `rrd-contract` and `rrd-engine` pass. Strict
+  all-target Clippy with `-D warnings` passes for `rrd-store`, `rrd-contract`,
+  and `rrd-engine`.
+- Remaining vector foundation: TurboQuant must enter this same build/reopen/
+  freshness path, followed by one hybrid BM25+dense engine contract. The new
+  index-build engine contract is intentionally not yet claimed as an HTTP,
+  MCP, SDK, CLI, or Connectome surface; those are regenerated after the
+  engine-level persistent scenario gate. Logical backup currently guarantees
+  referenced metadata, not inclusion of immutable vector payload bytes, so
+  vector-bearing backup/restore remains an explicit scenario/gap rather than a
+  completed claim.
+
+## 2026-08-25 — RRD-owned persistent TurboQuant lifecycle
+
+- Shared lifecycle: TurboQuant is a second physical artifact kind behind the
+  same authenticated `EnsureVectorIndex` engine contract, source-specific
+  freshness rule, immutable object tier, typed catalogue, CAS revision, reopen
+  path, and vector planner used by HNSW. It does not own a parallel collection,
+  transaction, or serving catalogue.
+- Typed configuration: the public engine contract selects 4-, 2-, 1.5-, or
+  1-bit TurboQuant encoding, deterministic seed, and declared one-stage filter
+  properties. The existing codec performs randomized orthogonal Hadamard
+  rotation, MSE centroids, compact packing, asymmetric query scoring, and
+  exact final reranking against canonical vectors.
+- Coexistence and selection: HNSW and TurboQuant may both be published for one
+  named vector under distinct stable projection identities. The shared planner
+  compares only fresh, identity-compatible, filter-complete candidates;
+  `require_approximate` removes exact fallback and selected TurboQuant in the
+  controlled fixture. Search still reports the actual chosen path.
+- Persistence/compression evidence: the engine fixture publishes a 2-bit
+  TurboQuant generation over four canonical dense vectors, verifies its packed
+  vector payload is smaller than the 32-bit source-vector payload, proves
+  content-idempotent ensure, exact top-hit reranking, closes and reopens RRD,
+  and reproduces the same TurboQuant plan digest.
+- Verification: all targets for `rrd-contract` and `rrd-engine` pass after the
+  HNSW/TurboQuant composition. Strict all-target Clippy with `-D warnings`
+  passes for `rrd-store`, `rrd-contract`, and `rrd-engine`.
+- Remaining retrieval foundation: BM25 and dense/approximate retrieval are
+  individually real but do not yet execute through one typed hybrid request,
+  fusion policy, read stamp, and result explanation. Compression effectiveness
+  at fixture scale is not a latency, recall, or database-superiority claim.
+
+## 2026-08-25 — Shared-stamp BM25 and vector hybrid retrieval
+
+- One engine operation: `RrdEngine::search_hybrid` requires both query and
+  vector-search authorization, captures one immutable RRD read stamp, binds
+  BM25 to its explicit known cursor, and executes vector retrieval against the
+  same stamp. It rejects any branch whose manifest or known cursor differs.
+- Typed contract: hybrid requests name the canonical document kind/text field,
+  BM25 query, named vector, dense/sparse/multivector query, optional one-stage
+  vector filter, exact/allow/require vector mode, bounded candidate/result
+  counts, and weighted reciprocal-rank parameters. Validation requires both
+  retrieval branches to carry non-zero bounded weights and requires
+  `top_k <= candidate_k`.
+- Deterministic fusion: text rows and vector hits join by the canonical vector
+  subject identity. Fusion uses one-based ranks and a versioned request-bound
+  weighted RRF formula; fused ties resolve by canonical subject identity. The
+  response preserves text/vector raw scores and ranks, both physical access
+  paths, both plan digests, the shared read coordinates, and a SHA-256 fusion
+  plan identity.
+- Physical paths remain honest: BM25 may use its fresh materialized index or
+  exact authoritative fallback; vectors may use exact scan, HNSW, or
+  TurboQuant under the existing freshness/filter rules. Hybrid does not
+  concatenate independent server responses or establish another catalogue.
+- Persistence evidence: the fixture builds a persisted BM25 document index and
+  persisted 2-bit TurboQuant vector artifact, selects both physical indexes at
+  one read stamp, joins their canonical document identities, ranks the shared
+  top hit first in both branches, closes and reopens RRD, and reproduces the
+  complete hybrid result including all three plan digests.
+- Verification: all targets for `rrd-contract` and `rrd-engine` pass; strict
+  all-target Clippy with `-D warnings` passes for `rrd-store`, `rrd-contract`,
+  and `rrd-engine`.
+- Remaining gate: hybrid/index administration is an engine contract, not yet a
+  generated HTTP/MCP/SDK/CLI/Connectome surface. Before surface expansion, the
+  next gate is ten or more independent persistent engine scenarios, including
+  object-bearing backup/restore behavior, with 100% success.
+
+## 2026-08-25 — Application-complete RRD backup activation boundary
+
+- Audit finding: logical backup catalogues declared immutable payloads
+  `referenced_only`, while restore replayed object-reference mutations without
+  retaining their bytes. A second independent defect stored vector-collection
+  and query-index catalogue records outside the logical archive. A restored
+  vector runtime therefore had canonical vectors and artifact references but
+  could not resolve its named collection and could not open the artifact after
+  source loss.
+- Stable-cut contract: the application backup now captures claim, runtime, and
+  control watermarks; exports one logical cut; collects its exact unique object
+  reference closure; captures final query/vector catalogue records and each
+  scope's authoritative catalogue revision; and rejects publication if any
+  source watermark changes during capture.
+- Authenticated artifacts: backup catalogue format 2 binds the logical archive
+  digest, an authenticated content-addressed object manifest, retained verified
+  object payloads, and an authenticated content-addressed catalogue manifest.
+  Public coverage now reports `catalogues=included`,
+  `object_payloads=included`, and `application_complete=true` for the RRD
+  service path. The lower-level logical-only API remains explicitly incomplete
+  with excluded catalogues and referenced-only objects.
+- Atomic activation: logical replay, catalogue materialization/revision
+  reconstruction, immutable payload streaming, engine reopen, catalogue
+  verification, and payload verification occur inside one hidden staging root.
+  The root is published only after every check succeeds. Existing-restore
+  idempotency also re-verifies catalogue state, revisions, and payloads.
+- Positive executable evidence:
+  `application_backup_restores_turboquant_payload_before_instance_activation`
+  publishes TurboQuant through `RrdEngine`, creates and restores an
+  application-complete backup, removes the source root, reopens the restored
+  RRD root, and requires the planner to select `turboquant`. The correctly
+  targeted run reports 1 passed, 0 failed.
+- Negative executable evidence:
+  `application_backup_payload_corruption_fails_before_restore_publication`
+  alters one retained payload byte, proves authenticated catalogue verification
+  fails, proves restore fails, and proves the target root remains absent. The
+  independent run reports 1 passed, 0 failed.
+- Wire review: adding truthful public catalogue coverage intentionally advances
+  the generated OpenAPI digest to
+  `35b62d736846ff1fc2c353c54de42b6455e9a4ec2d5a9e793eec724418c9cfdc`.
+- Scenario gate: `docs/rrd-persistent-scenario-matrix.md` freezes 15 independent
+  persistence/recovery scenarios and the required post-scenario workspace and
+  platform order.
+- Scenario execution: all 15 tests were then invoked as separate Cargo test
+  processes with exact filters. Every process reported 1 passed and 0 failed:
+  native identity/reopen; reasoning transaction replay; unified multi-model
+  evidence reopen; bitemporal correction history; authenticated historical
+  proofs; persistent snapshot leases; live-query deltas; persisted query-index
+  planner selection; HNSW/TurboQuant/BM25 hybrid persistence and staleness;
+  source-independent TurboQuant backup restore; payload-corruption denial;
+  logical-archive corruption/retry; cross-format logical recovery; resumable
+  migration fault boundaries; and persistent deny-by-default security.
+- Gate result: persistent scenario matrix 15/15 (100%) on the current Linux
+  workspace.
+- Full-workspace environment incident: the first locked, all-feature workspace
+  run stopped during linking because the shared Cargo target volume had only
+  2.4 GB free. No test failure was produced. A read-only disk audit identified
+  67 GB of disposable Cargo incremental state under the exact workspace cache
+  target. Only that incremental cache was removed; it is recoverable by a
+  rebuild. Available space increased to 68 GB.
+- Full-workspace executable evidence: with incremental compilation disabled and
+  the disposable pgvector test endpoint configured, `cargo test --workspace
+  --all-features --locked` completed successfully on Linux, including workspace
+  unit, integration, process, architecture, recovery, HTTP, MCP, edge,
+  Connectome, pgvector, and documentation tests.
+- Strict Clippy evidence: after the operator-requested pause ended, the exact
+  gate was rerun with incremental compilation disabled. `cargo clippy
+  --workspace --all-targets --all-features --locked -- -D warnings` completed
+  successfully on Linux with exit status 0.
+- Pause boundary: no specialized workflow gates, remote Linux/macOS/ARM/Windows
+  matrix, final diff audit, public-surface generation/reconciliation, commit, or
+  push was performed. The unified RRFlow foundation is not declared complete;
+  those gates and the wider capability/cohesion audit remain unfinished.
+
+## 2026-08-25 — RRFlow/RRD pre-release V1 identity cutover
+
+- Decision: RRFlow is the Reason Ready Flow product. RRD is the Reason Ready
+  Daemon and the product's single engine/runtime authority. The retired
+  pre-release identity is not preserved as a package, alias, forwarding crate,
+  protocol, environment fallback, persisted-format reader, or documentation
+  exception. Because this is pre-release, V1 was corrected in place; no
+  artificial V2 or compatibility shim was introduced.
+- Workspace cutover: the dependency graph now resolves through canonical
+  `rrd-*` engine packages and `rrflow-*` product adapters. RRFlowQL is the public
+  query language. The separately branded query-executor, data-service, and KV
+  identities were absorbed as responsibilities inside the RRD engine/package
+  graph rather than retained as products.
+- Persisted contract: WAL, record, batch, segment, index, snapshot, migration,
+  native keyspace/sequence, vector, HNSW, dense-map, and TurboQuant V1 markers
+  now use the frozen RRD identities recorded in
+  `docs/rrflow-rename-ledger.md`. Digest/media domains and checked-in fixtures
+  were regenerated against the canonical bytes.
+- Fixture handling: stale expected digests surfaced independently in core
+  unified-data, operator-knowledge, RRFlowQL planning, store migration, vector
+  search/HNSW, and RRD LSM persistence tests. Each fixture family received a
+  narrow, explicit golden-update path where one did not already exist; the
+  canonical fixtures were regenerated and then verified again without update
+  mode.
+- Architecture enforcement: `rrd-engine/tests/workspace_architecture.rs`
+  enumerates active tracked and untracked files through Git, ignores only
+  non-repository/generated locations, filters deleted index entries, scans
+  names and bytes case-insensitively, and rejects the retired identity plus
+  obsolete composition-root names. There is no source allowlist. The same
+  suite continues to expose known CLI and Connectome lower-layer dependency
+  bypasses as explicit cohesion debt.
+- Environment incident: the shared Cargo target volume reached capacity during
+  the DataFusion build. A package-aware `cargo clean --workspace --target-dir`
+  removed 38,792 rebuildable files belonging to this workspace (264.9 GiB),
+  leaving other project/dependency caches in place. The workspace was rebuilt
+  and all gates below completed after the cleanup.
+- Successful local gates on the same current tree:
+  - `cargo metadata --locked`
+  - `cargo fmt --all -- --check`
+  - `cargo check --workspace --all-targets --locked`
+  - `cargo test -p rrd-engine --test workspace_architecture --locked` (8/8)
+  - `cargo test -p rrd-lsm --locked`
+  - targeted core, operator-knowledge, query, store, and vector golden suites
+  - `cargo test --workspace --all-targets --locked --no-fail-fast`
+  - `cargo clippy --workspace --all-targets --locked -- -D warnings`
+  - repository identity/path scan and `git diff --check`
+- Scope truth: this completes the local identity cutover, not the whole RRFlow
+  product foundation. Connectome and the CLI still have recorded direct
+  lower-crate dependencies; capability-surface disposition is not yet fully
+  generated across engine, MCP, CLI, SDKs, and Connectome; the DataFusion plane
+  still lacks a custom streaming provider, pushdown, cancellation, memory/spill
+  qualification; sparse/late-interaction retrieval remains incomplete; and
+  the Fjall compatibility backend remains separate backend-removal debt.
+- Publication truth: this cutover is uncommitted and unpushed in the current
+  worktree. Remote Linux, macOS/ARM, and Windows CI has not run and is not
+  claimed.

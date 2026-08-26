@@ -5,30 +5,28 @@ members = [
     "crates/rrd-client",
     "crates/rrd-estate",
     "crates/rrd-security",
-    "crates/rrflow-engine",
+    "crates/rrd-engine",
     "crates/rrd-server",
-    "crates/vyrm-core",
-    "crates/vyrm-ql",
+    "crates/rrd-core",
+    "crates/rrd-query",
     "crates/rrd-store",
-    "crates/vyrm-mx",
-    "crates/vyrm-vector",
-    "crates/vyrm-operator",
-    "crates/vyrm-embed",
-    "crates/vyrm-edge",
-    "crates/vyrm-cluster",
+    "crates/rrd-vector",
+    "crates/rrd-operator-knowledge",
+    "crates/rrd-inference",
+    "crates/rrflow-edge",
+    "crates/rrd-cluster",
     "crates/rrd-kubernetes",
-    "crates/vyrm-kv",
-    "crates/vyrm-graph",
-    "crates/vyrm-node",
-    "crates/vyrm-cli",
-    "crates/vyrmd",
-    "crates/vyrm-eval",
+    "crates/rrd-maintenance",
+    "crates/rrd-lsm",
+    "crates/rrd-graph",
+    "crates/rrflow-cli",
+    "crates/rrflow-mcp",
+    "crates/rrflow-eval",
     "crates/connectome-ui",
 ]
 
 # Remaining future member. Current dependency arrows point inward:
-# core <- {store, graph} <- node <- {cli, vyrmd}; eval is standalone.
-#   "crates/vyrm-gate",
+# core <- {store, graph} <- runtime <- {cli, MCP}; eval is standalone.
 
 [workspace.package]
 edition = "2021"
@@ -41,6 +39,6 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 toml = "0.8"
 # Step T: spans at subsystem boundaries, zero-cost with no subscriber
-# installed. The kernel (vyrm-core) stays out — serde is its only dependency.
+# installed. The kernel (rrd-core) stays out — serde is its only dependency.
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }

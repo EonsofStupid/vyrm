@@ -83,15 +83,18 @@ fn catalog() -> LocalDeploymentCatalog {
                         version: "0.1.0".into(),
                         executable_sha256: file_sha256(&executable),
                         executable,
-                        arguments: vec![
-                            LocalArgument::Literal("--db".into()),
-                            LocalArgument::InstancePath(PathBuf::from("rrd-data")),
+                        preparation_arguments: vec![
+                            LocalArgument::Literal("initialize".into()),
+                            LocalArgument::Literal("--root".into()),
+                            LocalArgument::InstanceRoot,
                             LocalArgument::Literal("--instance".into()),
                             LocalArgument::InstanceId,
+                        ],
+                        arguments: vec![
+                            LocalArgument::Literal("--root".into()),
+                            LocalArgument::InstanceRoot,
                             LocalArgument::Literal("--bind".into()),
                             LocalArgument::Literal("127.0.0.1:0".into()),
-                            LocalArgument::Literal("--token-key-file".into()),
-                            LocalArgument::InstancePath(PathBuf::from("RRD.SERVER.SECRET")),
                             LocalArgument::Literal("--shutdown-request-file".into()),
                             LocalArgument::InstancePath(PathBuf::from("SHUTDOWN.REQUEST")),
                             LocalArgument::Literal("--shutdown-complete-file".into()),
@@ -380,7 +383,7 @@ fn real_rrd_child_survives_controller_reopen_and_stops_without_data_deletion() {
             .is_file(),
         "managed RRD child must confirm graceful shutdown"
     );
-    assert!(state_root.join("instances/project-a/rrd-data").is_dir());
+    assert!(state_root.join("instances/project-a/.rrflow/rrd").is_dir());
     assert_boundary(
         step(&database, &state_root, 120),
         ReconcileBoundary::Observed,
@@ -514,7 +517,7 @@ fn graceful_timeout_reauthenticates_then_uses_the_bounded_kill_fallback() {
             .exists(),
         "a forced fallback must not fabricate graceful completion"
     );
-    assert!(state_root.join("instances/project-a/rrd-data").is_dir());
+    assert!(state_root.join("instances/project-a/.rrflow/rrd").is_dir());
 }
 
 #[test]
@@ -613,7 +616,7 @@ fn controller_process_kill_matrix_converges_across_start_and_stop_effect_gaps() 
             .is_file(),
         "effect-gap stop must complete through the graceful protocol"
     );
-    assert!(state_root.join("instances/project-a/rrd-data").is_dir());
+    assert!(state_root.join("instances/project-a/.rrflow/rrd").is_dir());
     run_controller_and_kill(&database, &state_root, &catalog_path, &marker, 130, false);
     assert_eq!(
         operation_state(&database, "stop-project-a"),

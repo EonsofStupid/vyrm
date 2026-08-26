@@ -4,11 +4,11 @@ use rrd_estate::{
     LeaseRequest, MutationContext, ObservationRequest, ObservedPhase, ReceiptBoundary,
     ReceiptRequest, ScheduleBackup, SetDesired,
 };
+use rrd_store::{verify_backup_catalogue, NativeEngine, PersistentEngine};
 use std::path::Path;
 use std::process::{Command, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
-use rrd_store::{verify_backup_catalogue, NativeEngine, PersistentEngine};
 
 fn id(value: &str) -> CanonicalId {
     CanonicalId::new(value).unwrap()
@@ -94,7 +94,7 @@ fn prepare(database: &Path, state_root: &Path) {
             label: "daily.0001".into(),
         })
         .unwrap();
-    let source = state_root.join("instances/instance-a/rrd-data");
+    let source = state_root.join("instances/instance-a/.rrflow/rrd");
     drop(PersistentEngine::open(&source).unwrap());
 }
 

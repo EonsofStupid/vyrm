@@ -1,13 +1,13 @@
-use std::sync::Arc;
-use vyrm_cluster::{
+use rrd_cluster::{
     ArtifactTransferSessionInventory, ArtifactTransferSessionPolicy,
-    ArtifactTransferTelemetrySnapshot, ClusterId, NodeId, ShardId,
-    VyrmConsensusTraceTelemetrySnapshot, VyrmNodeStatus, VyrmNodeTelemetrySnapshot,
-    VyrmTlsGeneration, VyrmTransportAdmissionPolicy, VyrmTransportOperation, VyrmTransportOutcome,
-    VyrmTransportTelemetry, ARTIFACT_TRANSFER_TELEMETRY_VERSION,
+    ArtifactTransferTelemetrySnapshot, ClusterId, NodeId, RrdConsensusTraceTelemetrySnapshot,
+    RrdNodeStatus, RrdNodeTelemetrySnapshot, RrdTlsGeneration, RrdTransportAdmissionPolicy,
+    RrdTransportOperation, RrdTransportOutcome, RrdTransportTelemetry, ShardId,
+    ARTIFACT_TRANSFER_TELEMETRY_VERSION,
 };
-use vyrm_core::ScopeId;
+use rrd_core::ScopeId;
 use rrd_store::{Engine, PersistentEngine};
+use std::sync::Arc;
 
 fn artifact_telemetry(started_at: u64, observed_at: u64) -> ArtifactTransferTelemetrySnapshot {
     ArtifactTransferTelemetrySnapshot {
@@ -41,12 +41,12 @@ fn artifact_telemetry(started_at: u64, observed_at: u64) -> ArtifactTransferTele
 
 fn status(
     project: &ScopeId,
-    transport: &VyrmTransportTelemetry,
+    transport: &RrdTransportTelemetry,
     started_at: u64,
     observed_at: u64,
     trace_commits: u64,
-) -> VyrmNodeStatus {
-    VyrmNodeStatus {
+) -> RrdNodeStatus {
+    RrdNodeStatus {
         project_scope: project.clone(),
         cluster: ClusterId::new("cluster:connectome-test").unwrap(),
         shard: ShardId(7),
@@ -59,15 +59,15 @@ fn status(
         snapshot_index: Some(10),
         purged_index: Some(10),
         state: "leader".into(),
-        credentials: VyrmTlsGeneration {
+        credentials: RrdTlsGeneration {
             generation: 1,
             leaf_digest: "ab".repeat(32),
         },
-        telemetry: VyrmNodeTelemetrySnapshot {
+        telemetry: RrdNodeTelemetrySnapshot {
             observed_at,
             transport_ingress: transport.snapshot(observed_at).unwrap(),
             artifacts: artifact_telemetry(started_at, observed_at),
-            consensus_traces: VyrmConsensusTraceTelemetrySnapshot {
+            consensus_traces: RrdConsensusTraceTelemetrySnapshot {
                 started_at,
                 observed_at,
                 prepared_observations: trace_commits,
@@ -89,15 +89,15 @@ fn status(
 #[test]
 fn retained_cluster_samples_are_hash_linked_restart_aware_and_scope_bound() {
     let root = tempfile::tempdir().unwrap();
-    vyrm_node::InstanceManifest::ensure_dedicated(root.path()).unwrap();
-    let binding = vyrm_node::InstanceBinding::discover(root.path()).unwrap();
+    rrd_engine::InstanceManifest::ensure_dedicated(root.path()).unwrap();
+    let binding = rrd_engine::InstanceBinding::discover(root.path()).unwrap();
     let project = ScopeId::new(binding.manifest.id.clone()).unwrap();
-    let db = root.path().join(vyrm_node::STORE_DIR);
+    let db = root.path().join(rrd_engine::STORE_DIR);
     let store = Arc::new(PersistentEngine::open(&db).unwrap());
     let recorder =
         connectome_ui::ClusterTelemetryRecorder::new(Arc::clone(&store), binding.clone());
     let transport =
-        VyrmTransportTelemetry::new(VyrmTransportAdmissionPolicy::default(), 100).unwrap();
+        RrdTransportTelemetry::new(RrdTransportAdmissionPolicy::default(), 100).unwrap();
     let first = recorder
         .record(
             connectome_ui::RecordClusterTelemetry {
@@ -125,12 +125,12 @@ fn retained_cluster_samples_are_hash_linked_restart_aware_and_scope_bound() {
     transport
         .admit(
             &NodeId::new("node:peer").unwrap(),
-            VyrmTransportOperation::RuntimeCommit,
+            RrdTransportOperation::RuntimeCommit,
             64,
             120,
         )
         .unwrap()
-        .finish(VyrmTransportOutcome::Denied, 32)
+        .finish(RrdTransportOutcome::Denied, 32)
         .unwrap();
     let second = recorder
         .record(
@@ -153,17 +153,17 @@ fn retained_cluster_samples_are_hash_linked_restart_aware_and_scope_bound() {
         .any(|alert| alert.code == "transport_denied"));
 
     let restarted_transport =
-        VyrmTransportTelemetry::new(VyrmTransportAdmissionPolicy::default(), 200).unwrap();
+        RrdTransportTelemetry::new(RrdTransportAdmissionPolicy::default(), 200).unwrap();
     restarted_transport.accept_connection(32).unwrap();
     restarted_transport
         .admit(
             &NodeId::new("node:peer").unwrap(),
-            VyrmTransportOperation::Append,
+            RrdTransportOperation::Append,
             32,
             205,
         )
         .unwrap()
-        .finish(VyrmTransportOutcome::Allowed, 16)
+        .finish(RrdTransportOutcome::Allowed, 16)
         .unwrap();
     let third = recorder
         .record(
@@ -183,7 +183,7 @@ fn retained_cluster_samples_are_hash_linked_restart_aware_and_scope_bound() {
         .any(|alert| alert.code == "process_reset"));
 
     let regressed_transport =
-        VyrmTransportTelemetry::new(VyrmTransportAdmissionPolicy::default(), 200).unwrap();
+        RrdTransportTelemetry::new(RrdTransportAdmissionPolicy::default(), 200).unwrap();
     assert!(recorder
         .record(
             connectome_ui::RecordClusterTelemetry {

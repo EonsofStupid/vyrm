@@ -5,7 +5,7 @@
 | Suite | RRFlow: umbrella brand and deployable system |
 | Orchestration | RRO: Automaton/LFG execution, policy, and lifecycle composition |
 | Data runtime | RRD: unified durable contracts over storage capabilities |
-| Storage engine | Vyrm: native LSM authority; columnar path only after measured implementation |
+| Storage engine | RRFlow: native LSM authority; columnar path only after measured implementation |
 | Operator client | Connectome Panel: visualization, replay, comparison, and control |
 | Instance | One deployed, isolated runtime molded to a platform or an explicit umbrella |
 | Member | A project admitted to an umbrella instance |
@@ -58,7 +58,7 @@ writes and a persisted trace link records the exact project and external source
 revision.
 See [`runtime-tracing-operator-knowledge.md`](runtime-tracing-operator-knowledge.md).
 
-The portable boundary is now executable in `vyrm-operator`: immutable
+The portable boundary is now executable in `rrd-operator-knowledge`: immutable
 project/member and source/tenant/model bindings, snapshot/catalog/stable-revision
 evidence, exact/HNSW/IVFFlat controls, bounded results, safe pgvector SQL shapes,
 and idempotent vector-outbox work. A live PostgreSQL connection and deployment
@@ -85,12 +85,12 @@ unpostponed.
 
 ## Current implementation boundary
 
-The existing `.vyrm/store` layout and persisted routing root binding implement
-dedicated per-checkout isolation. A versioned `.vyrm/instance.toml` now carries
-relocatable identity and topology. Model-facing CLI paths and `vyrmd` reject a
+The existing `.rrflow/store` layout and persisted routing root binding implement
+dedicated per-checkout isolation. A versioned `.rrflow/instance.toml` now carries
+relocatable identity and topology. Model-facing CLI paths and `rrflow-mcp` reject a
 missing manifest or foreign store/root pairing.
 
-Missing `.vyrm/store` paths now initialize native `vyrmKV`. Runtime entry points
+Missing `.rrflow/store` paths now initialize native `RRD LSM`. Runtime entry points
 share `PersistentEngine`: an authenticated native `CURRENT` marker selects
 native on reopen, while an existing non-native directory selects the explicit
 Fjall compatibility adapter. Store identity is derived from durable bytes, not

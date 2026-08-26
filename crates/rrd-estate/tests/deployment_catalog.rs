@@ -26,7 +26,16 @@ fn generator_authenticates_an_explicit_executable_and_refuses_overwrite() {
     let deployment = &catalog.deployments["rrd-server"];
     assert_eq!(deployment.executable, server);
     assert_eq!(deployment.version, env!("CARGO_PKG_VERSION"));
-    assert!(deployment.arguments.contains(&LocalArgument::InstanceId));
+    assert!(deployment
+        .preparation_arguments
+        .contains(&LocalArgument::InstanceId));
+    assert!(deployment.arguments.windows(2).any(|arguments| {
+        arguments
+            == [
+                LocalArgument::Literal("--root".into()),
+                LocalArgument::InstanceRoot,
+            ]
+    }));
     assert!(matches!(
         deployment.shutdown,
         LocalShutdown::RequestFile {

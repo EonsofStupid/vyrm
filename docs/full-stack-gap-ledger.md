@@ -1,13 +1,13 @@
 # RRFlow/RRD full-stack capability ledger
 
-**Status:** authoritative sequencing baseline as of 2026-08-23
+**Status:** authoritative sequencing baseline, revised 2026-08-25
 **Upstream inventories:**
 [SurrealDB](surrealdb-capability-inventory.md) first, then
 [Qdrant](qdrant-capability-inventory.md)
 
 ## Why this ledger exists
 
-The project previously optimized a bounded VyrmKV/Fjall workload and added a
+The project previously optimized a bounded RRD LSM/Fjall workload and added a
 bounded SurrealDB 3.0.5 differential before enumerating either competitor's
 complete product surface. That was the wrong order. The measurements are valid
 for their fixtures, but they cannot establish a full database, vector product,
@@ -24,28 +24,28 @@ prototype, UI card, or design exists. Promotion requires:
 5. a retained evidence artifact or deterministic CI gate;
 6. an honest limitation and edition/deployment boundary.
 
-## Product ownership — stop putting the entire stack inside VyrmKV
+## Product ownership — one RRFlow product and one RRD authority
 
 ```text
 Clyffy
 └── RRFlow
-    ├── RRO: orchestration, accounts, entitlements, policy and estate control
-    │   ├── Automaton: workflow execution/integration
-    │   └── LFG: JIT context encoding/routing
-    ├── RRD: public durable AI data/runtime product
-    │   ├── VyrmQL + VyrmMX: query language, planner and execution
-    │   ├── vector/inference/realtime/security/API services
-    │   └── Vyrm: internal native LSM/MVCC persistence engine
-    └── Connectome Panel: local and enterprise operator/developer client
+    ├── RRD: Reason Ready Daemon, the one durable engine/runtime authority
+    │   ├── catalogue, transactions, security, audit and lifecycle truth
+    │   ├── RRFlowQL plus shared planning/execution
+    │   ├── document, relational, graph, vector, temporal, geo and AI state
+    │   └── rrd-lsm and specialized physical operators behind one contract
+    ├── rrflow: project CLI, preflight and exact command boundary
+    ├── adapters/SDKs: daemon, embedded, provider and language surfaces
+    └── Connectome: local and enterprise operator/developer client
 ```
 
 This boundary is mandatory:
 
-- **Vyrm/VyrmKV** owns physical durability, MVCC, WAL, manifests, segments,
-  compaction, checkpoints, snapshots, recovery, migration and storage evidence.
-- **RRD** owns multi-model semantics, query, vector, inference, transactions,
-  live feeds, auth enforcement, protocols and SDK contracts.
-- **RRO/RRFlow control plane** owns accounts, entitlements, organisations,
+- **RRD** owns physical durability, the shared catalogue and read stamp,
+  multi-model semantics, transactions, query, indexes, live feeds, AI runtime
+  state, auth enforcement, audit, recovery, and its public protocol. Internal
+  physical packages do not become independent engines or product authorities.
+- **RRFlow's control plane** owns accounts, entitlements, organisations,
   estates, desired state, deployment reconciliation, upgrades, backups,
   placement, fleet health and policy.
 - **Connectome** owns operator/developer interaction and visualization. It
@@ -53,14 +53,96 @@ This boundary is mandatory:
 - **Automaton/LFG** remain external runtime/context components with typed
   integration boundaries. They do not become hidden database behavior.
 
+Existing RRFlow-named prose below is retained only where it describes historical
+implementation evidence or durable-format migration input. It is not a target
+product boundary. New contracts use RRFlow/RRD names.
+
+## Master execution control board
+
+The machine-readable scope and dependency graph is
+[`rrflow.workplan.toml`](../rrflow.workplan.toml). This ledger explains it; it
+does not maintain a second status authority. RRD persists the active plan
+revision, work-item state, lifecycle events, evidence, and decisions. A box is
+crossed only by the runtime's verified transition on the current plan/tree
+revision, never because code or prose appears to exist.
+
+Status at this checkpoint: **all gates below are open until G00 enforcement
+revalidates existing evidence on the current tree.** Prior code and tests are
+inputs to that validation, not permission to pre-check the board.
+
+- [ ] **G00 — enforced work control:** strict work-plan contract; canonical
+  lifecycle state machine; active-item planning/mutation gate; evidence-only
+  verification; generated status surfaces.
+- [ ] **G01 — V1 identity and one-engine cohesion:** complete RRFlow/RRD rename;
+  one `rrd-engine` authority; zero physical bypasses; one capability catalogue.
+- [ ] **G02 — durable storage and recovery:** WAL/MVCC/LSM qualification;
+  object-complete archives; backup/retention/restore; migrations; time travel;
+  S3/tiered persistence.
+- [ ] **G03 — unified multi-model query and realtime:** one schema/catalogue;
+  concurrent CRUD/transactions; RRFlowQL; Arrow/DataFusion; scalar/full-text
+  indexes; push live queries; governed triggers/functions.
+- [ ] **G04 — vector, retrieval, compression, and inference:** collections and
+  points; filtered persistent HNSW; sparse/hybrid/multivector/late interaction;
+  TurboQuant; memory tiers; native inference; GPU qualification.
+- [ ] **G05 — service, transactions, security, and audit:** embedded/local/
+  remote parity; authenticated sessions and transactions; TLS and granular
+  authorization; unavoidable comprehensive structured audit.
+- [ ] **G06 — generated public surfaces:** one generated API/MCP/CLI/SDK/UI
+  catalogue; complete task-level MCP; daemon MCP; CLI; Rust, TypeScript,
+  Python, Go-edge, Java, and .NET SDK qualification.
+- [ ] **G07 — provider-neutral Clyffy enforcement:** deterministic topology and
+  attunement; task-specific preflight; architecture/pattern gate; exact-argv
+  proxy; provider/local adapter conformance and honest coverage.
+- [ ] **G08 — estate, distributed, and Kubernetes:** persistent estate and
+  reconciler; RRD-backed consensus data plane; Multi-AZ and hybrid-cloud
+  qualification.
+- [ ] **G09 — Connectome:** native release artifacts; remove SurrealDB aliases
+  and temporary UI; generated RRD connection path; complete data/operations
+  workspaces; replay/NodeTrace; live enforced-work-plan view.
+- [ ] **G10 — persistent end-to-end qualification:** 14 runtime-control and at
+  least 10 cohesive-data reopen scenarios at 100%; real process/surface matrix;
+  destructive recovery and security faults.
+- [ ] **G11 — bounded competitive evidence:** pinned SurrealDB, Qdrant, and
+  Fjall differentials; correctness and recovery before performance; public raw
+  results; every loss disclosed.
+- [ ] **G12 — firm-alpha release:** repository and architecture gates; Linux,
+  macOS/ARM, Windows, edge, and browser CI; signed/package install/update/
+  rollback; one consistent public status.
+
+### Runtime transition rules
+
+1. `workplan.loaded` validates the checked-in V1 plan and persists its digest.
+2. `workitem.activated` is allowed only when every dependency is verified.
+3. `plan.recorded` must bind the active work item, source-tree digest,
+   attunement/preflight receipts, architecture decision, and verification plan.
+4. `tool.proposed` and every mutating command must bind that same chain.
+5. `tool.completed` records an observation; it never completes the item.
+6. `verification.completed` carries exact current-revision evidence.
+7. `workitem.verified` is the only transition that crosses a box. It fails
+   closed if any required evidence is missing, failed, stale, skipped, or from
+   another platform/revision.
+8. Scope changes require a reviewed plan revision event. They cannot be hidden
+   in an implementation diff.
+9. RRD reopen must replay the identical plan aggregate and consumed permits.
+10. CLI, MCP, hooks, SDKs, and Connectome project this state; none may edit a
+    checkbox or manufacture completion independently.
+
 ## Current truth
 
 ### What “true persistence” means today
 
-Vyrm has **real local alpha persistence**, not a wrapper: native WAL and
-recovery, MVCC, authenticated manifests/segments, atomic multi-family runtime
-commits, snapshots/checkpoints, compaction/GC, crash injection, reopen tests,
-and a staged Fjall migration exist. That is substantial.
+RRD has **real local alpha persistence**, not a wrapper: its native `rrd-lsm`
+path provides WAL and recovery, MVCC, authenticated manifests/segments, atomic
+multi-family runtime commits, snapshots/checkpoints, compaction/GC, crash
+injection, reopen tests, and a staged Fjall migration.
+
+The single-node process boundary is now project-bound locally: an explicit
+provisioning action creates or verifies one immutable instance identity,
+`rrd-server` discovers that project root and opens only its canonical
+`.rrflow/rrd` store, and RRD persists the canonical project/store binding so a
+normal restart cannot silently rebind copied or moved data. The estate process
+catalogue and generated Kubernetes workload use the same initialize-then-serve
+contract. This is D1 evidence, not distributed or managed-cloud qualification.
 
 It is not yet a complete persistent product because these surrounding gates
 remain open:
@@ -73,6 +155,26 @@ remain open:
 - estate-owned backup identities and recovery objectives;
 - authenticated remote client/session transaction boundaries;
 - public stable SDK/API compatibility.
+
+### Frozen cohesive breadth requirements — 2026-08-25
+
+These requirements are product gates and shared-catalogue rows. They may not be
+claimed from a UI card, type, or isolated physical component:
+
+| Requirement | Current executable truth | Missing gate |
+|---|---|---|
+| Concurrent document, relational, native graph-edge, vector, event, time-series and geo storage | The typed RRD transaction can atomically commit these models; `rrflow_data_commit` exercises that path with exact authorization and reopen replay | Complete public administration, indexes, query/search parity and cross-model transaction qualification |
+| Real-time live queries and changefeeds | Bounded engine/HTTP/MCP poll, read and follow operations exist | Push/subscription transport, backpressure, retention and distributed ordering qualification |
+| Vector and full-text retrieval | Dense/sparse/multi-dense storage plus MCP collection, point and exact-search paths exist; HNSW/TurboQuant engine artifacts also exist | Collection-bound approximate serving, full-text engine/index implementation, hybrid planner and production recall/latency evidence |
+| Time travel and rollback | RRFlowQL exposes valid-time and known-at historical reads | Explicit audited forward rollback/restore semantics; history must never be silently rewritten |
+| In-memory, embedded, single-node, browser/WASM, mobile/edge and distributed modes | Embedded persistent and single-node daemon paths exist; underlying test/memory and experimental edge/distributed pieces exist | One logical conformance suite and platform-specific durability/security/resource qualification for every advertised mode |
+| Autonomous agent memory | Bitemporal facts, exact recall, context, routing, reasoning events, attunement and lifecycle enforcement exist | Hybrid recall, reflection, ingestion, semantic code search, governed retirement and evaluation evidence under one RRD authority |
+| Managed cloud | Kubernetes and estate foundations exist | Tenant control plane, autoscaling, granular capability administration, secure outbound-network policy, upgrades, recovery and Multi-AZ qualification |
+
+The engine-owned product capability catalogue now records the unfinished
+full-text, rollback, deployment, autonomous-memory, granular-security and
+managed-cloud rows as `planned` across every surface. This prevents MCP,
+Connectome, CLI or documentation from presenting them as executable early.
 
 ### What “estate” means
 
@@ -121,11 +223,11 @@ Rust types. No SDK or control plane is built against an unstable private API.
 capability negotiation; canonical typed resource paths; request, operation,
 idempotency and deadline coordinates; mutation idempotency requirements;
 response framing; and stable error codes. Its checked-in JSON fixture and
-adversarial decode tests pass without depending on any internal Vyrm crate.
+adversarial decode tests pass without depending on any internal RRFlow crate.
 See [`rrd-public-contract.md`](rrd-public-contract.md). Further endpoint payload
 schemas extend this versioned boundary in the slice that implements them.
 
-### F1 — close Vyrm persistence as an operable storage product
+### F1 — close RRD persistence as an operable storage product
 
 **Status:** in progress. The current persistence-format changes passed their
 format, migration, crash, corruption, disk-full, soak, and lint gate. Logical
@@ -147,7 +249,7 @@ signing/encryption, streaming source spill, and general cross-version migration
 remain before the F1 exit gate.
 
 **Native migration ledger landed 2026-08-23:** the only admitted application
-format edge is the exact successor TextV1 → `VYRSK002` TagV2. Its authenticated
+format edge is the exact successor TextV1 → `RRDSK002` TagV2. Its authenticated
 ledger resumes export/import/verify/two-rename cutover, preserves all 18
 keyspaces, retains the predecessor and archive, rejects a source modified after
 export, and is idempotent after completion. Fault injection covers every
@@ -179,14 +281,14 @@ canonical reads and audit roots.
 
 **Status:** dependency contract frozen in
 [`rrd-server-v1.md`](rrd-server-v1.md); persistent coordinator and async
-loopback HTTP alpha implemented. The contract keeps `vyrmd` as an MCP adapter,
+loopback HTTP alpha implemented. The contract keeps `rrflow-mcp` as an MCP adapter,
 requires public payload types before handlers, denies non-loopback exposure
 before F4, and makes accepted-request idempotency durable rather than
 process-local.
 
 **Implementation progress 2026-08-23:** `rrd-contract` now owns bounded session
 limits/leases, transaction leases/states, typed public multi-model mutations,
-and generalized commit receipts without importing private Vyrm types. Engine
+and generalized commit receipts without importing private RRFlow types. Engine
 now provides an
 atomic idempotent claim append: client key, operation SHA-256, and accepted
 sequence receipt share the authoritative claim transaction in the existing
@@ -217,12 +319,12 @@ bounds, metrics, and released-version client qualification keep F2 open.
 The public service now also exposes the first F6 breadth path through
 `POST /v1/query`: a transport-neutral, strictly bounded `ExecuteQuery`
 contract is authenticated against the persistent session, restricted to the
-server's exact instance scope, and executed by the real VyrmQL parser and
-VyrmMX catalogue/binder/planner/executor. The response preserves typed values,
+server's exact instance scope, and executed by the real RRFlowQL parser and
+RRD query executor catalogue/binder/planner/executor. The response preserves typed values,
 read manifest, cursor, schema revision, plan candidates, exactness/order/auth
 contracts, and execution evidence. A real-socket test proves unauthenticated
 and wrong-scope denial plus an exact persisted-record result. This does not yet
-provide mutating VyrmQL, live queries, or durable service-query spans.
+provide mutating RRFlowQL, live queries, or durable service-query spans.
 
 The same public transaction resource now has a `data` scope whose typed
 vocabulary lowers explicitly into one authoritative `RuntimeCommit`. Schema,
@@ -233,7 +335,7 @@ commit identity. The coordinator freezes that identity in its durable prepared
 intent and resolves lost acknowledgements from the runtime commit catalogue.
 A real-socket test commits all nine families, restarts, replays the identical
 receipt, and observes no duplicate changes. Generalized read-your-writes,
-data-scope process-kill qualification, mutating VyrmQL, object upload/staging,
+data-scope process-kill qualification, mutating RRFlowQL, object upload/staging,
 and model-specific administration endpoints remain open.
 
 `POST /v1/vector/search` now exposes the canonical vector truth path over an
@@ -311,7 +413,7 @@ work or loss of operation history.
 **Implementation progress 2026-08-23:** the first persistent authority slice is
 landed in `rrd-estate` and frozen in
 [`estate-control-v1.md`](estate-control-v1.md). A bounded per-estate aggregate
-uses Vyrm control-state CAS plus its authenticated journal to advance monotonic
+uses RRFlow control-state CAS plus its authenticated journal to advance monotonic
 desired generations, observed evidence, idempotency bindings, operation state,
 fenced lease epochs, append-only receipts, heartbeat/runtime evidence and
 derived activity. Memory/native tests prove key rebinding denial, stale-worker
@@ -373,7 +475,7 @@ It stores bounded user/service/node principals with credential verifiers,
 validity/disable state, and exact action/resource-prefix grants. Missing policy,
 unknown or expired principals, wrong credentials, ungranted actions, and wrong
 resource prefixes deny by default. Typed redacted audit records are immutable,
-idempotent, and replayed through the authenticated Vyrm control journal.
+idempotent, and replayed through the authenticated RRFlow control journal.
 Native reopen tests prove policy and audit persistence without journaling the
 raw credential. When security state exists, the real server now authenticates
 session creation with a principal/API key, durably binds that principal to the
@@ -423,9 +525,10 @@ every public mutation and prove denied actions do not partially apply.
 
 **Order:** Rust embedded/client → TypeScript → Python → Go → Java/.NET.
 
-**Status:** in progress. `rrd-contract::EndpointCatalogue` now freezes all 28
+**Status:** in progress. `rrd-contract::EndpointCatalogue` now freezes all 31
 current routes by canonical operation, method/path template, authentication,
-mutation rule, security action, and public request/response type. Every public
+mutation rule, fixed or descriptor-derived security action, and public
+request/response type. Every public
 wire type derives JSON Schema, and deterministic OpenAPI 3.1 is built from that
 catalogue rather than maintained separately. The server publishes both at
 `GET /v1/schema/endpoints` and `GET /v1/schema/openapi`; a frozen SHA-256 fails
@@ -460,7 +563,7 @@ client at walking-skeleton status.
 The Python walking skeleton is implemented in `sdks/python` and specified by
 [`rrd-python-client-v1.md`](rrd-python-client-v1.md). Its shell-free generator
 derives the closed operation/route/auth/mutation map from the same OpenAPI
-authority. The synchronous HTTPX client covers all 28 operations and enforces
+authority. The synchronous HTTPX client covers all 31 operations and enforces
 bounded responses, correlation, resource identity, mutation idempotency,
 absolute/per-attempt deadlines, safe retry, API-key/session authentication,
 typed errors, and loopback-only cleartext. Pydantic validates response
@@ -470,7 +573,7 @@ real-server conformance, and publication remain open.
 
 The Go walking skeleton is implemented in `sdks/go` and specified by
 [`rrd-go-client-v1.md`](rrd-go-client-v1.md). Its shell-free generator emits a
-closed operation constant set and route/auth/mutation map for all 28 operations
+closed operation constant set and route/auth/mutation map for all 31 operations
 from the same OpenAPI authority. The standard-library client uses caller
 contexts, bounded response reads, strict envelopes, correlated identities,
 resource validation, mutation idempotency, combined deadlines, safe transport
@@ -481,7 +584,7 @@ conformance, and publication remain open.
 
 The Java walking skeleton is implemented in `sdks/java` and specified by
 [`rrd-java-client-v1.md`](rrd-java-client-v1.md). Its generator emits a closed
-operation enum with route/auth/mutation metadata for all 28 operations. Java's
+operation enum with route/auth/mutation metadata for all 31 operations. Java's
 HTTP client plus Jackson 3.2 enforce bounded reads, exact envelopes, correlation,
 resources, mutation idempotency, combined deadlines, safe I/O retry,
 authentication, redirect denial, and loopback-only cleartext. Maven/Java 21
@@ -492,7 +595,7 @@ dependency verification, shared conformance, and publication remain open.
 The asynchronous .NET walking skeleton is implemented in `sdks/dotnet` and
 specified by [`rrd-dotnet-client-v1.md`](rrd-dotnet-client-v1.md). Its generator
 emits a closed operation enum/switch with route/auth/mutation metadata for all
-28 operations. `HttpClient` and `System.Text.Json` provide a third-party-free
+31 operations. `HttpClient` and `System.Text.Json` provide a third-party-free
 runtime with caller cancellation, bounded streaming, exact envelopes,
 correlation, resources, mutation idempotency, combined deadlines, safe retry,
 authentication, redirect denial, and loopback-only cleartext. .NET 10 nullable
@@ -503,7 +606,7 @@ shared real-server/version conformance, and publication remain open.
 **Deliverables**
 
 - Generated protocol types plus intentional ergonomic layers.
-- Auth/session, transaction, VyrmQL, CRUD/schema, vector/query, live feed,
+- Auth/session, transaction, RRFlowQL, CRUD/schema, vector/query, live feed,
   snapshot/backup and estate clients.
 - Async, timeout, cancellation, retry and idempotency behavior.
 - Capability/version negotiation and typed error mapping.
@@ -520,18 +623,18 @@ already atomically commit schema, claim, record, relation, event, vector,
 series, geo, and object-reference mutations; this is retained as the write
 authority rather than rebuilt. The first read-breadth slice adds
 `series:<kind>` and `geo:<kind>` to the existing record/relation/event/claim
-VyrmQL grammar. They bind and execute through the same explicit valid/known
+RRFlowQL grammar. They bind and execute through the same explicit valid/known
 time, captured read stamp, content-addressed exact plan, deterministic ordering,
-and scan/row/output/batch budgets. Memory, Fjall compatibility, native VyrmKV,
+and scan/row/output/batch budgets. Memory, Fjall compatibility, native RRD LSM,
 and secured real-RRD tests prove typed results and time cutoffs. Details and
 current built-in-field limits are in
-[`vyrmql-multimodel-v1.md`](vyrmql-multimodel-v1.md).
+[`rrflowql-multimodel-v1.md`](rrflowql-multimodel-v1.md).
 The next slice adds a `traverse:<relation>` source with a mandatory canonical
 start reference, outgoing/incoming/both direction, and depth in `1..=32`.
 Binding proves the types against the stamped schema; execution walks only the
 visible bitemporal graph snapshot, orders edges canonically, suppresses cycles,
 and emits one deterministic shortest-path row per reached node. Memory, Fjall
-compatibility, native VyrmKV, and secured RRD tests cover it.
+compatibility, native RRD LSM, and secured RRD tests cover it.
 Typed predicates now carry their comparison operator through the AST, bound
 plan, digest, and executor. `=`, `!=`, `<`, `<=`, `>`, and `>=` round-trip to a
 canonical query; ordering is fail-closed to integer, unsigned, and string
@@ -539,15 +642,15 @@ operands. The event-cursor point path remains eligible only for equality.
 The first index lifecycle slice persists schema-bound compound definitions in
 CAS-protected control state, journals every lifecycle transition, fences stale
 builder generations, and binds readiness to configuration/artifact digests and
-an exact per-scope source cursor. VyrmMX emits matching prefix/freshness
+an exact per-scope source cursor. RRD query executor emits matching prefix/freshness
 candidates. It now builds durable content-addressed exact snapshot artifacts
 and selects them only at the exact source cursor and valid-time after complete
 identity/digest revalidation; stale queries use the authoritative log. See
-[`vyrmql-index-catalogue-v1.md`](vyrmql-index-catalogue-v1.md).
+[`rrflowql-index-catalogue-v1.md`](rrflowql-index-catalogue-v1.md).
 
 **Deliverables**
 
-- Mutating VyrmQL and multi-statement transactions.
+- Mutating RRFlowQL and multi-statement transactions.
 - General document/record/edge CRUD and schemafull/schemaless policy.
 - Relational links, richer graph/path algebra, and spatial operators.
 - Materialized ordinary/compound/unique/count, spatial and full-text indexes;
@@ -626,11 +729,11 @@ update/recovery matrices on fixed hardware and corpora against current Qdrant.
 ### F8 — qualify distributed and Kubernetes operation
 
 **Status:** experimental distributed and Kubernetes foundations present; no
-Multi-AZ product qualification. `vyrm-cluster` freezes canonical three-zone placement,
+Multi-AZ product qualification. `rrd-cluster` freezes canonical three-zone placement,
 per-shard quorum semantics, explicit partial-order snapshot vectors, transfer
 and reshard cutovers, transport identities, bounded telemetry, and restart-safe
 artifact sessions. Its OpenRaft adapter runs both an in-process three-voter
-cluster and independent node processes over native Vyrm storage. Tests prove
+cluster and independent node processes over native RRFlow storage. Tests prove
 replication, leader loss/failover, membership change, snapshot install,
 corruption denial, mTLS peer-identity denial, minority-partition write/read
 denial, and survival of every single disk loss in the modeled topology.
@@ -644,7 +747,7 @@ volume executable. Tests freeze CRD drift, RBAC exclusions, unsafe-spec denial,
 and exact rendered resources.
 
 This remains a single-node Kubernetes alpha, not Multi-AZ. The public RRD data
-plane is not yet backed by `vyrm-cluster`; the controller therefore refuses to
+plane is not yet backed by `rrd-cluster`; the controller therefore refuses to
 misrepresent independent RRD pods as replicas. There is no published release
 image/SBOM/signature, real-cluster conformance, RRD/Raft integration, safe
 rolling-upgrade controller, CSI recovery workflow, certificate rotation
@@ -669,7 +772,7 @@ RTO, availability and consistency; anything not demonstrated stays unclaimed.
 
 **Status:** local developer foundation present; authoritative remote operations
 remain open. `connectome-ui` is a real loopback application over one physically
-bound Vyrm instance. It renders estates, logical tables, data models, source
+bound RRFlow instance. It renders estates, logical tables, data models, source
 routes, query results, vector artifacts, retention, reasoning flights, temporal
 changes, causal traces, runtime graphs, and retained cluster observations.
 Freeze, rewind, forward, speed control, raw-event inspection, weak/strong prompt
@@ -677,7 +780,7 @@ cohorts, and explicit capability maturity are backed by retained evidence.
 
 Commit `e21eb6e` adds the first connection-profile authority. The Connections
 workspace negotiates the public RRD capability handshake against an exact local
-instance before committing a bounded profile through Vyrm control-state CAS and
+instance before committing a bounded profile through RRFlow control-state CAS and
 its hash-chained journal. Retries are idempotent, key rebinding is denied, only
 credential references are retained, non-loopback cleartext is denied, and
 remote profiles require HTTPS. Authenticated data access, selecting a connected
@@ -738,3 +841,14 @@ each remaining product layer before returning to engine benchmark tuning:
 7. only then resume bounded performance optimization and comparative claims.
 
 Remote provisioning remains prohibited until the F4 baseline is executable.
+
+### Cross-cutting foundation — governed context maintenance
+
+Connectome's context-maintenance contract is frozen in
+[`context-maintenance-v1.md`](context-maintenance-v1.md). It treats the claim and
+typed runtime logs as immutable authority, requires an authenticated F1 archive
+before proposing a smaller working projection, and gates application on
+instance-specific recall/replay differentials. The executable state machine,
+real Connectome controls, prompt-flight validation, projection activation, and
+compensating rollback are the current F9 slice; no fixed 50–75% target is
+presented as universally safe.

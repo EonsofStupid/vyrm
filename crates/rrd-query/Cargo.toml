@@ -1,0 +1,18 @@
+[package]
+name = "rrd-query"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "RRFlowQL syntax, catalog binding, deterministic planning, and execution."
+
+[dependencies]
+rrd-core = { path = "../rrd-core" }
+rrd-store = { path = "../rrd-store" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+datafusion = { version = "=55.0.0", default-features = false, features = ["recursive_protection"] }
+futures = "0.3"
+
+[dev-dependencies]
+tempfile = "3"

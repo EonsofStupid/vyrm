@@ -1,11 +1,11 @@
-use rrd_store::{Engine, Error, MemoryEngine, NativeEngine, Store};
-use std::collections::BTreeMap;
-use vyrm_core::{
+use rrd_core::{
     Claim, Predicate, Producer, RuntimeCommit, RuntimeMutation, RuntimeProperties,
     RuntimePropertySchema, RuntimeRecord, RuntimeRecordSchema, RuntimeRef, RuntimeRelation,
     RuntimeRelationSchema, RuntimeSchemaRegistry, RuntimeType, RuntimeValue, RuntimeValueType,
     ScopeId, Subject,
 };
+use rrd_store::{Engine, Error, MemoryEngine, NativeEngine, Store};
+use std::collections::BTreeMap;
 
 fn record(kind: &str, id: &str) -> RuntimeRecord {
     RuntimeRecord {

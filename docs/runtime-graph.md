@@ -8,7 +8,7 @@ The product architecture is:
 RRFlow
 ├─ RRO orchestration: Automaton → LFG
 ├─ RRD data runtime
-│  └─ Vyrm native LSM persistence engine
+│  └─ RRFlow native LSM persistence engine
 └─ Connectome Panel: operator client and visualizer
 ```
 
@@ -18,7 +18,7 @@ chain-of-thought.
 
 ## Authoritative contract
 
-`vyrm-core::RuntimeCommit` is the atomic unit. A commit declares:
+`rrd-core::RuntimeCommit` is the atomic unit. A commit declares:
 
 - a validated `ScopeId`;
 - actor and caller-supplied time;
@@ -86,7 +86,7 @@ Connectome exposes read-only development endpoints:
 GET /api/changes?after=0&limit=256
 GET /api/runtime/schema
 GET /api/runtime/retention
-GET /api/runtime/query?ql=<percent-encoded-vyrmQL>
+GET /api/runtime/query?ql=<percent-encoded-RRFlowQL>
 GET /api/runtime/graph?valid_at=<millis>&cursor=<cursor>
 GET /api/runtime/diff?from=<cursor>&to=<cursor>&valid_at=<millis>
 ```
@@ -113,6 +113,6 @@ The following are not represented as complete:
 4. Retention checkpoints and archival for high-volume event histories.
 
 Fjall is the transitional compatibility adapter, not the destination. The
-Vyrm-native engine now implements the same contracts, proven against both
+RRFlow-native engine now implements the same contracts, proven against both
 Fjall and `MemoryEngine`. Fjall remains useful as a live compatibility path and
 as the performance/correctness threshold the native engine must meet or beat.

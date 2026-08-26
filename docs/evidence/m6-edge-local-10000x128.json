@@ -1,11 +1,11 @@
 {
-  "schema": "vyrm-m6-edge-evidence-v1",
+  "schema": "rrflow-m6-edge-evidence-v1",
   "recorded_at": "2026-08-19",
   "profile": {
     "documents": 10000,
     "dimensions": 128,
     "queries": 25,
-    "backend": "vyrm:feature-hash:cpu:v1",
+    "backend": "rrflow:feature-hash:cpu:v1",
     "network_policy": "deny",
     "memory_placement": "mmap",
     "kernel": "runtime-dispatched-avx2"
@@ -40,21 +40,21 @@
     "network_runtime_dependencies_max": 0
   },
   "dependency_audit": {
-    "command": "cargo tree --locked -p vyrm-edge --edges normal",
+    "command": "cargo tree --locked -p rrflow-edge --edges normal",
     "network_runtime_dependencies": [],
     "direct_runtime_dependencies": [
       "serde",
       "serde_json",
-      "vyrm-core",
-      "vyrm-embed",
-      "vyrm-vector"
+      "rrd-core",
+      "rrd-inference",
+      "rrd-vector"
     ]
   },
   "commands": [
-    "cargo build --locked --release -p vyrm-edge",
-    "cargo run --locked --release -p vyrm-edge --example edge_evidence -- /tmp/vyrm-m6-edge-current-10000x128.vyrdense 10000 128",
-    "/usr/bin/time -v vyrm-edge query /tmp/vyrm-m6-edge-current-10000x128.vyrdense 'document 0 modular runtime hook event partition 0' 10 128 7",
-    "cargo tree --locked -p vyrm-edge --edges normal"
+    "cargo build --locked --release -p rrflow-edge",
+    "cargo run --locked --release -p rrflow-edge --example edge_evidence -- /tmp/rrflow-m6-edge-current-10000x128.rrdense 10000 128",
+    "/usr/bin/time -v rrflow-edge query /tmp/rrflow-m6-edge-current-10000x128.rrdense 'document 0 modular runtime hook event partition 0' 10 128 7",
+    "cargo tree --locked -p rrflow-edge --edges normal"
   ],
   "scope": "Single local fixed-seed observation. FeatureHash proves the offline lifecycle and provenance path, not state-of-the-art semantic quality or superiority over Qdrant."
 }

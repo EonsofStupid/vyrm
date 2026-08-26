@@ -3,17 +3,17 @@
 //! A sample proves what Connectome observed from one validated node status at
 //! one runtime cursor. It does not turn process counters into consensus truth.
 
-use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, BTreeSet, VecDeque};
-use std::sync::{Arc, Mutex};
-use vyrm_cluster::{VyrmNodeStatus, VyrmTransportOperationMetrics, VyrmTransportTelemetrySnapshot};
-use vyrm_core::{
+use rrd_cluster::{RrdNodeStatus, RrdTransportOperationMetrics, RrdTransportTelemetrySnapshot};
+use rrd_core::{
     digest, RuntimeCommit, RuntimeMutation, RuntimeProperties, RuntimePropertySchema,
     RuntimeRecord, RuntimeRecordSchema, RuntimeRef, RuntimeSchemaRegistry, RuntimeType,
     RuntimeValue, RuntimeValueType, ScopeId,
 };
-use vyrm_node::InstanceBinding;
+use rrd_engine::InstanceBinding;
 use rrd_store::{Engine, Error as StoreError, PersistentEngine};
+use serde::{Deserialize, Serialize};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::sync::{Arc, Mutex};
 
 pub const CLUSTER_TELEMETRY_SAMPLE_VERSION: u16 = 1;
 const SAMPLE_TYPE: &str = "cluster_telemetry_sample";
@@ -23,7 +23,7 @@ const MAX_HISTORY_LIMIT: usize = 4_096;
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RecordClusterTelemetry {
-    pub status: VyrmNodeStatus,
+    pub status: RrdNodeStatus,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -78,7 +78,7 @@ struct ClusterTelemetrySamplePayload {
     process_reset: bool,
     delta: Option<ClusterTelemetryDelta>,
     alerts: Vec<ClusterAlert>,
-    status: VyrmNodeStatus,
+    status: RrdNodeStatus,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -93,7 +93,7 @@ pub struct ClusterTelemetrySample {
     pub process_reset: bool,
     pub delta: Option<ClusterTelemetryDelta>,
     pub alerts: Vec<ClusterAlert>,
-    pub status: VyrmNodeStatus,
+    pub status: RrdNodeStatus,
     pub digest: String,
 }
 
@@ -572,7 +572,7 @@ fn sample_schema_update(
     Ok(Some(registry))
 }
 
-fn node_key(status: &VyrmNodeStatus) -> String {
+fn node_key(status: &RrdNodeStatus) -> String {
     format!(
         "{}/{}/{}:{}",
         status.cluster.as_str(),
@@ -582,7 +582,7 @@ fn node_key(status: &VyrmNodeStatus) -> String {
     )
 }
 
-fn status_digest(status: &VyrmNodeStatus) -> Result<String, serde_json::Error> {
+fn status_digest(status: &RrdNodeStatus) -> Result<String, serde_json::Error> {
     serde_json::to_vec(status).map(|bytes| digest::sha256_hex(&bytes))
 }
 
@@ -590,7 +590,7 @@ fn sample_digest(payload: &ClusterTelemetrySamplePayload) -> Result<String, serd
     serde_json::to_vec(payload).map(|bytes| digest::sha256_hex(&bytes))
 }
 
-fn process_coordinates(status: &VyrmNodeStatus) -> (u64, u64, u64) {
+fn process_coordinates(status: &RrdNodeStatus) -> (u64, u64, u64) {
     (
         status.telemetry.transport_ingress.started_at,
         status.telemetry.artifacts.started_at,
@@ -599,8 +599,8 @@ fn process_coordinates(status: &VyrmNodeStatus) -> (u64, u64, u64) {
 }
 
 fn validate_process_progress(
-    previous: &VyrmNodeStatus,
-    current: &VyrmNodeStatus,
+    previous: &RrdNodeStatus,
+    current: &RrdNodeStatus,
     process_reset: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let previous_coordinates = process_coordinates(previous);
@@ -687,8 +687,8 @@ fn validate_process_progress(
 }
 
 fn ensure_transport_monotonic(
-    previous: &VyrmTransportTelemetrySnapshot,
-    current: &VyrmTransportTelemetrySnapshot,
+    previous: &RrdTransportTelemetrySnapshot,
+    current: &RrdTransportTelemetrySnapshot,
 ) -> Result<(), Box<dyn std::error::Error>> {
     ensure_monotonic(
         &[
@@ -703,7 +703,7 @@ fn ensure_transport_monotonic(
         ],
         "transport connection telemetry",
     )?;
-    for operation in vyrm_cluster::VyrmTransportOperation::ALL {
+    for operation in rrd_cluster::RrdTransportOperation::ALL {
         ensure_operation_monotonic(
             &previous.operations[&operation],
             &current.operations[&operation],
@@ -713,8 +713,8 @@ fn ensure_transport_monotonic(
 }
 
 fn ensure_operation_monotonic(
-    previous: &VyrmTransportOperationMetrics,
-    current: &VyrmTransportOperationMetrics,
+    previous: &RrdTransportOperationMetrics,
+    current: &RrdTransportOperationMetrics,
 ) -> Result<(), Box<dyn std::error::Error>> {
     ensure_monotonic(
         &[
@@ -760,8 +760,8 @@ fn ensure_monotonic(
 }
 
 fn telemetry_delta(
-    previous: &VyrmNodeStatus,
-    current: &VyrmNodeStatus,
+    previous: &RrdNodeStatus,
+    current: &RrdNodeStatus,
 ) -> Result<Option<ClusterTelemetryDelta>, Box<dyn std::error::Error>> {
     if previous.telemetry.transport_ingress.overflowed
         || current.telemetry.transport_ingress.overflowed
@@ -805,9 +805,9 @@ fn telemetry_delta(
     }))
 }
 
-fn aggregate_transport(snapshot: &VyrmTransportTelemetrySnapshot) -> VyrmTransportOperationMetrics {
+fn aggregate_transport(snapshot: &RrdTransportTelemetrySnapshot) -> RrdTransportOperationMetrics {
     snapshot.operations.values().fold(
-        VyrmTransportOperationMetrics::default(),
+        RrdTransportOperationMetrics::default(),
         |mut total, operation| {
             total.attempted = total.attempted.saturating_add(operation.attempted);
             total.allowed = total.allowed.saturating_add(operation.allowed);
@@ -826,7 +826,7 @@ fn aggregate_transport(snapshot: &VyrmTransportTelemetrySnapshot) -> VyrmTranspo
 }
 
 fn alerts(
-    status: &VyrmNodeStatus,
+    status: &RrdNodeStatus,
     delta: Option<&ClusterTelemetryDelta>,
     process_reset: bool,
 ) -> Vec<ClusterAlert> {
@@ -935,7 +935,7 @@ fn alert(code: &str, severity: ClusterAlertSeverity, value: u64, detail: &str) -
     }
 }
 
-fn applied_lag(status: &VyrmNodeStatus) -> u64 {
+fn applied_lag(status: &RrdNodeStatus) -> u64 {
     status
         .last_log_index
         .unwrap_or(0)

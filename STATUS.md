@@ -1,8 +1,96 @@
-# Runtime status — 2026-08-24
+# Runtime status — 2026-08-25
 
-Vyrm implements the complete **local reasoning-runtime loop** described by the
+## Current recovery truth
+
+There is no verified cohesive RRFlow product checkpoint for the current
+worktree. The repository contains substantial executable storage, query,
+vector, reasoning, server, security, SDK, estate, and Connectome code, but the
+pre-release RRFlow/RRD V1 identity cutover is uncommitted and several outward
+surfaces still bypass or duplicate the engine authority.
+
+The active recovery sequence is R0–R6 in `PLAN.md`. As of this entry:
+
+- RRD engine, runtime, query, storage, LSM, vector, graph, inference, operator
+  knowledge, cluster, CLI, MCP, evaluation, and edge package moves exist in the
+  worktree; the full rename/recovery matrix has not yet been rerun.
+- MCP currently has executable preflight, exact recall, routing, RRFlowQL,
+  typed reasoning, lifecycle, claim-backed `remember`, bounded `context`,
+  provenance/history `inspect`, history-preserving `forget`, public service/
+  capability discovery, and exact-authorized atomic multi-model data commit.
+  Generated discovery currently contains 28 executable tools, including
+  governed query-index ensure/list, live-query/changefeed read/follow, and
+  named-vector collection ensure/list, point retrieve/scroll, and exact search. The adapter
+  serializes the engine-owned executable catalogue rather than maintaining a
+  second list. The final five existing-engine adapters provide authenticated
+  logical backup create/list, explicitly acknowledged restore-to-new-root,
+  persistent estate read, and bounded audit read. Vector rows now persist their optional
+  collection/vector address so same-field legacy or foreign-address rows cannot
+  leak into collection-bound reads. The interactive stdio process test executes
+  every implemented domain, and Connectome's parity test consumes the same
+  28-tool and product-surface catalogues. Credentialed secured-daemon mode plus
+  the cohesive workspace and remote matrices remain open.
+- Development doctor report v3 records 14 passing checks and five blockers. It
+  now distinguishes MCP's clean engine dependency boundary from actual daemon
+  readiness: MCP's embedded mode opens `RrdEngine`, while its mutually
+  exclusive daemon mode uses authenticated `rrd-client` and no database path.
+- Daemon-mode slices D0 through D3 are locally complete: RRD now has strict public runtime
+  catalogue/invocation/result contracts, argument and result digests, bounded
+  schemas, and an exhaustive granular policy action for every one of the 28
+  executable tools. `rrd-server` now discovers one project manifest, opens only
+  its canonical `.rrflow/rrd` store, persists the immutable canonical project/
+  store binding, and denies ordinary-start rebinding. Estate catalogue format
+  2 runs a bounded idempotent project-authority initialization before serving;
+  Kubernetes renders the same initialize-then-serve contract. Runtime dispatch now
+  preserves API-key/session principals through nested engine calls and exact
+  granular audit. The public catalogue has 31 HTTP operations, including
+  authenticated runtime-tool catalogue and invocation routes; invocation
+  derives authorization from the selected 28-tool descriptor and uses only
+  the server-bound project root. The Rust client exercises allowance and
+  granular denial against a real project-bound server. MCP now requires an
+  explicit embedded or daemon mode; daemon mode takes no database/project
+  path, authenticates from an owner-only credential file, validates exact
+  28-tool parity, invokes through `rrd-client`, refreshes expired sessions, and
+  preserves its principal in durable audit. Remote mTLS/every-domain parity
+  and D5 topology qualification remain open.
+- D5.1a-c are locally implemented: the public catalogue now has 31 operations,
+  adding authenticated `POST /v1/diagnostics/read`. RRD assembles readiness,
+  capability/tool catalogues, query/vector catalogues, estate, changefeed, and
+  audit plus the schema/logical model catalogue and temporal graph/difference
+  under verified claim, control-journal, and authenticated runtime read
+  coordinates. Graph reads use explicit valid-time, known-cursor, comparison,
+  and replay-budget coordinates; future cursors fail rather than clamp. The
+  response also carries persisted snapshot leases and their semantic retention
+  pins under a separately verified set digest, because lease changes do not
+  advance the data/control cursors. The Rust client real-server test covers the
+  path and a live persisted lease after reopen. Connectome has not yet been
+  moved to it, and reasoning/routing/trace/artifact/cluster diagnostic sections
+  remain D5.1 work. Large-history graph checkpoints also remain open beyond the
+  bounded replay ceiling.
+- Document ingestion, collection deletion, true hybrid lexical/vector recall,
+  reflection/synthesis, broad CRUD/schema/graph administration, and the full
+  remaining RRD server adapters must not be advertised as working MCP tools
+  until their executable engine paths and tests exist.
+- Connectome is a real local UI and replay client, but its capability matrix is
+  still partly separately authored and its production crate still depends
+  directly on lower engine components. It now renders the generated
+  engine/HTTP/MCP/CLI/Connectome surface matrix and the current durable project
+  attunement receipt; it is not yet proof of the zero-bypass engine boundary.
+- Preflight and prompt lifecycle events persist a hash-sealed project
+  attunement receipt over the source tree, manifests, lockfiles, CI workflows,
+  policy/config inputs, routing generation, and RRD read stamp. Mutation fails
+  closed when that evidence is absent or stale, binds one exact tool request to
+  one reasoning run, and requires matching post-tool consumption.
+- Targeted local checks are useful diagnostic evidence only. No current
+  product-green or cross-platform-green claim is valid until R6 passes on one
+  commit.
+
+The older status history below is retained as dated evidence. Any statement
+that implies a completed cohesive product, a surviving RRFlow product layer, or
+current full-matrix verification is superseded by the recovery truth above.
+
+RRFlow implements the complete **local reasoning-runtime loop** described by the
 earlier kernel plan. It does not implement the complete database/vector/cloud
-product stack. The previous work optimized bounded VyrmKV/Fjall and SurrealDB
+product stack. The previous work optimized bounded RRD LSM/Fjall and SurrealDB
 3.0.5 cells before inventorying the current SurrealDB and Qdrant products; that
 was a sequencing error. The bounded evidence remains valid, but it is not a
 full-stack or superiority result.
@@ -23,7 +111,7 @@ Kubernetes operation, and authoritative Connectome management.
 
 - F0 freezes the first public `rrd-contract` resource, envelope,
   idempotency, capability-negotiation, and error vocabulary independently of
-  private Vyrm types. F1 now provides a content-authenticated logical archive,
+  private RRFlow types. F1 now provides a content-authenticated logical archive,
   exact claim/runtime replay, restore-to-absent-root with hidden staging and
   reopen verification, an authenticated content-addressed backup catalogue,
   corruption/retry tests, and CLI operations. Catalogue coverage deliberately
@@ -39,7 +127,7 @@ Kubernetes operation, and authoritative Connectome management.
 - F2 implementation has started at the durable boundary: public session and
   claim-transaction payloads are frozen, and client idempotency bindings are
   now committed atomically with claim batches in Memory, Fjall compatibility,
-  and native VyrmKV. Same-key replay survives restart without duplicating a
+  and native RRD LSM. Same-key replay survives restart without duplicating a
   claim; key/digest collisions fail closed. Engine control state now combines
   compare-and-swap materialization with a monotonic, SHA-256-chained,
   replayable journal in one storage transaction. The persistent RRD
@@ -123,12 +211,12 @@ Kubernetes operation, and authoritative Connectome management.
   references. Exact retries converge after reopen, drift fails, and raw
   credential bytes never enter policy or journal state. Authorized ongoing
   policy/credential administration remains open.
-- F5 publishes one validated catalogue for all 28 current RRD operations and
+- F5 publishes one validated catalogue for all 31 current RRD operations and
   serves it from the running process. JSON Schema for every public wire type
   and deterministic OpenAPI 3.1 are derived from the same authority, served by
   RRD, and protected by a frozen digest. The first supported `rrd-client` Rust
   boundary now negotiates that contract and covers session, transaction,
-  VyrmQL, vector, changefeed, backup, estate, and audit calls with bounded
+  RRFlowQL, vector, changefeed, backup, estate, and audit calls with bounded
   async I/O, absolute deadlines, typed errors, response identity checks, and
   safe transport retry. A real-server fault test proves negotiation recovery,
   auth, exact query, transaction preview/abort, changefeed, audit, and local-
@@ -138,21 +226,21 @@ Kubernetes operation, and authoritative Connectome management.
   query/error tests. The Python walking skeleton derives the same closed route
   surface, validates envelopes with Pydantic, and passes uv lock/build,
   generation-drift, Ruff, strict mypy, retry/auth/query/error tests. The
-  generated Go walking skeleton covers all 28 operations with a
+  generated Go walking skeleton covers all 31 operations with a
   standard-library client and passes format, vet, drift, behavioral, and race
-  gates. The generated Java 21 walking skeleton covers all 28 operations,
+  gates. The generated Java 21 walking skeleton covers all 31 operations,
   compiles with warnings as errors, and passes real-loopback JUnit retry/auth/
   query/error tests. Shared conformance, packaging, generated payload models,
   async Python/Java. The generated asynchronous .NET 10 walking skeleton covers
-  all 28 operations and passes formatting, warnings-as-errors build, locked
+  all 31 operations and passes formatting, warnings-as-errors build, locked
   restore, three xUnit transport/auth/error tests, and NuGet packing. All six
   intended clients now exist; shared real-server/version conformance, complete
   generated payload models, and release publication keep F5 open.
 - F6 has started from the existing atomic public data transaction rather than
-  duplicating it. VyrmQL/VyrmMX sources now cover records, relations, events,
+  duplicating it. RRFlowQL/RRD query executor sources now cover records, relations, events,
   claims, series samples, and geo values with explicit valid/known time,
   stamped exact plans, deterministic rows, and bounded execution. Memory,
-  Fjall compatibility, and native VyrmKV return identical series/geo results;
+  Fjall compatibility, and native RRD LSM return identical series/geo results;
   a secured real-RRD transaction/query test proves the same public typed rows.
   Bounded recursive traversal now validates its start/relation against the
   stamped schema, requires direction and depth, returns deterministic shortest
@@ -160,7 +248,7 @@ Kubernetes operation, and authoritative Connectome management.
   frozen series/geo built-ins are bindable today. Scalar equality, inequality,
   and ordering predicates are typed and deterministic; ordering currently
   accepts only integer, unsigned, and string operands. Incremental and broader
-  index families, spatial operators, full text, mutating VyrmQL, streaming, and push
+  index families, spatial operators, full text, mutating RRFlowQL, streaming, and push
   subscriptions keep F6 open.
   The first index lifecycle and serving foundation is also executable: schema-bound
   compound definitions persist through authoritative control-state CAS,
@@ -213,7 +301,7 @@ Kubernetes operation, and authoritative Connectome management.
   offline security bootstrap, TLS 1.3 mTLS, retained PVC, headless/client
   Services, PDB, default-deny NetworkPolicy, non-root hardening, resource bounds,
   least-privilege RBAC, and observed status/digest. It does not claim Multi-AZ:
-  RRD is not yet backed by `vyrm-cluster`, and release images, live-cluster
+  RRD is not yet backed by `rrd-cluster`, and release images, live-cluster
   conformance, safe upgrade/CSI/certificate controllers, and fault qualification
   remain open.
 
@@ -231,13 +319,13 @@ Kubernetes operation, and authoritative Connectome management.
   content-addressed object references. Memory, Fjall, and native engines update
   canonical latest-value indexes, deterministic projection outbox work,
   chained accepted-operation audit, and an idempotent retry outcome atomically.
-  `vyrmDS::DataRuntime` stages and re-verifies bytes before reference commit.
+  `RRD storage coordinator::DataRuntime` stages and re-verifies bytes before reference commit.
   Local storage has sync/rename/verify, orphan inventory/reclamation, and
   corruption quarantine; the capability-explicit S3-compatible adapter requires
   real conditional create and passes the same semantic differential fixture.
   Failure injection covers every local publication boundary and both sides of
   commit; mixed-family rollback and native flush/reopen are tested.
-- M6 closes the local embedding/edge kernel gate. `vyrm-embed` binds each job
+- M6 closes the local embedding/edge kernel gate. `rrd-inference` binds each job
   to source bytes, an exact model digest, network policy, and the originating
   read stamp; it detects source changes around inference and relies on final
   transaction CAS for commit authority. An optional local FastEmbed adapter is
@@ -247,11 +335,11 @@ Kubernetes operation, and authoritative Connectome management.
   corruption/layout/model/freshness, publishes atomically, and opens through a
   real read-only mmap. Scalar and runtime-dispatched AVX2 paths match the exact
   oracle. The feature-gated accelerator boundary admits only verified
-  CPU-identical bytes and makes fallback policy visible. `vyrm-edge` packages
+  CPU-identical bytes and makes fallback policy visible. `rrflow-edge` packages
   one-call no-network embedding/search; its retained 10k×128 local profile is
   inside binary, artifact, RSS, and latency budgets. This does not certify a
   physical GPU or semantic-model quality.
-- The first M7 protocol gate is executable in `vyrm-cluster`. Canonical
+- The first M7 protocol gate is executable in `rrd-cluster`. Canonical
   placement enforces ordered unique voters and zone diversity; per-shard read
   stamps compose into a real partial-order snapshot vector. Route evidence,
   grounded snapshot-plus-WAL transfer, metadata-indexed reshard cutover, and
@@ -261,13 +349,13 @@ Kubernetes operation, and authoritative Connectome management.
   entries retain a durable copy across every tolerated single-disk loss and
   that a leader minority cannot acknowledge. A feature-gated OpenRaft 0.9.25
   adapter now durably stores votes, logs, committed pointers, state, and
-  snapshots in native VyrmKV and passes the complete upstream storage suite. A
+  snapshots in native RRD LSM and passes the complete upstream storage suite. A
   four-node in-process test covers election, quorum commit, snapshot catch-up,
   majority-side failover, post-failover commit, and voter replacement.
   Adapter format v4 physically separates node-local vote/log/commit/purge and
   snapshot-cache state from transferable canonical application state. A typed
   `RuntimeCommit` and Raft applied state still publish in one state-domain WAL
-  frame. Authenticated VyrmKV bundles now carry that complete canonical state;
+  frame. Authenticated RRD LSM bundles now carry that complete canonical state;
   a four-node run snapshots a real runtime commit, purges the leader log, and
   catches up a fresh learner that reopens the same runtime truth. Local votes
   are not imported. Corrupt, forged-metadata, stale, duplicate, restart, and
@@ -286,13 +374,13 @@ Kubernetes operation, and authoritative Connectome management.
   instead of OpenRaft's scheduler-sensitive development defaults. A four-node
   loopback run covers election, replication, post-purge snapshot catch-up,
   certificate impersonation denial, and authenticated vote-source forgery denial. The
-  feature also ships a real `vyrm-cluster-node` process boundary with a bounded,
+  feature also ships a real `rrd-cluster-node` process boundary with a bounded,
   versioned, request-correlated JSON-lines supervisor protocol over inherited
   stdin/stdout. A four-process black-box run proves abrupt voter restart and
   catch-up, failover write, bidirectional live-leader transport isolation,
   majority-side replacement and write, healing/reconciliation, post-purge
   physical snapshot catch-up, leaf/node identity confusion denial before
-  readiness, and corrupt VyrmKV `CURRENT` refusal on restart. The monotonic
+  readiness, and corrupt RRD LSM `CURRENT` refusal on restart. The monotonic
   wait contract is stress-tested against learners that advance beyond the
   requested index. Complete TLS states can now be hot-reloaded by exact-successor
   generation: leaf/key, full trust-root set, and complete CRL set swap together
@@ -311,7 +399,7 @@ Kubernetes operation, and authoritative Connectome management.
   ephemeral files clean up on drop/restart; and ambiguous spool entries fail
   closed. Crash/storage-full export boundaries, corruption/truncation, durable
   cache reopen, post-purge catch-up, and a >16 MiB bundle/≤16 MiB incremental
-  RSS Linux regression are green. VyrmKV segment v3 now keeps immutable files
+  RSS Linux regression are green. RRD LSM segment v3 now keeps immutable files
   disk-resident, validates/decodes independent 4 KiB blocks, and shares a
   configurable bounded LRU across a database. A 20 MiB Linux reopen/read
   regression with a 4 MiB cache stays within 16 MiB RSS growth and proves
@@ -326,7 +414,7 @@ Kubernetes operation, and authoritative Connectome management.
   4,096 applied-log positions and prune deterministically into state/snapshots;
   runtime commits retain independent content idempotency after that request
   window expires.
-- Native VyrmKV now provides the required physical snapshot-bundle primitive.
+- Native RRD LSM now provides the required physical snapshot-bundle primitive.
   Bundle v1 is a deterministic SHA-256-authenticated binary closure over a
   flush-bounded manifest and all reachable immutable segments. Installation
   syncs segments and an empty continuation WAL before one local manifest CAS;
@@ -363,7 +451,7 @@ Kubernetes operation, and authoritative Connectome management.
   ledger blobs. Both append typed node revisions and immutable micro-events to
   the runtime log. Existing v1 projection ledgers remain readable and migrate
   atomically on their next mutation.
-- Preflight owns a persisted `vyrm-graph` routing projection. Every project
+- Preflight owns a persisted `rrd-graph` routing projection. Every project
   mutation refreshes it immediately beforehand; unreadable source, corrupt
   state, root mismatch, or projection quarantine denies the call. Recovery is
   explicit through `reset-routing` or `reset-projection`.
@@ -375,18 +463,18 @@ Kubernetes operation, and authoritative Connectome management.
   result; post-tool dispatch records content-addressed observation evidence and
   closes that authorization. Verification commands become typed pass/fail
   checks. Denials include expected-versus-observed contract differentials.
-- `vyrmd` exposes preflight, recall, routing, reasoning, and lifecycle tools over
+- `rrflow-mcp` exposes preflight, recall, routing, reasoning, and lifecycle tools over
   newline-delimited stdio MCP. It supports stateless MCP `2026-07-28`
   `server/discover` and legacy `2025-11-25`/`2025-06-18` initialization while
   calling the same node functions as hook runtimes.
-- `vyrm-eval` runs paired provider trials and normalizes success, retries,
+- `rrflow-eval` runs paired provider trials and normalizes success, retries,
   regressions, tool calls, tokens, and latency. The 2026-08-18 run covered two
   providers, two repositories, and stale-evidence/post-compaction scenarios:
   8/8 success, zero retries, zero paired regressions. Runtime was cheaper in
   the stale-evidence cells and more expensive in the post-compaction cells; the
   sample does not support a universal efficiency claim.
-- `vyrm init` creates a versioned, relocatable instance manifest. Preflight,
-  lifecycle hooks, reset-routing, and `vyrmd` fail closed on absent identity or
+- `rrflow init` creates a versioned, relocatable instance manifest. Preflight,
+  lifecycle hooks, reset-routing, and `rrflow-mcp` fail closed on absent identity or
   a store/root mismatch. Dedicated instances are executable; umbrella
   manifests enforce explicit relative membership but remain non-executable
   until every mutable ledger and projection is member-scoped.
@@ -420,7 +508,7 @@ Kubernetes operation, and authoritative Connectome management.
   scrub, rewind, resume, fast-forward up to 8×, jump to boundaries, inspect the
   entire retained envelope, and compare identical-prompt effort runs using
   provider-reported token, cache, tool, latency, and acceptance evidence.
-- Connectome now publishes `vyrm-diagnostics` v1 at
+- Connectome now publishes `rrd-diagnostics` v1 at
   `GET /api/runtime/capabilities`. The handshake advertises persisted,
   restart-recoverable, seekable, reversible playback and the exact available
   speeds/lenses. Its engine catalog separates alpha, partial, experimental,
@@ -436,7 +524,7 @@ Kubernetes operation, and authoritative Connectome management.
   connection authority baseline, not authenticated source switching. The Rust
   RRD client now supports mTLS, but Connectome still lacks credential-provider
   resolution and active remote-source switching.
-- `vyrmQL` and `vyrmMX` now form a separate read-only query layer above the
+- `RRFlowQL` and `RRD query executor` now form a separate read-only query layer above the
   frozen engine port. The language requires explicit valid and known time;
   catalog binding rejects unknown types/fields and missing parameters; the
   reference planner publishes a content-addressed logical/physical plan,
@@ -460,7 +548,7 @@ Kubernetes operation, and authoritative Connectome management.
   the next optimization boundaries.
   Connectome's Query Lab exposes this evidence and result
   together without mutating on GET. The explicit CLI `query` command and MCP
-  `vyrm_query` tool capture the immutable read stamp before tracing, then emit
+  `rrflow_query` tool capture the immutable read stamp before tracing, then emit
   a causal parent plus paired parse/bind, plan, and execution spans. Successful,
   parse-failed, and budget-denied trees record digests, candidates, budgets,
   plan/read coordinates, and result counts without persisting raw query or
@@ -468,7 +556,7 @@ Kubernetes operation, and authoritative Connectome management.
   green.
 - The local M3–M6 data path now emits one durable causal evidence model rather
   than disconnected telemetry. Query execution brackets an exact storage-read
-  span; all engines report logical work and native VyrmKV additionally reports
+  span; all engines report logical work and native RRD LSM additionally reports
   bounded manifest, memtable, segment, shared-cache, block-load, and byte
   deltas. Vector search seals and revalidates its prepared plan against request
   digest and catalog revision, links the selected projection generation, and
@@ -487,18 +575,18 @@ Kubernetes operation, and authoritative Connectome management.
   the typed generations without raw vectors. Cluster spans, broader
   storage-write coverage, OTLP translation, and cross-run resource analysis
   remain open.
-- The portable operator-knowledge gate is now executable in `vyrm-operator`.
-  One immutable binding fixes instance/member, Vyrm scope, adapter/config,
+- The portable operator-knowledge gate is now executable in `rrd-operator-knowledge`.
+  One immutable binding fixes instance/member, RRFlow scope, adapter/config,
   external source/relation/tenant, model space, dimensions, and projection
   generation. Search requests expose exact/HNSW/IVFFlat and iterative-scan
-  controls plus a required Vyrm cursor; stale/future projections fail closed.
+  controls plus a required RRFlow cursor; stale/future projections fail closed.
   Results must return bounded identities, finite scores, the sealed controls
   and actual path, plan/index digests, a PostgreSQL-snapshot digest, catalog
   identity, and an optional stable project revision. WAL LSN remains supporting
   evidence rather
   than being misrepresented as the query snapshot. The pgvector SQL builder
   quotes validated identifiers and keeps vector, tenant, and limit as query
-  parameters. Vyrm vector outbox work becomes a content-addressed external work
+  parameters. RRFlow vector outbox work becomes a content-addressed external work
   identity; the reference writer proves retry returns the same revision without
   reapplying payload. Traced search/sync, foreign-project and stale-revision
   denial, payload substitution, privacy, Memory/Fjall/native parity, native
@@ -519,7 +607,7 @@ Kubernetes operation, and authoritative Connectome management.
   concurrent serialization recovery, and performance evidence remain open. No
   live pgvector superiority claim is made.
 - M3 native storage persistence and semantic gates pass in the standalone
-  `vyrm-kv` crate. The corrected nine-trial local general performance fixture
+  `rrd-lsm` crate. The corrected nine-trial local general performance fixture
   passes, and compact authenticated keyspace tags close the former extended RSS
   cell; remote reproduction and a fresh read-heavy tail diagnostic remain. WAL
   v1 now has frozen CRC32C file/frame formats; atomic batch
@@ -548,7 +636,7 @@ Kubernetes operation, and authoritative Connectome management.
   legacy manifest-v1 stores retain their textual-prefix codec. Three-backend tests cover
   claims, projections, schema/cardinality enforcement, hash-chain replay,
   leased snapshots, stamped transactions, concurrent global CAS, flush/reopen,
-  and exact `vyrmQL` execution. Snapshot-aware compaction retains versions at
+  and exact `RRFlowQL` execution. Snapshot-aware compaction retains versions at
   explicitly protected physical sequences; native runtime leases create and
   reconcile manifest checkpoints; GC deletes only manifests, segments, and
   WALs unreachable from `CURRENT` or a checkpoint. Deterministic crash and
@@ -596,7 +684,7 @@ Kubernetes operation, and authoritative Connectome management.
 ## Verification
 
 CI runs the locked full workspace tests, warning-free clippy, evaluation-evidence
-validation, and the `vyrm-core` serde-only dependency boundary. Compiled-binary
+validation, and the `rrd-core` serde-only dependency boundary. Compiled-binary
 tests cover operator commands, hooks, explicit recovery, and both MCP eras. A
 separate scheduled/manual workflow executes five isolated nine-trial
 native/Fjall profiles with `--require-promotion` and retains each raw JSON
@@ -608,14 +696,14 @@ remote repetition remains required before compatibility retirement.
 - The evaluation sample is a harness validation, not statistical significance:
   one trial per cell on synthetic repository fixtures.
 - MCP cannot intercept another runtime's private tools. Hookless clients receive
-  identical semantics through `vyrm_lifecycle` and must place that call around
+  identical semantics through `rrflow_lifecycle` and must place that call around
   their mutations; server-owned operations remain directly enforceable.
 - Runtime scopes are present in every commit and feed query. Current reasoning
   and flight composition uses the physically isolated store's
   `instance:default` scope; umbrella member routing and capability-based remote
   authorization remain deliberately non-executable.
-- Native `vyrmKV` is the default for missing store paths through
-  `PersistentEngine`; CLI, `vyrmd`, and Connectome expose the selected backend.
+- Native `RRD LSM` is the default for missing store paths through
+  `PersistentEngine`; CLI, `rrflow-mcp`, and Connectome expose the selected backend.
   Existing non-native directories reopen as `fjall_compatibility` and are never
   reinterpreted. Fjall source removal remains gated by explicit migration,
   mixed update/delete soak, and remote matrix reproduction—not by preserving it
@@ -628,16 +716,16 @@ remote repetition remains required before compatibility retirement.
 - Prompt-flight acceptance without a marker proves process completion only.
   Model-quality conclusions require non-trivial evaluators and repeated trials;
   the flight UI deliberately does not turn one attractive trace into a claim.
-- `vyrmDS` remains a researched target subsystem. Native `vyrmKV` now has an
+- `RRD storage coordinator` remains a researched target subsystem. Native `RRD LSM` now has an
   executable WAL/MVCC/segment/manifest/checkpoint/compaction/GC engine and a
   locally passing promotion baseline; broader promotion and removal of the
-  Fjall oracle remain open. `vyrmQL` and the exact reference slice of `vyrmMX`
+  Fjall oracle remain open. `RRFlowQL` and the exact reference slice of `RRD query executor`
   are implemented; its first narrower result path is the exact stamped event
   cursor lookup. New stamps bind an authenticated accumulator and cursor
   execution reports its actual inclusion-proof/change-read evidence, while
   other sources and schema history deliberately retain the authoritative replay
   fallback. M5 now adds a
-  separate `vyrm-vector` exact dense/sparse/multivector oracle, deterministic
+  separate `rrd-vector` exact dense/sparse/multivector oracle, deterministic
   filter-aware HNSW, exact reranking, immutable authenticated artifacts,
   freshness/cost planning, CAS generation retirement/quarantine, a portable
   fixture, backend differential, recall gate, and update/delete/reopen soak.
@@ -658,9 +746,9 @@ remote repetition remains required before compatibility retirement.
   layouts, payload indexes, a physical GPU adapter and benchmark, real-model
   quality evidence, external vector comparison, and Multi-AZ capabilities
   remain sequenced work, not current product claims. See
-  `docs/vyrmds-architecture-research.md`,
-  `docs/vyrm-vector-search.md`, `docs/vyrm-embedding-edge.md`, and
-  `docs/vyrm-cluster-m7.md`.
+  `docs/rrflow-mcps-architecture-research.md`,
+  `docs/rrd-vector-search.md`, `docs/rrd-inferenceding-edge.md`, and
+  `docs/rrd-cluster-m7.md`.
   The older symmetric-int8 experiment remains separate from TurboQuant. The
   new MSE TurboQuant path uses deterministic seeded rotation, fixed
   distribution-matched 4/2/1.5/1-bit scalar codes, bit packing, norm correction,
@@ -679,7 +767,7 @@ remote repetition remains required before compatibility retirement.
   A durable cross-process authorization lease remains open.
 
 - A fresh exact-source audit confirms Fjall 3.1.8 remains only the compatibility
-  engine and migration/differential oracle; native `vyrm-kv` owns its physical
+  engine and migration/differential oracle; native `rrd-lsm` owns its physical
   formats and recovery. The first AI-specific optimization resolves current
   hot memtable point reads and multi-gets before immutable blocks. Its MVCC test
   proves zero segment-cache traffic for current overwrites/tombstones and exact
@@ -691,7 +779,7 @@ remote repetition remains required before compatibility retirement.
   memtable flush, family-aware maintenance/cache policy, and
   threshold-crossing latency remain open; the full mixed AI matrix is green.
   See
-  `docs/vyrmkv-fjall-ai-audit.md`.
+  `docs/rrd-lsm-fjall-ai-audit.md`.
 
 - The first persisted runtime-tracing contract is now implemented in the
   serde-only kernel. It uses W3C-width trace/span IDs, immutable
@@ -699,7 +787,7 @@ remote repetition remains required before compatibility retirement.
   exact causal links for runtime/read/plan/projection/workflow/provider and
   external operator-knowledge coordinates. Trace events enter the ordinary
   scoped, hash-chained runtime log through a cursor-CAS recorder that repairs
-  the strict schema atomically with the first event. `vyrm init` records the
+  the strict schema atomically with the first event. `rrflow init` records the
   contract and a bounded initialization annotation. Hooks and the shared MCP
   lifecycle path durably write start before dispatch and finish afterward,
   including explicit denial outcomes; an interrupted native span remains
@@ -728,23 +816,24 @@ remote repetition remains required before compatibility retirement.
 ## Product and instance boundary
 
 **RRFlow means Reason Ready Flow and is the single product. RRD means Reason
-Ready Daemon and is its one native engine/runtime.** RRD is the target identity
-for what Vyrm was becoming and is the actual Fjall competitor. Persistence,
+Ready Daemon and is its one native engine/runtime.** RRD is the actual Fjall
+competitor. Persistence,
 transactions, catalogue, query, indexes, reasoning, lifecycle, security, audit,
-and recovery compose through RRD; Vyrm does not survive as an engine beneath
-it. Existing `vyrm-*`, VyrmQL, and `.vyrm/store` references describe current
-implementation and migration inputs.
+and recovery compose through RRD; RRFlow is the product rather than a second
+engine beneath it. Active implementation names follow the RRFlow/RRD V1
+identity contract.
 
-The current workspace has native WAL/MVCC/LSM persistence but no Arrow or
-DataFusion dependency. The target RRD Arrow/DataFusion query plane is therefore
-not a current capability claim. See `docs/rrflow-rrd-architecture.md` and
-`docs/rrflow-vyrm-migration-ledger.md`.
+The current workspace has native WAL/MVCC/LSM persistence, typed Arrow snapshot
+conversion, and DataFusion 55 execution for bounded relational operations.
+DataFusion currently consumes a materialized immutable snapshot rather than a
+custom streaming provider; pushdown, spill governance, and the remaining
+physical optimization work are still open. See
+`docs/rrd-arrow-datafusion-bm25-plan.md`.
 
 A major platform receives one isolated RRFlow/RRD instance molded to that
 platform. A set of related small projects may share an umbrella instance only
-through explicit membership. The current per-checkout `.vyrm/store` remains in
-place until the migration ledger's read-old/write-new path is implemented and
-verified.
+through explicit membership. Per-checkout state lives under the canonical
+`.rrflow` product directory; physical storage selection remains an RRD concern.
 
 The current routing projection is bound to one canonical project root and
 refuses implicit rebinding. The instance manifest now prevents a different
@@ -753,9 +842,9 @@ remaining topology work. SurrealDB inspired the record-edge, transaction,
 changefeed, reference-integrity, and temporal-query capability analysis; no
 SurrealDB code or database dependency was imported. Search/vector work remains
 separate. A new external-process claim-runtime differential pins SurrealDB
-3.0.5/SurrealKV and verifies both complete corpora. Vyrm wins the bounded
+3.0.5/SurrealKV and verifies both complete corpora. RRFlow wins the bounded
 throughput, latency, restart, and RSS cells, including against Surreal's
 server-reported execution time, but loses reopened allocated disk at 1.380×;
 therefore no all-cells or general superiority claim is made. See
 `docs/instance-topology.md`, `docs/runtime-graph.md`, and
-`docs/vyrm-surrealdb-differential.md`.
+`docs/rrflow-surrealdb-differential.md`.

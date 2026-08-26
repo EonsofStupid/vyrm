@@ -1,14 +1,14 @@
 use rrd_contract::CanonicalId;
+use rrd_core::digest;
 use rrd_estate::{
     DesiredPhase, DesiredTarget, DriverEffect, DriverError, DriverObservation, DriverRequest,
     EstateDriver, EstateRepository, MutationContext, ObservedPhase, OperationState,
     ReconcileBoundary, ReconcileOutcome, Reconciler, SetDesired,
 };
+use rrd_store::{Engine, NativeEngine};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
-use vyrm_core::digest;
-use rrd_store::{Engine, NativeEngine};
 
 fn id(value: &str) -> CanonicalId {
     CanonicalId::new(value).unwrap()

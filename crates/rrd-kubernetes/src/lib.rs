@@ -1,17 +1,17 @@
 //! Kubernetes-native deployment contract for a secured RRD instance.
 //!
 //! The first version intentionally deploys one durable RRD process. The
-//! separate `vyrm-cluster` consensus engine is not yet wired into the public
+//! separate `rrd-cluster` consensus engine is not yet wired into the public
 //! RRD data plane, so this crate refuses to represent multiple independent RRD
 //! pods as a distributed database.
 
 use kube::{CustomResource, CustomResourceExt};
 use rrd_contract::CanonicalId;
+use rrd_core::digest;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
-use vyrm_core::digest;
 
 pub mod controller;
 
@@ -251,32 +251,48 @@ pub fn desired_resources(input: &DesiredInstanceInput<'_>) -> Result<Vec<Desired
                     "automountServiceAccountToken": false,
                     "terminationGracePeriodSeconds": 30,
                     "securityContext": pod_security,
-                    "initContainers": [{
-                        "name": "security-bootstrap",
-                        "image": input.spec.image,
-                        "imagePullPolicy": "IfNotPresent",
-                        "command": ["rrd-security-bootstrap"],
-                        "args": [
-                            "--db", "/var/lib/rrd/data",
-                            "--instance", input.spec.instance_id.as_str(),
-                            "--manifest", "/etc/rrd/bootstrap/manifest/bootstrap.json",
-                            "--at-unix-ms", input.spec.bootstrap_at_unix_ms.to_string(),
-                        ],
-                        "securityContext": container_security,
-                        "volumeMounts": [
-                            {"name": data_claim_name, "mountPath": "/var/lib/rrd"},
-                            {"name": "bootstrap-manifest", "mountPath": "/etc/rrd/bootstrap/manifest", "readOnly": true},
-                            {"name": "bootstrap-credentials", "mountPath": "/etc/rrd/bootstrap/credentials", "readOnly": true},
-                        ],
-                    }],
+                    "initContainers": [
+                        {
+                            "name": "project-authority",
+                            "image": input.spec.image,
+                            "imagePullPolicy": "IfNotPresent",
+                            "command": ["rrd-server"],
+                            "args": [
+                                "initialize",
+                                "--root", "/var/lib/rrd/project",
+                                "--instance", input.spec.instance_id.as_str(),
+                            ],
+                            "securityContext": container_security,
+                            "volumeMounts": [
+                                {"name": data_claim_name, "mountPath": "/var/lib/rrd"},
+                            ],
+                        },
+                        {
+                            "name": "security-bootstrap",
+                            "image": input.spec.image,
+                            "imagePullPolicy": "IfNotPresent",
+                            "command": ["rrd-security-bootstrap"],
+                            "args": [
+                                "--db", "/var/lib/rrd/project/.rrflow/rrd",
+                                "--instance", input.spec.instance_id.as_str(),
+                                "--manifest", "/etc/rrd/bootstrap/manifest/bootstrap.json",
+                                "--at-unix-ms", input.spec.bootstrap_at_unix_ms.to_string(),
+                            ],
+                            "securityContext": container_security,
+                            "volumeMounts": [
+                                {"name": data_claim_name, "mountPath": "/var/lib/rrd"},
+                                {"name": "bootstrap-manifest", "mountPath": "/etc/rrd/bootstrap/manifest", "readOnly": true},
+                                {"name": "bootstrap-credentials", "mountPath": "/etc/rrd/bootstrap/credentials", "readOnly": true},
+                            ],
+                        }
+                    ],
                     "containers": [{
                         "name": "rrd",
                         "image": input.spec.image,
                         "imagePullPolicy": "IfNotPresent",
                         "command": ["rrd-server"],
                         "args": [
-                            "--db", "/var/lib/rrd/data",
-                            "--instance", input.spec.instance_id.as_str(),
+                            "--root", "/var/lib/rrd/project",
                             "--bind", format!("0.0.0.0:{RRD_CLIENT_PORT}"),
                             "--tls-cert", "/etc/rrd/tls/tls.crt",
                             "--tls-key", "/etc/rrd/tls/tls.key",

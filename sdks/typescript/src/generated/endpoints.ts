@@ -36,6 +36,12 @@ export const endpoints = {
     "authentication": "session_bearer",
     "mutation": false
   },
+  "diagnostics-read": {
+    "method": "POST",
+    "path": "/v1/diagnostics/read",
+    "authentication": "session_bearer",
+    "mutation": false
+  },
   "estate-read": {
     "method": "POST",
     "path": "/v1/estates/{estate}/read",
@@ -83,6 +89,18 @@ export const endpoints = {
     "path": "/v1/restores",
     "authentication": "session_bearer",
     "mutation": true
+  },
+  "runtime-tool-invoke": {
+    "method": "POST",
+    "path": "/v1/runtime/tools/invoke",
+    "authentication": "session_bearer",
+    "mutation": true
+  },
+  "runtime-tool-catalogue-read": {
+    "method": "POST",
+    "path": "/v1/runtime/tools/list",
+    "authentication": "session_bearer",
+    "mutation": false
   },
   "endpoint-catalogue": {
     "method": "GET",

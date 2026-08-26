@@ -15,10 +15,10 @@
 //! cargo run --release -p rrd-store --example sparse_latency -- <path-on-ext4>
 //! ```
 
+use rrd_core::{Claim, Predicate, Producer, Subject};
 use rrd_store::{Store, Writer, WriterConfig};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use vyrm_core::{Claim, Predicate, Producer, Subject};
 
 fn claim(tag: &str, i: usize) -> Claim {
     Claim::new(

@@ -13,7 +13,7 @@ or overwrite authoritative state.
 
 An estate is stored as one bounded compare-and-swap document at
 `server/state/estate/{estate_id}/document`. Every accepted replacement and its
-request/operation identity are committed atomically to Vyrm's authenticated
+request/operation identity are committed atomically to RRFlow's authenticated
 control journal. The v1 aggregate is intentionally bounded to 1,024 instances,
 4,096 operations, and 4,096 idempotency bindings; sharding the catalogue is a
 future persisted-format migration, not an implicit layout change.

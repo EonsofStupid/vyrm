@@ -4,11 +4,11 @@ version = "0.1.0"
 edition.workspace = true
 license.workspace = true
 publish.workspace = true
-description = "vyrm storage contract and transitional Fjall adapter: atomic runtime commits, durability, and replay."
+description = "rrflow storage contract and transitional Fjall adapter: atomic runtime commits, durability, and replay."
 
 [dependencies]
-vyrm-core = { path = "../vyrm-core" }
-vyrm-kv = { path = "../vyrm-kv" }
+rrd-core = { path = "../rrd-core" }
+rrd-lsm = { path = "../rrd-lsm" }
 fjall = "=3.1.8"
 serde = { workspace = true }
 serde_json = { workspace = true }

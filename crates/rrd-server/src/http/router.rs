@@ -54,7 +54,7 @@ impl AppState {
         let response = match (method, path.as_str()) {
             (Method::GET, "/v1/health/live") => {
                 let context = generated_context(now, "health-live");
-                public_audit = Some((SecurityAction::ServiceInspect, context.clone()));
+                public_audit = Some((RrdOperation::ServiceInspect, context.clone()));
                 success(
                     StatusCode::OK,
                     &context,
@@ -65,7 +65,7 @@ impl AppState {
             }
             (Method::GET, "/v1/health/ready") => {
                 let context = generated_context(now, "health-ready");
-                public_audit = Some((SecurityAction::ServiceInspect, context.clone()));
+                public_audit = Some((RrdOperation::ServiceInspect, context.clone()));
                 match self.readiness(now) {
                     Ok(ready) => success(StatusCode::OK, &context, ready),
                     Err(error) => failure(&context, api_error(error)),
@@ -73,17 +73,17 @@ impl AppState {
             }
             (Method::GET, "/v1/capabilities") => {
                 let context = generated_context(now, "capabilities");
-                public_audit = Some((SecurityAction::ServiceInspect, context.clone()));
+                public_audit = Some((RrdOperation::ServiceInspect, context.clone()));
                 success(StatusCode::OK, &context, self.capabilities.clone())
             }
             (Method::GET, "/v1/schema/endpoints") => {
                 let context = generated_context(now, "endpoint-catalogue");
-                public_audit = Some((SecurityAction::ServiceInspect, context.clone()));
+                public_audit = Some((RrdOperation::ServiceInspect, context.clone()));
                 success(StatusCode::OK, &context, rrd_contract::endpoint_catalogue())
             }
             (Method::GET, "/v1/schema/openapi") => {
                 let context = generated_context(now, "openapi-read");
-                public_audit = Some((SecurityAction::ServiceInspect, context.clone()));
+                public_audit = Some((RrdOperation::ServiceInspect, context.clone()));
                 match rrd_contract::openapi_document() {
                     Ok(document) => success(StatusCode::OK, &context, document),
                     Err(error) => failure(
@@ -108,12 +108,21 @@ impl AppState {
                 self.list_query_indexes(&headers, &body, now)
             }
             (Method::POST, "/v1/query/live/poll") => self.poll_live_query(&headers, &body, now),
+            (Method::POST, "/v1/runtime/tools/list") => {
+                self.list_runtime_tools(&headers, &body, now)
+            }
+            (Method::POST, "/v1/runtime/tools/invoke") => {
+                self.invoke_runtime_tool(&headers, &body, now)
+            }
             (Method::POST, "/v1/backups") => self.create_instance_backup(&headers, &body, now),
             (Method::POST, "/v1/backups/list") => self.list_instance_backups(&headers, &body, now),
             (Method::POST, "/v1/restores") => self.restore_instance_backup(&headers, &body, now),
             (Method::POST, "/v1/audit/read") => self.read_audit(&headers, &body, now),
             (Method::POST, "/v1/changes/read") => self.read_changefeed(&headers, &body, now),
             (Method::POST, "/v1/changes/follow") => self.follow_changefeed(&headers, &body, now),
+            (Method::POST, "/v1/diagnostics/read") => {
+                self.read_diagnostic_snapshot(&headers, &body, now)
+            }
             (Method::POST, "/v1/vector/collections/ensure") => {
                 self.ensure_vector_collection(&headers, &body, now)
             }
@@ -141,30 +150,32 @@ impl AppState {
             }
             _ => {
                 let context = generated_context(now, "not-found");
-                public_audit = Some((SecurityAction::UnknownRequest, context.clone()));
+                public_audit = Some((RrdOperation::UnknownRequest, context.clone()));
                 failure(
                     &context,
                     ApiError::new(ErrorCode::NotFound, "endpoint not found", false),
                 )
             }
         };
-        if self.security_enforced {
-            if let Some((action, context)) = public_audit {
-                self.audit_response(
-                    action,
-                    &instance_resource(self.service.instance_id()),
-                    &context,
-                    None,
-                    &body,
-                    &response,
-                    now,
-                    HTTP_ID_COUNTER.fetch_add(1, Ordering::Relaxed),
-                )
-                .unwrap_or_else(|error| {
-                    tracing::error!(error = %error, "RRD security audit append failed");
-                });
+        let response = if let Some((operation, context)) = public_audit {
+            let invocation = Invocation {
+                context: context.clone(),
+                resource: instance_resource(self.service.instance_id()),
+                observed_at_unix_ms: now,
+                attempt: HTTP_ID_COUNTER.fetch_add(1, Ordering::Relaxed),
+                request_sha256: sha256_hex(&body),
+            };
+            match self.service.record_public_invocation(
+                invocation,
+                operation,
+                invocation_completion(&response),
+            ) {
+                Ok(()) => response,
+                Err(error) => failure(&context, api_error(error)),
             }
-        }
+        } else {
+            response
+        };
         span.record("status", response.status().as_u16());
         response
     }

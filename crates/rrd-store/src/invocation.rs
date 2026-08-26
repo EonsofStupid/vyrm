@@ -9,8 +9,8 @@
 //! the decision. The §13.1 effectiveness ledger extends this shape with token
 //! counts rather than introducing a second log.
 
+use rrd_core::Millis;
 use serde::{Deserialize, Serialize};
-use vyrm_core::Millis;
 
 /// What caused an invocation. Only `Manual` occurs at stage 1; the remaining
 /// variants exist so that promoting a trigger to automatic is a change of value

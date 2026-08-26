@@ -5,6 +5,37 @@
 //! same serialized vocabulary. Version 1 intentionally freezes only the
 //! coordinates needed before those outward surfaces are implemented.
 
+mod capability_surface;
+mod diagnostic;
+mod runtime_tool;
+mod workplan;
+
+pub use capability_surface::{
+    ProductCapability, ProductCapabilityCatalogue, ProductSurface, SurfaceBinding,
+    SurfaceDisposition,
+};
+pub use diagnostic::{
+    DiagnosticAuthority, DiagnosticCoverage, DiagnosticGraphDifference,
+    DiagnosticGraphRecordChange, DiagnosticGraphRecordSnapshot, DiagnosticGraphRelationChange,
+    DiagnosticGraphRelationSnapshot, DiagnosticGraphSnapshot, DiagnosticModelCatalogueSnapshot,
+    DiagnosticModelKind, DiagnosticModelSnapshot, DiagnosticReadStamp, DiagnosticRetentionPin,
+    DiagnosticRetentionSnapshot, DiagnosticRuntimeReference, DiagnosticSectionSnapshot,
+    DiagnosticSnapshot, DiagnosticSnapshotLease, DiagnosticVectorArtifactCatalogueSnapshot,
+    DiagnosticVectorArtifactKind, DiagnosticVectorArtifactSnapshot, ReadDiagnosticSnapshot,
+    DIAGNOSTIC_SNAPSHOT_FORMAT_VERSION, MAX_DIAGNOSTIC_AUDIT_RECORDS,
+};
+pub use runtime_tool::{
+    runtime_tool_arguments_sha256, ListRuntimeTools, RuntimeToolAttunement,
+    RuntimeToolAuthorization, RuntimeToolCatalogue, RuntimeToolDescriptor, RuntimeToolInvocation,
+    RuntimeToolInvocationResult, MAX_RUNTIME_TOOL_ARGUMENT_BYTES, MAX_RUNTIME_TOOL_RESULT_BYTES,
+    RUNTIME_TOOL_CATALOGUE_VERSION,
+};
+pub use workplan::{
+    WorkGateDefinition, WorkItemDefinition, WorkItemStatus, WorkItemStatusSnapshot,
+    WorkPlanDefinition, WorkPlanEventEnvelope, WorkPlanEventKind, WorkPlanSnapshot,
+    MAX_WORK_PLAN_GATES, MAX_WORK_PLAN_ITEMS, MAX_WORK_PLAN_TEXT_BYTES, WORK_PLAN_SCHEMA_VERSION,
+};
+
 use schemars::JsonSchema;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use sha2::{Digest, Sha256};
@@ -14,7 +45,7 @@ use std::fmt;
 pub const PROTOCOL: &str = "rrd";
 pub const PROTOCOL_VERSION: u16 = 1;
 pub const OPENAPI_DOCUMENT_SHA256: &str =
-    "68d87505b85d7d99e6a58ce49404040d832295c6572f70f791db635dd45bbf64";
+    "35b62d736846ff1fc2c353c54de42b6455e9a4ec2d5a9e793eec724418c9cfdc";
 pub const MAX_ID_BYTES: usize = 128;
 pub const MAX_MESSAGE_BYTES: usize = 4_096;
 pub const MAX_CAPABILITIES: usize = 512;
@@ -268,7 +299,17 @@ pub struct EnsureQueryIndex {
     #[serde(default)]
     pub unique: bool,
     #[serde(default)]
+    pub kind: QueryIndexKind,
+    #[serde(default)]
     pub budget: QueryBudget,
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum QueryIndexKind {
+    #[default]
+    Scalar,
+    Bm25,
 }
 
 impl EnsureQueryIndex {
@@ -315,6 +356,8 @@ pub struct QueryIndexSnapshot {
     pub index_id: CanonicalId,
     pub definition_query: String,
     pub unique: bool,
+    #[serde(default)]
+    pub kind: QueryIndexKind,
     pub generation: u64,
     pub source_cursor: u64,
     pub built_valid_at: Option<u64>,
@@ -489,11 +532,137 @@ pub struct EnsureVectorCollectionResult {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum VectorIndexConfiguration {
+    Hnsw {
+        m: u32,
+        ef_construction: u64,
+        max_level: u8,
+        seed: u64,
+        #[serde(default)]
+        filter_properties: Vec<CanonicalId>,
+    },
+    TurboQuant {
+        bits: VectorQuantizationBits,
+        seed: u64,
+        #[serde(default)]
+        filter_properties: Vec<CanonicalId>,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum VectorQuantizationBits {
+    Bits4,
+    Bits2,
+    Bits1_5,
+    Bits1,
+}
+
+impl VectorIndexConfiguration {
+    fn validate(&self) -> Result<()> {
+        match self {
+            Self::Hnsw {
+                m,
+                ef_construction,
+                max_level,
+                filter_properties,
+                ..
+            } => {
+                if !(2..=128).contains(m)
+                    || *ef_construction < u64::from(*m)
+                    || *ef_construction > 1_000_000
+                    || !(1..=32).contains(max_level)
+                {
+                    return invalid("HNSW index parameters are outside supported bounds");
+                }
+                let unique = filter_properties
+                    .iter()
+                    .map(CanonicalId::as_str)
+                    .collect::<BTreeSet<_>>();
+                if unique.len() != filter_properties.len() {
+                    return invalid("HNSW filter properties must be unique");
+                }
+                Ok(())
+            }
+            Self::TurboQuant {
+                filter_properties, ..
+            } => {
+                let unique = filter_properties
+                    .iter()
+                    .map(CanonicalId::as_str)
+                    .collect::<BTreeSet<_>>();
+                if unique.len() != filter_properties.len() {
+                    return invalid("TurboQuant filter properties must be unique");
+                }
+                Ok(())
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct EnsureVectorIndex {
+    pub scope: String,
+    pub collection_id: CanonicalId,
+    pub vector_name: CanonicalId,
+    pub configuration: VectorIndexConfiguration,
+    pub max_scanned_changes: u64,
+}
+
+impl EnsureVectorIndex {
+    pub fn validate(&self) -> Result<()> {
+        validate_vector_scope(&self.scope)?;
+        self.configuration.validate()?;
+        if self.max_scanned_changes == 0 || self.max_scanned_changes > MAX_VECTOR_SEARCH_CHANGES {
+            return invalid(format!(
+                "vector index max_scanned_changes must be in 1..={MAX_VECTOR_SEARCH_CHANGES}"
+            ));
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct VectorIndexSnapshot {
+    pub index_id: CanonicalId,
+    pub collection_id: CanonicalId,
+    pub vector_name: CanonicalId,
+    pub kind: CanonicalId,
+    pub generation: u64,
+    pub source_cursor: u64,
+    pub indexed_vectors: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub packed_vector_bytes: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub full_precision_vector_bytes: Option<u64>,
+    pub configuration_sha256: String,
+    pub artifact_sha256: String,
+    pub object_sha256: String,
+    pub catalogue_revision: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct EnsureVectorIndexResult {
+    pub index: VectorIndexSnapshot,
+    pub idempotent_replay: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "operator", rename_all = "snake_case", deny_unknown_fields)]
 pub enum VectorPayloadOperator {
-    Equals { value: QueryValue },
-    NotEquals { value: QueryValue },
-    In { values: Vec<QueryValue> },
+    Equals {
+        value: QueryValue,
+    },
+    NotEquals {
+        value: QueryValue,
+    },
+    In {
+        values: Vec<QueryValue>,
+    },
     Range {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         gt: Option<QueryValue>,
@@ -504,7 +673,9 @@ pub enum VectorPayloadOperator {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         lte: Option<QueryValue>,
     },
-    Exists { value: bool },
+    Exists {
+        value: bool,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -582,6 +753,21 @@ pub enum VectorSearchQuery {
     },
 }
 
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "mode", rename_all = "snake_case", deny_unknown_fields)]
+pub enum VectorSearchMode {
+    #[default]
+    Exact,
+    AllowApproximate {
+        exact_rerank: u64,
+        ef_search: u64,
+    },
+    RequireApproximate {
+        exact_rerank: u64,
+        ef_search: u64,
+    },
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct SearchVectors {
@@ -599,6 +785,8 @@ pub struct SearchVectors {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub metric: Option<VectorSearchMetric>,
     pub top_k: u64,
+    #[serde(default)]
+    pub mode: VectorSearchMode,
     pub max_scanned_changes: u64,
 }
 
@@ -622,6 +810,27 @@ impl SearchVectors {
             return invalid(format!(
                 "vector search top_k must be in 1..={MAX_VECTOR_SEARCH_TOP_K}"
             ));
+        }
+        match self.mode {
+            VectorSearchMode::Exact => {}
+            VectorSearchMode::AllowApproximate {
+                exact_rerank,
+                ef_search,
+            }
+            | VectorSearchMode::RequireApproximate {
+                exact_rerank,
+                ef_search,
+            } => {
+                if exact_rerank < self.top_k
+                    || exact_rerank > MAX_VECTOR_SEARCH_CHANGES
+                    || ef_search < exact_rerank
+                    || ef_search > MAX_VECTOR_SEARCH_CHANGES
+                {
+                    return invalid(
+                        "approximate vector search requires top_k <= exact_rerank <= ef_search within the search bound",
+                    );
+                }
+            }
         }
         if self.max_scanned_changes == 0 || self.max_scanned_changes > MAX_VECTOR_SEARCH_CHANGES {
             return invalid(format!(
@@ -695,6 +904,143 @@ pub struct VectorSearchResult {
     pub access_path: CanonicalId,
     pub exact: bool,
     pub hits: Vec<VectorSearchHit>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum HybridFusion {
+    ReciprocalRank {
+        rank_constant: u32,
+        text_weight_millionths: u32,
+        vector_weight_millionths: u32,
+    },
+}
+
+impl Default for HybridFusion {
+    fn default() -> Self {
+        Self::ReciprocalRank {
+            rank_constant: 60,
+            text_weight_millionths: 1_000_000,
+            vector_weight_millionths: 1_000_000,
+        }
+    }
+}
+
+impl HybridFusion {
+    fn validate(self) -> Result<()> {
+        match self {
+            Self::ReciprocalRank {
+                rank_constant,
+                text_weight_millionths,
+                vector_weight_millionths,
+            } => {
+                if !(1..=10_000).contains(&rank_constant)
+                    || !(1..=1_000_000).contains(&text_weight_millionths)
+                    || !(1..=1_000_000).contains(&vector_weight_millionths)
+                {
+                    return invalid(
+                        "hybrid reciprocal-rank parameters exceed their supported bounds",
+                    );
+                }
+                Ok(())
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SearchHybrid {
+    pub scope: String,
+    pub valid_at: u64,
+    pub document_kind: CanonicalId,
+    pub text_field: CanonicalId,
+    pub text_query: String,
+    pub collection_id: CanonicalId,
+    pub vector_name: CanonicalId,
+    pub vector_query: VectorSearchQuery,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub vector_filter: Option<VectorPayloadFilter>,
+    #[serde(default)]
+    pub vector_mode: VectorSearchMode,
+    #[serde(default)]
+    pub fusion: HybridFusion,
+    pub top_k: u64,
+    pub candidate_k: u64,
+    pub max_scanned_changes: u64,
+}
+
+impl SearchHybrid {
+    pub fn validate(&self) -> Result<()> {
+        validate_vector_scope(&self.scope)?;
+        if self.valid_at == 0 {
+            return invalid("hybrid search valid_at must be greater than zero");
+        }
+        if self.text_query.trim().is_empty() || self.text_query.len() > MAX_MESSAGE_BYTES {
+            return invalid(format!(
+                "hybrid text query length must be in 1..={MAX_MESSAGE_BYTES} bytes"
+            ));
+        }
+        if self.top_k == 0
+            || self.top_k > MAX_VECTOR_SEARCH_TOP_K
+            || self.candidate_k < self.top_k
+            || self.candidate_k > MAX_VECTOR_SEARCH_TOP_K
+        {
+            return invalid(
+                "hybrid search requires 1 <= top_k <= candidate_k within the vector result bound",
+            );
+        }
+        self.fusion.validate()?;
+        SearchVectors {
+            scope: self.scope.clone(),
+            valid_at: self.valid_at,
+            collection_id: Some(self.collection_id.clone()),
+            vector_name: Some(self.vector_name.clone()),
+            field: None,
+            query: self.vector_query.clone(),
+            filter: self.vector_filter.clone(),
+            metric: None,
+            top_k: self.candidate_k,
+            mode: self.vector_mode,
+            max_scanned_changes: self.max_scanned_changes,
+        }
+        .validate()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct HybridSearchHit {
+    pub subject: DataReference,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub vector_reference: Option<DataReference>,
+    pub fused_score: f64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub text_score: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub vector_score: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub text_rank: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub vector_rank: Option<u64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct HybridSearchResult {
+    pub scope: String,
+    pub read_manifest_sha256: String,
+    pub known_at_cursor: u64,
+    pub text_plan_sha256: String,
+    pub vector_plan_sha256: String,
+    pub fusion_plan_sha256: String,
+    pub text_access_path: CanonicalId,
+    pub vector_access_path: CanonicalId,
+    pub vector_exact: bool,
+    pub text_candidates: u64,
+    pub vector_candidates: u64,
+    pub fusion: HybridFusion,
+    pub hits: Vec<HybridSearchHit>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -984,6 +1330,7 @@ pub struct InstanceBackupSnapshot {
     pub archive: LogicalArchiveSnapshot,
     pub claims: BackupCoverageSnapshot,
     pub typed_runtime: BackupCoverageSnapshot,
+    pub catalogues: BackupCoverageSnapshot,
     pub object_payloads: BackupCoverageSnapshot,
     pub projections: BackupCoverageSnapshot,
     pub invocation_telemetry: BackupCoverageSnapshot,
@@ -1103,7 +1450,19 @@ pub enum SecurityAction {
     RestoreCreate,
     EstateRead,
     AuditRead,
+    DiagnosticsRead,
     SecurityAdmin,
+    MemoryContextRead,
+    MemoryInspect,
+    MemoryRecall,
+    MemoryRetire,
+    MemoryWrite,
+    LifecycleApply,
+    ProjectAttune,
+    ProjectRoute,
+    ReasoningRead,
+    ReasoningWrite,
+    RuntimeToolCatalogueRead,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -1181,6 +1540,31 @@ pub enum EndpointAuthentication {
     SessionBearer,
 }
 
+/// Source of the policy action enforced for an endpoint.
+///
+/// Runtime-tool invocation derives its mutation bit and granular action from
+/// the selected versioned tool descriptor. It deliberately has no broad
+/// dispatch action that a principal could be granted.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "source", rename_all = "snake_case")]
+pub enum EndpointAction {
+    Fixed { action: SecurityAction },
+    RuntimeToolDescriptor,
+}
+
+impl EndpointAction {
+    pub const fn fixed(action: SecurityAction) -> Self {
+        Self::Fixed { action }
+    }
+
+    pub const fn fixed_action(self) -> Option<SecurityAction> {
+        match self {
+            Self::Fixed { action } => Some(action),
+            Self::RuntimeToolDescriptor => None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct EndpointDescriptor {
@@ -1189,7 +1573,7 @@ pub struct EndpointDescriptor {
     pub path: String,
     pub authentication: EndpointAuthentication,
     pub mutation: bool,
-    pub action: SecurityAction,
+    pub action: EndpointAction,
     pub request_type: String,
     pub response_type: String,
 }
@@ -1231,6 +1615,19 @@ impl EndpointCatalogue {
             }
             if endpoint.mutation && endpoint.method == HttpMethod::Get {
                 return invalid("mutating endpoints may not use GET");
+            }
+            if endpoint.action == EndpointAction::RuntimeToolDescriptor
+                && (endpoint.operation.as_str() != "runtime-tool-invoke"
+                    || endpoint.method != HttpMethod::Post
+                    || endpoint.path != "/v1/runtime/tools/invoke"
+                    || endpoint.authentication != EndpointAuthentication::SessionBearer
+                    || !endpoint.mutation
+                    || endpoint.request_type != "RuntimeToolInvocation"
+                    || endpoint.response_type != "RuntimeToolInvocationResult")
+            {
+                return invalid(
+                    "runtime-tool-derived authorization is restricted to the canonical invocation endpoint",
+                );
             }
         }
         if self
@@ -1305,6 +1702,16 @@ pub fn endpoint_catalogue() -> EndpointCatalogue {
             SecurityAction::ChangefeedRead,
             "ReadChangefeed",
             "ChangefeedPage",
+        ),
+        endpoint(
+            "diagnostics-read",
+            HttpMethod::Post,
+            "/v1/diagnostics/read",
+            EndpointAuthentication::SessionBearer,
+            false,
+            SecurityAction::DiagnosticsRead,
+            "ReadDiagnosticSnapshot",
+            "DiagnosticSnapshot",
         ),
         endpoint(
             "estate-read",
@@ -1396,6 +1803,29 @@ pub fn endpoint_catalogue() -> EndpointCatalogue {
             "PollLiveQuery",
             "LiveQueryDeltaResult",
         ),
+        endpoint(
+            "runtime-tool-catalogue-read",
+            HttpMethod::Post,
+            "/v1/runtime/tools/list",
+            EndpointAuthentication::SessionBearer,
+            false,
+            SecurityAction::RuntimeToolCatalogueRead,
+            "ListRuntimeTools",
+            "RuntimeToolCatalogue",
+        ),
+        EndpointDescriptor {
+            operation: CanonicalId::new("runtime-tool-invoke")
+                .expect("static endpoint operation is canonical"),
+            method: HttpMethod::Post,
+            path: "/v1/runtime/tools/invoke".into(),
+            authentication: EndpointAuthentication::SessionBearer,
+            // The selected descriptor supplies the effective mutation bit.
+            // `true` keeps transport retries/idempotency conservative.
+            mutation: true,
+            action: EndpointAction::RuntimeToolDescriptor,
+            request_type: "RuntimeToolInvocation".into(),
+            response_type: "RuntimeToolInvocationResult".into(),
+        },
         endpoint(
             "restore-create",
             HttpMethod::Post,
@@ -1648,7 +2078,7 @@ pub fn openapi_document() -> Result<serde_json::Value> {
             .insert(method.into(), serde_json::Value::Object(operation));
     }
 
-    Ok(serde_json::json!({
+    Ok(canonical_json(serde_json::json!({
         "openapi": "3.1.0",
         "info": {
             "title": "RRFlow Durable Runtime API",
@@ -1678,7 +2108,29 @@ pub fn openapi_document() -> Result<serde_json::Value> {
         "x-rrd-protocol": PROTOCOL,
         "x-rrd-protocol-version": PROTOCOL_VERSION,
         "x-rrd-endpoint-count": catalogue.endpoints.len()
-    }))
+    })))
+}
+
+/// Normalize object insertion order so public protocol bytes are independent
+/// of workspace feature unification. In particular, DataFusion enables
+/// `serde_json/preserve_order`; RRD must not emit a different OpenAPI digest
+/// merely because another workspace package activated that representation.
+fn canonical_json(value: serde_json::Value) -> serde_json::Value {
+    match value {
+        serde_json::Value::Array(values) => {
+            serde_json::Value::Array(values.into_iter().map(canonical_json).collect())
+        }
+        serde_json::Value::Object(values) => {
+            let mut entries = values.into_iter().collect::<Vec<_>>();
+            entries.sort_by(|left, right| left.0.cmp(&right.0));
+            let mut canonical = serde_json::Map::with_capacity(entries.len());
+            for (name, value) in entries {
+                canonical.insert(name, canonical_json(value));
+            }
+            serde_json::Value::Object(canonical)
+        }
+        scalar => scalar,
+    }
 }
 
 fn openapi_schema_pointer(path: &str, method: &str, suffix: &str) -> String {
@@ -1798,6 +2250,7 @@ fn request_envelope_schema(name: &str) -> Result<serde_json::Value> {
         "EnsureQueryIndex" => schema_json::<RequestEnvelope<EnsureQueryIndex>>(),
         "EnsureVectorCollection" => schema_json::<RequestEnvelope<EnsureVectorCollection>>(),
         "ListQueryIndexes" => schema_json::<RequestEnvelope<ListQueryIndexes>>(),
+        "ListRuntimeTools" => schema_json::<RequestEnvelope<ListRuntimeTools>>(),
         "ListVectorCollections" => schema_json::<RequestEnvelope<ListVectorCollections>>(),
         "PollLiveQuery" => schema_json::<RequestEnvelope<PollLiveQuery>>(),
         "FollowChangefeed" => schema_json::<RequestEnvelope<FollowChangefeed>>(),
@@ -1805,9 +2258,11 @@ fn request_envelope_schema(name: &str) -> Result<serde_json::Value> {
         "PreviewTransaction" => schema_json::<RequestEnvelope<PreviewTransaction>>(),
         "ReadAudit" => schema_json::<RequestEnvelope<ReadAudit>>(),
         "ReadChangefeed" => schema_json::<RequestEnvelope<ReadChangefeed>>(),
+        "ReadDiagnosticSnapshot" => schema_json::<RequestEnvelope<ReadDiagnosticSnapshot>>(),
         "ReadEstate" => schema_json::<RequestEnvelope<ReadEstate>>(),
         "RenewSession" => schema_json::<RequestEnvelope<RenewSession>>(),
         "RestoreInstanceBackup" => schema_json::<RequestEnvelope<RestoreInstanceBackup>>(),
+        "RuntimeToolInvocation" => schema_json::<RequestEnvelope<RuntimeToolInvocation>>(),
         "RetrieveVectorPoints" => schema_json::<RequestEnvelope<RetrieveVectorPoints>>(),
         "ScrollVectorPoints" => schema_json::<RequestEnvelope<ScrollVectorPoints>>(),
         "SearchVectors" => schema_json::<RequestEnvelope<SearchVectors>>(),
@@ -1825,6 +2280,7 @@ fn response_envelope_schema(name: &str) -> Result<serde_json::Value> {
         "CreateInstanceBackupResult" => {
             schema_json::<ResponseEnvelope<CreateInstanceBackupResult>>()
         }
+        "DiagnosticSnapshot" => schema_json::<ResponseEnvelope<DiagnosticSnapshot>>(),
         "EndpointCatalogue" => schema_json::<ResponseEnvelope<EndpointCatalogue>>(),
         "EstateSnapshot" => schema_json::<ResponseEnvelope<EstateSnapshot>>(),
         "InstanceBackupCatalogueSnapshot" => {
@@ -1844,6 +2300,10 @@ fn response_envelope_schema(name: &str) -> Result<serde_json::Value> {
         "Readiness" => schema_json::<ResponseEnvelope<Readiness>>(),
         "RestoreInstanceBackupResult" => {
             schema_json::<ResponseEnvelope<RestoreInstanceBackupResult>>()
+        }
+        "RuntimeToolCatalogue" => schema_json::<ResponseEnvelope<RuntimeToolCatalogue>>(),
+        "RuntimeToolInvocationResult" => {
+            schema_json::<ResponseEnvelope<RuntimeToolInvocationResult>>()
         }
         "ServiceCapabilities" => schema_json::<ResponseEnvelope<ServiceCapabilities>>(),
         "SessionLease" => schema_json::<ResponseEnvelope<SessionLease>>(),
@@ -1878,7 +2338,7 @@ fn endpoint(
         path: path.into(),
         authentication,
         mutation,
-        action,
+        action: EndpointAction::fixed(action),
         request_type: request_type.into(),
         response_type: response_type.into(),
     }
@@ -2849,7 +3309,7 @@ pub struct DataObjectReceipt {
 }
 
 /// Public multi-model mutation vocabulary. It is deliberately independent of
-/// `vyrm_core`; adapters lower these values into the authoritative runtime.
+/// `rrd_core`; adapters lower these values into the authoritative runtime.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "mutation", rename_all = "snake_case", deny_unknown_fields)]
 pub enum TransactionMutation {

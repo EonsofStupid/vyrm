@@ -1,8 +1,8 @@
 //! Authoritative, replayable control-plane state transitions.
 
 use crate::{Error, Result};
+use rrd_core::digest;
 use serde::{Deserialize, Serialize};
-use vyrm_core::digest;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

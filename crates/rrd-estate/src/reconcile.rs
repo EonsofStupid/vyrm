@@ -4,9 +4,9 @@ use crate::{
     ReceiptRequest, Result,
 };
 use rrd_contract::CanonicalId;
-use serde::{Deserialize, Serialize};
-use vyrm_core::digest;
+use rrd_core::digest;
 use rrd_store::Engine;
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

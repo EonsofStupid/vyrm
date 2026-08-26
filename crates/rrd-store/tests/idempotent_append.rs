@@ -1,5 +1,5 @@
+use rrd_core::{Claim, Predicate, Producer, Subject};
 use rrd_store::{Engine, Error, MemoryEngine, NativeEngine, Store};
-use vyrm_core::{Claim, Predicate, Producer, Subject};
 
 const DIGEST_A: &str = "3c94150b4ea4f9dcb27d3b602e9f190debe656533c047b99e11367bc6a28017f";
 const DIGEST_B: &str = "4c94150b4ea4f9dcb27d3b602e9f190debe656533c047b99e11367bc6a28017f";

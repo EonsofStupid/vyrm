@@ -11,7 +11,7 @@ pub enum Error {
     /// Claim encoding or decoding failed.
     Codec(String),
     /// Propagated from the kernel.
-    Kernel(vyrm_core::Error),
+    Kernel(rrd_core::Error),
     /// Sequence allocation overflowed. Reported rather than saturated, so that
     /// overflow cannot degrade into silent key reuse. `SPEC.md` §11 correction 2.
     SequenceOverflow,
@@ -130,14 +130,14 @@ impl From<fjall::Error> for Error {
     }
 }
 
-impl From<vyrm_kv::Error> for Error {
-    fn from(value: vyrm_kv::Error) -> Self {
+impl From<rrd_lsm::Error> for Error {
+    fn from(value: rrd_lsm::Error) -> Self {
         Error::Substrate(value.to_string())
     }
 }
 
-impl From<vyrm_core::Error> for Error {
-    fn from(value: vyrm_core::Error) -> Self {
+impl From<rrd_core::Error> for Error {
+    fn from(value: rrd_core::Error) -> Self {
         Error::Kernel(value)
     }
 }

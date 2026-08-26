@@ -41,33 +41,79 @@ impl RrdMutualTlsServerConfig {
 }
 
 pub(super) struct AppState {
-    pub(super) service: RrflowEngine,
+    pub(super) service: RrdEngine,
     pub(super) capabilities: ServiceCapabilities,
-    pub(super) security_enforced: bool,
+    pub(super) project_root: Option<std::path::PathBuf>,
 }
 
 impl RrdHttpServer {
-    pub fn bind(engine: RrflowEngine, bind: SocketAddr) -> Result<Self> {
+    pub fn bind(engine: RrdEngine, bind: SocketAddr) -> Result<Self> {
         if !bind.ip().is_loopback() {
             return Err(HttpError::RemoteBindDenied(bind));
         }
-        Self::bind_inner(engine, bind, None)
+        Self::bind_inner(engine, bind, None, None)
+    }
+
+    pub fn bind_project(
+        engine: RrdEngine,
+        project: ProjectAuthorityBinding,
+        bind: SocketAddr,
+    ) -> Result<Self> {
+        if !bind.ip().is_loopback() {
+            return Err(HttpError::RemoteBindDenied(bind));
+        }
+        Self::bind_inner(engine, bind, None, Some(project))
     }
 
     pub fn bind_mtls(
-        engine: RrflowEngine,
+        engine: RrdEngine,
         bind: SocketAddr,
         tls: RrdMutualTlsServerConfig,
     ) -> Result<Self> {
-        Self::bind_inner(engine, bind, Some(TlsAcceptor::from(tls.inner)))
+        Self::bind_inner(engine, bind, Some(TlsAcceptor::from(tls.inner)), None)
+    }
+
+    pub fn bind_project_mtls(
+        engine: RrdEngine,
+        project: ProjectAuthorityBinding,
+        bind: SocketAddr,
+        tls: RrdMutualTlsServerConfig,
+    ) -> Result<Self> {
+        Self::bind_inner(
+            engine,
+            bind,
+            Some(TlsAcceptor::from(tls.inner)),
+            Some(project),
+        )
     }
 
     fn bind_inner(
-        engine: RrflowEngine,
+        engine: RrdEngine,
         bind: SocketAddr,
         tls: Option<TlsAcceptor>,
+        project: Option<ProjectAuthorityBinding>,
     ) -> Result<Self> {
         let instance = engine.instance_id().clone();
+        if let Some(project) = &project {
+            project
+                .validate()
+                .map_err(|error| HttpError::Contract(error.to_string()))?;
+            if project.instance_id != instance {
+                return Err(HttpError::Contract(
+                    "project authority and engine instance identities differ".into(),
+                ));
+            }
+            if engine
+                .project_authority_binding()
+                .map_err(|error| HttpError::Contract(error.to_string()))?
+                .as_ref()
+                != Some(project)
+            {
+                return Err(HttpError::Contract(
+                    "project authority is not persisted by this engine".into(),
+                ));
+            }
+        }
         let backend = engine
             .readiness(0)
             .map(|readiness| readiness.backend)
@@ -86,10 +132,11 @@ impl RrdHttpServer {
         capabilities
             .validate()
             .map_err(|error| HttpError::Contract(error.to_string()))?;
+        let project_root = project.map(|binding| std::path::PathBuf::from(binding.project_root));
         let state = Arc::new(AppState {
             service: engine,
             capabilities,
-            security_enforced,
+            project_root,
         });
         let app = Router::new().fallback(any(dispatch)).with_state(state);
         Ok(Self { listener, app, tls })

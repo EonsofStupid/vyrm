@@ -3,7 +3,7 @@
 Status: F1 contract, frozen for the first operable backup/restore slice.
 
 The RRD logical archive is a backend-independent replay of authoritative Engine
-operations. It is not a copy of VyrmKV files and it is not the Fjall migration
+operations. It is not a copy of RRD LSM files and it is not the Fjall migration
 archive. Its purpose is recovery across physical formats and storage adapters.
 
 ## Consistency
@@ -77,10 +77,10 @@ archive before restore.
 The CLI surface is:
 
 ```text
-vyrm --db SOURCE storage archive-export --archive FILE
-vyrm --db SOURCE storage archive-inspect --archive FILE
-vyrm --db ABSENT_TARGET storage archive-restore --archive FILE
-vyrm --db SOURCE storage backup-create --catalogue DIR --label LABEL
-vyrm --db SOURCE storage backup-list --catalogue DIR
-vyrm --db ABSENT_TARGET storage backup-restore --catalogue DIR --backup-id ID
+rrflow --db SOURCE storage archive-export --archive FILE
+rrflow --db SOURCE storage archive-inspect --archive FILE
+rrflow --db ABSENT_TARGET storage archive-restore --archive FILE
+rrflow --db SOURCE storage backup-create --catalogue DIR --label LABEL
+rrflow --db SOURCE storage backup-list --catalogue DIR
+rrflow --db ABSENT_TARGET storage backup-restore --catalogue DIR --backup-id ID
 ```

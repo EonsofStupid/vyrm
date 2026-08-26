@@ -6,7 +6,7 @@ TLS/mTLS, secrets providers, row/field policy, rate limits, atomic audit
 completion with application mutation, and external audit archival remain open.
 
 `rrd-security` owns identity, deny-by-default action policy, and the durable
-audit vocabulary. It is deliberately separate from Vyrm physical storage,
+audit vocabulary. It is deliberately separate from RRFlow physical storage,
 RRD query execution, RRO provisioning, and Connectome presentation.
 
 ## Persistent contract
@@ -37,7 +37,7 @@ response SHA-256 values. Bodies,
 credentials, bearer tokens, and arbitrary headers are excluded.
 
 Each record is immutable and idempotent by audit identity. Rebinding that
-identity is denied. The record is appended through Vyrm's authenticated
+identity is denied. The record is appended through RRFlow's authenticated
 control journal, so restart replay validates the existing journal chain rather
 than trusting a detached log file. Bounded reads return only typed
 `security.audit` records while retaining their global control-journal sequence.

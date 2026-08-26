@@ -9,10 +9,10 @@
 //! cargo run --release -p rrd-store --example ground_cost -- <dir> [claims]
 //! ```
 
+use rrd_core::{Claim, Predicate, Producer, Subject};
 use rrd_store::Engine;
 use rrd_store::{GroundingReport, Store};
 use std::time::Instant;
-use vyrm_core::{Claim, Predicate, Producer, Subject};
 
 fn main() {
     let mut args = std::env::args().skip(1);

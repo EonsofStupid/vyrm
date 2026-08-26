@@ -1,5 +1,5 @@
+use rrd_core::ScopeId;
 use rrd_store::{ControlTransition, Engine, Error, MemoryEngine, NativeEngine, Store};
-use vyrm_core::ScopeId;
 
 fn scope(name: &str) -> ScopeId {
     ScopeId::new(name).unwrap()

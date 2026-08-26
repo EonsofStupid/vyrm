@@ -1,14 +1,14 @@
 use rrd_contract::CanonicalId;
+use rrd_core::digest;
 use rrd_security::{
     Principal, PrincipalKind, ResourceGrant, SecurityRepository, SecurityState, SECURITY_FORMAT,
 };
+use rrd_store::PersistentEngine;
 use serde::Deserialize;
 use std::collections::BTreeMap;
 use std::fs::File;
 use std::io::{self, Read};
 use std::path::{Path, PathBuf};
-use vyrm_core::digest;
-use rrd_store::PersistentEngine;
 
 const BOOTSTRAP_FORMAT: u16 = 1;
 const MAX_BOOTSTRAP_BYTES: u64 = 1024 * 1024;

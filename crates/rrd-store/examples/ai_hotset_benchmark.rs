@@ -1,4 +1,4 @@
-//! Isolated Fjall/vyrmKV read profiles for an AI runtime's control and metadata sets.
+//! Isolated Fjall/RRD LSM read profiles for an AI runtime's control and metadata sets.
 //!
 //! Setup is deliberately excluded from measurement: a cold immutable corpus is
 //! published first, then a small set of routing, lease, cursor, and outcome-like
@@ -9,6 +9,7 @@
 use fjall::{
     KeyspaceCreateOptions, PersistMode, Readable, SingleWriterTxDatabase, SingleWriterTxKeyspace,
 };
+use rrd_lsm::{Database, Durability, Mutation, WriteBatch};
 use rrd_store::{measure_storage_footprint, FootprintBytes, StorageFootprint};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
@@ -17,7 +18,6 @@ use std::hint::black_box;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
-use vyrm_kv::{Database, Durability, Mutation, WriteBatch};
 
 const FORMAT_VERSION: u16 = 3;
 

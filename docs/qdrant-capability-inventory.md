@@ -1,4 +1,4 @@
-# Qdrant capability inventory and Vyrm disposition
+# Qdrant capability inventory and RRFlow disposition
 
 **Baseline:** Qdrant `1.19.x`, the current documentation/API line on
 2026-08-23. This inventory follows the SurrealDB inventory intentionally:
@@ -19,7 +19,7 @@ Sources: [Qdrant overview](https://qdrant.tech/documentation/overview/),
 [Hybrid Cloud](https://qdrant.tech/documentation/hybrid-cloud/), and
 [Private Cloud](https://qdrant.tech/documentation/private-cloud/).
 
-| Qdrant capability | Vyrm disposition |
+| Qdrant capability | RRFlow disposition |
 |---|---|
 | Rust vector-search server with persistent local storage | **Partial** — vector/storage crates exist; no stable public vector server |
 | Standalone binary and Docker image | **Absent** as a supported distribution |
@@ -30,7 +30,7 @@ Sources: [Qdrant overview](https://qdrant.tech/documentation/overview/),
 | Managed Cloud clusters | **Absent** |
 | Hybrid Cloud on customer Kubernetes with cloud management | **Absent** |
 | Fully disconnected Private Cloud operator | **Absent** |
-| Embedded offline Qdrant Edge | **Partial** — `vyrm-edge` provides a narrower mmap exact-search runtime |
+| Embedded offline Qdrant Edge | **Partial** — `rrflow-edge` provides a narrower mmap exact-search runtime |
 | Consistent data API across self-hosted and cloud | **Absent** |
 | AWS, GCP, Azure and customer-infrastructure placement | **Absent** |
 
@@ -41,7 +41,7 @@ Sources: [manage data](https://qdrant.tech/documentation/manage-data/),
 [points](https://qdrant.tech/documentation/manage-data/points/), and
 [payload](https://qdrant.tech/documentation/concepts/payload/).
 
-| Qdrant capability | Vyrm disposition |
+| Qdrant capability | RRFlow disposition |
 |---|---|
 | Collections as independently configured sets of points | **Absent** — scope/field/catalog generations are not collection administration |
 | Collection create, inspect, update, delete and list | **Absent** public API |
@@ -69,7 +69,7 @@ Sources: [similarity search](https://qdrant.tech/documentation/search/search/),
 [exploration](https://qdrant.tech/documentation/search/explore/), and
 [hybrid/multi-stage queries](https://qdrant.tech/documentation/search/hybrid-queries/).
 
-| Qdrant capability | Vyrm disposition |
+| Qdrant capability | RRFlow disposition |
 |---|---|
 | Unified Query API | **Absent** as public API; `SearchRequest` is an internal alpha contract |
 | Nearest-neighbor search by raw vector | **Verified locally** |
@@ -106,7 +106,7 @@ Sources: [similarity search](https://qdrant.tech/documentation/search/search/),
 Sources: [filtering](https://qdrant.tech/documentation/search/filtering/) and
 [indexing](https://qdrant.tech/documentation/manage-data/indexing/).
 
-| Qdrant capability | Vyrm disposition |
+| Qdrant capability | RRFlow disposition |
 |---|---|
 | Boolean `must`, `should`, `must_not` and minimum-should filters | **Partial** — typed expressions are narrower |
 | Exact match, any-of and except matching | **Partial** |
@@ -135,12 +135,12 @@ Sources: [indexing](https://qdrant.tech/documentation/manage-data/indexing/),
 [GPU indexing](https://qdrant.tech/documentation/ops-configuration/running-with-gpu/), and
 [memory tiers](https://qdrant.tech/documentation/ops-configuration/memory-tiers/).
 
-| Qdrant capability | Vyrm disposition |
+| Qdrant capability | RRFlow disposition |
 |---|---|
 | Mutable/background-built dense HNSW | **Partial** — immutable generation build/publish |
 | Per-collection and per-named-vector `m`, `ef_construct`, full-scan threshold | **Partial** programmatic config |
 | Sparse inverted index | **Absent** — sparse path is exact scanning |
-| Automatic segment optimization, merge and index thresholds | **Partial** in VyrmKV; vector segment optimization is absent |
+| Automatic segment optimization, merge and index thresholds | **Partial** in RRD LSM; vector segment optimization is absent |
 | Optimizer status and indexing progress | **Partial** catalogue only |
 | GPU-accelerated HNSW indexing | **Absent** physical backend |
 | Vulkan GPU support across NVIDIA/AMD and selected devices | **Absent** |
@@ -157,7 +157,7 @@ Sources: [indexing](https://qdrant.tech/documentation/manage-data/indexing/),
 
 Source: [Qdrant quantization](https://qdrant.tech/documentation/manage-data/quantization/).
 
-| Qdrant capability | Vyrm disposition |
+| Qdrant capability | RRFlow disposition |
 |---|---|
 | Scalar int8 quantization (4x compression) | **Partial/experimental** — symmetric per-vector int8 only, not Qdrant-equivalent production format |
 | Binary quantization | **Absent** |
@@ -182,23 +182,23 @@ TurboQuant. Qdrant 1.19 implements a materially different codec and lifecycle.
 Sources: [storage](https://qdrant.tech/documentation/storage/) and
 [migration/recovery](https://qdrant.tech/documentation/migration-recovery-options/).
 
-| Qdrant capability | Vyrm disposition |
+| Qdrant capability | RRFlow disposition |
 |---|---|
-| Disk persistence for all collection data | **Verified locally** for canonical Vyrm state |
+| Disk persistence for all collection data | **Verified locally** for canonical RRFlow state |
 | Ordered WAL before segment application | **Verified locally** |
 | Per-operation sequence/version to ignore stale reapplication | **Verified locally** through MVCC/idempotency, different API contract |
 | Crash recovery from WAL | **Verified locally** |
-| Mutable and immutable segment lifecycle | **Partial** — VyrmKV LSM segments, vector generations are separate |
+| Mutable and immutable segment lifecycle | **Partial** — RRD LSM LSM segments, vector generations are separate |
 | Background flush/index/optimization | **Partial** |
 | Upsert idempotency | **Verified locally** for content/request identities |
 | Synchronous `wait` option for update completion | **Absent** public API |
 | Weak, medium and strong write ordering | **Absent** selectable API |
 | Read consistency controls in replicated collections | **Absent** selectable API |
 | Batched mutations | **Verified internally** |
-| Atomic multi-operation point batches within Qdrant's supported batch contract | **Partial** — Vyrm atomic transaction is broader, but no point API parity |
+| Atomic multi-operation point batches within Qdrant's supported batch contract | **Partial** — RRFlow atomic transaction is broader, but no point API parity |
 | Collection aliases for online migration | **Absent** |
 | Bulk upload with parallel batches and deferred indexing | **Absent** product path |
-| Storage snapshots preserving prebuilt indexes | **Partial** — authenticated snapshots include Vyrm state/artifacts, not collection API |
+| Storage snapshots preserving prebuilt indexes | **Partial** — authenticated snapshots include RRFlow state/artifacts, not collection API |
 | Full-storage and collection snapshots | **Partial** |
 | Snapshot download/upload/restore API | **Absent** network API |
 | Snapshot-based migration without reindexing | **Partial** in cluster artifact/snapshot transfer |
@@ -211,7 +211,7 @@ Sources: [distributed deployment](https://qdrant.tech/documentation/scaling/dist
 [resilience](https://qdrant.tech/documentation/scaling/resilience/), and
 [multitenancy](https://qdrant.tech/documentation/manage-data/multitenancy/).
 
-| Qdrant capability | Vyrm disposition |
+| Qdrant capability | RRFlow disposition |
 |---|---|
 | Collections split into shards | **Partial** — typed shard IDs/placement; no collection service |
 | Replication factor per collection | **Partial protocol only** |
@@ -242,7 +242,7 @@ Sources: [inference](https://qdrant.tech/documentation/inference/),
 [Qdrant Edge](https://qdrant.tech/documentation/edge/), and
 [on-device embeddings](https://qdrant.tech/documentation/edge/edge-fastembed-embeddings/).
 
-| Qdrant capability | Vyrm disposition |
+| Qdrant capability | RRFlow disposition |
 |---|---|
 | Unified Inference API accepting documents/images in upsert and query | **Absent** public API |
 | In-cluster sparse BM25 embedding | **Absent** |
@@ -252,7 +252,7 @@ Sources: [inference](https://qdrant.tech/documentation/inference/),
 | Text and image embedding | **Partial** — modality contract exists; verified production models are limited |
 | Model identity/configuration associated with vector space | **Verified locally**, stronger digest binding |
 | One-round-trip embed-and-query/upsert | **Absent** network surface |
-| Qdrant Edge in-process, offline, no background service | **Partial** — `vyrm-edge` satisfies this form for a narrower path |
+| Qdrant Edge in-process, offline, no background service | **Partial** — `rrflow-edge` satisfies this form for a narrower path |
 | Edge dense/sparse/multivector search | **Partial** — dense exact path only in packaged runtime |
 | Edge BM25 | **Absent** |
 | Edge synchronization patterns with server | **Absent** |
@@ -262,7 +262,7 @@ Sources: [inference](https://qdrant.tech/documentation/inference/),
 
 Source: [Qdrant security](https://qdrant.tech/documentation/security/).
 
-| Qdrant capability | Vyrm disposition |
+| Qdrant capability | RRFlow disposition |
 |---|---|
 | Admin API key | **Absent** general client API |
 | Read-only API key | **Absent** |
@@ -285,7 +285,7 @@ Sources: [API reference](https://api.qdrant.tech/),
 [local quickstart](https://qdrant.tech/documentation/quick-start/), and
 the [documentation index](https://qdrant.tech/documentation/).
 
-| Qdrant capability | Vyrm disposition |
+| Qdrant capability | RRFlow disposition |
 |---|---|
 | OpenAPI-documented REST API | **Absent** |
 | High-performance gRPC API | **Absent** |
@@ -298,7 +298,7 @@ the [documentation index](https://qdrant.tech/documentation/).
 | Async client operations | **Absent** public SDK |
 | Embedded/local mode in Python client | **Absent** equivalent SDK packaging |
 | FastEmbed library and retrieval/reranking helpers | **Partial** backend adapter only |
-| Qdrant MCP server | **Partial** — Vyrm has its own narrower MCP server |
+| Qdrant MCP server | **Partial** — RRFlow has its own narrower MCP server |
 | Agent skills/documentation for AI tools | **Partial** runtime registry/hooks; no distributable skill package |
 | Web UI collection console, API console and visual point explorer | **Partial** — Connectome focuses runtime traces/graph, not collection ops |
 | Ecosystem integrations with orchestration/RAG frameworks | **Absent** supported matrix |
@@ -308,7 +308,7 @@ the [documentation index](https://qdrant.tech/documentation/).
 Sources: [monitoring and telemetry](https://qdrant.tech/documentation/ops-monitoring/) and
 [Managed Cloud](https://qdrant.tech/documentation/cloud/).
 
-| Qdrant capability | Vyrm disposition |
+| Qdrant capability | RRFlow disposition |
 |---|---|
 | Health, liveness and readiness endpoints | **Absent** database service endpoints |
 | Service and collection telemetry endpoints | **Absent** public endpoint |
@@ -330,7 +330,7 @@ Sources: [Managed Cloud](https://qdrant.tech/documentation/cloud/),
 [Private Cloud](https://qdrant.tech/documentation/private-cloud/), and
 [installation options](https://qdrant.tech/documentation/installation/).
 
-| Qdrant capability | Vyrm disposition |
+| Qdrant capability | RRFlow disposition |
 |---|---|
 | Cloud account/organisation and central management console | **Absent** |
 | Create/configure/delete database clusters | **Absent** |
@@ -353,7 +353,7 @@ Sources: [Managed Cloud](https://qdrant.tech/documentation/cloud/),
 
 ## 14. Immediate conclusion
 
-Vyrm's strongest overlap with Qdrant today is real but narrow: exact dense,
+RRFlow's strongest overlap with Qdrant today is real but narrow: exact dense,
 sparse and multivector values; dense HNSW; exact reranking; typed filters;
 model-bound provenance; immutable artifacts; mmap dense search; WAL-backed
 persistence; snapshots; offline embedding/search; and detailed causal runtime
@@ -366,7 +366,7 @@ memory tiers, physical GPU indexing, server inference, official SDKs, REST/gRPC,
 complete security/audit, production distribution, backups, Kubernetes, and an
 estate control plane.
 
-Until those exist and pass fixed-corpus/fixed-hardware differentials, a Vyrm
+Until those exist and pass fixed-corpus/fixed-hardware differentials, a RRFlow
 versus Qdrant superiority claim would be false. The correct near-term claim is
-that Vyrm owns an AI-reasoning-aware persistence and evidence kernel with some
+that RRFlow owns an AI-reasoning-aware persistence and evidence kernel with some
 verified vector primitives that Qdrant does not attempt to provide.

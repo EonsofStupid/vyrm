@@ -1,5 +1,5 @@
+use rrd_core::{Claim, Predicate, Producer, Subject};
 use rrd_store::{Engine, PersistentBackend, PersistentEngine, Store};
-use vyrm_core::{Claim, Predicate, Producer, Subject};
 
 fn claim(object: &str) -> Claim {
     Claim::new(

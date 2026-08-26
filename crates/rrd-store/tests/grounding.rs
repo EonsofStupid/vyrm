@@ -1,13 +1,13 @@
 //! Adapter conformance against the grounding reference.
 //!
 //! `SPEC.md` §8.3 and §12: a substrate adapter is correct if and only if it
-//! returns what [`vyrm_core::reference::MemoryClaims`] returns for the same
+//! returns what [`rrd_core::reference::MemoryClaims`] returns for the same
 //! claims. These tests are that differential, not an independent set of
 //! hand-written expectations.
 
+use rrd_core::reference::MemoryClaims;
+use rrd_core::{Claim, ClaimReader, Predicate, Producer, Subject};
 use rrd_store::Store;
-use vyrm_core::reference::MemoryClaims;
-use vyrm_core::{Claim, ClaimReader, Predicate, Producer, Subject};
 
 fn producer() -> Producer {
     Producer {
@@ -148,13 +148,13 @@ fn recall_matches_grounding_reference_across_the_corpus() {
         .collect();
     for at in (0..600).step_by(13) {
         for budget in [1usize, 40, 10_000] {
-            let query = vyrm_core::RecallQuery {
+            let query = rrd_core::RecallQuery {
                 subjects: subjects.clone(),
                 predicates: None,
                 as_of: at,
             };
-            let from_store = vyrm_core::recall(&store, &query, budget).unwrap();
-            let from_reference = vyrm_core::recall(&reference, &query, budget).unwrap();
+            let from_store = rrd_core::recall(&store, &query, budget).unwrap();
+            let from_reference = rrd_core::recall(&reference, &query, budget).unwrap();
             assert_eq!(
                 from_store, from_reference,
                 "recall divergence at as_of={at} budget={budget}"
@@ -264,7 +264,7 @@ fn access_records_are_written_without_blocking_reads() {
     for i in 0..10 {
         store
             .observe(
-                &vyrm_core::Reader::new("agent:clyffy").unwrap(),
+                &rrd_core::Reader::new("agent:clyffy").unwrap(),
                 &subject,
                 &predicate,
                 1000 + i,

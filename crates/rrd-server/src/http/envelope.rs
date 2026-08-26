@@ -6,8 +6,7 @@ impl AppState {
         headers: &HeaderMap,
         body: &[u8],
         now: u64,
-        mutation: bool,
-        action: SecurityAction,
+        operation_kind: RrdOperation,
         operation: F,
     ) -> HttpResponse
     where
@@ -19,121 +18,81 @@ impl AppState {
         ) -> std::result::Result<O, ApiError>,
     {
         let attempt = HTTP_ID_COUNTER.fetch_add(1, Ordering::Relaxed);
-        let envelope =
-            match parse_envelope::<T>(headers, body, now, mutation, self.service.instance_id()) {
-                Ok(envelope) => envelope,
-                Err(error) => {
-                    let (context, error) = *error;
-                    let response = failure(&context, error);
-                    if self.security_enforced {
-                        self.audit_response(
-                            action,
-                            &instance_resource(self.service.instance_id()),
-                            &context,
-                            None,
-                            body,
-                            &response,
-                            now,
-                            attempt,
-                        )
-                        .unwrap_or_else(|error| {
-                            tracing::error!(error = %error, "RRD security audit append failed");
-                        });
-                    }
-                    return response;
-                }
-            };
-        let mut audited_principal = None;
-        let identity = if self.security_enforced {
-            let (principal, credential) = match api_key_identity(headers) {
-                Ok(identity) => identity,
-                Err(error) => {
-                    let response = failure(&envelope.context, error);
-                    self.audit_response(
-                        action,
-                        &envelope.resource,
-                        &envelope.context,
-                        None,
-                        body,
-                        &response,
-                        now,
-                        attempt,
-                    )
-                    .unwrap_or_else(|error| {
-                        tracing::error!(error = %error, "RRD security audit append failed");
-                    });
-                    return response;
-                }
-            };
-            if let Err(error) = self.service.authenticate_and_authorize(
-                &principal,
-                credential.as_bytes(),
-                action,
-                &envelope.resource,
-                now,
-            ) {
-                let response = failure(&envelope.context, api_error(error));
-                self.audit_response(
-                    action,
-                    &envelope.resource,
-                    &envelope.context,
-                    Some(principal),
+        let envelope = match parse_envelope::<T>(
+            headers,
+            body,
+            now,
+            operation_kind.mutates(),
+            self.service.instance_id(),
+        ) {
+            Ok(envelope) => envelope,
+            Err(error) => {
+                let (context, error) = *error;
+                return self.rejected_response(
+                    context,
+                    instance_resource(self.service.instance_id()),
                     body,
-                    &response,
                     now,
                     attempt,
-                )
-                .unwrap_or_else(|error| {
-                    tracing::error!(error = %error, "RRD security audit append failed");
-                });
-                return response;
+                    operation_kind,
+                    None,
+                    error,
+                );
             }
-            if let Err(error) = self.audit_authorized(
-                action,
-                &envelope.resource,
-                &envelope.context,
-                Some(principal.clone()),
-                body,
-                now,
-                attempt,
-            ) {
-                return failure(&envelope.context, api_error(error));
+        };
+        let invocation = invocation(&envelope, body, now, attempt);
+        let identity = if has_api_key_headers(headers) {
+            match api_key_identity(headers) {
+                Ok(identity) => Some(identity),
+                Err(error) => {
+                    return self.rejected_response(
+                        envelope.context,
+                        envelope.resource,
+                        body,
+                        now,
+                        attempt,
+                        operation_kind,
+                        None,
+                        error,
+                    );
+                }
             }
-            audited_principal = Some(principal.clone());
-            Some((principal, credential))
         } else {
             None
         };
+        let authorized = match identity.as_ref() {
+            Some((principal_id, credential)) => self.service.begin_invocation(
+                invocation,
+                operation_kind,
+                InvocationCredential::ApiKey {
+                    principal_id,
+                    credential: credential.as_bytes(),
+                },
+            ),
+            None => self.service.begin_invocation(
+                invocation,
+                operation_kind,
+                InvocationCredential::Anonymous,
+            ),
+        };
+        let authorized = match authorized {
+            Ok(authorized) => authorized,
+            Err(error) => return failure(&envelope.context, api_error(error)),
+        };
+
         let response = match operation(&envelope, identity) {
             Ok(payload) => success(StatusCode::OK, &envelope.context, payload),
             Err(error) => failure(&envelope.context, error),
         };
-        if self.security_enforced {
-            self.audit_response(
-                action,
-                &envelope.resource,
-                &envelope.context,
-                audited_principal,
-                body,
-                &response,
-                now,
-                attempt,
-            )
-            .unwrap_or_else(|error| {
-                tracing::error!(error = %error, "RRD security audit append failed");
-            });
-        }
-        response
+        self.complete_response(&envelope.context, &authorized, response)
     }
 
-    #[allow(clippy::too_many_arguments)]
     pub(super) fn with_authenticated_envelope<T, O, F>(
         &self,
         headers: &HeaderMap,
         body: &[u8],
         now: u64,
-        mutation: bool,
-        action: SecurityAction,
+        operation_kind: RrdOperation,
         expected_session: Option<&str>,
         operation: F,
     ) -> HttpResponse
@@ -146,165 +105,157 @@ impl AppState {
             &CorrelationId,
         ) -> std::result::Result<O, ApiError>,
     {
-        let fallback = generated_context(now, "authentication");
         let attempt = HTTP_ID_COUNTER.fetch_add(1, Ordering::Relaxed);
-        let session = match authenticated_session(headers, expected_session) {
-            Ok(value) => value,
+        let envelope = match parse_envelope::<T>(
+            headers,
+            body,
+            now,
+            operation_kind.mutates(),
+            self.service.instance_id(),
+        ) {
+            Ok(envelope) => envelope,
             Err(error) => {
-                let response = failure(&fallback, error);
-                if self.security_enforced {
-                    self.audit_response(
-                        action,
-                        &instance_resource(self.service.instance_id()),
-                        &fallback,
-                        None,
-                        body,
-                        &response,
-                        now,
-                        attempt,
-                    )
-                    .unwrap_or_else(|error| {
-                        tracing::error!(error = %error, "RRD security audit append failed");
-                    });
-                }
-                return response;
-            }
-        };
-        let envelope =
-            match parse_envelope::<T>(headers, body, now, mutation, self.service.instance_id()) {
-                Ok(envelope) => envelope,
-                Err(error) => {
-                    let (context, error) = *error;
-                    let response = failure(&context, error);
-                    if self.security_enforced {
-                        self.audit_response(
-                            action,
-                            &instance_resource(self.service.instance_id()),
-                            &context,
-                            None,
-                            body,
-                            &response,
-                            now,
-                            attempt,
-                        )
-                        .unwrap_or_else(|error| {
-                            tracing::error!(error = %error, "RRD security audit append failed");
-                        });
-                    }
-                    return response;
-                }
-            };
-        let principal = if self.security_enforced {
-            match self.service.session_principal(
-                &session.0,
-                &session.1,
-                now,
-                envelope.context.request_id.as_str(),
-                envelope.context.operation_id.as_str(),
-            ) {
-                Ok(Some(principal)) => Some(principal),
-                Ok(None) => {
-                    let response = failure(
-                        &envelope.context,
-                        ApiError::new(
-                            ErrorCode::Unauthenticated,
-                            "session is not bound to a security principal",
-                            false,
-                        ),
-                    );
-                    self.audit_response(
-                        action,
-                        &envelope.resource,
-                        &envelope.context,
-                        None,
-                        body,
-                        &response,
-                        now,
-                        attempt,
-                    )
-                    .unwrap_or_else(|error| {
-                        tracing::error!(error = %error, "RRD security audit append failed");
-                    });
-                    return response;
-                }
-                Err(error) => {
-                    let response = failure(&envelope.context, api_error(error));
-                    self.audit_response(
-                        action,
-                        &envelope.resource,
-                        &envelope.context,
-                        None,
-                        body,
-                        &response,
-                        now,
-                        attempt,
-                    )
-                    .unwrap_or_else(|error| {
-                        tracing::error!(error = %error, "RRD security audit append failed");
-                    });
-                    return response;
-                }
-            }
-        } else {
-            None
-        };
-        if let Some(principal) = &principal {
-            if let Err(error) =
-                self.service
-                    .authorize_principal(principal, action, &envelope.resource, now)
-            {
-                let response = failure(&envelope.context, api_error(error));
-                self.audit_response(
-                    action,
-                    &envelope.resource,
-                    &envelope.context,
-                    Some(principal.clone()),
+                let (context, error) = *error;
+                return self.rejected_response(
+                    context,
+                    instance_resource(self.service.instance_id()),
                     body,
-                    &response,
                     now,
                     attempt,
-                )
-                .unwrap_or_else(|error| {
-                    tracing::error!(error = %error, "RRD security audit append failed");
-                });
-                return response;
+                    operation_kind,
+                    None,
+                    error,
+                );
             }
-            if let Err(error) = self.audit_authorized(
-                action,
-                &envelope.resource,
-                &envelope.context,
-                Some(principal.clone()),
-                body,
-                now,
-                attempt,
-            ) {
-                return failure(&envelope.context, api_error(error));
+        };
+        let session = match authenticated_session(headers, expected_session) {
+            Ok(session) => session,
+            Err(error) => {
+                return self.rejected_response(
+                    envelope.context,
+                    envelope.resource,
+                    body,
+                    now,
+                    attempt,
+                    operation_kind,
+                    None,
+                    error,
+                );
             }
-        }
+        };
+        let authorized = match self.service.begin_invocation(
+            invocation(&envelope, body, now, attempt),
+            operation_kind,
+            InvocationCredential::Session {
+                session_id: &session.0,
+                token: &session.1,
+            },
+        ) {
+            Ok(authorized) => authorized,
+            Err(error) => return failure(&envelope.context, api_error(error)),
+        };
+
         let response = match operation(&envelope, &session.0, &session.1) {
             Ok(payload) => success(StatusCode::OK, &envelope.context, payload),
             Err(error) => failure(&envelope.context, error),
         };
-        if self.security_enforced {
-            self.audit_response(
-                action,
-                &envelope.resource,
-                &envelope.context,
-                principal,
-                body,
-                &response,
-                now,
-                attempt,
-            )
-            .unwrap_or_else(|error| {
-                tracing::error!(error = %error, "RRD security audit append failed");
-            });
+        self.complete_response(&envelope.context, &authorized, response)
+    }
+
+    fn complete_response(
+        &self,
+        context: &RequestContext,
+        authorized: &AuthorizedInvocation,
+        response: HttpResponse,
+    ) -> HttpResponse {
+        let completion = invocation_completion(&response);
+        match self.service.complete_invocation(authorized, completion) {
+            Ok(()) => response,
+            Err(error) => failure(context, api_error(error)),
         }
-        response
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(in crate::http) fn rejected_response(
+        &self,
+        context: RequestContext,
+        resource: rrd_contract::ResourcePath,
+        body: &[u8],
+        now: u64,
+        attempt: u64,
+        operation: RrdOperation,
+        principal_id: Option<CanonicalId>,
+        error: ApiError,
+    ) -> HttpResponse {
+        let context = if context.validate(false).is_ok() {
+            context
+        } else {
+            generated_context(now, "rejected-invocation")
+        };
+        let response = failure(&context, error);
+        let invocation = Invocation {
+            context: context.clone(),
+            resource,
+            observed_at_unix_ms: now,
+            attempt,
+            request_sha256: sha256_hex(body),
+        };
+        match self.service.record_invocation_failure(
+            invocation,
+            operation,
+            principal_id,
+            invocation_completion(&response),
+        ) {
+            Ok(()) => response,
+            Err(error) => failure(&context, api_error(error)),
+        }
     }
 }
 
-fn parse_envelope<T: DeserializeOwned>(
+pub(in crate::http) fn invocation<T>(
+    envelope: &RequestEnvelope<T>,
+    body: &[u8],
+    now: u64,
+    attempt: u64,
+) -> Invocation {
+    Invocation {
+        context: envelope.context.clone(),
+        resource: envelope.resource.clone(),
+        observed_at_unix_ms: now,
+        attempt,
+        request_sha256: sha256_hex(body),
+    }
+}
+
+pub(super) fn invocation_completion(response: &HttpResponse) -> InvocationCompletion {
+    let status_code = response.status().as_u16();
+    let decision = match status_code {
+        200..=299 => AuditDecision::Allowed,
+        401 | 403 => AuditDecision::Denied,
+        _ => AuditDecision::Failed,
+    };
+    let response_sha256 = response
+        .extensions()
+        .get::<ResponseDigest>()
+        .map(|digest| digest.0.clone())
+        .unwrap_or_else(|| sha256_hex(status_code.to_string().as_bytes()));
+    InvocationCompletion {
+        decision,
+        status_code,
+        response_sha256,
+    }
+}
+
+fn has_api_key_headers(headers: &HeaderMap) -> bool {
+    headers.contains_key("X-RRD-Principal")
+        || headers
+            .get_all("Authorization")
+            .iter()
+            .filter_map(|value| value.to_str().ok())
+            .any(|value| value.starts_with("ApiKey "))
+}
+
+pub(in crate::http) fn parse_envelope<T: DeserializeOwned>(
     headers: &HeaderMap,
     bytes: &[u8],
     now: u64,

@@ -18,7 +18,7 @@ Repository state was verified 2026-08-20.
 
 ## Why this is a kernel feature
 
-Vyrm needs three observability layers, each with a different truth claim:
+RRFlow needs three observability layers, each with a different truth claim:
 
 1. Rust `tracing` spans are low-overhead process diagnostics. They may vanish
    and are not product evidence.
@@ -27,7 +27,7 @@ Vyrm needs three observability layers, each with a different truth claim:
 3. Audit envelopes explain accepted or denied externally visible operations.
    They are compliance evidence, not a substitute for the detailed trace.
 
-The second layer is now frozen in `vyrm-core`. `RuntimeTraceEvent` supplies
+The second layer is now frozen in `rrd-core`. `RuntimeTraceEvent` supplies
 validated `start`, `annotation`, and `finish` methods with W3C-width trace/span
 identities, parentage, domain, outcome, data class, bounded attributes, and
 typed causal links. `into_runtime_event` maps it into the existing
@@ -35,14 +35,14 @@ typed causal links. `into_runtime_event` maps it into the existing
 scope, commit identity, mutation digest, hash chain, snapshot semantics, and
 replay path as all other runtime truth. A three-engine differential proves the
 serialized trace mutation is identical through memory, Fjall compatibility,
-and native VyrmKV. A checked-in v1 JSON vector freezes the portable trace and
+and native RRD LSM. A checked-in v1 JSON vector freezes the portable trace and
 stored-runtime-event shapes.
 
-`vyrm-core` owns the conflict-safe commit builder. It binds the exact scope
+`rrd-core` owns the conflict-safe commit builder. It binds the exact scope
 stamp and current schema, installing or repairing the canonical trace schema in the same commit
-as the first event, and retries only observed cursor conflicts. `vyrm init`
+as the first event, and retries only observed cursor conflicts. `rrflow init`
 records a bounded `instance.init` annotation after wiring the checkout.
-Lifecycle hooks—including the shared `vyrm_lifecycle` MCP path—commit a start
+Lifecycle hooks—including the shared `rrflow_lifecycle` MCP path—commit a start
 before dispatch and a separate finish afterward. Denials are explicit outcomes;
 input is represented by digest and byte count rather than persisted raw content.
 If the process dies between the commits, native reopen exposes the unmatched
@@ -52,15 +52,15 @@ Explicit query execution now uses the same consumable durable-span helper. The
 operator captures an immutable scope `ReadStamp` before writing a root
 `query.run` start, and `Catalog::capture_at` binds against that stamp after the
 live head advances. `KNOWN HEAD` therefore means the head the caller observed,
-not a head contaminated by trace events. Child `vyrmql.parse_bind`,
-`vyrmmx.plan`, and `vyrmmx.execute` spans link to the root and the exact read;
+not a head contaminated by trace events. Child `rrflowql.parse_bind`,
+`rrd_query_executor.plan`, and `rrd_query_executor.execute` spans link to the root and the exact read;
 plan/execution spans also link the physical-plan digest. Finishes record source
 family/type, schema revision, selected and rejected paths, budgets, scan/row/
 batch/byte counts, truncation, or a bounded error class and digest. Budget
 refusal is a denial rather than an apparent execution failure.
 
-The query execution span now contains a `vyrmkv.runtime_read` child. Every
-engine reports complete logical scan/result evidence. Native VyrmKV also
+The query execution span now contains a `rrd_lsm.runtime_read` child. Every
+engine reports complete logical scan/result evidence. Native RRD LSM also
 captures cumulative manifest, memtable, segment, shared-cache, block-load, and
 encoded/decoded-byte counters immediately around the logical execution and
 persists only their bounded deltas. Memory and Fjall explicitly label that
@@ -77,7 +77,7 @@ embedding.commit`; the commit may rebase over canonical trace-only mutations,
 but any intervening data or schema mutation denies it. The vector and its
 provenance still publish through one read-bound data transaction.
 
-The explicit surfaces are CLI `vyrm query` and MCP `vyrm_query`. Connectome's
+The explicit surfaces are CLI `rrflow query` and MCP `rrflow_query`. Connectome's
 GET Query Lab deliberately remains a read-only lens. Raw query text and
 parameter values are returned to the caller but are represented in durable
 trace and invocation state only by content digests, counts, and public plan
@@ -108,7 +108,7 @@ keeping the original read-cursor alias for v1 consumers.
 This follows the useful part of the
 [OpenTelemetry trace model and database semantic conventions](https://opentelemetry.io/docs/specs/semconv/db/database-spans/)
 without making OpenTelemetry a kernel dependency. Export is an adapter; the
-Vyrm causal contract remains stable if an exporter changes.
+RRFlow causal contract remains stable if an exporter changes.
 
 ## Causal coordinates
 
@@ -137,9 +137,9 @@ subsystem by subsystem and must carry the following minimum evidence:
 | Boundary | Required durable fields |
 |---|---|
 | Lifecycle/preflight/gate | reasoning run, workflow manifest, read stamp, decision, denial code |
-| `vyrmQL` parse/bind | query digest, contract version, referenced types, error class |
-| `vyrmMX` plan | plan digest, alternatives considered/rejected, budget, selected access paths |
-| VyrmKV read/write | cursor or read sequence, memtable/segment path, bytes/blocks, durability, cache deltas |
+| `RRFlowQL` parse/bind | query digest, contract version, referenced types, error class |
+| `RRD query executor` plan | plan digest, alternatives considered/rejected, budget, selected access paths |
+| RRD LSM read/write | cursor or read sequence, memtable/segment path, bytes/blocks, durability, cache deltas |
 | Projection | source cursor, generation/config/artifact digests, lag, fallback/quarantine |
 | Vector/embedding | model-space digest, filter selectivity, candidates, rerank count, recall mode, accelerator/fallback |
 | Provider/tool | provider invocation, observable token/tool envelope, outcome; never hidden chain-of-thought |
@@ -171,7 +171,7 @@ policy; control-class digests/counts/timings are the default.
 
 ## Per-project deployment
 
-One major project receives one Vyrm instance. The instance manifest is the
+One major project receives one RRFlow instance. The instance manifest is the
 authority for project ID, root, storage identity, adapters, trace retention,
 embedding model spaces, and permitted operator-knowledge sources. An umbrella
 instance still requires an explicit member on every trace and adapter request;
@@ -180,52 +180,52 @@ filesystem proximity is never membership.
 The target operator methods are:
 
 ```text
-vyrm init                    # materialize one instance contract
-vyrm run                     # start the local daemon/workbench for that instance
-vyrm trace status|tail       # inspect durable coverage, lag, drops, retention
-vyrm adapter inspect         # show capabilities and exact external revision
-vyrm adapter verify          # differential/freshness/tenant-isolation checks
-vyrm query                   # dynamic typed query plus durable causal evidence
+rrflow init                    # materialize one instance contract
+rrflow run                     # start the local daemon/workbench for that instance
+rrflow trace status|tail       # inspect durable coverage, lag, drops, retention
+rrflow adapter inspect         # show capabilities and exact external revision
+rrflow adapter verify          # differential/freshness/tenant-isolation checks
+rrflow query                   # dynamic typed query plus durable causal evidence
 ```
 
 `init`, runtime/workbench, and the traced `query` surface are implemented today.
 The `run`, `trace`, and adapter commands above remain target operator surfaces,
 not shipped CLI commands. The underlying typed operator-knowledge Rust port is
-now implemented in `vyrm-operator`.
+now implemented in `rrd-operator-knowledge`.
 
 ## pgvector is an operator-knowledge adapter
 
 pgvector is useful when a project already keeps operator-authored documents,
 code-derived knowledge, notes, incidents, or application rows in Postgres. It
-does not replace Vyrm's authoritative reasoning, policy, cursor, audit, graph,
+does not replace RRFlow's authoritative reasoning, policy, cursor, audit, graph,
 or native search state.
 
 The executable adapter contract is:
 
-1. Bind one explicit Vyrm scope to one Postgres database/schema/table or
+1. Bind one explicit RRFlow scope to one Postgres database/schema/table or
    partition and immutable adapter-config digest.
 2. Execute the search in one external snapshot and bind its snapshot digest,
    database/relation/catalog identity, and optional stable project revision.
    WAL LSN is supporting evidence, not a substitute for snapshot visibility.
 3. Bind every vector to exact embedding provenance/model space and every query
-   to project/tenant filters. Seal the minimum required Vyrm source cursor;
+   to project/tenant filters. Seal the minimum required RRFlow source cursor;
    deny a stale projection or one newer than the query's captured read stamp.
 4. Return result identities, distances, source revision, chosen exact/HNSW/
    IVFFlat path, scan controls, and observed latency—not unbounded row payloads.
 5. Commit or reference an `OperatorKnowledge` trace link and projection stamp.
 6. Deny, fall back, or label stale when the source revision/config/model binding
    no longer matches policy.
-7. Synchronize Vyrm-originated work through a content-addressed idempotent
+7. Synchronize RRFlow-originated work through a content-addressed idempotent
    outbox identity. A retry after an ambiguous finish returns the same external
    revision without applying the payload again. Never claim a single ACID
-   transaction spans VyrmKV and Postgres.
+   transaction spans RRD LSM and Postgres.
 
-`vyrm-operator` now freezes these portable shapes in checked-in JSON, provides
-a deterministic exact-search adapter over Vyrm's vector oracle, validates both
+`rrd-operator-knowledge` now freezes these portable shapes in checked-in JSON, provides
+a deterministic exact-search adapter over RRFlow's vector oracle, validates both
 sides of every adapter call—including the applied scan controls and projection
 freshness—and declares vector-kind plus path-specific metric capabilities so an
 unsupported cross-product fails closed. It builds quoted/parameterized pgvector
-query shapes for exact, HNSW, and IVFFlat operation. `vyrm-node` adds paired
+query shapes for exact, HNSW, and IVFFlat operation. `rrd-engine` adds paired
 durable search/execute and sync/apply spans with `OperatorKnowledge` and projection
 links. The reference writer proves idempotent replay. This is an executable
 port and conformance oracle.
@@ -265,7 +265,7 @@ graph/vector/text access, built-in embedding and MCP surfaces, HNSW lifecycle
 configuration, planner experiments/guardrails, and query/index telemetry. See
 the [HelixDB repository](https://github.com/HelixDB/helix-db).
 
-These are the parts Vyrm should compete with directly:
+These are the parts RRFlow should compete with directly:
 
 - one obvious `init → run → query → inspect` project experience;
 - a single typed dynamic query AST shared by SDKs;
@@ -274,7 +274,7 @@ These are the parts Vyrm should compete with directly:
 - embedded/local operation with a production service path;
 - observable query and index behavior.
 
-Vyrm's distinct hypothesis is not “another graph-vector wrapper.” It is that a
+RRFlow's distinct hypothesis is not “another graph-vector wrapper.” It is that a
 database dedicated to frontier-AI operation can make evidence freshness,
 reasoning lifecycle, temporal truth, tool authorization, provider observation,
 projection generation, and replay part of the same enforceable runtime. That
@@ -298,7 +298,7 @@ superiority claim.
    complete at the local M3–M6 boundary. Provider roots and observable
    model/tool-envelope coverage are complete for Connectome prompt flights.
    Vector artifact publication now emits the same projection span around an
-   authoritative `vyrmDS` transition: staged exact/compact/HNSW bytes plus a
+   authoritative `RRD storage coordinator` transition: staged exact/compact/HNSW bytes plus a
    typed catalog record and verified object reference commit atomically before
    serving changes, and restart reconstruction fails closed. Cluster emission,
    storage-write coverage outside this projection/embedding path, and
@@ -309,7 +309,7 @@ superiority claim.
    candidate, exact event drill-down, and responsive visualization are
    complete. Cross-run fan-out/cache/IO/token mass and explicit sampling
    completeness remain open.
-5. JSON export preserves Vyrm identities and is deny-by-default for non-control
+5. JSON export preserves RRFlow identities and is deny-by-default for non-control
    data classes — complete. A formal OTLP translation and round-trip fixture
    remain open.
 6. Portable operator contract, exact oracle, project/model/revision denial,
@@ -319,5 +319,5 @@ superiority claim.
    retry—is complete and CI-enforced. Typed payload filters, process restart,
    concurrent failure recovery, authenticated endpoint TLS, and performance
    evidence remain open.
-7. HelixDB/Vyrm fixtures publish correctness, task outcome, recall, throughput,
+7. HelixDB/RRFlow fixtures publish correctness, task outcome, recall, throughput,
    p50/p95/p99, RSS/disk, startup/recovery, trace completeness, and raw trials.

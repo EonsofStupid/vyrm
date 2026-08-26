@@ -2,9 +2,9 @@
 //! halts and quarantines; a matching projection emits `grounded` with a
 //! digest; a crash mid-rebuild replays the interval rather than skipping it.
 
+use rrd_core::{Claim, Predicate, Producer, Subject};
 use rrd_store::Engine;
 use rrd_store::{Error, GroundingReport, ProjectionStatus, Store, CURRENT_PROJECTION};
-use vyrm_core::{Claim, Predicate, Producer, Subject};
 
 fn claim(subject: &str, predicate: &str, object: &str, from: u64) -> Claim {
     Claim::new(

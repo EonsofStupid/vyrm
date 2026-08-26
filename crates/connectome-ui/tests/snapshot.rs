@@ -1,4 +1,4 @@
-use vyrm_core::{
+use rrd_core::{
     Claim, Evidence, Predicate, Producer, ReasoningPayload, RuntimeCommit, RuntimeEventSchema,
     RuntimeMutation, RuntimeProperties, RuntimeSchemaRegistry, RuntimeTraceEvent, RuntimeType,
     ScopeId, Subject, TraceDataClass, TraceDomain, TraceOutcome,
@@ -9,8 +9,8 @@ use rrd_store::Engine;
 fn snapshot_exposes_runtime_objects_without_mutating_the_store() {
     let root = tempfile::tempdir().unwrap();
     std::fs::write(root.path().join("lib.rs"), "pub fn connectome() {}\n").unwrap();
-    vyrm_node::InstanceManifest::ensure_dedicated(root.path()).unwrap();
-    let db = root.path().join(vyrm_node::STORE_DIR);
+    rrd_engine::InstanceManifest::ensure_dedicated(root.path()).unwrap();
+    let db = root.path().join(rrd_engine::STORE_DIR);
     let store = rrd_store::PersistentEngine::open(&db).unwrap();
     Engine::assert(
         &store,
@@ -63,12 +63,12 @@ fn snapshot_exposes_runtime_objects_without_mutating_the_store() {
             },
         ),
     ] {
-        vyrm_node::record_reasoning(&store, "ui-run", at, "test", payload).unwrap();
+        rrd_engine::record_reasoning(&store, "ui-run", at, "test", payload).unwrap();
     }
-    vyrm_node::ensure_routing_fresh(&store, root.path()).unwrap();
-    let binding = vyrm_node::InstanceBinding::discover(root.path()).unwrap();
-    let workflow = vyrm_node::WorkflowObservation {
-        contract_version: vyrm_node::WORKFLOW_FORMAT,
+    rrd_engine::ensure_routing_fresh(&store, root.path()).unwrap();
+    let binding = rrd_engine::InstanceBinding::discover(root.path()).unwrap();
+    let workflow = rrd_engine::WorkflowObservation {
+        contract_version: rrd_engine::WORKFLOW_FORMAT,
         event: "package:bun:test".into(),
         manifest_digest: "a".repeat(64),
         command: "bun test".into(),
@@ -76,7 +76,7 @@ fn snapshot_exposes_runtime_objects_without_mutating_the_store() {
         command_digest: "b".repeat(64),
         response_digest: "c".repeat(64),
         exit_code: Some(0),
-        status: vyrm_node::WorkflowStatus::Passed,
+        status: rrd_engine::WorkflowStatus::Passed,
         at: 9,
     };
     store
@@ -116,10 +116,11 @@ fn snapshot_exposes_runtime_objects_without_mutating_the_store() {
             ],
         })
         .unwrap();
-    let trace_identity = vyrm_node::TraceIdentity::derive(&[b"connectome-workflow-trace"]).unwrap();
-    vyrm_node::record_runtime_trace(
+    let trace_identity =
+        rrd_engine::TraceIdentity::derive(&[b"connectome-workflow-trace"]).unwrap();
+    rrd_engine::record_runtime_trace(
         &store,
-        &ScopeId::new(vyrm_node::REASONING_SCOPE).unwrap(),
+        &ScopeId::new(rrd_engine::REASONING_SCOPE).unwrap(),
         "hook:test",
         RuntimeTraceEvent::finish(
             trace_identity.trace_id,
@@ -137,17 +138,17 @@ fn snapshot_exposes_runtime_objects_without_mutating_the_store() {
         .unwrap(),
     )
     .unwrap();
-    let plan_identity = vyrm_node::TraceIdentity::derive(&[b"connectome-planning-trace"]).unwrap();
-    vyrm_node::record_runtime_trace(
+    let plan_identity = rrd_engine::TraceIdentity::derive(&[b"connectome-planning-trace"]).unwrap();
+    rrd_engine::record_runtime_trace(
         &store,
-        &ScopeId::new(vyrm_node::REASONING_SCOPE).unwrap(),
+        &ScopeId::new(rrd_engine::REASONING_SCOPE).unwrap(),
         "query:test",
         RuntimeTraceEvent::finish(
             plan_identity.trace_id,
             plan_identity.span_id,
             None,
             TraceDomain::Planning,
-            "vyrmmx.plan",
+            "rrd.query.plan",
             10,
             125,
             TraceOutcome::Ok,
@@ -177,7 +178,7 @@ fn snapshot_exposes_runtime_objects_without_mutating_the_store() {
             b"connectome-storage-trace".as_slice(),
             "storage:test",
             TraceDomain::Storage,
-            "vyrmkv.runtime_read",
+            "rrd.lsm.runtime_read",
             75,
         ),
         (
@@ -188,10 +189,10 @@ fn snapshot_exposes_runtime_objects_without_mutating_the_store() {
             625,
         ),
     ] {
-        let identity = vyrm_node::TraceIdentity::derive(&[seed]).unwrap();
-        vyrm_node::record_runtime_trace(
+        let identity = rrd_engine::TraceIdentity::derive(&[seed]).unwrap();
+        rrd_engine::record_runtime_trace(
             &store,
-            &ScopeId::new(vyrm_node::REASONING_SCOPE).unwrap(),
+            &ScopeId::new(rrd_engine::REASONING_SCOPE).unwrap(),
             actor,
             RuntimeTraceEvent::finish(
                 identity.trace_id,
@@ -212,7 +213,7 @@ fn snapshot_exposes_runtime_objects_without_mutating_the_store() {
     }
     let lease = store
         .open_runtime_snapshot(
-            &vyrm_core::ScopeId::new("instance:default").unwrap(),
+            &rrd_core::ScopeId::new("instance:default").unwrap(),
             "workbench:test",
             10,
             100,
@@ -243,7 +244,7 @@ fn snapshot_exposes_runtime_objects_without_mutating_the_store() {
         .records
         .keys()
         .any(|kind| kind.as_str() == "reasoning_run")));
-    assert_eq!(snapshot.health.storage_backend, "vyrmkv_native");
+    assert_eq!(snapshot.health.storage_backend, "rrd_lsm");
     assert_eq!(snapshot.health.current_claims, 2);
     assert_eq!(snapshot.health.runtime_cursor, 18);
     assert_eq!(snapshot.health.schema_revision, Some(2));
@@ -296,7 +297,7 @@ fn snapshot_exposes_runtime_objects_without_mutating_the_store() {
     let plan_trace = snapshot
         .temporal_events
         .iter()
-        .find(|event| event.label == "vyrmmx.plan")
+        .find(|event| event.label == "rrd.query.plan")
         .expect("durable planning trace is visible in the temporal stream");
     assert_eq!(plan_trace.family, "routing");
     assert_eq!(plan_trace.action, "trace_finish");
@@ -304,7 +305,7 @@ fn snapshot_exposes_runtime_objects_without_mutating_the_store() {
     for (label, family, detail) in [
         ("vector.search", "search", "search; ok; 375 µs"),
         ("embedding.run", "search", "embedding; ok; 500 µs"),
-        ("vyrmkv.runtime_read", "storage", "storage; ok; 75 µs"),
+        ("rrd.lsm.runtime_read", "storage", "storage; ok; 75 µs"),
         ("operator.knowledge.search", "search", "adapter; ok; 625 µs"),
     ] {
         let event = snapshot
@@ -325,7 +326,7 @@ fn snapshot_exposes_runtime_objects_without_mutating_the_store() {
 
     let runtime = connectome_ui::runtime_graph(
         &store,
-        vyrm_core::ScopeId::new("instance:default").unwrap(),
+        rrd_core::ScopeId::new("instance:default").unwrap(),
         10,
         None,
     )
@@ -346,9 +347,9 @@ fn snapshot_exposes_runtime_objects_without_mutating_the_store() {
 
     let query = connectome_ui::runtime_query(
         &store,
-        vyrm_core::ScopeId::new("instance:default").unwrap(),
+        rrd_core::ScopeId::new("instance:default").unwrap(),
         "FROM record:reasoning_run AT VALID 10 KNOWN HEAD PROJECT id EXPLAIN CONTRACT",
-        &vyrm_mx::ExecutionBudget::default(),
+        &rrd_query::ExecutionBudget::default(),
     )
     .unwrap();
     assert_eq!(query.execution.returned_rows, 1);
@@ -363,27 +364,27 @@ fn snapshot_exposes_runtime_objects_without_mutating_the_store() {
 fn default_path_resolution_is_instance_local_and_foreign_paths_fail() {
     let first = tempfile::tempdir().unwrap();
     let second = tempfile::tempdir().unwrap();
-    vyrm_node::InstanceManifest::ensure_dedicated(first.path()).unwrap();
-    vyrm_node::InstanceManifest::ensure_dedicated(second.path()).unwrap();
+    rrd_engine::InstanceManifest::ensure_dedicated(first.path()).unwrap();
+    rrd_engine::InstanceManifest::ensure_dedicated(second.path()).unwrap();
 
     let (_, local) = connectome_ui::resolve_paths(first.path(), None).unwrap();
-    assert_eq!(local, first.path().join(".vyrm/store"));
+    assert_eq!(local, first.path().join(".rrflow/rrd"));
     let error =
-        connectome_ui::resolve_paths(first.path(), Some(&second.path().join(".vyrm/store")))
+        connectome_ui::resolve_paths(first.path(), Some(&second.path().join(".rrflow/rrd")))
             .unwrap_err()
             .to_string();
     assert!(error.contains("does not belong"));
-    assert!(!second.path().join(".vyrm/store").exists());
+    assert!(!second.path().join(".rrflow/rrd").exists());
 }
 
 #[test]
 fn trace_export_is_causal_bounded_and_deny_by_default_for_content() {
     let root = tempfile::tempdir().unwrap();
-    vyrm_node::InstanceManifest::ensure_dedicated(root.path()).unwrap();
-    let binding = vyrm_node::InstanceBinding::discover(root.path()).unwrap();
+    rrd_engine::InstanceManifest::ensure_dedicated(root.path()).unwrap();
+    let binding = rrd_engine::InstanceBinding::discover(root.path()).unwrap();
     let store = rrd_store::PersistentEngine::open(&binding.expected_store()).unwrap();
-    let scope = ScopeId::new(vyrm_node::REASONING_SCOPE).unwrap();
-    let root_identity = vyrm_node::TraceIdentity::derive(&[b"trace-export-root"]).unwrap();
+    let scope = ScopeId::new(rrd_engine::REASONING_SCOPE).unwrap();
+    let root_identity = rrd_engine::TraceIdentity::derive(&[b"trace-export-root"]).unwrap();
     let child_identity = root_identity.child(&[b"tool"]).unwrap();
     for event in [
         RuntimeTraceEvent::start(
@@ -439,10 +440,10 @@ fn trace_export_is_causal_bounded_and_deny_by_default_for_content() {
         )
         .unwrap(),
     ] {
-        vyrm_node::record_runtime_trace(&store, &scope, "connectome:test", event).unwrap();
+        rrd_engine::record_runtime_trace(&store, &scope, "connectome:test", event).unwrap();
     }
-    let content_identity = vyrm_node::TraceIdentity::derive(&[b"trace-export-content"]).unwrap();
-    vyrm_node::record_runtime_trace(
+    let content_identity = rrd_engine::TraceIdentity::derive(&[b"trace-export-content"]).unwrap();
+    rrd_engine::record_runtime_trace(
         &store,
         &scope,
         "connectome:test",
@@ -466,7 +467,7 @@ fn trace_export_is_causal_bounded_and_deny_by_default_for_content() {
     let before = store.runtime_cursor().unwrap();
     let control =
         connectome_ui::runtime_traces(&store, &binding.manifest.id, 4_096, &["control"]).unwrap();
-    assert_eq!(control.format, "vyrm-trace-export-v1");
+    assert_eq!(control.format, "rrflow-trace-export-v1");
     assert_eq!(control.included_data_classes, vec!["control"]);
     assert_eq!(control.events.len(), 4);
     assert_eq!(control.traces.len(), 1);

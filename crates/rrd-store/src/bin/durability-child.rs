@@ -8,11 +8,11 @@
 //! durability-child <db-path> <count> <flush|noflush>
 //! ```
 
+use rrd_core::{Claim, Predicate, Producer, Subject};
 use rrd_store::{Store, Writer, WriterConfig};
 use std::io::Write;
 use std::sync::Arc;
 use std::time::Duration;
-use vyrm_core::{Claim, Predicate, Producer, Subject};
 
 fn main() {
     let mut args = std::env::args().skip(1);

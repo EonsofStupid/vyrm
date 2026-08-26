@@ -24,7 +24,7 @@ path = "src/commands/rrd-estate-controller.rs"
 
 [dependencies]
 rrd-contract = { path = "../rrd-contract" }
-vyrm-core = { path = "../vyrm-core" }
+rrd-core = { path = "../rrd-core" }
 rrd-store = { path = "../rrd-store" }
 serde = { workspace = true }
 serde_json = { workspace = true }

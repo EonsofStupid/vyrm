@@ -1,17 +1,17 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use rrd_store::{
-    DataRuntime, DataRuntimeStep, Engine, Error, LocalObjectStore, MemoryEngine, NativeEngine,
-    Store,
-};
-use tempfile::tempdir;
-use vyrm_core::{
+use rrd_core::{
     Claim, DataTransaction, EmbeddingProvenance, GeoPoint, GeoValue, Predicate, Producer,
     RuntimeCommit, RuntimeEvent, RuntimeEventSchema, RuntimeGeo, RuntimeMutation,
     RuntimeProperties, RuntimeRecord, RuntimeRecordSchema, RuntimeRef, RuntimeRelation,
     RuntimeRelationSchema, RuntimeSchemaRegistry, RuntimeSeriesSample, RuntimeType, RuntimeVector,
     ScopeId, SeriesValue, Subject, VectorNormalization, VectorValue,
 };
+use rrd_store::{
+    DataRuntime, DataRuntimeStep, Engine, Error, LocalObjectStore, MemoryEngine, NativeEngine,
+    Store,
+};
+use tempfile::tempdir;
 
 fn schema() -> RuntimeSchemaRegistry {
     let mut registry = RuntimeSchemaRegistry::empty(1, "unified data test schema");
@@ -69,7 +69,7 @@ fn bootstrap(engine: &dyn Engine, scope: &ScopeId) -> u64 {
         .last_cursor
 }
 
-fn unified_mutations(object: vyrm_core::ObjectReference) -> Vec<RuntimeMutation> {
+fn unified_mutations(object: rrd_core::ObjectReference) -> Vec<RuntimeMutation> {
     let subject = RuntimeRef::new("entity", "a").unwrap();
     vec![
         RuntimeMutation::Claim {
@@ -110,6 +110,7 @@ fn unified_mutations(object: vyrm_core::ObjectReference) -> Vec<RuntimeMutation>
             vector: RuntimeVector {
                 reference: RuntimeRef::new("embedding", "a-title").unwrap(),
                 subject: subject.clone(),
+                collection: None,
                 field: "title".into(),
                 valid_from: 101,
                 valid_to: None,
@@ -240,6 +241,7 @@ fn dangling_late_family_rolls_back_every_earlier_family() {
                 vector: RuntimeVector {
                     reference: RuntimeRef::new("embedding", "dangling").unwrap(),
                     subject: RuntimeRef::new("entity", "missing").unwrap(),
+                    collection: None,
                     field: "body".into(),
                     valid_from: 101,
                     valid_to: None,

@@ -4,7 +4,7 @@ use connectome_ui::{capabilities, CapabilityMaturity};
 fn diagnostics_handshake_is_replayable_and_truthfully_matured() {
     let view = capabilities(false);
 
-    assert_eq!(view.protocol, "vyrm-diagnostics");
+    assert_eq!(view.protocol, "rrd-diagnostics");
     assert_eq!(view.version, 1);
     assert!(view.developer_diagnostics);
     assert!(!view.runners_enabled);
@@ -14,6 +14,30 @@ fn diagnostics_handshake_is_replayable_and_truthfully_matured() {
     assert!(view.replay.seekable);
     assert!(view.replay.reversible);
     assert_eq!(view.replay.speeds, [0.5, 1.0, 2.0, 4.0, 8.0]);
+    assert_eq!(
+        view.mcp_tools
+            .iter()
+            .map(|tool| tool.name)
+            .collect::<Vec<_>>(),
+        rrd_engine::runtime_tool_catalogue()
+            .iter()
+            .map(|definition| definition.name)
+            .collect::<Vec<_>>()
+    );
+    assert!(view
+        .mcp_tools
+        .iter()
+        .any(|tool| tool.name == "rrflow_remember" && tool.mutation));
+    assert!(view
+        .mcp_tools
+        .iter()
+        .any(|tool| tool.name == "rrflow_inspect" && !tool.mutation));
+    view.surfaces.validate().unwrap();
+    assert!(view
+        .surfaces
+        .capabilities
+        .iter()
+        .any(|capability| capability.id == "document-ingest"));
 
     let maturity = |id| {
         view.engine
@@ -51,5 +75,6 @@ fn enabling_frontier_runners_changes_only_the_exposed_runner_envelope() {
     assert!(enabled.runners_enabled);
     assert_eq!(enabled.providers, ["observe", "codex", "claude"]);
     assert_eq!(disabled.replay.persisted, enabled.replay.persisted);
+    assert_eq!(disabled.mcp_tools.len(), enabled.mcp_tools.len());
     assert_eq!(disabled.engine.len(), enabled.engine.len());
 }

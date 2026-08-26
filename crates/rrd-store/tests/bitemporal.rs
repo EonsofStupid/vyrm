@@ -5,8 +5,8 @@
 //! corrected. The sequence watermark counted both claims while only one existed,
 //! so any sequence-derived reconstruction would have been wrong.
 
+use rrd_core::{Claim, ClaimReader, Predicate, Producer, Subject};
 use rrd_store::Store;
-use vyrm_core::{Claim, ClaimReader, Predicate, Producer, Subject};
 
 fn producer() -> Producer {
     Producer {

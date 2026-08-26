@@ -6,7 +6,7 @@ Distributed qualification, streaming subscriptions, generated API reference,
 and released-version matrix remain open.
 
 `rrd-client` is the first supported-client boundary. It depends on
-`rrd-contract` and HTTP transport crates, never on Vyrm storage, VyrmQL/VyrmMX,
+`rrd-contract` and HTTP transport crates, never on RRFlow storage, RRFlowQL/RRD query executor,
 RRD server, estate, or security internals. Server/security dependencies are
 dev-only black-box fixtures.
 
@@ -34,7 +34,7 @@ dev-only black-box fixtures.
 ## Current typed surface
 
 The client covers capability, endpoint, and OpenAPI negotiation; session create/renew/
-close; transaction begin/preview/commit/abort; VyrmQL query; vector search;
+close; transaction begin/preview/commit/abort; RRFlowQL query; vector search;
 changefeed read/follow; backup create/list/restore; estate read; and audit read.
 `RequestOptions` makes correlation, deadline, and mutation idempotency explicit.
 API errors retain stable `ErrorCode`, message, retryability and HTTP status.

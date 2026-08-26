@@ -1,6 +1,6 @@
 //! Supported asynchronous Rust client for the public RRD v1 protocol.
 //!
-//! This crate depends on `rrd-contract`, never on Vyrm storage/query internals.
+//! This crate depends on `rrd-contract`, never on Rrd storage/query internals.
 //! Loopback HTTP remains available for local development. Remote endpoints use
 //! an explicit mutually authenticated TLS configuration.
 
@@ -9,25 +9,27 @@ use http_body_util::{BodyExt, Full};
 use hyper::header::CONTENT_TYPE;
 use hyper::{Method, Request, StatusCode, Uri};
 use hyper_rustls::{HttpsConnector, HttpsConnectorBuilder};
-use hyper_util::client::legacy::Client;
 use hyper_util::client::legacy::connect::HttpConnector;
+use hyper_util::client::legacy::Client;
 use hyper_util::rt::TokioExecutor;
 use rrd_contract::{
     AbortTransaction, AuditPage, BeginTransaction, CanonicalId, ChangefeedFollowResult,
     ChangefeedPage, CloseSession, CommitReceipt, CommitTransaction, CorrelationId,
-    CreateInstanceBackup, CreateInstanceBackupResult, CreateSession, EndpointCatalogue, ErrorBody,
-    ErrorCode, EstateSnapshot, EnsureVectorCollection, EnsureVectorCollectionResult, ExecuteQuery,
-    FollowChangefeed, InstanceBackupCatalogueSnapshot, ListInstanceBackups, ListVectorCollections,
-    PreviewTransaction, QueryResult, ReadAudit, ReadChangefeed, ReadEstate, RenewSession,
-    RequestContext, RequestEnvelope, ResourceId, ResourceKind, ResourcePath, ResponseEnvelope,
-    ResponseOutcome, RestoreInstanceBackup, RestoreInstanceBackupResult, RetrieveVectorPoints,
-    ScrollVectorPoints, SearchVectors, ServiceCapabilities, SessionLease, SessionTermination,
-    TransactionLease, TransactionPreview, VectorCollectionCatalogueSnapshot, VectorPointBatch,
-    VectorPointPage, VectorSearchResult, PROTOCOL, PROTOCOL_VERSION,
+    CreateInstanceBackup, CreateInstanceBackupResult, CreateSession, DiagnosticSnapshot,
+    EndpointCatalogue, EnsureVectorCollection, EnsureVectorCollectionResult, ErrorBody, ErrorCode,
+    EstateSnapshot, ExecuteQuery, FollowChangefeed, InstanceBackupCatalogueSnapshot,
+    ListInstanceBackups, ListRuntimeTools, ListVectorCollections, PreviewTransaction, QueryResult,
+    ReadAudit, ReadChangefeed, ReadDiagnosticSnapshot, ReadEstate, RenewSession, RequestContext,
+    RequestEnvelope, ResourceId, ResourceKind, ResourcePath, ResponseEnvelope, ResponseOutcome,
+    RestoreInstanceBackup, RestoreInstanceBackupResult, RetrieveVectorPoints, RuntimeToolCatalogue,
+    RuntimeToolInvocation, RuntimeToolInvocationResult, ScrollVectorPoints, SearchVectors,
+    ServiceCapabilities, SessionLease, SessionTermination, TransactionLease, TransactionPreview,
+    VectorCollectionCatalogueSnapshot, VectorPointBatch, VectorPointPage, VectorSearchResult,
+    PROTOCOL, PROTOCOL_VERSION,
 };
-use serde::Serialize;
-use serde::de::DeserializeOwned;
 use rustls::ClientConfig as RustlsClientConfig;
+use serde::de::DeserializeOwned;
+use serde::Serialize;
 use std::fmt;
 use std::net::SocketAddr;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -200,7 +202,9 @@ impl RrdClient {
             .map_err(|error| Error::Contract(format!("invalid RRD TLS endpoint: {error}")))?;
         if parsed.scheme_str() != Some("https")
             || parsed.authority().is_none()
-            || parsed.path_and_query().is_some_and(|value| value.as_str() != "/")
+            || parsed
+                .path_and_query()
+                .is_some_and(|value| value.as_str() != "/")
         {
             return Err(Error::Contract(
                 "RRD TLS endpoint must be an https origin without a path or query".into(),
@@ -643,6 +647,86 @@ impl RrdClient {
         .await
     }
 
+    pub async fn read_diagnostic_snapshot(
+        &self,
+        session: &Session,
+        request: ReadDiagnosticSnapshot,
+        options: RequestOptions,
+    ) -> Result<DiagnosticSnapshot> {
+        let snapshot: DiagnosticSnapshot = self
+            .session_call(
+                Method::POST,
+                "/v1/diagnostics/read",
+                session,
+                request,
+                options,
+                false,
+            )
+            .await?;
+        snapshot.validate().map_err(contract)?;
+        Ok(snapshot)
+    }
+
+    pub async fn runtime_tool_catalogue(
+        &self,
+        session: &Session,
+        options: RequestOptions,
+    ) -> Result<RuntimeToolCatalogue> {
+        let catalogue: RuntimeToolCatalogue = self
+            .session_call(
+                Method::POST,
+                "/v1/runtime/tools/list",
+                session,
+                ListRuntimeTools {},
+                options,
+                false,
+            )
+            .await?;
+        catalogue.validate().map_err(contract)?;
+        Ok(catalogue)
+    }
+
+    /// Invokes one tool from a previously fetched, validated catalogue.
+    ///
+    /// The descriptor supplies the client-side idempotency requirement. The
+    /// server independently resolves the same tool name against its current
+    /// catalogue and rejects stale or weaker envelopes.
+    pub async fn invoke_runtime_tool(
+        &self,
+        session: &Session,
+        catalogue: &RuntimeToolCatalogue,
+        tool: &CanonicalId,
+        arguments: serde_json::Value,
+        options: RequestOptions,
+    ) -> Result<RuntimeToolInvocationResult> {
+        catalogue.validate().map_err(contract)?;
+        let descriptor = catalogue
+            .tools
+            .iter()
+            .find(|descriptor| &descriptor.name == tool)
+            .ok_or_else(|| Error::Contract("runtime tool is absent from catalogue".into()))?;
+        let request = RuntimeToolInvocation {
+            catalogue_version: catalogue.catalogue_version,
+            tool: tool.clone(),
+            arguments_sha256: rrd_contract::runtime_tool_arguments_sha256(&arguments)
+                .map_err(contract)?,
+            arguments,
+        };
+        request.validate().map_err(contract)?;
+        let result: RuntimeToolInvocationResult = self
+            .session_call(
+                Method::POST,
+                "/v1/runtime/tools/invoke",
+                session,
+                request,
+                options,
+                descriptor.mutation,
+            )
+            .await?;
+        result.validate().map_err(contract)?;
+        Ok(result)
+    }
+
     async fn session_call<T, O>(
         &self,
         method: Method,
@@ -733,10 +817,11 @@ impl RrdClient {
 
     fn instance_resource(&self) -> Result<ResourcePath> {
         Ok(ResourcePath {
-            segments: vec![
-                ResourceId::new(ResourceKind::Instance, self.instance.as_str().to_owned())
-                    .map_err(contract)?,
-            ],
+            segments: vec![ResourceId::new(
+                ResourceKind::Instance,
+                self.instance.as_str().to_owned(),
+            )
+            .map_err(contract)?],
         })
     }
 

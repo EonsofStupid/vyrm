@@ -6,7 +6,7 @@ cancellation, metrics, read-your-writes, and mutating-query exit gate remains
 open.
 
 The first RRD server is a new process boundary, not an HTTP wrapper around the
-CLI and not an extension of `vyrmd`'s MCP protocol. `vyrmd` remains the AI-tool
+CLI and not an extension of `rrflow-mcp`'s MCP protocol. `rrflow-mcp` remains the AI-tool
 adapter. Both consume `rrd-contract`; neither owns persistence semantics.
 
 ## Initial deployment boundary
@@ -19,19 +19,21 @@ principal/API key, persists that principal on the lease, and every current
 authenticated route rechecks its closed action and exact resource policy. With
 no security state, sessions remain an explicitly advertised loopback development
 transport mode and TLS startup is denied. Certificate reload/revocation,
-credential-provider integration, provisioning, field/row policy, and complete
-endpoint audit remain F4 gates.
+credential-provider integration, field/row policy, and complete endpoint audit
+remain F4 gates. Project/instance provisioning is an explicit offline command;
+serving never creates or rewrites topology.
 
 Start the local process with:
 
 ```text
-cargo run -p rrd-server -- --db PATH --instance INSTANCE --bind 127.0.0.1:9477
+cargo run -p rrd-server -- initialize --root PROJECT --instance INSTANCE
+cargo run -p rrd-server -- --root PROJECT --bind 127.0.0.1:9477
 ```
 
 The experimental remote path requires all three PEM inputs together:
 
 ```text
-rrd-server --db PATH --instance INSTANCE --bind 0.0.0.0:9477 \
+rrd-server --root PROJECT --bind 0.0.0.0:9477 \
   --tls-cert SERVER_CHAIN.pem --tls-key SERVER_KEY.pem \
   --tls-client-ca CLIENT_CA.pem
 ```
@@ -63,11 +65,11 @@ places that secret elsewhere. `X-RRD-Session` carries the session identifier;
 - `POST /v1/sessions/{session}/renew` rotates the token and never extends past
   absolute expiry.
 - `POST /v1/query` authenticates the session, requires the exact
-  `instance:<server-instance>` scope, and executes bounded VyrmQL through the
-  VyrmMX binder, planner, and executor. The typed response includes the
+  `instance:<server-instance>` scope, and executes bounded RRFlowQL through the
+  RRD query executor binder, planner, and executor. The typed response includes the
   canonical query, read manifest, cursor, schema revision, selected and
   rejected plan candidates, execution evidence, and rows. This endpoint is a
-  read-only F6 walking skeleton; mutating VyrmQL and live subscriptions remain
+  read-only F6 walking skeleton; mutating RRFlowQL and live subscriptions remain
   open.
 - `POST /v1/query/live/poll` authenticates the session under a separate
   deny-by-default action and returns bounded added/updated/removed row deltas
@@ -86,7 +88,7 @@ places that secret elsewhere. `X-RRD-Session` carries the session identifier;
   and full-text index administration remain open.
 - `POST /v1/vector/search` captures an authenticated runtime read stamp and
   runs bounded dense, sparse, or multi-vector search through the canonical
-  Vyrm vector planner and exact oracle. The response includes manifest/cursor,
+  RRFlow vector planner and exact oracle. The response includes manifest/cursor,
   scan evidence, plan digest, selected access path, exactness, score, source
   cursor, and typed vector/subject identities. Public filters and persisted
   HNSW/TurboQuant artifact serving remain open.
@@ -140,7 +142,7 @@ places that secret elsewhere. `X-RRD-Session` carries the session identifier;
 
 Every response uses `ResponseEnvelope`; every failure uses the stable
 `ErrorCode`. Payload schemas must be added to `rrd-contract` before handler
-code, and public payloads must not serialize private `vyrm_core` types.
+code, and public payloads must not serialize private `rrd_core` types.
 Mutating envelopes require a client idempotency key. Operation digests use
 `rrd_contract::transaction_operation_sha256`, which hashes the stable typed
 JSON mutation order rather than arbitrary incoming object-key order; its
@@ -263,7 +265,7 @@ API key nor authorization scheme.
 F2 is not closed by that matrix. Remaining black-box gates are cancellation of
 long-running query work, deadline races during generalized commit, prospective
 multi-model read-your-writes, lost-ack process interruption for the data scope,
-mutating VyrmQL, live subscriptions,
+mutating RRFlowQL, live subscriptions,
 CRUD/schema/vector/snapshot administration, generalized result/time limits,
 durable query-span export, metrics export, and released-version negotiation
 clients. Backup object payloads remain referenced-only and the service does not

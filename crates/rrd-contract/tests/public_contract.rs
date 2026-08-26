@@ -1,19 +1,20 @@
 use rrd_contract::{
     transaction_operation_sha256, BeginTransaction, CanonicalId, CapabilityDescriptor,
     CapabilityStatus, CloseSession, CommitReceipt, CommitTransaction, CorrelationId,
-    CreateInstanceBackup, DeploymentMode, EnsureQueryIndex, EnsureVectorCollection, ErrorBody,
-    ErrorCode,
-    EstateActivityPolicySnapshot, EstateBackupJobSnapshot, EstateBackupJobState,
-    EstateBackupJobsSnapshot, EstateMutationResult, EstateSnapshot, ExecuteQuery, FollowChangefeed,
-    IdempotencyBinding, ListQueryIndexes, ListVectorCollections, Liveness, NamedVectorDefinition,
-    PollLiveQuery, PreviewTransaction, QueryBudget,
-    QueryExecutionSnapshot, QueryPlanCandidate, QueryPlanSnapshot, QueryResult, QueryRowSnapshot,
-    QueryValue, ReadAudit, ReadChangefeed, ReadEstate, Readiness, RenewSession, RequestContext,
-    RequestEnvelope, ResourceId, ResourceKind, ResourcePath, ResponseEnvelope, ResponseOutcome,
-    RestoreInstanceBackup, SearchVectors, ServiceCapabilities, SessionEndState, SessionLease,
-    SessionLimits, SessionTermination, TransactionMutation, TransactionPreview, TransactionState,
+    CreateInstanceBackup, DeploymentMode, EnsureQueryIndex, EnsureVectorCollection,
+    EnsureVectorIndex, ErrorBody, ErrorCode, EstateActivityPolicySnapshot, EstateBackupJobSnapshot,
+    EstateBackupJobState, EstateBackupJobsSnapshot, EstateMutationResult, EstateSnapshot,
+    ExecuteQuery, FollowChangefeed, HybridFusion, IdempotencyBinding, ListQueryIndexes,
+    ListVectorCollections, Liveness, NamedVectorDefinition, PollLiveQuery, PreviewTransaction,
+    QueryBudget, QueryExecutionSnapshot, QueryIndexKind, QueryPlanCandidate, QueryPlanSnapshot,
+    QueryResult, QueryRowSnapshot, QueryValue, ReadAudit, ReadChangefeed, ReadEstate, Readiness,
+    RenewSession, RequestContext, RequestEnvelope, ResourceId, ResourceKind, ResourcePath,
+    ResponseEnvelope, ResponseOutcome, RestoreInstanceBackup, SearchHybrid, SearchVectors,
+    ServiceCapabilities, SessionEndState, SessionLease, SessionLimits, SessionTermination,
+    TransactionMutation, TransactionPreview, TransactionState, VectorIndexConfiguration,
     VectorMemoryTier, VectorPayloadCondition, VectorPayloadFilter, VectorPayloadOperator,
-    VectorSearchMetric, VectorSearchQuery, VectorValueKind, PROTOCOL, PROTOCOL_VERSION,
+    VectorQuantizationBits, VectorSearchMetric, VectorSearchMode, VectorSearchQuery,
+    VectorValueKind, PROTOCOL, PROTOCOL_VERSION,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -42,7 +43,7 @@ fn contract_fixture() -> ContractFixture {
         service: ServiceCapabilities {
             protocol: PROTOCOL.into(),
             protocol_version: PROTOCOL_VERSION,
-            implementation: CanonicalId::new("vyrm").unwrap(),
+            implementation: CanonicalId::new("rrflow").unwrap(),
             implementation_version: "0.1.0-alpha.1".into(),
             deployment_mode: DeploymentMode::Embedded,
             instance: ResourceId::new(ResourceKind::Instance, "project-alpha").unwrap(),
@@ -358,7 +359,21 @@ fn query_index_administration_contract_is_bounded_and_strict() {
         definition_query: "FROM record:document AT VALID 42 KNOWN HEAD PROJECT status, title"
             .into(),
         unique: false,
+        kind: QueryIndexKind::Scalar,
         budget: QueryBudget::default(),
+    }
+    .validate()
+    .unwrap();
+    EnsureVectorIndex {
+        scope: "instance:project-alpha".into(),
+        collection_id: CanonicalId::new("documents").unwrap(),
+        vector_name: CanonicalId::new("title").unwrap(),
+        configuration: VectorIndexConfiguration::TurboQuant {
+            bits: VectorQuantizationBits::Bits2,
+            seed: 11,
+            filter_properties: vec![CanonicalId::new("tenant").unwrap()],
+        },
+        max_scanned_changes: 10_000,
     }
     .validate()
     .unwrap();
@@ -397,6 +412,21 @@ fn vector_collection_contract_is_named_bounded_and_search_addressable() {
     }
     .validate()
     .unwrap();
+    EnsureVectorIndex {
+        scope: "instance:project-alpha".into(),
+        collection_id: CanonicalId::new("documents").unwrap(),
+        vector_name: CanonicalId::new("title").unwrap(),
+        configuration: VectorIndexConfiguration::Hnsw {
+            m: 16,
+            ef_construction: 100,
+            max_level: 8,
+            seed: 7,
+            filter_properties: vec![CanonicalId::new("tenant").unwrap()],
+        },
+        max_scanned_changes: 10_000,
+    }
+    .validate()
+    .unwrap();
     SearchVectors {
         scope: "instance:project-alpha".into(),
         valid_at: 42,
@@ -416,10 +446,63 @@ fn vector_collection_contract_is_named_bounded_and_search_addressable() {
         }),
         metric: None,
         top_k: 10,
+        mode: VectorSearchMode::Exact,
         max_scanned_changes: 100,
     }
     .validate()
     .unwrap();
+    let approximate = SearchVectors {
+        scope: "instance:project-alpha".into(),
+        valid_at: 42,
+        collection_id: Some(CanonicalId::new("documents").unwrap()),
+        vector_name: Some(CanonicalId::new("title").unwrap()),
+        field: None,
+        query: VectorSearchQuery::Dense {
+            values: vec![0.6, 0.8],
+        },
+        filter: None,
+        metric: None,
+        top_k: 10,
+        mode: VectorSearchMode::RequireApproximate {
+            exact_rerank: 20,
+            ef_search: 100,
+        },
+        max_scanned_changes: 100,
+    };
+    approximate.validate().unwrap();
+    SearchHybrid {
+        scope: "instance:project-alpha".into(),
+        valid_at: 42,
+        document_kind: CanonicalId::new("document").unwrap(),
+        text_field: CanonicalId::new("title").unwrap(),
+        text_query: "reason ready flow".into(),
+        collection_id: CanonicalId::new("documents").unwrap(),
+        vector_name: CanonicalId::new("title").unwrap(),
+        vector_query: VectorSearchQuery::Dense {
+            values: vec![0.6, 0.8],
+        },
+        vector_filter: None,
+        vector_mode: VectorSearchMode::RequireApproximate {
+            exact_rerank: 20,
+            ef_search: 100,
+        },
+        fusion: HybridFusion::ReciprocalRank {
+            rank_constant: 60,
+            text_weight_millionths: 1_000_000,
+            vector_weight_millionths: 1_000_000,
+        },
+        top_k: 10,
+        candidate_k: 20,
+        max_scanned_changes: 100,
+    }
+    .validate()
+    .unwrap();
+    let mut invalid_approximate = approximate;
+    invalid_approximate.mode = VectorSearchMode::AllowApproximate {
+        exact_rerank: 9,
+        ef_search: 100,
+    };
+    assert!(invalid_approximate.validate().is_err());
     assert!(SearchVectors {
         scope: "instance:project-alpha".into(),
         valid_at: 42,
@@ -432,6 +515,7 @@ fn vector_collection_contract_is_named_bounded_and_search_addressable() {
         filter: None,
         metric: None,
         top_k: 10,
+        mode: VectorSearchMode::Exact,
         max_scanned_changes: 100,
     }
     .validate()
@@ -451,12 +535,10 @@ fn vector_collection_contract_is_named_bounded_and_search_addressable() {
     point.validate().unwrap();
     let mut incomplete = serde_json::to_value(point).unwrap();
     incomplete.as_object_mut().unwrap().remove("vector_name");
-    assert!(
-        serde_json::from_value::<TransactionMutation>(incomplete)
-            .unwrap()
-            .validate()
-            .is_err()
-    );
+    assert!(serde_json::from_value::<TransactionMutation>(incomplete)
+        .unwrap()
+        .validate()
+        .is_err());
 }
 
 #[test]
@@ -541,10 +623,67 @@ fn audit_read_contract_is_bounded_and_strict() {
 }
 
 #[test]
+fn diagnostic_read_contract_is_bounded_strict_and_separately_authorized() {
+    rrd_contract::ReadDiagnosticSnapshot {
+        scope: "instance:alpha".into(),
+        graph_valid_at_unix_ms: 1_000,
+        graph_known_at_cursor: Some(30),
+        graph_compare_cursor: 10,
+        runtime_max_scanned_changes: 1_024,
+        changes_after_cursor: 10,
+        change_limit: 128,
+        audit_after_sequence: 20,
+        audit_limit: 128,
+    }
+    .validate()
+    .unwrap();
+    assert!(rrd_contract::ReadDiagnosticSnapshot {
+        scope: "instance:alpha".into(),
+        graph_valid_at_unix_ms: 1_000,
+        graph_known_at_cursor: Some(30),
+        graph_compare_cursor: 10,
+        runtime_max_scanned_changes: 1_024,
+        changes_after_cursor: 0,
+        change_limit: 0,
+        audit_after_sequence: 0,
+        audit_limit: 1,
+    }
+    .validate()
+    .is_err());
+    assert!(
+        serde_json::from_value::<rrd_contract::ReadDiagnosticSnapshot>(serde_json::json!({
+            "scope": "instance:alpha",
+            "graph_valid_at_unix_ms": 1000,
+            "graph_known_at_cursor": 30,
+            "graph_compare_cursor": 10,
+            "runtime_max_scanned_changes": 1024,
+            "changes_after_cursor": 0,
+            "change_limit": 1,
+            "audit_after_sequence": 0,
+            "audit_limit": 1,
+            "physical_store": "/tmp/escape"
+        }))
+        .is_err()
+    );
+
+    let descriptor = rrd_contract::endpoint_catalogue()
+        .endpoints
+        .into_iter()
+        .find(|endpoint| endpoint.operation.as_str() == "diagnostics-read")
+        .unwrap();
+    assert_eq!(descriptor.path, "/v1/diagnostics/read");
+    assert_eq!(
+        descriptor.action.fixed_action(),
+        Some(rrd_contract::SecurityAction::DiagnosticsRead)
+    );
+    assert!(!descriptor.mutation);
+}
+
+#[test]
 fn endpoint_catalogue_is_complete_sorted_and_transport_neutral() {
     let catalogue = rrd_contract::endpoint_catalogue();
     catalogue.validate().unwrap();
-    assert_eq!(catalogue.endpoints.len(), 28);
+    assert_eq!(catalogue.endpoints.len(), 31);
     assert_eq!(catalogue.endpoints[0].operation.as_str(), "audit-read");
     let create = catalogue
         .endpoints
@@ -560,6 +699,25 @@ fn endpoint_catalogue_is_complete_sorted_and_transport_neutral() {
     assert!(catalogue.endpoints.iter().all(|endpoint| {
         !endpoint.request_type.contains("::") && !endpoint.response_type.contains("::")
     }));
+    let runtime_invoke = catalogue
+        .endpoints
+        .iter()
+        .find(|endpoint| endpoint.operation.as_str() == "runtime-tool-invoke")
+        .unwrap();
+    assert_eq!(
+        runtime_invoke.action,
+        rrd_contract::EndpointAction::RuntimeToolDescriptor
+    );
+    assert!(runtime_invoke.action.fixed_action().is_none());
+    let runtime_list = catalogue
+        .endpoints
+        .iter()
+        .find(|endpoint| endpoint.operation.as_str() == "runtime-tool-catalogue-read")
+        .unwrap();
+    assert_eq!(
+        runtime_list.action.fixed_action(),
+        Some(rrd_contract::SecurityAction::RuntimeToolCatalogueRead)
+    );
     let encoded = serde_json::to_value(&catalogue).unwrap();
     assert_eq!(
         serde_json::from_value::<rrd_contract::EndpointCatalogue>(encoded).unwrap(),
@@ -752,7 +910,7 @@ fn lifecycle_health_and_preview_payloads_are_bounded_and_strict() {
         observed_at_unix_ms: 1,
         claim_sequence: 2,
         runtime_cursor: 3,
-        backend: CanonicalId::new("vyrmkv-native").unwrap(),
+        backend: CanonicalId::new("rrd-lsm").unwrap(),
     }
     .validate()
     .unwrap();

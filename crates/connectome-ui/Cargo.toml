@@ -4,19 +4,18 @@ version = "0.1.0"
 edition.workspace = true
 license.workspace = true
 publish.workspace = true
-description = "Local developer workbench and visualizer for vyrm/connectome instances"
+description = "Local developer workbench and visualizer for rrflow/connectome instances"
 
 [dependencies]
 rrd-contract = { path = "../rrd-contract" }
 rrd-client = { path = "../rrd-client" }
 rrd-estate = { path = "../rrd-estate" }
-vyrm-core = { path = "../vyrm-core" }
-vyrm-cluster = { path = "../vyrm-cluster", features = ["openraft-transport"] }
-vyrm-ql = { path = "../vyrm-ql" }
-vyrm-mx = { path = "../vyrm-mx" }
-vyrm-node = { path = "../vyrm-node" }
+rrd-core = { path = "../rrd-core" }
+rrd-cluster = { path = "../rrd-cluster", features = ["openraft-transport"] }
+rrd-query = { path = "../rrd-query" }
+rrd-engine = { path = "../rrd-engine" }
 rrd-store = { path = "../rrd-store" }
-vyrm-vector = { path = "../vyrm-vector" }
+rrd-vector = { path = "../rrd-vector" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tiny_http = "0.12"

@@ -1,4 +1,4 @@
-//! Explicit, resumable Fjall -> vyrmKV storage migration.
+//! Explicit, resumable Fjall -> RRD LSM storage migration.
 //!
 //! The live database path is never populated incrementally. Fjall is exported
 //! from one cross-keyspace snapshot, native state is built and verified in an
@@ -6,15 +6,15 @@
 //! and archive remain available for rollback and diagnosis.
 
 use crate::{keyspaces, Engine, Error, NativeEngine, Result, Store};
+use rrd_core::digest::Sha256;
+use rrd_lsm::{Database, DatabaseOptions, Durability as KvDurability, Mutation, WriteBatch};
 use serde::{Deserialize, Serialize};
 use std::fs::{self, File, OpenOptions};
 use std::io::{ErrorKind, Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
-use vyrm_core::digest::Sha256;
-use vyrm_kv::{Database, DatabaseOptions, Durability as KvDurability, Mutation, WriteBatch};
 
-const ARCHIVE_MAGIC: &[u8; 8] = b"VYRMIG01";
+const ARCHIVE_MAGIC: &[u8; 8] = b"RRDMIG01";
 const ARCHIVE_VERSION: u16 = 1;
 const RECORD_TAG: u8 = 1;
 const FOOTER_TAG: u8 = 0xff;
@@ -112,9 +112,9 @@ impl Artifacts {
                 Error::Migration("database path must have a UTF-8 final component".into())
             })?;
         Ok(Self {
-            marker: parent.join(format!(".{name}.vyrm-migration.json")),
-            archive: parent.join(format!(".{name}.vyrm-migration.bin")),
-            staging: parent.join(format!(".{name}.vyrm-native-stage")),
+            marker: parent.join(format!(".{name}.rrflow-migration.json")),
+            archive: parent.join(format!(".{name}.rrflow-migration.bin")),
+            staging: parent.join(format!(".{name}.rrflow-native-stage")),
             backup: parent.join(format!(".{name}.fjall-backup")),
             retired: parent.join(format!(".{name}.native-retired")),
         })
@@ -339,7 +339,7 @@ fn verify_fjall_copy(path: &Path, expected: &MigrationInventory) -> Result<()> {
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
     let id = TEMP_ID.fetch_add(1, Ordering::Relaxed);
     let verification = parent.join(format!(
-        ".vyrm-rollback-verification-{}-{id}.bin",
+        ".rrflow-rollback-verification-{}-{id}.bin",
         std::process::id()
     ));
     let store = Store::open(path)?;
@@ -363,7 +363,7 @@ fn begin(source: &Path, artifacts: &Artifacts) -> Result<MigrationReport> {
     }
     if source.join("CURRENT").is_file() || source.join("MANIFEST.LOCK").is_file() {
         return Err(Error::Migration(
-            "source is already a native vyrmKV store".into(),
+            "source is already a native RRD LSM store".into(),
         ));
     }
     for path in [
@@ -533,7 +533,7 @@ fn verify_visible_native(path: &Path, expected: Option<&NativeStateToken>) -> Re
         expected.ok_or_else(|| Error::Migration("native state token is absent".into()))?;
     if !path.join("CURRENT").is_file() {
         return Err(Error::Migration(
-            "visible database is not native vyrmKV".into(),
+            "visible database is not native RRD LSM".into(),
         ));
     }
     let actual = native_state(path)?;
@@ -614,7 +614,7 @@ fn write_report(path: &Path, report: &MigrationReport) -> Result<()> {
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
     let id = TEMP_ID.fetch_add(1, Ordering::Relaxed);
     let temp = parent.join(format!(
-        ".vyrm-migration-marker-{}-{id}.tmp",
+        ".rrflow-migration-marker-{}-{id}.tmp",
         std::process::id()
     ));
     let bytes = serde_json::to_vec_pretty(report)
@@ -666,7 +666,7 @@ impl ArchiveWriter {
         let parent = path.parent().unwrap_or_else(|| Path::new("."));
         let id = TEMP_ID.fetch_add(1, Ordering::Relaxed);
         let temporary_path = parent.join(format!(
-            ".vyrm-migration-export-{}-{id}.tmp",
+            ".rrflow-migration-export-{}-{id}.tmp",
             std::process::id()
         ));
         let mut writer = Self {

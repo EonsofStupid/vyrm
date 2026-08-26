@@ -2,13 +2,13 @@
 
 use rrd_client::{ClientConfig, RrdClient};
 use rrd_contract::{CanonicalId, ServiceCapabilities};
+use rrd_core::digest;
+use rrd_store::{ControlTransition, Engine};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fmt;
 use std::net::SocketAddr;
 use std::time::Duration;
-use vyrm_core::digest;
-use rrd_store::{ControlTransition, Engine};
 
 pub const CONNECTION_CATALOGUE_FORMAT: u16 = 1;
 pub const MAX_CONNECTION_PROFILES: usize = 64;
@@ -466,7 +466,7 @@ mod tests {
         ServiceCapabilities {
             protocol: PROTOCOL.into(),
             protocol_version: PROTOCOL_VERSION,
-            implementation: CanonicalId::new("vyrm").unwrap(),
+            implementation: CanonicalId::new("rrflow").unwrap(),
             implementation_version: "0.1.0".into(),
             deployment_mode: DeploymentMode::LocalServer,
             instance: ResourceId::new(ResourceKind::Instance, "instance-test").unwrap(),

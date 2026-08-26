@@ -1,11 +1,11 @@
 use rrd_contract::{CanonicalId, ResourceId, ResourceKind, ResourcePath};
+use rrd_core::digest;
 use rrd_security::{
     Action, AuditDecision, AuditPhase, AuditRecord, Error, Principal, PrincipalKind, ResourceGrant,
     SecurityRepository, SecurityState, SECURITY_FORMAT,
 };
-use std::collections::BTreeMap;
-use vyrm_core::digest;
 use rrd_store::{Engine, NativeEngine};
+use std::collections::BTreeMap;
 
 fn path(instance: &str) -> ResourcePath {
     ResourcePath {

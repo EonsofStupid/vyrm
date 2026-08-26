@@ -1,9 +1,9 @@
-use rrd_store::{Engine, MemoryEngine, NativeEngine, Store};
-use vyrm_core::{
+use rrd_core::{
     RuntimeCommit, RuntimeMutation, RuntimeProperties, RuntimeSchemaRegistry, RuntimeTraceEvent,
     RuntimeType, RuntimeValue, ScopeId, SpanId, TraceDataClass, TraceDomain, TraceId, TraceLink,
     TraceOutcome,
 };
+use rrd_store::{Engine, MemoryEngine, NativeEngine, Store};
 
 fn trace_id() -> TraceId {
     TraceId::new("0123456789abcdef0123456789abcdef").unwrap()

@@ -1,4 +1,4 @@
-# SurrealDB capability inventory and Vyrm disposition
+# SurrealDB capability inventory and RRFlow disposition
 
 **Baseline:** SurrealDB `3.2.4`, the latest stable release on 2026-08-23.
 SurrealDB `3.3.0-beta.3` additions are isolated in the preview section and are
@@ -6,7 +6,7 @@ not treated as stable. This is a product-capability inventory: individual
 SurrealQL functions and every CLI/configuration flag are grouped under their
 own capability families rather than misrepresented as separate products.
 
-This document exists because Vyrm cannot make a meaningful competitive or
+This document exists because RRFlow cannot make a meaningful competitive or
 optimization claim against a database whose complete product surface has not
 first been enumerated. The old `3.0.5` differential remains a bounded engine
 diagnostic only.
@@ -15,9 +15,9 @@ diagnostic only.
 
 | Status | Meaning in this repository |
 |---|---|
-| **Verified** | Executable Vyrm code and a retained test/evidence path exist. |
+| **Verified** | Executable RRFlow code and a retained test/evidence path exist. |
 | **Partial** | A real subset exists, but it does not provide SurrealDB's complete capability. |
-| **Absent** | No executable Vyrm product capability exists. |
+| **Absent** | No executable RRFlow product capability exists. |
 | **External** | Intentionally supplied by another RRFlow component or provider; the adapter/contract must still exist. |
 
 Maturity is deliberately conservative. A Rust type, a UI label, or a design
@@ -29,14 +29,14 @@ Sources: [deployment models](https://surrealdb.com/docs/build/deployment),
 [what SurrealDB is](https://surrealdb.com/docs/what-is-surrealdb), and
 [Cloud scaling](https://surrealdb.com/docs/manage/cloud/scaling).
 
-| SurrealDB capability | Edition/state | Vyrm disposition |
+| SurrealDB capability | Edition/state | RRFlow disposition |
 |---|---|---|
-| One Rust database engine exposed as a server and embeddable library | Community | **Partial** — Vyrm has libraries and several binaries, but not one stable public database distribution/API. |
+| One Rust database engine exposed as a server and embeddable library | Community | **Partial** — RRFlow has libraries and several binaries, but not one stable public database distribution/API. |
 | In-memory embedded engine | Community | **Verified** — `MemoryEngine`; test/reference use, not a separately versioned SDK product. |
 | Browser/WASM embedded engine using IndexedDB | Community | **Absent** |
 | Native embedded engines for Rust, Node.js, and WASM clients | Community | **Absent** as supported SDK distributions |
-| Offline and edge deployment | Community | **Partial** — `vyrm-edge` is executable and offline, but its database/query surface is narrow. |
-| Standalone single-node persistent server | Community | **Partial** — native persistence exists; `vyrmd` is an MCP runtime rather than a full network database server. |
+| Offline and edge deployment | Community | **Partial** — `rrflow-edge` is executable and offline, but its database/query surface is narrow. |
+| Standalone single-node persistent server | Community | **Partial** — native persistence exists; `rrflow-mcp` is an MCP runtime rather than a full network database server. |
 | Docker deployment | Community | **Absent** as a supported, tested product artifact |
 | Self-hosted Kubernetes deployment | Community/Enterprise | **Absent** |
 | Distributed multi-node database | Enterprise (`SurrealDS`); TiKV development path | **Partial/experimental** — real Raft adapter and TLS process tests exist; production service, independent-host and operational qualification do not. |
@@ -45,7 +45,7 @@ Sources: [deployment models](https://surrealdb.com/docs/build/deployment),
 | High-availability managed Scale clusters | Cloud/Enterprise | **Absent** |
 | Namespace and database hierarchy for multi-tenancy | Community | **Partial** — scopes and isolated instance manifests exist; full namespace/database administration does not. |
 | Organisation, users, projects/instances, regions and plans as managed estates | Cloud | **Partial UI model only** — Connectome has local `EstateView`/`InstanceView`; no authoritative control plane provisions or reconciles estates. |
-| One query/API contract across embedded, server, and distributed modes | Product-wide | **Absent** — Vyrm ports share semantics internally, but no stable multi-language/network contract spans every mode. |
+| One query/API contract across embedded, server, and distributed modes | Product-wide | **Absent** — RRFlow ports share semantics internally, but no stable multi-language/network contract spans every mode. |
 
 ## 2. Persistence, transactions, and lifecycle
 
@@ -53,22 +53,22 @@ Sources: [deployment/storage matrix](https://surrealdb.com/docs/build/deployment
 [3.2 release](https://surrealdb.com/releases/3.2), and
 [self-hosted backup guidance](https://surrealdb.com/docs/manage/self-hosted/backups-and-recovery).
 
-| SurrealDB capability | Vyrm disposition |
+| SurrealDB capability | RRFlow disposition |
 |---|---|
-| Multi-record and multi-table ACID transactions | **Verified locally** for one canonical runtime transaction across Vyrm value families |
-| Explicit `BEGIN` / `COMMIT` / `CANCEL` transactions | **Partial** — typed transaction API exists; no equivalent public VyrmQL/session surface |
+| Multi-record and multi-table ACID transactions | **Verified locally** for one canonical runtime transaction across RRFlow value families |
+| Explicit `BEGIN` / `COMMIT` / `CANCEL` transactions | **Partial** — typed transaction API exists; no equivalent public RRFlowQL/session surface |
 | Client-owned transactions over RPC/SDKs | **Absent** |
 | Read-your-writes transaction views | **Verified locally** |
 | Optimistic conflict detection and atomic rollback | **Verified locally** |
-| Durable WAL with corruption/torn-tail recovery | **Verified locally** in VyrmKV |
+| Durable WAL with corruption/torn-tail recovery | **Verified locally** in RRD LSM |
 | MVCC historical versions and repeatable stamped reads | **Verified locally** |
-| Versioned/temporal reads where supported by the storage engine | **Verified locally** with explicit valid/known time; wider VyrmQL coverage is partial |
+| Versioned/temporal reads where supported by the storage engine | **Verified locally** with explicit valid/known time; wider RRFlowQL coverage is partial |
 | Persisted snapshot leases and retention pins | **Verified locally** |
 | Named physical checkpoints/snapshots | **Verified locally** |
 | Authenticated physical snapshot bundle export/install | **Verified locally** |
 | Background compaction and garbage collection | **Verified locally**, but production scheduling/tuning remains partial |
 | Resumable datastore migrations and on-disk version history | **Partial** — manifest/codec compatibility and Fjall migration exist; general schema/data migration ledger does not |
-| Memory, SurrealKV, RocksDB, IndexedDB, TiKV, and SurrealDS backend choices | **External/absent** — Vyrm has Memory, VyrmKV, and Fjall compatibility, not those backend products |
+| Memory, SurrealKV, RocksDB, IndexedDB, TiKV, and SurrealDS backend choices | **External/absent** — RRFlow has Memory, RRD LSM, and Fjall compatibility, not those backend products |
 | Durable RPC sessions with TTL cleanup | **Absent** |
 | Bounded abandoned client transactions | **Absent** because public client transactions are absent |
 | Logical export/import of namespaces, schema, users, indexes and data | **Absent** as a complete portable database archive |
@@ -82,7 +82,7 @@ Sources: [data models](https://surrealdb.com/docs/learn/data-models),
 [geospatial model](https://surrealdb.com/docs/learn/data-models/geospatial/overview),
 and [files](https://surrealdb.com/docs/learn/schema-management/files/working-with-files).
 
-| SurrealDB capability | Vyrm disposition |
+| SurrealDB capability | RRFlow disposition |
 |---|---|
 | Schemaless JSON-like documents with nested objects and arrays | **Partial** — typed runtime properties exist; general document CRUD/query semantics do not |
 | Schemafull, schemaless, and mixed/flexible tables | **Partial** — strict revisioned runtime schema exists; no general schemaless table engine |
@@ -109,7 +109,7 @@ and [files](https://surrealdb.com/docs/learn/schema-management/files/working-wit
 Source: [schema management](https://surrealdb.com/docs/learn/schema-management) and
 the [complete statement catalogue](https://surrealdb.com/docs/reference/query-language/language-primitives/statements).
 
-| SurrealDB capability | Vyrm disposition |
+| SurrealDB capability | RRFlow disposition |
 |---|---|
 | Define/alter/remove namespaces and databases | **Absent** |
 | Define/alter/remove tables and views | **Partial** — revisioned runtime record types, no general DDL/view surface |
@@ -135,13 +135,13 @@ Sources: [SurrealQL reference](https://surrealdb.com/docs/reference/query-langua
 [querying overview](https://surrealdb.com/docs/learn/querying), and
 [clauses](https://surrealdb.com/docs/reference/query-language/clauses/overview).
 
-| SurrealDB capability | Vyrm disposition |
+| SurrealDB capability | RRFlow disposition |
 |---|---|
-| General CRUD: create, insert, upsert, select, update, merge, patch and delete | **Partial** — internal commits support mutations; VyrmQL is read-only and narrow |
-| Graph relation creation and deletion (`RELATE`) | **Partial** — typed API, no public VyrmQL mutation statement |
-| Multi-statement transactional scripts | **Absent** from VyrmQL |
+| General CRUD: create, insert, upsert, select, update, merge, patch and delete | **Partial** — internal commits support mutations; RRFlowQL is read-only and narrow |
+| Graph relation creation and deletion (`RELATE`) | **Partial** — typed API, no public RRFlowQL mutation statement |
+| Multi-statement transactional scripts | **Absent** from RRFlowQL |
 | SQL-like projection, filtering, ordering, grouping, pagination, split, omit and fetch | **Partial** — explicit sources, filters and projection only |
-| Joins through record links and graph idioms | **Partial/absent** in VyrmQL |
+| Joins through record links and graph idioms | **Partial/absent** in RRFlowQL |
 | Subqueries and composable expressions | **Absent** |
 | Aggregates, math, statistics and vector functions | **Partial** — scoring primitives, not a database function library |
 | Control flow, blocks, `IF`, `FOR`, `LET`, `RETURN`, `THROW`, sleep and futures | **Absent** |
@@ -150,7 +150,7 @@ Sources: [SurrealQL reference](https://surrealdb.com/docs/reference/query-langua
 | `EXPLAIN` and `EXPLAIN ANALYZE` | **Partial** — plan explanation/work evidence, no general analyzer |
 | Streaming/batched query executor | **Partial** — bounded result batches; no end-to-end network stream |
 | Resource/time/write-fanout query bounds | **Partial** — read budgets exist; full server safeguards do not |
-| SurrealQL | **Absent** by design; VyrmQL is not compatibility syntax |
+| SurrealQL | **Absent** by design; RRFlowQL is not compatibility syntax |
 | GraphQL with schema generation, queries, mutations/subscriptions and pagination | **Absent** |
 | ISO GQL/OpenGQL graph language | **Absent** |
 | Runtime evaluation of nested SurrealQL/GQL strings under capability gates | **Absent** |
@@ -161,7 +161,7 @@ Sources: [hybrid search](https://surrealdb.com/docs/learn/data-models/vector-sea
 [3.1 release](https://surrealdb.com/releases/3.1), and
 [3.2 release](https://surrealdb.com/releases/3.2).
 
-| SurrealDB capability | Vyrm disposition |
+| SurrealDB capability | RRFlow disposition |
 |---|---|
 | Exact/brute-force KNN | **Verified locally** for dense, sparse and multivector |
 | In-memory HNSW ANN | **Verified locally** for deterministic dense search only |
@@ -183,7 +183,7 @@ Sources: [hybrid search](https://surrealdb.com/docs/learn/data-models/vector-sea
 Sources: [live queries](https://surrealdb.com/docs/learn/querying/real-time/live-queries) and
 [changefeeds](https://surrealdb.com/docs/learn/querying/real-time/changefeeds).
 
-| SurrealDB capability | Vyrm disposition |
+| SurrealDB capability | RRFlow disposition |
 |---|---|
 | Push-based `LIVE SELECT` subscriptions | **Absent** |
 | Full-record live notifications | **Absent** |
@@ -203,7 +203,7 @@ Sources: [security](https://surrealdb.com/docs/learn/security),
 [row/field security](https://surrealdb.com/docs/learn/security/authorization/permissions-and-row-level-security),
 and [capability gates](https://surrealdb.com/docs/learn/security/authorization/capabilities).
 
-| SurrealDB capability | Vyrm disposition |
+| SurrealDB capability | RRFlow disposition |
 |---|---|
 | Root-, namespace-, and database-level system users | **Absent** |
 | Owner/editor/viewer RBAC for system users | **Absent** |
@@ -229,7 +229,7 @@ Sources: [RPC protocol](https://surrealdb.com/docs/reference/rest-api/rpc-protoc
 [SDK list](https://surrealdb.com/docs/learn/querying/surrealql/executing-queries/via-sdks),
 and [3.1 MCP release](https://surrealdb.com/releases/3.1).
 
-| SurrealDB capability | Vyrm disposition |
+| SurrealDB capability | RRFlow disposition |
 |---|---|
 | HTTP SQL endpoint | **Absent** |
 | REST record endpoints | **Absent** |
@@ -239,7 +239,7 @@ and [3.1 MCP release](https://surrealdb.com/releases/3.1).
 | GraphQL HTTP/RPC surface | **Absent** |
 | GQL HTTP/RPC surface | **Absent** |
 | First-party MCP over stdio and authenticated HTTP | **Partial** — stdio MCP lifecycle/query tools exist; authenticated HTTP and full CRUD/schema surface do not |
-| Stateless MCP 2026-07-28 plus legacy handshake revisions | **Verified locally** for Vyrm's narrower tool surface |
+| Stateless MCP 2026-07-28 plus legacy handshake revisions | **Verified locally** for RRFlow's narrower tool surface |
 | Official Go SDK | **Absent** |
 | Official Java SDK | **Absent** |
 | Official JavaScript/TypeScript/Node SDK | **Absent** |
@@ -259,7 +259,7 @@ Sources: [extensions](https://surrealdb.com/docs/learn/extensions),
 [file functions](https://surrealdb.com/docs/reference/query-language/functions/database-functions/file),
 and the [documentation index](https://surrealdb.com/docs).
 
-| SurrealDB capability | Vyrm disposition |
+| SurrealDB capability | RRFlow disposition |
 |---|---|
 | Sandboxed WASM extension system (`Surrealism`) | **Absent** |
 | Custom modules and namespaced functions | **Absent** |
@@ -268,7 +268,7 @@ and the [documentation index](https://surrealdb.com/docs).
 | In-database ML model import/use (`SurrealML`) | **Absent** |
 | Local/cloud embedding pipeline integrated with data writes | **Partial** — governed local embedding exists, not cluster inference |
 | AI-agent MCP query/data/schema tooling | **Partial** |
-| Agent memory product (`Spectron`) | **External/absent** — reasoning/claim memory is Vyrm-native but not equivalent product packaging |
+| Agent memory product (`Spectron`) | **External/absent** — reasoning/claim memory is RRFlow-native but not equivalent product packaging |
 
 ## 11. Operations, observability, UI, and estates
 
@@ -277,9 +277,9 @@ Sources: [logging](https://surrealdb.com/docs/manage/observability/logging),
 [audit logging](https://surrealdb.com/docs/manage/observability/audit-logging), and
 [Cloud backups](https://surrealdb.com/docs/manage/cloud/backups-and-recovery).
 
-| SurrealDB capability | Vyrm disposition |
+| SurrealDB capability | RRFlow disposition |
 |---|---|
-| CLI start/stop/query/import/export/version/health and administration workflows | **Partial** — Vyrm CLI/runtime commands, not full database administration |
+| CLI start/stop/query/import/export/version/health and administration workflows | **Partial** — RRFlow CLI/runtime commands, not full database administration |
 | Dedicated liveness/readiness endpoints | **Absent** as network service probes |
 | Text and JSON structured logs | **Partial** |
 | File/socket log sinks and rotation | **Absent** |
@@ -307,11 +307,11 @@ Sources: [logging](https://surrealdb.com/docs/manage/observability/logging),
 Source: [distributed deployment](https://surrealdb.com/docs/build/deployment) and
 the [3.2 stable release](https://surrealdb.com/releases/3.2).
 
-| SurrealDB capability | Vyrm disposition |
+| SurrealDB capability | RRFlow disposition |
 |---|---|
 | Horizontally scaled query nodes over shared distributed storage | **Absent** |
 | Replication, consensus and fault tolerance | **Partial/experimental** |
-| Distributed ACID transactions | **Absent** — Vyrm Raft serializes one canonical state domain; this is not a general distributed transaction service |
+| Distributed ACID transactions | **Absent** — RRFlow Raft serializes one canonical state domain; this is not a general distributed transaction service |
 | Cluster membership changes and placement epochs | **Verified protocol slice**, not production operations |
 | Replica snapshot catch-up and WAL-delta recovery | **Verified protocol slice** |
 | Immutable object closure transfer before state activation | **Verified locally** |
@@ -327,7 +327,7 @@ the [3.2 stable release](https://surrealdb.com/releases/3.2).
 
 Source: [SurrealDB 3.3 beta release notes](https://surrealdb.com/releases/3.3).
 
-These capabilities must be tracked so Vyrm does not build against an already
+These capabilities must be tracked so RRFlow does not build against an already
 obsolete target, but they are marked preview until SurrealDB ships stable 3.3:
 
 - Postgres wire protocol with simple/extended query flows, TLS, SCRAM-SHA-256,
@@ -342,20 +342,20 @@ obsolete target, but they are marked preview until SurrealDB ships stable 3.3:
 - Runtime-swappable capability policy for embedders.
 - S3-backed SurrealDS storage plus bounded recovery/admission improvements.
 
-Vyrm currently has no Postgres wire, gRPC query server, bitmap payload-index
+RRFlow currently has no Postgres wire, gRPC query server, bitmap payload-index
 fusion, or cloud-backed distributed persistence. Its typed query batches,
 capability gates, and S3 semantic port are prerequisites, not equivalents.
 
 ## 14. Immediate conclusion
 
-Vyrm has a substantive local runtime kernel: authenticated persistence,
+RRFlow has a substantive local runtime kernel: authenticated persistence,
 multi-family atomic commits, bitemporal reads, typed graph/history, exact and
 dense-HNSW vector paths, snapshots, object closure, reasoning enforcement,
 cluster protocol evidence, and unusually rich temporal diagnostics. It does
 **not** yet have the SurrealDB full stack. The largest blockers are the public
-server/session/transaction surface, complete VyrmQL mutations and indexes,
+server/session/transaction surface, complete RRFlowQL mutations and indexes,
 live subscriptions, comprehensive identity/security, supported SDKs,
 backup/export/restore, production operations, and a real estate control plane.
 
-Those gaps must be implemented and verified before any claim that Vyrm is a
+Those gaps must be implemented and verified before any claim that RRFlow is a
 SurrealDB competitor rather than a promising runtime/storage kernel.

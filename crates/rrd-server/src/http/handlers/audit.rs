@@ -11,8 +11,7 @@ impl AppState {
             headers,
             body,
             now,
-            false,
-            SecurityAction::AuditRead,
+            RrdOperation::AuditRead,
             None,
             |envelope, session, token| {
                 self.service
