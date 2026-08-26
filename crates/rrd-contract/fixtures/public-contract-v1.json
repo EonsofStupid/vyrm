@@ -3,7 +3,7 @@
     "protocol": "rrd",
     "protocol_version": 1,
     "implementation": "rrflow",
-    "implementation_version": "0.1.0-alpha.1",
+    "implementation_version": "0.1.0",
     "deployment_mode": "embedded",
     "instance": {
       "kind": "instance",

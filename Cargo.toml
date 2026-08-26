@@ -29,6 +29,7 @@ members = [
 # core <- {store, graph} <- runtime <- {cli, MCP}; eval is standalone.
 
 [workspace.package]
+version = "0.1.0"
 edition = "2021"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/EonsofStupid/rrflow"

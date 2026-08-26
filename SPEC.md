@@ -2,7 +2,7 @@
 
 | Field | Value |
 |-------|-------|
-| Status | Draft pre-release semantic specification under the RRFlow/RRD V1 identity contract |
+| Status | Draft semantic specification for the RRFlow `0.1.0` alpha product identity; internal contracts are versioned independently |
 | Current default substrate | Native `RRD LSM`; pre-existing non-native directories reopen through the Fjall 3.1.8 compatibility adapter until explicitly migrated |
 | Scope | Kernel invariants; not the product boundary or naming authority |
 | Target authority | `docs/rrflow-rrd-architecture.md` and `docs/rrflow-rename-ledger.md` |

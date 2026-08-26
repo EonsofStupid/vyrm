@@ -1,5 +1,31 @@
 # RRFlow implementation journal
 
+## 2026-08-26 — owner-controlled `0.1.0` release train
+
+- Product decision: RRFlow remains at `0.1.0`. Internal protocol, contract,
+  fixture, schema, and persisted-format `v1` identifiers are compatibility
+  domains and are not product release numbers.
+- Single source: root `VERSION` and `[workspace.package].version` carry the
+  canonical release. All 22 Rust workspace crates now inherit rather than
+  repeat it.
+- Cross-ecosystem parity: TypeScript, Python, Java, and .NET client package
+  manifests and the public implementation fixture now report exact `0.1.0`.
+  Python's lockfile was reconciled without dependency changes.
+- Enforcement: `scripts/check_version.py` validates SemVer, Rust inheritance,
+  every packaged SDK, the Python lock, the public implementation fixture, and
+  a future canonical `apps/connectome` mount. Linux CI runs the check before
+  the workspace architecture and test gates.
+- Approval boundary: `.github/CODEOWNERS` assigns `VERSION`, the guard, its CI
+  step, and this policy to the repository owner. GitHub currently reports the
+  default `main` branch as unprotected, so owner approval is requested but is
+  not yet server-enforced. Branch protection must require Code Owner review to
+  make the approval rule mandatory.
+- Connectome truth: the canonical Connectome application is still not mounted
+  in RRFlow as the planned `apps/connectome` submodule. Its separate dirty
+  checkout has conflicting package versions and was deliberately not mutated.
+- Verification: the version-policy check, locked Cargo metadata, Python lock
+  check, 25 `rrd-contract` targets, and `git diff --check` pass locally.
+
 ## 2026-08-26 — enforced foundation work plan and first runtime gate
 
 - Commit: `pending`. Evidence is local to the current dirty pre-release tree;
@@ -2105,7 +2131,7 @@ index.
   push was performed. The unified RRFlow foundation is not declared complete;
   those gates and the wider capability/cohesion audit remain unfinished.
 
-## 2026-08-25 — RRFlow/RRD pre-release V1 identity cutover
+## 2026-08-25 — RRFlow `0.1.0` alpha identity cutover
 
 - Decision: RRFlow is the Reason Ready Flow product. RRD is the Reason Ready
   Daemon and the product's single engine/runtime authority. The retired

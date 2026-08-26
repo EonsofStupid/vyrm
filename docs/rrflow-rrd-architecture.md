@@ -4,7 +4,7 @@ Status: authoritative pre-release product architecture.
 
 This document defines the target system boundary. It supersedes older text that
 treated the retired pre-release identity or any physical crate as a separately
-governed product. The in-place RRFlow/RRD V1 identity contract is enforced by
+governed product. The in-place RRFlow `0.1.0` alpha identity contract is enforced by
 [`rrflow-rename-ledger.md`](rrflow-rename-ledger.md).
 
 ## Decision
@@ -304,7 +304,7 @@ As of 2026-08-25:
 
 ## Completion gates
 
-The RRFlow/RRD V1 identity cutover and cohesion checkpoint are complete only when:
+The RRFlow `0.1.0` alpha identity cutover and cohesion checkpoint are complete only when:
 
 1. every public package, binary, protocol description, configuration, SDK,
    environment variable, UI label, and current document uses the canonical

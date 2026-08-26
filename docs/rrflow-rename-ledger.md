@@ -66,12 +66,13 @@ The query executor has no separately branded MX layer. Data services have no
 separately branded DS layer. Native persistence has no separately branded KV
 product. Those are responsibilities inside RRD.
 
-## Canonical V1 persisted identities
+## Canonical internal V1 persisted identities
 
-These bytes identify RRFlow/RRD V1. They are updated in place and frozen by
-fixtures and reopen/recovery tests.
+These bytes identify RRFlow's internal persisted-format V1 compatibility
+domain. They are updated in place and frozen by fixtures and reopen/recovery
+tests. `V1` here is not the RRFlow or Connectome product release number.
 
-| Class | V1 identity |
+| Class | Internal V1 identity |
 |---|---|
 | WAL | `RRDWAL01`; record prefix `RRD1` |
 | Batches | `RRDBAT01`, `RRDBAT02` |

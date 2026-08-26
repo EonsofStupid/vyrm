@@ -73,7 +73,7 @@ inputs to that validation, not permission to pre-check the board.
 - [ ] **G00 — enforced work control:** strict work-plan contract; canonical
   lifecycle state machine; active-item planning/mutation gate; evidence-only
   verification; generated status surfaces.
-- [ ] **G01 — V1 identity and one-engine cohesion:** complete RRFlow/RRD rename;
+- [ ] **G01 — `0.1.0` alpha identity and one-engine cohesion:** complete RRFlow/RRD rename;
   one `rrd-engine` authority; zero physical bypasses; one capability catalogue.
 - [ ] **G02 — durable storage and recovery:** WAL/MVCC/LSM qualification;
   object-complete archives; backup/retention/restore; migrations; time travel;

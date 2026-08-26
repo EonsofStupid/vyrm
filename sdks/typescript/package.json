@@ -1,6 +1,6 @@
 {
   "name": "@rrflow/rrd-client",
-  "version": "0.1.0-alpha.1",
+  "version": "0.1.0",
   "description": "Supported TypeScript client for the RRFlow Durable Runtime v1 API",
   "type": "module",
   "private": true,

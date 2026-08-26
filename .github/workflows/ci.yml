@@ -60,6 +60,8 @@ jobs:
         with:
           components: clippy
       - uses: Swatinem/rust-cache@v2
+      - name: Enforce owner-controlled release version
+        run: python3 scripts/check_version.py
       - name: Enforce RRFlow engine ownership
         run: cargo test -p rrd-engine --test workspace_architecture --locked
       - name: Build cross-package controller fixture

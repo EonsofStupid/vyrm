@@ -2,7 +2,7 @@
 
 | Field | Value |
 |-------|-------|
-| Status | RRFlow/RRD V1 identity cutover active 2026-08-25; implementation history retained below |
+| Status | RRFlow `0.1.0` alpha identity cutover active 2026-08-25; implementation history retained below |
 | Governs | Historical sequencing plus executable capability work not superseded by the current identity contract |
 | Does not govern | Product boundary or terminology; those are `docs/rrflow-rrd-architecture.md` and `docs/rrflow-rename-ledger.md` |
 
@@ -21,7 +21,7 @@ surfaces over that authority.
 
 | Order | Slice | Current truth | Exit gate |
 |---:|---|---|---|
-| R0 | Verify the in-place RRFlow/RRD V1 identity cutover | Canonical package moves and persisted-marker changes exist in the worktree; the full same-tree gate is not yet complete | Workspace resolves only the canonical package graph; the no-retired-identity scan, V1 reopen fixtures, full tests, and strict Clippy pass |
+| R0 | Verify the in-place RRFlow `0.1.0` alpha identity cutover | Canonical package moves and persisted-marker changes exist; the full same-tree gate is not yet complete | Workspace resolves only the canonical package graph; the no-retired-identity scan, internal-format V1 reopen fixtures, full tests, and strict Clippy pass |
 | R1 | One authoritative capability and tool catalogue | Engine HTTP operations, MCP tools, and Connectome cards are separately enumerated | One engine-owned catalogue generates MCP discovery and Connectome surface data; tests prove every advertised tool is executable and every executable tool is advertised |
 | R2 | Complete the truthful memory MCP foundation | Exact recall, routing, query, reasoning, lifecycle, and preflight exist; memory write/inspect/retire/context and document/vector administration are incomplete | `remember`, `recall`, `context`, `inspect`, and history-preserving `forget` pass persistence/reopen tests; every unavailable tool remains explicitly planned rather than falsely advertised |
 | R3 | Enforce project attunement before planning and mutation | Preflight refreshes routing, but no one-shot planning receipt binds the inspected file tree to a later mutation | A persisted attunement receipt binds project root, source fingerprints, manifests, routing generation, RRD read stamp, and attempt; stale or absent receipts deny mutation across every enforcing adapter |

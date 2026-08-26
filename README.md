@@ -7,6 +7,11 @@ query execution, indexes, reasoning state, lifecycle enforcement, security,
 audit, recovery, and diagnostics must compose through that one engine.
 Connectome is the operator/developer client.
 
+The current RRFlow release-train version is `0.1.0`. Package versions inherit
+or mirror that value under the owner-controlled [version policy](docs/versioning.md).
+Internal protocol, schema, fixture, and persisted-format `v1` identifiers are
+compatibility domains, not RRFlow or Connectome product release numbers.
+
 The pre-release identity cutover is in place: active packages, namespaces,
 protocol labels, persisted markers, fixtures, SDK surfaces, and documentation
 use RRFlow/RRD names without aliases or compatibility shims. The authoritative

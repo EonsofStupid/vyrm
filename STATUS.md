@@ -1,18 +1,23 @@
-# Runtime status — 2026-08-25
+# Runtime status — 2026-08-26
 
 ## Current recovery truth
 
 There is no verified cohesive RRFlow product checkpoint for the current
 worktree. The repository contains substantial executable storage, query,
-vector, reasoning, server, security, SDK, estate, and Connectome code, but the
-pre-release RRFlow/RRD V1 identity cutover is uncommitted and several outward
-surfaces still bypass or duplicate the engine authority.
+vector, reasoning, server, security, SDK, estate, and Connectome code. The
+RRFlow `0.1.0` alpha identity cutover was committed and pushed as `3fc2842`, but
+several outward surfaces still bypass or duplicate the engine authority.
 
 The active recovery sequence is R0–R6 in `PLAN.md`. As of this entry:
 
+- The owner-controlled release train is `0.1.0`. Rust workspace crates inherit
+  that version, supported SDK package manifests mirror it, and CI rejects
+  drift. Internal protocol/schema/persisted-format `v1` identifiers do not
+  change the product release number.
 - RRD engine, runtime, query, storage, LSM, vector, graph, inference, operator
   knowledge, cluster, CLI, MCP, evaluation, and edge package moves exist in the
-  worktree; the full rename/recovery matrix has not yet been rerun.
+  pushed commit. Current product-green and cross-platform qualification remain
+  open.
 - MCP currently has executable preflight, exact recall, routing, RRFlowQL,
   typed reasoning, lifecycle, claim-backed `remember`, bounded `context`,
   provenance/history `inspect`, history-preserving `forget`, public service/
@@ -820,8 +825,9 @@ Ready Daemon and is its one native engine/runtime.** RRD is the actual Fjall
 competitor. Persistence,
 transactions, catalogue, query, indexes, reasoning, lifecycle, security, audit,
 and recovery compose through RRD; RRFlow is the product rather than a second
-engine beneath it. Active implementation names follow the RRFlow/RRD V1
-identity contract.
+engine beneath it. Active implementation names follow the RRFlow `0.1.0` alpha
+identity contract. Internal `v1` protocol and persisted-format identifiers are
+independent compatibility domains, not a product release number.
 
 The current workspace has native WAL/MVCC/LSM persistence, typed Arrow snapshot
 conversion, and DataFusion 55 execution for bounded relational operations.

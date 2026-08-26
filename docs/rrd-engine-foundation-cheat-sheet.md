@@ -52,7 +52,7 @@ and module names. Use `RRD` only for the Reason Ready Daemon role and its public
 service contract. Do not use RRD as a second product brand.
 
 Active packages and public surfaces use RRFlow/RRD names. Because this is a
-pre-release V1 cutover, the retired identity has no alias, forwarding crate,
+`0.1.0` alpha identity cutover, the retired identity has no alias, forwarding crate,
 dual reader, deprecated command, environment fallback, or source allowlist.
 Checked-in V1 fixtures use canonical RRD bytes. Future compatibility begins
 only after a released version creates a real contract to preserve.
@@ -81,8 +81,8 @@ RRFlow state.
 
 ### Pre-release rename rule
 
-Because the product has not reached a stable release, RRFlow/RRD V1 is corrected
-in place. The repository must reject every active occurrence of the retired
+Because the product has not reached a stable release, the RRFlow `0.1.0` alpha
+identity is corrected in place. The repository must reject every active occurrence of the retired
 identity, including serialized markers and fixtures. Git history is the only
 rollback mechanism for the rename. No compatibility path survives in runtime
 code.
@@ -894,7 +894,7 @@ local/frontier models all bind to the same lifecycle and data contracts.
 ### Next implementation session
 
 1. Audit the worktree and preserve unrelated or concurrent changes.
-2. Enforce this document's naming and cohesion rules through the V1 identity
+2. Enforce this document's naming and cohesion rules through the product-identity
    scan and dependency map.
 3. Freeze canonical lifecycle types, state transitions, decisions, and reopen
    fixtures in RRD's existing contract/engine boundary.

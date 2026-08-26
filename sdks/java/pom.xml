@@ -5,7 +5,7 @@
   <modelVersion>4.0.0</modelVersion>
   <groupId>io.rrflow</groupId>
   <artifactId>rrd-client</artifactId>
-  <version>0.1.0-alpha.1</version>
+  <version>0.1.0</version>
   <name>RRFlow RRD Java Client</name>
   <properties>
     <maven.compiler.release>21</maven.compiler.release>
