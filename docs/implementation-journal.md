@@ -2478,3 +2478,34 @@ index.
   locally. W04 remains active until its recorded formatting, workspace test,
   and strict workspace Clippy commands pass on the final tree and the pushed
   Linux, macOS/ARM, and Windows matrix is green.
+
+## 2026-08-26 — W04 publication correction after Windows matrix failure
+
+- Remote evidence, not local inference: commit `4b45294` passed the supervised
+  topology and macOS/Ubuntu estate jobs but failed the Windows estate job. The
+  real RRD child exited during `RrdEngine::open` with `object store: Access is
+  denied. (os error 5)`. The controller's later `Prepared` observation was a
+  consequence of that startup failure, not a separate reconciliation defect.
+- Root cause: object, migration, and cluster paths independently copied the
+  Unix `File::open(directory).sync_all()` operation instead of consuming the
+  physical storage durability boundary. Rust's ordinary Windows file open does
+  not obtain a directory handle; Windows publication durability was already
+  implemented in `rrd-lsm` with write-through `MoveFileExW`, but those callers
+  bypassed it.
+- Cohesive correction: `rrd-lsm` now publicly owns the platform directory-sync
+  and durable-rename primitives. `rrd-store` exposes that one boundary to its
+  object and cluster consumers. Object publication, quarantine, Fjall-to-native
+  migration, native format upgrade, artifact-transfer state, and OpenRaft spool
+  cleanup no longer carry independent directory-sync implementations. Cross-
+  directory object moves also sync the removed source entry on Unix.
+- Contract proof: portable tests publish both a file and a directory through
+  the same primitive. All-target `rrd-store` tests pass, including every
+  migration/recovery fault boundary; all-feature `rrd-cluster` tests pass,
+  including process-isolated Raft, transfer restart, snapshot, and mTLS; and the
+  exact four-test local estate process matrix now passes through child startup,
+  controller reopen, identity validation, graceful stop, kill fallback, and
+  retained data.
+- Status boundary: this corrects the locally reproduced failure, but does not
+  make the platform matrix green by assertion. The recorded W04 commands must
+  pass again on the final tree, then the exact pushed commit must complete both
+  required GitHub workflow runs before W05 begins.

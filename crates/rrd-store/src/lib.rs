@@ -84,6 +84,9 @@ pub use rrd_core::{
     DataTransaction, DataTransactionView, ReadStamp, RetentionPin, RetentionPinId,
     RuntimeChangePage, RuntimeCommitOutcome, SnapshotHandle, SnapshotId,
 };
+pub use rrd_lsm::{
+    publish_rename as publish_durable_rename, sync_directory as sync_directory_metadata,
+};
 pub use s3::{ConditionalPut, S3CompatibleObjectStore, S3ObjectClient, S3ObjectMetadata};
 pub use store::{AppendOutcome, IdempotentAppendOutcome, Store};
 pub use upgrade::{

@@ -5,7 +5,7 @@
 //! unreachable object, but never a reachable partial object; inventory and
 //! reclamation make that asymmetry explicit.
 
-use crate::{Error, Result};
+use crate::{publish_durable_rename, sync_directory_metadata, Error, Result};
 use rrd_core::{digest, ObjectReceipt, ObjectReference};
 use std::collections::BTreeSet;
 use std::fs::{self, File, OpenOptions};
@@ -82,7 +82,7 @@ impl LocalObjectStore {
         fs::create_dir_all(root.join("objects/sha256"))?;
         fs::create_dir_all(root.join("staging"))?;
         fs::create_dir_all(root.join("quarantine"))?;
-        sync_directory(&root)?;
+        sync_directory_metadata(&root)?;
         Ok(Self { root })
     }
 
@@ -153,7 +153,7 @@ impl LocalObjectStore {
                 });
             }
             stage.sync_all()?;
-            sync_directory(self.root.join("staging"))?;
+            sync_directory_metadata(&self.root.join("staging"))?;
             Ok(())
         })();
         if let Err(error) = staged {
@@ -212,7 +212,7 @@ impl LocalObjectStore {
                 stage.write_all(&buffer[..read])?;
             }
             stage.sync_all()?;
-            sync_directory(self.root.join("staging"))?;
+            sync_directory_metadata(&self.root.join("staging"))?;
             Ok((digest.finalize_hex(), length))
         })();
         let (sha256, length) = match staged {
@@ -266,7 +266,7 @@ impl LocalObjectStore {
         stage.write_all(bytes)?;
         stage.sync_all()?;
         drop(stage);
-        sync_directory(self.root.join("staging"))?;
+        sync_directory_metadata(&self.root.join("staging"))?;
         hook(ObjectStep::AfterStageSync)?;
 
         self.publish_stage(&stage_path, &final_path, &sha256)?;
@@ -383,8 +383,7 @@ impl LocalObjectStore {
             sha256,
             STAGE_ORDINAL.fetch_add(1, Ordering::Relaxed)
         ));
-        fs::rename(&source, &target)?;
-        sync_directory(self.root.join("quarantine"))?;
+        publish_object_path(&source, &target)?;
         Ok(target)
     }
 
@@ -405,9 +404,10 @@ impl LocalObjectStore {
     }
 
     fn publish_stage(&self, stage_path: &Path, final_path: &Path, sha256: &str) -> Result<()> {
-        if let Some(parent) = final_path.parent() {
-            fs::create_dir_all(parent)?;
-        }
+        let parent = final_path
+            .parent()
+            .ok_or_else(|| Error::Object("object publication target has no parent".into()))?;
+        fs::create_dir_all(parent)?;
         if final_path.exists() {
             match self.verify(sha256) {
                 Ok(_) => {
@@ -416,18 +416,12 @@ impl LocalObjectStore {
                 }
                 Err(Error::ObjectCorrupt { .. }) => {
                     self.quarantine(sha256)?;
-                    fs::rename(stage_path, final_path)?;
-                    if let Some(parent) = final_path.parent() {
-                        sync_directory(parent)?;
-                    }
+                    publish_object_path(stage_path, final_path)?;
                 }
                 Err(error) => return Err(error),
             }
         } else {
-            fs::rename(stage_path, final_path)?;
-            if let Some(parent) = final_path.parent() {
-                sync_directory(parent)?;
-            }
+            publish_object_path(stage_path, final_path)?;
         }
         Ok(())
     }
@@ -496,8 +490,17 @@ fn sorted_paths(path: &Path) -> Result<Vec<PathBuf>> {
     Ok(paths)
 }
 
-fn sync_directory(path: impl AsRef<Path>) -> Result<()> {
-    File::open(path)?.sync_all()?;
+fn publish_object_path(source: &Path, target: &Path) -> Result<()> {
+    let source_parent = source
+        .parent()
+        .ok_or_else(|| Error::Object("object publication source has no parent".into()))?;
+    let target_parent = target
+        .parent()
+        .ok_or_else(|| Error::Object("object publication target has no parent".into()))?;
+    publish_durable_rename(target_parent, source, target)?;
+    if source_parent != target_parent {
+        sync_directory_metadata(source_parent)?;
+    }
     Ok(())
 }
 

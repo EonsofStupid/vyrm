@@ -1,11 +1,13 @@
 //! Resumable exact-successor migration of native application-key formats.
 
 use crate::migration::{read_archive, ArchiveWriter, MigrationInventory};
-use crate::{keyspaces, Engine, Error, NativeEngine, Result};
+use crate::{
+    keyspaces, publish_durable_rename, sync_directory_metadata, Engine, Error, NativeEngine, Result,
+};
 use rrd_core::digest;
 use rrd_lsm::{Database, DatabaseOptions, Durability, Mutation, WriteBatch};
 use serde::{Deserialize, Serialize};
-use std::fs::{self, File, OpenOptions};
+use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -145,8 +147,7 @@ fn migrate_inner(
                     ));
                 }
                 verify_legacy_source(source, &ledger.inventory)?;
-                fs::rename(source, &artifacts.backup).map_err(migration_io)?;
-                sync_parent(source)?;
+                durable_rename(source, &artifacts.backup)?;
                 inject(fault, FormatMigrationFault::AfterSourceRename)?;
                 ledger.phase = FormatMigrationPhase::SourceMoved;
                 write_ledger(&artifacts.marker, &ledger)?;
@@ -158,8 +159,7 @@ fn migrate_inner(
                         "format cutover filesystem state is incomplete or ambiguous".into(),
                     ));
                 }
-                fs::rename(&artifacts.staging, source).map_err(migration_io)?;
-                sync_parent(source)?;
+                durable_rename(&artifacts.staging, source)?;
                 inject(fault, FormatMigrationFault::AfterCutoverRename)?;
                 ledger.target_manifest = Some(target_manifest(source)?);
                 ledger.phase = FormatMigrationPhase::Cutover;
@@ -440,8 +440,8 @@ fn write_ledger(path: &Path, ledger: &FormatMigrationLedger) -> Result<()> {
             .map_err(migration_io)?;
         file.write_all(&bytes).map_err(migration_io)?;
         file.sync_all().map_err(migration_io)?;
-        fs::rename(&temporary, path).map_err(migration_io)?;
-        sync_parent(path)
+        let parent = path.parent().unwrap_or_else(|| Path::new("."));
+        publish_durable_rename(parent, &temporary, path).map_err(migration_io)
     })();
     if result.is_err() && temporary.exists() {
         fs::remove_file(&temporary).map_err(migration_io)?;
@@ -489,8 +489,10 @@ fn migration_io(error: std::io::Error) -> Error {
 
 fn sync_parent(path: &Path) -> Result<()> {
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
-    File::open(parent)
-        .map_err(migration_io)?
-        .sync_all()
-        .map_err(migration_io)
+    sync_directory_metadata(parent).map_err(migration_io)
+}
+
+fn durable_rename(source: &Path, target: &Path) -> Result<()> {
+    let parent = target.parent().unwrap_or_else(|| Path::new("."));
+    publish_durable_rename(parent, source, target).map_err(migration_io)
 }

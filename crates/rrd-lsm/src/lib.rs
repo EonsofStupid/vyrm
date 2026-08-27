@@ -17,12 +17,17 @@ mod wal;
 use std::path::Path;
 
 #[cfg(unix)]
-pub(crate) fn sync_directory(path: &Path) -> std::io::Result<()> {
+/// Requests durable directory-entry metadata on platforms that expose a
+/// directory `fsync` operation.
+pub fn sync_directory(path: &Path) -> std::io::Result<()> {
     std::fs::File::open(path)?.sync_all()
 }
 
 #[cfg(not(unix))]
-pub(crate) fn sync_directory(_path: &Path) -> std::io::Result<()> {
+/// Completes the portable directory-publication boundary on platforms without
+/// a directory `fsync` operation. Windows publication durability is supplied
+/// by [`publish_rename`]'s write-through rename instead.
+pub fn sync_directory(_path: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
@@ -96,3 +101,41 @@ pub use wal::{
     recover, recover_from, repair_torn_tail, AppendReceipt, Durability, RecoveredBatch, Recovery,
     WalBatch, WalWriter, WAL_FORMAT_VERSION, WAL_MAX_PAYLOAD_BYTES,
 };
+
+#[cfg(test)]
+mod durable_fs_tests {
+    use super::*;
+
+    #[test]
+    fn directory_sync_uses_the_platform_durability_boundary() {
+        let root = tempfile::tempdir().unwrap();
+        sync_directory(root.path()).unwrap();
+    }
+
+    #[test]
+    fn durable_rename_publishes_files_and_directories() {
+        let root = tempfile::tempdir().unwrap();
+
+        let temporary_file = root.path().join("file.pending");
+        let target_file = root.path().join("file.ready");
+        std::fs::write(&temporary_file, b"ready").unwrap();
+        std::fs::File::open(&temporary_file)
+            .unwrap()
+            .sync_all()
+            .unwrap();
+        publish_rename(root.path(), &temporary_file, &target_file).unwrap();
+        assert_eq!(std::fs::read(&target_file).unwrap(), b"ready");
+        assert!(!temporary_file.exists());
+
+        let temporary_directory = root.path().join("directory.pending");
+        let target_directory = root.path().join("directory.ready");
+        std::fs::create_dir(&temporary_directory).unwrap();
+        std::fs::write(temporary_directory.join("entry"), b"durable").unwrap();
+        publish_rename(root.path(), &temporary_directory, &target_directory).unwrap();
+        assert_eq!(
+            std::fs::read(target_directory.join("entry")).unwrap(),
+            b"durable"
+        );
+        assert!(!temporary_directory.exists());
+    }
+}

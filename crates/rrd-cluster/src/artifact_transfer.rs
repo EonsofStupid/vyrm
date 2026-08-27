@@ -6,7 +6,10 @@ use crate::{
     ArtifactTransferRpcResult, ClusterError, NodeId, Result,
 };
 use rrd_core::{RuntimeMutation, ScopeId};
-use rrd_store::{Engine, Error as StoreError, ImmutableObjectStore, LocalObjectStore};
+use rrd_store::{
+    publish_durable_rename, sync_directory_metadata, Engine, Error as StoreError,
+    ImmutableObjectStore, LocalObjectStore,
+};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs::{self, File, OpenOptions};
 use std::io::Write;
@@ -1256,8 +1259,7 @@ fn publish_bytes(path: &Path, bytes: &[u8]) -> Result<()> {
         file.write_all(bytes).map_err(cluster_io_error)?;
         file.sync_all().map_err(cluster_io_error)?;
         drop(file);
-        fs::rename(&pending, path).map_err(cluster_io_error)?;
-        sync_directory(parent)
+        publish_durable_rename(parent, &pending, path).map_err(cluster_io_error)
     })();
     if published.is_err() {
         let _ = fs::remove_file(&pending);
@@ -1266,9 +1268,7 @@ fn publish_bytes(path: &Path, bytes: &[u8]) -> Result<()> {
 }
 
 fn sync_directory(path: &Path) -> Result<()> {
-    File::open(path)
-        .and_then(|directory| directory.sync_all())
-        .map_err(cluster_io_error)
+    sync_directory_metadata(path).map_err(cluster_io_error)
 }
 
 fn cluster_io_error(error: std::io::Error) -> ClusterError {

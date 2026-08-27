@@ -5,7 +5,10 @@
 //! absent sibling, and two directory renames perform cutover. The Fjall source
 //! and archive remain available for rollback and diagnosis.
 
-use crate::{keyspaces, Engine, Error, NativeEngine, Result, Store};
+use crate::{
+    keyspaces, publish_durable_rename, sync_directory_metadata, Engine, Error, NativeEngine,
+    Result, Store,
+};
 use rrd_core::digest::Sha256;
 use rrd_lsm::{Database, DatabaseOptions, Durability as KvDurability, Mutation, WriteBatch};
 use serde::{Deserialize, Serialize};
@@ -183,8 +186,7 @@ fn migrate_inner(source: &Path, at: u64, fault: Option<MigrationFault>) -> Resul
                         "Fjall backup target already exists before source move".into(),
                     ));
                 }
-                fs::rename(source, &artifacts.backup).map_err(migration_io)?;
-                sync_parent(source)?;
+                durable_rename(source, &artifacts.backup)?;
                 inject(fault, MigrationFault::AfterSourceRename)?;
                 report.phase = MigrationPhase::SourceMoved;
                 write_report(&artifacts.marker, &report)?;
@@ -201,8 +203,7 @@ fn migrate_inner(source: &Path, at: u64, fault: Option<MigrationFault>) -> Resul
                         "cutover requires both native staging and retained Fjall backup".into(),
                     ));
                 }
-                fs::rename(&artifacts.staging, source).map_err(migration_io)?;
-                sync_parent(source)?;
+                durable_rename(&artifacts.staging, source)?;
                 inject(fault, MigrationFault::AfterCutoverRename)?;
                 report.native_state = Some(native_state(source)?);
                 report.phase = MigrationPhase::Cutover;
@@ -318,15 +319,13 @@ pub fn rollback_fjall_migration(source: &Path) -> Result<MigrationReport> {
                 "retired-native target already exists; refusing to overwrite evidence".into(),
             ));
         }
-        fs::rename(source, &artifacts.retired).map_err(migration_io)?;
-        sync_parent(source)?;
+        durable_rename(source, &artifacts.retired)?;
         report.phase = MigrationPhase::RollbackNativeMoved;
         write_report(&artifacts.marker, &report)?;
     }
 
     verify_fjall_copy(&artifacts.backup, &report.inventory)?;
-    fs::rename(&artifacts.backup, source).map_err(migration_io)?;
-    sync_parent(source)?;
+    durable_rename(&artifacts.backup, source)?;
     let fjall = Store::open(source)?;
     let _ = Engine::sequence(&fjall)?;
     drop(fjall);
@@ -346,7 +345,7 @@ fn verify_fjall_copy(path: &Path, expected: &MigrationInventory) -> Result<()> {
     let actual = store.export_migration_archive(&verification)?;
     drop(store);
     fs::remove_file(&verification).map_err(migration_io)?;
-    sync_directory(parent)?;
+    sync_directory_metadata(parent).map_err(migration_io)?;
     if &actual != expected {
         return Err(Error::Migration(
             "retained Fjall copy differs from the authenticated migration archive".into(),
@@ -627,18 +626,16 @@ fn write_report(path: &Path, report: &MigrationReport) -> Result<()> {
     file.write_all(&bytes).map_err(migration_io)?;
     file.sync_all().map_err(migration_io)?;
     drop(file);
-    fs::rename(&temp, path).map_err(migration_io)?;
-    sync_directory(parent)
+    publish_durable_rename(parent, &temp, path).map_err(migration_io)
 }
 
 fn sync_parent(path: &Path) -> Result<()> {
-    sync_directory(path.parent().unwrap_or_else(|| Path::new(".")))
+    sync_directory_metadata(path.parent().unwrap_or_else(|| Path::new("."))).map_err(migration_io)
 }
 
-fn sync_directory(path: &Path) -> Result<()> {
-    File::open(path)
-        .and_then(|file| file.sync_all())
-        .map_err(migration_io)
+fn durable_rename(source: &Path, target: &Path) -> Result<()> {
+    let parent = target.parent().unwrap_or_else(|| Path::new("."));
+    publish_durable_rename(parent, source, target).map_err(migration_io)
 }
 
 fn migration_io(error: std::io::Error) -> Error {
@@ -736,8 +733,7 @@ impl ArchiveWriter {
             .map_err(migration_io)?;
         self.file.sync_all().map_err(migration_io)?;
         drop(self.file);
-        fs::rename(&self.temporary_path, &self.final_path).map_err(migration_io)?;
-        sync_parent(&self.final_path)?;
+        durable_rename(&self.temporary_path, &self.final_path)?;
         Ok(MigrationInventory {
             format_version: ARCHIVE_VERSION,
             archive_sha256,

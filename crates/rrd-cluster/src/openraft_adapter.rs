@@ -26,7 +26,8 @@ use rrd_core::{
     RuntimeSchemaRegistry, ScopeId,
 };
 use rrd_lsm::{
-    Database, Durability, Mutation, SnapshotBundleFile, WriteBatch, SNAPSHOT_BUNDLE_MAX_BYTES,
+    sync_directory, Database, Durability, Mutation, SnapshotBundleFile, WriteBatch,
+    SNAPSHOT_BUNDLE_MAX_BYTES,
 };
 use rrd_store::{
     native_runtime_commit_context, native_runtime_commit_outcome,
@@ -578,9 +579,7 @@ fn clean_snapshot_spool(path: &Path) -> ClusterResult<()> {
         std::fs::remove_file(entry.path())
             .map_err(|error| ClusterError::Unavailable(error.to_string()))?;
     }
-    std::fs::File::open(path)
-        .and_then(|directory| directory.sync_all())
-        .map_err(|error| ClusterError::Unavailable(error.to_string()))
+    sync_directory(path).map_err(|error| ClusterError::Unavailable(error.to_string()))
 }
 
 fn snapshot_spool_path(root: &Path, purpose: &str) -> PathBuf {
