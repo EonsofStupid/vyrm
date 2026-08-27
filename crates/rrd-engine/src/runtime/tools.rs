@@ -4,11 +4,9 @@
 //! semantics, persistence access, recall observation, lifecycle handling, and
 //! the authoritative invocation ledger remain inside RRD.
 
-use super::policy::tool_request_digest;
 use super::{
-    active_reasoning_run, append_lifecycle_event, consume_attuned_tool_authorization,
-    ensure_routing_fresh, execute_traced_query, handle, load_routing, preflight,
-    query_parameters_from_json, reasoning_run, record_reasoning, require_fresh_attunement,
+    active_reasoning_run, append_lifecycle_event, ensure_routing_fresh, execute_traced_query,
+    handle, load_routing, preflight, query_parameters_from_json, reasoning_run, record_reasoning,
     ExecutionBudget, HookContext, HookEvent, InstanceBinding, REASONING_SCOPE,
 };
 use crate::{
@@ -25,7 +23,7 @@ use rrd_contract::{
     SearchVectors, SecurityAction, TransactionMutation, MAX_LEASE_MS, MIN_LEASE_MS, PROTOCOL,
     PROTOCOL_VERSION, RUNTIME_TOOL_CATALOGUE_VERSION,
 };
-pub use rrd_contract::{RuntimeToolAttunement, RuntimeToolAuthorization};
+pub use rrd_contract::{RuntimeToolAuthorization, RuntimeToolLifecyclePolicy};
 use rrd_core::{
     digest, Claim, ClaimReader, ClaimSource, Predicate, Producer, Reader, ReasoningPayload,
     RecallQuery, ScopeId, Subject,
@@ -40,8 +38,10 @@ use std::path::Path;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 mod adapter;
+mod lifecycle;
 
 use adapter::{AdapterCaller, AdapterSession};
+use lifecycle::RuntimeToolLifecycle;
 
 const LOCAL_TOKEN_KEY_FILE: &str = "RRD.SECRET";
 
@@ -67,7 +67,7 @@ pub struct RuntimeToolDefinition {
     pub mutation: bool,
     pub authorization: RuntimeToolAuthorization,
     pub action: SecurityAction,
-    pub attunement: RuntimeToolAttunement,
+    pub lifecycle: RuntimeToolLifecyclePolicy,
 }
 
 #[derive(JsonSchema)]
@@ -420,46 +420,18 @@ impl RrdEngine {
             return Err(ServiceError::Unauthenticated);
         }
 
-        let lifecycle_input = json!({"tool_name": name, "tool_input": args});
-        if definition.attunement == RuntimeToolAttunement::ExactTool {
-            let ready = ensure_routing_fresh(&self.storage, root)
-                .map_err(|error| ServiceError::Runtime(error.to_string()))?;
-            require_fresh_attunement(&self.storage, root, &ready)
-                .map_err(|error| ServiceError::Runtime(error.to_string()))?;
-            consume_attuned_tool_authorization(
-                &self.storage,
-                root,
-                &tool_request_digest(&lifecycle_input)
-                    .map_err(|error| ServiceError::Runtime(error.to_string()))?,
-                at,
-                "agent:mcp",
-            )
-            .map_err(|error| ServiceError::Runtime(error.to_string()))?;
-        }
+        let (execution_args, lifecycle) =
+            RuntimeToolLifecycle::prepare(name, args, definition.lifecycle)?;
+        lifecycle.authorize(&self.storage, root, at)?;
 
         let started = Instant::now();
-        let mut result = execute_runtime_tool(self, root, name, args, at, caller);
-        if definition.attunement == RuntimeToolAttunement::ExactTool {
+        let mut result = execute_runtime_tool(self, root, name, &execution_args, at, caller);
+        if definition.lifecycle == RuntimeToolLifecyclePolicy::PlannedMutation {
             let response = match &result {
                 Ok(_) => json!({"success": true}),
                 Err(error) => json!({"success": false, "error": error.to_string()}),
             };
-            let post_input = json!({
-                "tool_name": name,
-                "tool_input": args,
-                "tool_response": response,
-            });
-            let reader = Reader::new("agent:mcp")
-                .map_err(|error| ServiceError::Runtime(error.to_string()))?;
-            let context = HookContext {
-                store: &self.storage,
-                root,
-                harness: Some("mcp"),
-                reader: &reader,
-                now: at,
-                budget: 1_500,
-            };
-            if let Err(error) = handle(&context, HookEvent::PostToolUse, &post_input) {
+            if let Err(error) = lifecycle.complete(&self.storage, root, response, at) {
                 result = Err(format!(
                     "runtime tool execution could not close its lifecycle observation: {error}"
                 )
@@ -624,12 +596,14 @@ pub fn runtime_tool_catalogue() -> Vec<RuntimeToolDefinition> {
             "Load a bounded consolidated view of current project memory with provenance",
             json!({"type":"object","properties":{"subjects":{"type":"array","items":{"type":"string"}},"at":{"type":"integer"},"budget":{"type":"integer"},"max_subjects":{"type":"integer"}}}),
             false,
+            RuntimeToolLifecyclePolicy::ReadOnly,
         ),
         tool(
             "rrflow_forget",
             "Retire one current memory fact without erasing its bitemporal history",
             json!({"type":"object","required":["subject","predicate"],"properties":{"subject":{"type":"string"},"predicate":{"type":"string"},"at":{"type":"integer"}}}),
             true,
+            RuntimeToolLifecyclePolicy::ControlTransition,
         ),
         typed_tool::<HookApplyArguments>(
             "rrflow_hook",
@@ -637,13 +611,14 @@ pub fn runtime_tool_catalogue() -> Vec<RuntimeToolDefinition> {
             "Translate one supported provider hook payload through RRFlow's current hook adapter",
             true,
             RuntimeToolAuthorization::Governed,
-            RuntimeToolAttunement::None,
+            RuntimeToolLifecyclePolicy::ControlTransition,
         ),
         tool(
             "rrflow_inspect",
             "Inspect memory history, metadata, and provenance for a subject and optional predicate",
             json!({"type":"object","required":["subject"],"properties":{"subject":{"type":"string"},"predicate":{"type":"string"},"limit":{"type":"integer"}}}),
             false,
+            RuntimeToolLifecyclePolicy::ReadOnly,
         ),
         typed_tool::<LifecycleApplyArguments>(
             "rrflow_lifecycle",
@@ -651,49 +626,56 @@ pub fn runtime_tool_catalogue() -> Vec<RuntimeToolDefinition> {
             "Append one strict provider-neutral lifecycle transition to the authoritative RRD event chain",
             true,
             RuntimeToolAuthorization::Governed,
-            RuntimeToolAttunement::None,
+            RuntimeToolLifecyclePolicy::ControlTransition,
         ),
         tool(
             "rrflow_preflight",
             "Attune the project, refresh routing, and inject current memory before reasoning",
             json!({"type":"object","properties":{"at":{"type":"integer"},"budget":{"type":"integer"},"harness":{"type":"string"}}}),
             true,
+            RuntimeToolLifecyclePolicy::ControlTransition,
         ),
         tool(
             "rrflow_query",
             "Execute a project-scoped RRFlowQL read with durable parse, plan, and execution evidence",
             json!({"type":"object","required":["ql"],"properties":{"ql":{"type":"string"},"scope":{"type":"string"},"parameters":{"type":"object"},"at":{"type":"integer"},"max_scanned_changes":{"type":"integer"},"max_rows":{"type":"integer"},"max_output_bytes":{"type":"integer"},"max_batch_rows":{"type":"integer"}}}),
             false,
+            RuntimeToolLifecyclePolicy::ReadOnly,
         ),
         tool(
             "rrflow_reasoning_record",
             "Append one typed goal, plan, attempt, observation, decision, verification, or outcome transition",
             json!({"type":"object","required":["run_id","payload"],"properties":{"run_id":{"type":"string"},"actor":{"type":"string"},"at":{"type":"integer"},"payload":{"type":"object"}}}),
             true,
+            RuntimeToolLifecyclePolicy::ControlTransition,
         ),
         tool(
             "rrflow_reasoning_show",
             "Show a specified reasoning run or the active reasoning run",
             json!({"type":"object","properties":{"run_id":{"type":"string"}}}),
             false,
+            RuntimeToolLifecyclePolicy::ReadOnly,
         ),
         tool(
             "rrflow_recall",
             "Recall current claims for exact subjects with provenance and a bounded token estimate",
             json!({"type":"object","required":["subjects"],"properties":{"subjects":{"type":"array","items":{"type":"string"}},"at":{"type":"integer"},"budget":{"type":"integer"}}}),
             false,
+            RuntimeToolLifecyclePolicy::ReadOnly,
         ),
         tool(
             "rrflow_remember",
             "Persist one bitemporal fact or observation with explicit provenance",
             json!({"type":"object","required":["subject","predicate","object"],"properties":{"subject":{"type":"string"},"predicate":{"type":"string"},"object":{"type":"string"},"actor":{"type":"string"},"on_behalf_of":{"type":"string"},"session":{"type":"string"},"valid_from":{"type":"integer"},"at":{"type":"integer"},"confidence":{"type":"number","minimum":0,"maximum":1}}}),
             true,
+            RuntimeToolLifecyclePolicy::ControlTransition,
         ),
         tool(
             "rrflow_route",
             "Refresh the project index and route a symbol or query to complete source files",
             json!({"type":"object","required":["query"],"properties":{"query":{"type":"string"},"limit":{"type":"integer"}}}),
             true,
+            RuntimeToolLifecyclePolicy::ControlTransition,
         ),
         typed_tool::<ServiceStatusArguments>(
             "rrflow_service_status",
@@ -701,7 +683,7 @@ pub fn runtime_tool_catalogue() -> Vec<RuntimeToolDefinition> {
             "Inspect RRD readiness, security state, public endpoints, executable MCP tools, and the shared product capability catalogue",
             false,
             RuntimeToolAuthorization::Public,
-            RuntimeToolAttunement::None,
+            RuntimeToolLifecyclePolicy::ReadOnly,
         ),
         typed_tool::<DataCommitArguments>(
             "rrflow_data_commit",
@@ -709,7 +691,7 @@ pub fn runtime_tool_catalogue() -> Vec<RuntimeToolDefinition> {
             "Atomically commit ordered document, relational, graph, event, vector, time-series, geo, object-reference, and claim mutations through the one RRD transaction authority",
             true,
             RuntimeToolAuthorization::Governed,
-            RuntimeToolAttunement::ExactTool,
+            RuntimeToolLifecyclePolicy::PlannedMutation,
         ),
         typed_tool::<QueryIndexEnsureArguments>(
             "rrflow_query_index_ensure",
@@ -717,7 +699,7 @@ pub fn runtime_tool_catalogue() -> Vec<RuntimeToolDefinition> {
             "Create or rebuild one RRD query index through the shared catalogue, read-stamp, idempotency, security, and projection lifecycle",
             true,
             RuntimeToolAuthorization::Governed,
-            RuntimeToolAttunement::ExactTool,
+            RuntimeToolLifecyclePolicy::PlannedMutation,
         ),
         typed_tool::<QueryIndexListArguments>(
             "rrflow_query_index_list",
@@ -725,7 +707,7 @@ pub fn runtime_tool_catalogue() -> Vec<RuntimeToolDefinition> {
             "List the authoritative RRD query-index catalogue and projection state for one exact instance scope",
             false,
             RuntimeToolAuthorization::Governed,
-            RuntimeToolAttunement::None,
+            RuntimeToolLifecyclePolicy::ReadOnly,
         ),
         typed_tool::<LiveQueryPollArguments>(
             "rrflow_live_query_poll",
@@ -733,7 +715,7 @@ pub fn runtime_tool_catalogue() -> Vec<RuntimeToolDefinition> {
             "Poll one bounded RRFlowQL live view for added, updated, and removed rows after an exact runtime cursor",
             false,
             RuntimeToolAuthorization::Governed,
-            RuntimeToolAttunement::None,
+            RuntimeToolLifecyclePolicy::ReadOnly,
         ),
         typed_tool::<ChangefeedReadArguments>(
             "rrflow_changefeed_read",
@@ -741,7 +723,7 @@ pub fn runtime_tool_catalogue() -> Vec<RuntimeToolDefinition> {
             "Read one bounded validated page from RRD's retained ordered multi-model changefeed after an exact cursor",
             false,
             RuntimeToolAuthorization::Governed,
-            RuntimeToolAttunement::None,
+            RuntimeToolLifecyclePolicy::ReadOnly,
         ),
         typed_tool::<ChangefeedFollowArguments>(
             "rrflow_changefeed_follow",
@@ -749,7 +731,7 @@ pub fn runtime_tool_catalogue() -> Vec<RuntimeToolDefinition> {
             "Wait within the public timeout bound for the next validated retained RRD changefeed page",
             false,
             RuntimeToolAuthorization::Governed,
-            RuntimeToolAttunement::None,
+            RuntimeToolLifecyclePolicy::ReadOnly,
         ),
         typed_tool::<VectorCollectionEnsureArguments>(
             "rrflow_vector_collection_ensure",
@@ -757,7 +739,7 @@ pub fn runtime_tool_catalogue() -> Vec<RuntimeToolDefinition> {
             "Create or converge one named-vector collection through RRD's shared catalogue, security, idempotency, and read-stamp authority",
             true,
             RuntimeToolAuthorization::Governed,
-            RuntimeToolAttunement::ExactTool,
+            RuntimeToolLifecyclePolicy::PlannedMutation,
         ),
         typed_tool::<VectorCollectionListArguments>(
             "rrflow_vector_collection_list",
@@ -765,7 +747,7 @@ pub fn runtime_tool_catalogue() -> Vec<RuntimeToolDefinition> {
             "List RRD's authoritative named-vector collection definitions, generations, memory tiers, metrics, and model bindings",
             false,
             RuntimeToolAuthorization::Governed,
-            RuntimeToolAttunement::None,
+            RuntimeToolLifecyclePolicy::ReadOnly,
         ),
         typed_tool::<VectorPointsRetrieveArguments>(
             "rrflow_vector_points_retrieve",
@@ -773,7 +755,7 @@ pub fn runtime_tool_catalogue() -> Vec<RuntimeToolDefinition> {
             "Retrieve exact visible vector points from one named collection and vector address without leaking same-field rows from another address",
             false,
             RuntimeToolAuthorization::Governed,
-            RuntimeToolAttunement::None,
+            RuntimeToolLifecyclePolicy::ReadOnly,
         ),
         typed_tool::<VectorPointsScrollArguments>(
             "rrflow_vector_points_scroll",
@@ -781,7 +763,7 @@ pub fn runtime_tool_catalogue() -> Vec<RuntimeToolDefinition> {
             "Scroll one deterministic bounded page of visible vector points from an exact named collection and vector address",
             false,
             RuntimeToolAuthorization::Governed,
-            RuntimeToolAttunement::None,
+            RuntimeToolLifecyclePolicy::ReadOnly,
         ),
         typed_tool::<VectorSearchArguments>(
             "rrflow_vector_search",
@@ -789,7 +771,7 @@ pub fn runtime_tool_catalogue() -> Vec<RuntimeToolDefinition> {
             "Run bounded exact vector search through RRD's named-collection, read-stamp, payload-filter, metric, and security authority",
             false,
             RuntimeToolAuthorization::Governed,
-            RuntimeToolAttunement::None,
+            RuntimeToolLifecyclePolicy::ReadOnly,
         ),
         typed_tool::<BackupCreateArguments>(
             "rrflow_backup_create",
@@ -797,7 +779,7 @@ pub fn runtime_tool_catalogue() -> Vec<RuntimeToolDefinition> {
             "Create and catalogue one authenticated logical backup through RRD's governed idempotent archive authority",
             true,
             RuntimeToolAuthorization::Governed,
-            RuntimeToolAttunement::ExactTool,
+            RuntimeToolLifecyclePolicy::PlannedMutation,
         ),
         typed_tool::<BackupListArguments>(
             "rrflow_backup_list",
@@ -805,7 +787,7 @@ pub fn runtime_tool_catalogue() -> Vec<RuntimeToolDefinition> {
             "List RRD's logical backup catalogue with optional full archive verification",
             false,
             RuntimeToolAuthorization::Governed,
-            RuntimeToolAttunement::None,
+            RuntimeToolLifecyclePolicy::ReadOnly,
         ),
         typed_tool::<RestoreArguments>(
             "rrflow_restore",
@@ -813,7 +795,7 @@ pub fn runtime_tool_catalogue() -> Vec<RuntimeToolDefinition> {
             "Restore one catalogued authenticated logical backup to a new isolated root after explicit acknowledgement",
             true,
             RuntimeToolAuthorization::Governed,
-            RuntimeToolAttunement::ExactTool,
+            RuntimeToolLifecyclePolicy::PlannedMutation,
         ),
         typed_tool::<EstateReadArguments>(
             "rrflow_estate_read",
@@ -821,7 +803,7 @@ pub fn runtime_tool_catalogue() -> Vec<RuntimeToolDefinition> {
             "Read one persistent RRD estate's desired, observed, activity, lease, operation, and receipt state",
             false,
             RuntimeToolAuthorization::Governed,
-            RuntimeToolAttunement::None,
+            RuntimeToolLifecyclePolicy::ReadOnly,
         ),
         typed_tool::<AuditReadArguments>(
             "rrflow_audit_read",
@@ -829,7 +811,7 @@ pub fn runtime_tool_catalogue() -> Vec<RuntimeToolDefinition> {
             "Read one bounded page from RRD's comprehensive persistent security audit journal",
             false,
             RuntimeToolAuthorization::Governed,
-            RuntimeToolAttunement::None,
+            RuntimeToolLifecyclePolicy::ReadOnly,
         ),
     ];
     tools.sort_by_key(|definition| definition.name);
@@ -858,7 +840,7 @@ pub fn runtime_tool_contract_catalogue() -> RuntimeToolCatalogue {
                 mutation: definition.mutation,
                 authorization: definition.authorization,
                 action: definition.action,
-                attunement: definition.attunement,
+                lifecycle: definition.lifecycle,
             })
             .collect(),
     };
@@ -871,9 +853,13 @@ pub fn runtime_tool_contract_catalogue() -> RuntimeToolCatalogue {
 fn tool(
     name: &'static str,
     description: &'static str,
-    input_schema: Value,
+    mut input_schema: Value,
     mutation: bool,
+    lifecycle: RuntimeToolLifecyclePolicy,
 ) -> RuntimeToolDefinition {
+    if lifecycle == RuntimeToolLifecyclePolicy::PlannedMutation {
+        lifecycle::add_coordinates_schema(&mut input_schema);
+    }
     RuntimeToolDefinition {
         name,
         capability_id: None,
@@ -882,7 +868,7 @@ fn tool(
         mutation,
         authorization: RuntimeToolAuthorization::Governed,
         action: runtime_tool_action(name),
-        attunement: RuntimeToolAttunement::None,
+        lifecycle,
     }
 }
 
@@ -892,18 +878,22 @@ fn typed_tool<T: JsonSchema>(
     description: &'static str,
     mutation: bool,
     authorization: RuntimeToolAuthorization,
-    attunement: RuntimeToolAttunement,
+    lifecycle: RuntimeToolLifecyclePolicy,
 ) -> RuntimeToolDefinition {
+    let mut input_schema =
+        serde_json::to_value(schema_for!(T)).expect("generated runtime tool schema must serialize");
+    if lifecycle == RuntimeToolLifecyclePolicy::PlannedMutation {
+        lifecycle::add_coordinates_schema(&mut input_schema);
+    }
     RuntimeToolDefinition {
         name,
         capability_id,
         description,
-        input_schema: serde_json::to_value(schema_for!(T))
-            .expect("generated runtime tool schema must serialize"),
+        input_schema,
         mutation,
         authorization,
         action: runtime_tool_action(name),
-        attunement,
+        lifecycle,
     }
 }
 

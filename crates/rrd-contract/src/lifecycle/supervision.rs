@@ -46,6 +46,17 @@ pub struct LifecycleToolCompletionV1 {
     pub project_state_changed: bool,
 }
 
+/// Fresh projection evidence recorded after a project-changing tool result.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct LifecycleProjectionRefreshV1 {
+    pub before_tree_sha256: String,
+    pub after_tree_sha256: String,
+    pub changed_paths_sha256: String,
+    pub projection_sha256: String,
+    pub evidence_sha256: String,
+}
+
 impl LifecycleSupervisorContextV1 {
     pub fn validate(&self) -> Result<()> {
         validation::identity("supervisor scope", &self.scope)?;
@@ -80,5 +91,15 @@ impl LifecycleToolAuthorizationV1 {
 impl LifecycleToolCompletionV1 {
     pub fn validate(&self) -> Result<()> {
         validation::sha256("supervisor tool observation", &self.observation_sha256)
+    }
+}
+
+impl LifecycleProjectionRefreshV1 {
+    pub fn validate(&self) -> Result<()> {
+        validation::sha256("supervisor tree before mutation", &self.before_tree_sha256)?;
+        validation::sha256("supervisor tree after mutation", &self.after_tree_sha256)?;
+        validation::sha256("supervisor changed paths", &self.changed_paths_sha256)?;
+        validation::sha256("supervisor projection", &self.projection_sha256)?;
+        validation::sha256("supervisor projection evidence", &self.evidence_sha256)
     }
 }

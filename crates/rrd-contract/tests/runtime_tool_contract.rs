@@ -1,7 +1,7 @@
 use rrd_contract::{
-    runtime_tool_arguments_sha256, CanonicalId, RuntimeToolAttunement, RuntimeToolAuthorization,
-    RuntimeToolCatalogue, RuntimeToolDescriptor, RuntimeToolInvocation,
-    RuntimeToolInvocationResult, SecurityAction, PROTOCOL, PROTOCOL_VERSION,
+    runtime_tool_arguments_sha256, CanonicalId, RuntimeToolAuthorization, RuntimeToolCatalogue,
+    RuntimeToolDescriptor, RuntimeToolInvocation, RuntimeToolInvocationResult,
+    RuntimeToolLifecyclePolicy, SecurityAction, PROTOCOL, PROTOCOL_VERSION,
     RUNTIME_TOOL_CATALOGUE_VERSION,
 };
 use serde_json::json;
@@ -15,7 +15,7 @@ fn descriptor(name: &str) -> RuntimeToolDescriptor {
         mutation: false,
         authorization: RuntimeToolAuthorization::Governed,
         action: SecurityAction::MemoryRecall,
-        attunement: RuntimeToolAttunement::None,
+        lifecycle: RuntimeToolLifecyclePolicy::ReadOnly,
     }
 }
 
@@ -43,6 +43,11 @@ fn catalogue_requires_sorted_unique_validated_tools() {
     let mut unsafe_public = valid;
     unsafe_public.tools[0].authorization = RuntimeToolAuthorization::Public;
     assert!(unsafe_public.validate().is_err());
+
+    let mut ungoverned_mutation = descriptor("rrflow_mutate");
+    ungoverned_mutation.mutation = true;
+    ungoverned_mutation.lifecycle = RuntimeToolLifecyclePolicy::ReadOnly;
+    assert!(ungoverned_mutation.validate().is_err());
 }
 
 #[test]

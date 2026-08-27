@@ -1,6 +1,4 @@
-use rrd_engine::{
-    InstanceBinding, InstanceManifest, RrdEngine, RuntimeToolAttunement, ServiceError,
-};
+use rrd_engine::{InstanceBinding, InstanceManifest, RrdEngine, RuntimeToolLifecyclePolicy};
 use serde_json::{json, Value};
 
 fn call(engine: &RrdEngine, root: &std::path::Path, name: &str, args: Value, at: u64) -> Value {
@@ -173,11 +171,7 @@ fn data_commit_is_exactly_authorized_multi_model_idempotent_and_reopen_safe() {
         903,
     );
 
-    let denied = engine.call_runtime_tool(root, "rrflow_data_commit", &arguments, 904);
-    assert!(matches!(denied, Err(ServiceError::Runtime(_))));
-
-    authorize(&engine, root, "rrflow_data_commit", &arguments, 905);
-    let first = call(&engine, root, "rrflow_data_commit", arguments.clone(), 906);
+    let first = call(&engine, root, "rrflow_data_commit", arguments.clone(), 904);
     assert_eq!(first["mutation_count"], 9);
     assert_eq!(first["idempotent_replay"], false);
     assert!(first["runtime_commit_sha256"].as_str().is_some());
@@ -604,7 +598,10 @@ fn data_commit_contract_is_typed_and_maps_to_the_existing_transaction_capability
         .find(|definition| definition.name == "rrflow_data_commit")
         .unwrap();
     assert_eq!(definition.capability_id, Some("transaction-commit"));
-    assert_eq!(definition.attunement, RuntimeToolAttunement::ExactTool);
+    assert_eq!(
+        definition.lifecycle,
+        RuntimeToolLifecyclePolicy::PlannedMutation
+    );
     let required = definition.input_schema["required"].as_array().unwrap();
     assert!(required.iter().any(|field| field == "idempotency_key"));
     assert!(required.iter().any(|field| field == "mutations"));
@@ -614,7 +611,7 @@ fn data_commit_contract_is_typed_and_maps_to_the_existing_transaction_capability
         .find(|definition| definition.name == "rrflow_query_index_ensure")
         .unwrap();
     assert_eq!(index.capability_id, Some("query-index-ensure"));
-    assert_eq!(index.attunement, RuntimeToolAttunement::ExactTool);
+    assert_eq!(index.lifecycle, RuntimeToolLifecyclePolicy::PlannedMutation);
     let required = index.input_schema["required"].as_array().unwrap();
     for field in ["idempotency_key", "scope", "index_id", "definition_query"] {
         assert!(required.iter().any(|required| required == field));
@@ -625,7 +622,7 @@ fn data_commit_contract_is_typed_and_maps_to_the_existing_transaction_capability
         .find(|definition| definition.name == "rrflow_query_index_list")
         .unwrap();
     assert_eq!(list.capability_id, Some("query-index-list"));
-    assert_eq!(list.attunement, RuntimeToolAttunement::None);
+    assert_eq!(list.lifecycle, RuntimeToolLifecyclePolicy::ReadOnly);
     assert!(!list.mutation);
     let required = list.input_schema["required"].as_array().unwrap();
     assert!(required.iter().any(|field| field == "scope"));
@@ -635,7 +632,7 @@ fn data_commit_contract_is_typed_and_maps_to_the_existing_transaction_capability
         .find(|definition| definition.name == "rrflow_live_query_poll")
         .unwrap();
     assert_eq!(live.capability_id, Some("query-live-poll"));
-    assert_eq!(live.attunement, RuntimeToolAttunement::None);
+    assert_eq!(live.lifecycle, RuntimeToolLifecyclePolicy::ReadOnly);
     assert!(!live.mutation);
     let required = live.input_schema["required"].as_array().unwrap();
     for field in ["scope", "query", "after_cursor", "max_delta_rows"] {
@@ -659,7 +656,7 @@ fn data_commit_contract_is_typed_and_maps_to_the_existing_transaction_capability
             .find(|definition| definition.name == name)
             .unwrap();
         assert_eq!(definition.capability_id, Some(capability));
-        assert_eq!(definition.attunement, RuntimeToolAttunement::None);
+        assert_eq!(definition.lifecycle, RuntimeToolLifecyclePolicy::ReadOnly);
         assert!(!definition.mutation);
         let required = definition.input_schema["required"].as_array().unwrap();
         for field in required_fields {
@@ -667,25 +664,25 @@ fn data_commit_contract_is_typed_and_maps_to_the_existing_transaction_capability
         }
     }
 
-    for (name, capability, attunement, mutation, required_fields) in [
+    for (name, capability, lifecycle, mutation, required_fields) in [
         (
             "rrflow_vector_collection_ensure",
             "vector-collection-ensure",
-            RuntimeToolAttunement::ExactTool,
+            RuntimeToolLifecyclePolicy::PlannedMutation,
             true,
             &["idempotency_key", "scope", "collection_id", "vectors"][..],
         ),
         (
             "rrflow_vector_collection_list",
             "vector-collection-list",
-            RuntimeToolAttunement::None,
+            RuntimeToolLifecyclePolicy::ReadOnly,
             false,
             &["scope"][..],
         ),
         (
             "rrflow_vector_points_retrieve",
             "vector-point-retrieve",
-            RuntimeToolAttunement::None,
+            RuntimeToolLifecyclePolicy::ReadOnly,
             false,
             &[
                 "scope",
@@ -699,7 +696,7 @@ fn data_commit_contract_is_typed_and_maps_to_the_existing_transaction_capability
         (
             "rrflow_vector_points_scroll",
             "vector-point-scroll",
-            RuntimeToolAttunement::None,
+            RuntimeToolLifecyclePolicy::ReadOnly,
             false,
             &[
                 "scope",
@@ -713,7 +710,7 @@ fn data_commit_contract_is_typed_and_maps_to_the_existing_transaction_capability
         (
             "rrflow_vector_search",
             "vector-search",
-            RuntimeToolAttunement::None,
+            RuntimeToolLifecyclePolicy::ReadOnly,
             false,
             &["scope", "valid_at", "query", "top_k", "max_scanned_changes"][..],
         ),
@@ -723,7 +720,7 @@ fn data_commit_contract_is_typed_and_maps_to_the_existing_transaction_capability
             .find(|definition| definition.name == name)
             .unwrap();
         assert_eq!(definition.capability_id, Some(capability));
-        assert_eq!(definition.attunement, attunement);
+        assert_eq!(definition.lifecycle, lifecycle);
         assert_eq!(definition.mutation, mutation);
         let required = definition.input_schema["required"].as_array().unwrap();
         for field in required_fields {

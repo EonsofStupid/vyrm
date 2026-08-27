@@ -19,6 +19,8 @@
 *.fjall
 /store
 /.rrflow/dev/
+/.rrflow/rrd/
+/.rrflow/verification/
 
 # chatmirror — local AI session mirrors (never commit: may contain tokens)
 .chat/

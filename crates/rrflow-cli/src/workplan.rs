@@ -35,6 +35,10 @@ pub enum WorkPlanAction {
         /// File containing the reviewed implementation plan.
         #[arg(long)]
         plan_file: std::path::PathBuf,
+        /// Qualify implementation already present on the recorded tree.
+        /// Mutation is denied and the tree must remain unchanged.
+        #[arg(long)]
+        qualification_only: bool,
         /// Exact argv encoded as a JSON string array. Repeat for each check.
         #[arg(long = "verify-argv", required = true)]
         verification_argv: Vec<String>,
@@ -71,12 +75,14 @@ impl WorkPlanAction {
                 plan,
                 item,
                 plan_file,
+                qualification_only,
                 verification_argv,
             } => vec![
                 format!("root={}", root.display()),
                 format!("plan={plan}"),
                 format!("item={item}"),
                 format!("plan_file={}", plan_file.display()),
+                format!("qualification_only={qualification_only}"),
                 format!(
                     "verification_argv_sha256={}",
                     digest::sha256_hex(verification_argv.join("\0").as_bytes())
@@ -123,6 +129,7 @@ pub fn execute(
             plan,
             item,
             plan_file,
+            qualification_only,
             verification_argv,
         } => {
             verify_project_store(store, root)?;
@@ -147,6 +154,11 @@ pub fn execute(
                 plan,
                 rrd_engine::WorkItemPlanRecord {
                     work_item_id: item.clone(),
+                    execution_mode: if *qualification_only {
+                        rrd_engine::WorkItemExecutionMode::Qualification
+                    } else {
+                        rrd_engine::WorkItemExecutionMode::Change
+                    },
                     source_tree_sha256: receipt.source_tree_sha256,
                     attunement_receipt_sha256: receipt.receipt_sha256,
                     plan_payload_sha256: digest::sha256_hex(&payload),
@@ -161,6 +173,22 @@ pub fn execute(
             verify_project_store(store, root)?;
             let record = rrd_engine::load_active_work_item_plan(store.runtime_store(), plan)?
                 .ok_or("work plan has no active recorded implementation plan")?;
+            let result_source_tree_sha256 = match record.execution_mode {
+                rrd_engine::WorkItemExecutionMode::Change => {
+                    let authorization = rrd_engine::load_active_work_item_authorization(
+                        store.runtime_store(),
+                        plan,
+                    )?
+                    .filter(|authorization| authorization.consumed)
+                    .ok_or("work plan has no consumed mutation authorization")?;
+                    authorization
+                        .result_source_tree_sha256
+                        .ok_or("consumed mutation has no observed result source tree")?
+                }
+                rrd_engine::WorkItemExecutionMode::Qualification => {
+                    record.source_tree_sha256.clone()
+                }
+            };
             let mut checks = Vec::with_capacity(record.verification_commands.len());
             for argv in &record.verification_commands {
                 let output = run_verification(root, argv)?;
@@ -189,9 +217,10 @@ pub fn execute(
             let ready = rrd_engine::ensure_routing_fresh(store.runtime_store(), root)?;
             let receipt =
                 rrd_engine::require_fresh_attunement(store.runtime_store(), root, &ready)?;
-            if receipt.source_tree_sha256 != record.source_tree_sha256 {
+            if receipt.source_tree_sha256 != result_source_tree_sha256 {
                 return Err(
-                    "verification denied: project tree changed after the plan was recorded".into(),
+                    "verification denied: project tree changed after the last observed mutation"
+                        .into(),
                 );
             }
             let repository_revision = repository_revision(root, &record.source_tree_sha256)?;
@@ -200,7 +229,7 @@ pub fn execute(
                 plan,
                 rrd_engine::WorkItemVerification {
                     work_item_id: record.work_item_id,
-                    source_tree_sha256: record.source_tree_sha256,
+                    source_tree_sha256: result_source_tree_sha256,
                     plan_payload_sha256: record.plan_payload_sha256,
                     repository_revision,
                     platform: format!("{}-{}", std::env::consts::OS, std::env::consts::ARCH),

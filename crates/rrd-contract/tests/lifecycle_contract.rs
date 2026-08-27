@@ -1,8 +1,9 @@
 use rrd_contract::{
     LifecycleEnforcementLevelV1, LifecycleEventCommandV1, LifecycleEventEnvelopeV1,
-    LifecycleEventTypeV1, LifecyclePayloadV1, LifecycleSupervisorContextV1,
-    LifecycleToolAuthorizationV1, LifecycleToolCompletionV1, LifecycleToolRequestV1,
-    LifecycleTraceContextV1, LIFECYCLE_SPEC_VERSION, MAX_LIFECYCLE_EVENT_BYTES,
+    LifecycleEventTypeV1, LifecyclePayloadV1, LifecycleProjectionRefreshV1,
+    LifecycleSupervisorContextV1, LifecycleToolAuthorizationV1, LifecycleToolCompletionV1,
+    LifecycleToolRequestV1, LifecycleTraceContextV1, LIFECYCLE_SPEC_VERSION,
+    MAX_LIFECYCLE_EVENT_BYTES,
 };
 
 fn sha(byte: char) -> String {
@@ -217,4 +218,15 @@ fn supervisor_contracts_are_strict_and_validate_exact_identities() {
     }
     .validate()
     .is_err());
+    let refresh = LifecycleProjectionRefreshV1 {
+        before_tree_sha256: sha('1'),
+        after_tree_sha256: sha('2'),
+        changed_paths_sha256: sha('3'),
+        projection_sha256: sha('4'),
+        evidence_sha256: sha('5'),
+    };
+    refresh.validate().unwrap();
+    let mut encoded = serde_json::to_value(refresh).unwrap();
+    encoded["unknown"] = serde_json::json!(true);
+    assert!(serde_json::from_value::<LifecycleProjectionRefreshV1>(encoded).is_err());
 }

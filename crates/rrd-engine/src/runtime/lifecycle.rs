@@ -14,16 +14,19 @@ use aggregate::LifecycleAggregate;
 use persistence::{event_mutation, lifecycle_schema_update, load_aggregate_at, session_record};
 pub use rrd_contract::{
     LifecycleEnforcementLevelV1, LifecycleEventCommandV1, LifecycleEventEnvelopeV1,
-    LifecycleEventTypeV1, LifecyclePayloadV1, LifecyclePhaseV1, LifecycleReadStampV1,
-    LifecycleRiskV1, LifecycleSessionSnapshotV1, LifecycleSupervisorContextV1, LifecycleTaskKindV1,
-    LifecycleToolAuthorizationV1, LifecycleToolCompletionV1, LifecycleToolRequestV1,
-    LifecycleTraceContextV1, LifecycleTurnStatusV1,
+    LifecycleEventTypeV1, LifecyclePayloadV1, LifecyclePhaseV1, LifecycleProjectionRefreshV1,
+    LifecycleReadStampV1, LifecycleRiskV1, LifecycleSessionSnapshotV1,
+    LifecycleSupervisorContextV1, LifecycleTaskKindV1, LifecycleToolAuthorizationV1,
+    LifecycleToolCompletionV1, LifecycleToolRequestV1, LifecycleTraceContextV1,
+    LifecycleTurnStatusV1,
 };
 use rrd_core::{RuntimeCommit, RuntimeMutation, ScopeId};
 use rrd_store::Engine;
 
 pub use supervisor::{
-    authorize_lifecycle_tool, complete_lifecycle_tool, consume_lifecycle_tool_authorization,
+    authorize_lifecycle_tool, authorize_planned_lifecycle_tool, complete_lifecycle_tool,
+    complete_planned_lifecycle_tool, consume_lifecycle_tool_authorization,
+    load_active_lifecycle_tool_authorization, refresh_lifecycle_projection,
 };
 
 pub const LIFECYCLE_RUNTIME_EVENT_TYPE: &str = "rrflow_lifecycle_event_v1";

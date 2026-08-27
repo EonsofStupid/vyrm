@@ -2,7 +2,7 @@ use rrd_contract::{
     AuditDecision, AuditPhase, CanonicalId, ResourceId, ResourceKind, ResourcePath, SecurityAction,
 };
 use rrd_core::{digest, ClaimReader, Predicate, Subject};
-use rrd_engine::{InstanceBinding, InstanceManifest, RrdEngine, RuntimeToolAttunement};
+use rrd_engine::{InstanceBinding, InstanceManifest, RrdEngine, RuntimeToolLifecyclePolicy};
 use rrd_estate::{EstateRepository, MutationContext};
 use rrd_security::{AuditRecord, SecurityRepository};
 use rrd_store::PersistentEngine;
@@ -287,25 +287,25 @@ fn administration_tools_backup_restore_estate_and_audit_through_one_engine() {
 fn reviewed_a_series_is_fully_generated_and_capability_mapped() {
     let catalogue = rrd_engine::runtime_tool_catalogue();
     assert_eq!(catalogue.len(), 29);
-    for (name, capability, attunement, mutation, required_fields) in [
+    for (name, capability, lifecycle, mutation, required_fields) in [
         (
             "rrflow_backup_create",
             "backup-create",
-            RuntimeToolAttunement::ExactTool,
+            RuntimeToolLifecyclePolicy::PlannedMutation,
             true,
             &["idempotency_key", "label", "created_at_unix_ms"][..],
         ),
         (
             "rrflow_backup_list",
             "backup-list",
-            RuntimeToolAttunement::None,
+            RuntimeToolLifecyclePolicy::ReadOnly,
             false,
             &[][..],
         ),
         (
             "rrflow_restore",
             "restore-create",
-            RuntimeToolAttunement::ExactTool,
+            RuntimeToolLifecyclePolicy::PlannedMutation,
             true,
             &[
                 "idempotency_key",
@@ -318,14 +318,14 @@ fn reviewed_a_series_is_fully_generated_and_capability_mapped() {
         (
             "rrflow_estate_read",
             "estate-read",
-            RuntimeToolAttunement::None,
+            RuntimeToolLifecyclePolicy::ReadOnly,
             false,
             &["estate_id"][..],
         ),
         (
             "rrflow_audit_read",
             "audit-read",
-            RuntimeToolAttunement::None,
+            RuntimeToolLifecyclePolicy::ReadOnly,
             false,
             &["after_sequence", "limit"][..],
         ),
@@ -335,7 +335,7 @@ fn reviewed_a_series_is_fully_generated_and_capability_mapped() {
             .find(|definition| definition.name == name)
             .unwrap();
         assert_eq!(definition.capability_id, Some(capability));
-        assert_eq!(definition.attunement, attunement);
+        assert_eq!(definition.lifecycle, lifecycle);
         assert_eq!(definition.mutation, mutation);
         let required = definition.input_schema["required"]
             .as_array()

@@ -1,4 +1,4 @@
-use rrd_contract::{RuntimeToolAuthorization, SecurityAction};
+use rrd_contract::{RuntimeToolAuthorization, RuntimeToolLifecyclePolicy, SecurityAction};
 
 #[test]
 fn executable_catalogue_is_the_valid_public_catalogue_with_exact_actions() {
@@ -64,7 +64,13 @@ fn executable_catalogue_is_the_valid_public_catalogue_with_exact_actions() {
         assert_eq!(exposed.action, action);
         assert_eq!(exposed.mutation, definition.mutation);
         assert_eq!(exposed.authorization, definition.authorization);
-        assert_eq!(exposed.attunement, definition.attunement);
+        assert_eq!(exposed.lifecycle, definition.lifecycle);
+        if definition.lifecycle == RuntimeToolLifecyclePolicy::PlannedMutation {
+            let coordinates = definition.input_schema["properties"]["rrflow_lifecycle"]
+                .as_object()
+                .expect("exact mutation publishes canonical lifecycle coordinates");
+            assert_eq!(coordinates["type"], "object");
+        }
     }
 
     let status = public
@@ -81,4 +87,24 @@ fn executable_catalogue_is_the_valid_public_catalogue_with_exact_actions() {
             .count(),
         1
     );
+
+    let planned_mutations: Vec<_> = public
+        .tools
+        .iter()
+        .filter(|tool| tool.lifecycle == RuntimeToolLifecyclePolicy::PlannedMutation)
+        .map(|tool| tool.name.as_str())
+        .collect();
+    assert_eq!(
+        planned_mutations,
+        [
+            "rrflow_backup_create",
+            "rrflow_data_commit",
+            "rrflow_query_index_ensure",
+            "rrflow_restore",
+            "rrflow_vector_collection_ensure",
+        ]
+    );
+    assert!(public.tools.iter().all(|tool| {
+        (tool.lifecycle == RuntimeToolLifecyclePolicy::ReadOnly) == !tool.mutation
+    }));
 }

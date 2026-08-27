@@ -18,6 +18,6 @@ pub use payload::{
 };
 pub use snapshot::LifecycleSessionSnapshotV1;
 pub use supervision::{
-    LifecycleSupervisorContextV1, LifecycleToolAuthorizationV1, LifecycleToolCompletionV1,
-    LifecycleToolRequestV1,
+    LifecycleProjectionRefreshV1, LifecycleSupervisorContextV1, LifecycleToolAuthorizationV1,
+    LifecycleToolCompletionV1, LifecycleToolRequestV1,
 };

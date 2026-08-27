@@ -4,7 +4,7 @@ use rrd_core::{ReasoningRun, ReasoningState};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use super::{runtime_tool_catalogue, RuntimeToolAttunement};
+use super::{runtime_tool_catalogue, RuntimeToolLifecyclePolicy};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ContractDifferential {
@@ -127,7 +127,8 @@ pub(super) fn is_project_mutation_tool(tool: &str) -> bool {
         tool,
         "Edit" | "Write" | "NotebookEdit" | "Bash" | "RRFlowExec"
     ) || runtime_tool_catalogue().iter().any(|definition| {
-        definition.name == tool && definition.attunement == RuntimeToolAttunement::ExactTool
+        definition.name == tool
+            && definition.lifecycle == RuntimeToolLifecyclePolicy::PlannedMutation
     })
 }
 

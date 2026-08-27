@@ -4,11 +4,17 @@
 //! projection denies mutation until reset; init writes real wiring and
 //! refuses a dead harness.
 
+#[path = "../../rrd-engine/tests/support/planned_lifecycle.rs"]
+mod planned_lifecycle;
+
 use rrd_core::{RuntimeMutation, RuntimeValue, ScopeId};
+use rrd_engine::LifecycleEnforcementLevelV1;
 use rrd_store::{Engine, PersistentEngine};
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+
+use planned_lifecycle::{seed_planned_lifecycle, PlannedLifecycleFixture};
 
 fn rrflow(db: &Path, args: &[&str], stdin_json: Option<&str>) -> (bool, String, String) {
     let mut child = Command::new(env!("CARGO_BIN_EXE_rrflow"))
@@ -51,6 +57,25 @@ fn scratch(name: &str) -> PathBuf {
     )
     .expect("write instance manifest");
     path
+}
+
+fn initialize_git_fixture(root: &Path) {
+    std::fs::write(root.join(".gitignore"), ".rrflow/rrd/\n").unwrap();
+    for arguments in [
+        vec!["init", "--quiet"],
+        vec!["config", "user.email", "rrflow@example.invalid"],
+        vec!["config", "user.name", "RRFlow Test"],
+        vec!["add", "."],
+        vec!["commit", "--quiet", "-m", "fixture"],
+    ] {
+        let status = Command::new("git")
+            .arg("-C")
+            .arg(root)
+            .args(arguments)
+            .status()
+            .unwrap();
+        assert!(status.success());
+    }
 }
 
 fn declare_attempt(db: &Path, run: &str, action: &str) {
@@ -106,6 +131,13 @@ gate = "G00"
 title = "Enforce"
 depends_on = []
 acceptance = ["real CLI reopens verified state"]
+
+[[item]]
+id = "G00-W02"
+gate = "G00"
+title = "Qualify"
+depends_on = ["G00-W01"]
+acceptance = ["qualification verifies an unchanged tree without a fake mutation"]
 "#,
     )
     .unwrap();
@@ -115,6 +147,7 @@ acceptance = ["real CLI reopens verified state"]
         "# Reviewed plan\n\nMake and verify one bounded change.\n",
     )
     .unwrap();
+    initialize_git_fixture(&root);
     let root_str = root.to_str().unwrap();
 
     let (ok, out, err) = rrflow(
@@ -165,26 +198,57 @@ acceptance = ["real CLI reopens verified state"]
     );
     assert!(ok, "work-plan record failed: {err}");
 
-    declare_attempt(&db, "workplan-run", "Edit lib.rs");
-    let edit = serde_json::json!({
-        "tool_name": "Edit",
-        "tool_input": {"file_path": "lib.rs"},
-        "tool_response": {"success": true}
-    })
-    .to_string();
+    declare_attempt(&db, "workplan-run", "RRFlowExec");
+    let store = PersistentEngine::open(&db).unwrap();
+    let receipt = rrd_engine::load_attunement_receipt(&store, &root)
+        .unwrap()
+        .unwrap();
+    let lifecycle_start = (std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as u64)
+        .saturating_sub(100);
+    seed_planned_lifecycle(
+        &store,
+        &receipt,
+        PlannedLifecycleFixture {
+            project_id: "workplan-project",
+            session_id: "session-cli-workplan-1",
+            plan_id: "foundation",
+            work_item_id: "G00-W01",
+            reasoning_run_id: "workplan-run",
+            actor: "hook:rrflow-exec",
+            adapter_kind: "rrflow-exec",
+            enforcement_level: LifecycleEnforcementLevelV1::Proxied,
+            start_at: lifecycle_start,
+        },
+    );
+    drop(store);
     let (ok, out, err) = rrflow(
         &db,
-        &["hook", "pre-tool-use", "--root", root_str],
-        Some(&edit),
+        &[
+            "exec",
+            "--root",
+            root_str,
+            "--session-id",
+            "session-cli-workplan-1",
+            "--",
+            "git",
+            "-C",
+            root_str,
+            "status",
+            "--short",
+        ],
+        None,
     );
-    assert!(ok, "pre-tool hook failed: {err}");
-    assert!(out.is_empty(), "bound mutation was denied: {out}");
-    let (ok, _, err) = rrflow(
-        &db,
-        &["hook", "post-tool-use", "--root", root_str],
-        Some(&edit),
+    assert!(
+        ok,
+        "planned exact command failed: stdout={out} stderr={err}"
     );
-    assert!(ok, "post-tool hook failed: {err}");
+    assert!(
+        out.is_empty(),
+        "clean repository unexpectedly changed: {out}"
+    );
 
     let (ok, out, err) = rrflow(
         &db,
@@ -199,10 +263,59 @@ acceptance = ["real CLI reopens verified state"]
         None,
     );
     assert!(ok, "work-plan verification failed: {err}");
-    assert!(out.contains("verified=1/1"), "{out}");
+    assert!(out.contains("verified=1/2"), "{out}");
+
+    let (ok, _, err) = rrflow(
+        &db,
+        &[
+            "work-plan",
+            "activate",
+            "--plan",
+            "foundation",
+            "--item",
+            "G00-W02",
+        ],
+        None,
+    );
+    assert!(ok, "qualification activate failed: {err}");
+    let (ok, _, err) = rrflow(
+        &db,
+        &[
+            "work-plan",
+            "record",
+            "--root",
+            root_str,
+            "--plan",
+            "foundation",
+            "--item",
+            "G00-W02",
+            "--plan-file",
+            plan_file.to_str().unwrap(),
+            "--qualification-only",
+            "--verify-argv",
+            &verification_argv,
+        ],
+        None,
+    );
+    assert!(ok, "qualification record failed: {err}");
+    let (ok, out, err) = rrflow(
+        &db,
+        &[
+            "work-plan",
+            "verify",
+            "--root",
+            root_str,
+            "--plan",
+            "foundation",
+        ],
+        None,
+    );
+    assert!(ok, "qualification verification failed: {err}");
+    assert!(out.contains("verified=2/2"), "{out}");
     let (ok, out, err) = rrflow(&db, &["work-plan", "status", "--plan", "foundation"], None);
     assert!(ok, "reopened work-plan status failed: {err}");
     assert!(out.contains("[x] G00-W01"), "{out}");
+    assert!(out.contains("[x] G00-W02"), "{out}");
 }
 
 #[test]
@@ -600,22 +713,7 @@ fn exact_argv_exec_is_authorized_observed_and_cannot_reuse_the_attempt() {
     let root = scratch("exact-argv-project");
     let db = root.join(".rrflow/rrd");
     std::fs::write(root.join("lib.rs"), "pub fn exact_argv() {}\n").unwrap();
-    std::fs::write(root.join(".gitignore"), ".rrflow/rrd/\n").unwrap();
-    for arguments in [
-        vec!["init", "--quiet"],
-        vec!["config", "user.email", "rrflow@example.invalid"],
-        vec!["config", "user.name", "RRFlow Test"],
-        vec!["add", "."],
-        vec!["commit", "--quiet", "-m", "fixture"],
-    ] {
-        let status = Command::new("git")
-            .arg("-C")
-            .arg(&root)
-            .args(arguments)
-            .status()
-            .unwrap();
-        assert!(status.success());
-    }
+    initialize_git_fixture(&root);
 
     declare_attempt(&db, "exact-argv", "RRFlowExec");
     let root_str = root.to_str().unwrap();

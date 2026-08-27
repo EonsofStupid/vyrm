@@ -1,9 +1,16 @@
+#[path = "support/planned_lifecycle.rs"]
+mod planned_lifecycle;
+
 use rrd_core::{digest, DecisionKind, Reader, ReasoningPayload, ReasoningState};
 use rrd_engine::{
     activate_work_item, active_reasoning_run, consume_attuned_tool_authorization, handle,
-    preflight, record_reasoning, record_work_item_plan, HookContext, HookEvent, WorkItemPlanRecord,
+    load_lifecycle_session, preflight, record_reasoning, record_work_item_plan, HookContext,
+    HookEvent, InstanceBinding, LifecycleEnforcementLevelV1, LifecyclePhaseV1, WorkItemPlanRecord,
+    REASONING_SCOPE,
 };
 use rrd_store::MemoryEngine;
+
+use planned_lifecycle::{seed_planned_lifecycle, PlannedLifecycleFixture};
 
 #[test]
 fn one_attempt_authorizes_one_tool_and_post_tool_closes_it_with_evidence() {
@@ -211,8 +218,9 @@ acceptance = ["hook denies unscoped mutation"]
         "foundation",
         WorkItemPlanRecord {
             work_item_id: "G00-W01".into(),
-            source_tree_sha256: receipt.source_tree_sha256,
-            attunement_receipt_sha256: receipt.receipt_sha256,
+            execution_mode: rrd_engine::WorkItemExecutionMode::Change,
+            source_tree_sha256: receipt.source_tree_sha256.clone(),
+            attunement_receipt_sha256: receipt.receipt_sha256.clone(),
             plan_payload_sha256: digest::sha256_hex(b"reviewed plan"),
             verification_commands: vec![vec!["cargo".into(), "test".into()]],
         },
@@ -221,10 +229,108 @@ acceptance = ["hook denies unscoped mutation"]
         "plan-1",
     )
     .unwrap();
-    let allowed = handle(&HookContext { now: 8, ..ctx }, HookEvent::PreToolUse, &edit).unwrap();
+    let missing_session =
+        handle(&HookContext { now: 8, ..ctx }, HookEvent::PreToolUse, &edit).unwrap();
+    assert!(missing_session.stdout.contains("canonical session_id"));
+
+    let binding = InstanceBinding::discover(root.path()).unwrap();
+    seed_planned_lifecycle(
+        &store,
+        &receipt,
+        PlannedLifecycleFixture {
+            project_id: &binding.manifest.id,
+            session_id: "session-workplan-1",
+            plan_id: "foundation",
+            work_item_id: "G00-W01",
+            reasoning_run_id: "workplan-run",
+            actor: "hook:claude-code",
+            adapter_kind: "claude-code",
+            enforcement_level: LifecycleEnforcementLevelV1::Intercepting,
+            start_at: 8,
+        },
+    );
+    let edit = serde_json::json!({
+        "session_id": "session-workplan-1",
+        "tool_use_id": "tool-edit-1",
+        "tool_name": "Edit",
+        "tool_input": {"file_path": "lib.rs"},
+        "tool_response": {"success": true}
+    });
+    let allowed = handle(
+        &HookContext {
+            harness: Some("claude-code"),
+            now: 23,
+            ..ctx
+        },
+        HookEvent::PreToolUse,
+        &edit,
+    )
+    .unwrap();
     assert!(allowed.stdout.is_empty());
     assert!(allowed
         .detail
+        .as_deref()
         .unwrap()
-        .contains("enforced work item G00-W01"));
+        .contains("canonical lifecycle bound work item G00-W01"));
+    assert!(allowed.detail.unwrap().contains("authorization consumed"));
+    assert!(allowed.lifecycle_context.is_some());
+    assert!(allowed.lifecycle_authorization.is_some());
+    assert_eq!(
+        load_lifecycle_session(
+            &store,
+            REASONING_SCOPE,
+            &binding.manifest.id,
+            "session-workplan-1",
+        )
+        .unwrap()
+        .unwrap()
+        .phase,
+        LifecyclePhaseV1::ToolStarted,
+    );
+    std::fs::write(
+        root.path().join("lib.rs"),
+        "pub fn item() { let changed = true; assert!(changed); }\n",
+    )
+    .unwrap();
+    handle(
+        &HookContext {
+            harness: Some("claude-code"),
+            now: 24,
+            ..ctx
+        },
+        HookEvent::PostToolUse,
+        &edit,
+    )
+    .unwrap();
+    let completed = load_lifecycle_session(
+        &store,
+        REASONING_SCOPE,
+        &binding.manifest.id,
+        "session-workplan-1",
+    )
+    .unwrap()
+    .unwrap();
+    assert_eq!(completed.phase, LifecyclePhaseV1::ProjectionReady);
+    handle(
+        &HookContext {
+            harness: Some("claude-code"),
+            now: 25,
+            ..ctx
+        },
+        HookEvent::PostToolUse,
+        &edit,
+    )
+    .unwrap();
+    assert_eq!(
+        load_lifecycle_session(
+            &store,
+            REASONING_SCOPE,
+            &binding.manifest.id,
+            "session-workplan-1",
+        )
+        .unwrap()
+        .unwrap()
+        .event_count,
+        completed.event_count,
+    );
 }

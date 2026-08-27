@@ -19,6 +19,7 @@ const EXEC_TOOL: &str = "RRFlowExec";
 
 pub struct ExactCommandRequest<'a> {
     pub root: &'a Path,
+    pub session_id: Option<&'a str>,
     pub requested_cwd: Option<&'a Path>,
     pub exact_argv: &'a [String],
     pub timeout_ms: u64,
@@ -73,6 +74,7 @@ pub fn execute(
 ) -> Result<Execution, Box<dyn std::error::Error>> {
     let ExactCommandRequest {
         root,
+        session_id,
         requested_cwd,
         exact_argv,
         timeout_ms,
@@ -117,11 +119,19 @@ pub fn execute(
         "max_output_bytes": max_output_bytes,
         "verification_policy": "checked_in_work_plan",
     });
-    let lifecycle_input = json!({
+    let mut lifecycle_input = json!({
         "tool_name": EXEC_TOOL,
         "tool_input": tool_input,
     });
     let request_sha256 = tool_request_sha256(&lifecycle_input)?;
+    let tool_call_id = format!("exec-{}", &request_sha256[..24]);
+    let lifecycle_object = lifecycle_input
+        .as_object_mut()
+        .expect("exact lifecycle input is an object");
+    lifecycle_object.insert("tool_use_id".into(), Value::String(tool_call_id.clone()));
+    if let Some(session_id) = session_id {
+        lifecycle_object.insert("session_id".into(), Value::String(session_id.into()));
+    }
     let context = rrd_engine::HookContext {
         store: store.runtime_store(),
         root: &root,
@@ -142,15 +152,32 @@ pub fn execute(
     }
 
     // The engine CAS occurs after every policy check and immediately before
-    // spawn. A repeated request can be re-authorized before this point, but it
-    // cannot consume the same permit and start a second process.
-    rrd_engine::consume_attuned_tool_authorization(
-        store.runtime_store(),
-        &root,
-        &request_sha256,
-        now,
-        "cli:rrflow-exec",
-    )?;
+    // spawn. Governed projects consume the canonical lifecycle authorization;
+    // projects without a checked-in work plan retain the legacy attunement
+    // boundary until that compatibility path is retired by the work plan.
+    match (
+        authorization.lifecycle_context.as_ref(),
+        authorization.lifecycle_authorization.as_ref(),
+    ) {
+        (Some(lifecycle_context), Some(lifecycle_authorization)) => {
+            rrd_engine::consume_lifecycle_tool_authorization(
+                store.runtime_store(),
+                lifecycle_context,
+                lifecycle_authorization,
+                now,
+            )?;
+        }
+        (None, None) => {
+            rrd_engine::consume_attuned_tool_authorization(
+                store.runtime_store(),
+                &root,
+                &request_sha256,
+                now,
+                "cli:rrflow-exec",
+            )?;
+        }
+        _ => return Err("lifecycle gate returned a partial authorization".into()),
+    }
 
     let started = Instant::now();
     let process = run_exact_process(
@@ -189,11 +216,18 @@ pub fn execute(
     };
 
     let tool_response = serde_json::to_value(&report)?;
-    let post_input = json!({
+    let mut post_input = json!({
+        "tool_use_id": tool_call_id,
         "tool_name": EXEC_TOOL,
         "tool_input": lifecycle_input["tool_input"].clone(),
         "tool_response": tool_response,
     });
+    if let Some(session_id) = session_id {
+        post_input
+            .as_object_mut()
+            .expect("exact post-tool input is an object")
+            .insert("session_id".into(), Value::String(session_id.into()));
+    }
     let post_context = rrd_engine::HookContext {
         store: store.runtime_store(),
         root: &root,

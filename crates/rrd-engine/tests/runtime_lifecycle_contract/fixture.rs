@@ -9,12 +9,14 @@ pub(super) use rrd_core::{
     RuntimeType, RuntimeValue, ScopeId,
 };
 pub(super) use rrd_engine::runtime::{
-    activate_work_item, append_lifecycle_event, authorize_lifecycle_tool, complete_lifecycle_tool,
-    consume_lifecycle_tool_authorization, install_work_plan, load_lifecycle_events,
-    load_lifecycle_session, record_work_item_plan, LifecycleSessionSnapshotV1,
-    LifecycleSupervisorContextV1, LifecycleToolAuthorizationV1, LifecycleToolCompletionV1,
-    LifecycleToolRequestV1, WorkItemPlanRecord, LIFECYCLE_RUNTIME_EVENT_TYPE,
-    LIFECYCLE_RUNTIME_SESSION_TYPE,
+    activate_work_item, append_lifecycle_event, authorize_lifecycle_tool,
+    authorize_planned_lifecycle_tool, complete_lifecycle_tool, complete_planned_lifecycle_tool,
+    consume_lifecycle_tool_authorization, install_work_plan,
+    load_active_lifecycle_tool_authorization, load_lifecycle_events, load_lifecycle_session,
+    record_work_item_plan, refresh_lifecycle_projection, LifecycleProjectionRefreshV1,
+    LifecycleSessionSnapshotV1, LifecycleSupervisorContextV1, LifecycleToolAuthorizationV1,
+    LifecycleToolCompletionV1, LifecycleToolRequestV1, WorkItemPlanRecord,
+    LIFECYCLE_RUNTIME_EVENT_TYPE, LIFECYCLE_RUNTIME_SESSION_TYPE,
 };
 pub(super) use rrd_store::{Engine, MemoryEngine, NativeEngine, Store};
 
@@ -79,6 +81,7 @@ pub(super) fn prepare_work_plan<E: Engine>(engine: &E) {
         "rrflow-foundation",
         WorkItemPlanRecord {
             work_item_id: "G00-W02".into(),
+            execution_mode: rrd_engine::WorkItemExecutionMode::Change,
             source_tree_sha256: sha('4'),
             attunement_receipt_sha256: sha('6'),
             plan_payload_sha256: sha('e'),

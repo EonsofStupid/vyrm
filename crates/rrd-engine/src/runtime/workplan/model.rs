@@ -28,10 +28,23 @@ pub(super) struct PersistedWorkItem {
     pub verification_sha256: Option<String>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WorkItemExecutionMode {
+    /// The recorded plan is expected to execute one or more supervised
+    /// mutations before verification.
+    Change,
+    /// The current tree already contains the reviewed implementation and this
+    /// work item only qualifies it. Mutation is forbidden while this record is
+    /// active and verification requires the tree to remain unchanged.
+    Qualification,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct WorkItemPlanRecord {
     pub work_item_id: String,
+    pub execution_mode: WorkItemExecutionMode,
     pub source_tree_sha256: String,
     pub attunement_receipt_sha256: String,
     pub plan_payload_sha256: String,
@@ -43,8 +56,14 @@ pub struct WorkItemPlanRecord {
 pub struct WorkItemToolAuthorization {
     pub work_item_id: String,
     pub plan_payload_sha256: String,
+    pub authorized_source_tree_sha256: String,
+    pub attunement_receipt_sha256: String,
     pub tool_request_sha256: String,
     pub consumed: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub observation_sha256: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub result_source_tree_sha256: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -134,6 +153,35 @@ impl PersistedWorkPlan {
             self.active_item_id.as_deref() != Some(authorization.work_item_id.as_str())
         }) {
             return Err("work-plan binding does not belong to the active item".into());
+        }
+        if let Some(authorization) = &self.authorization {
+            validate_sha256(
+                "authorized source tree digest",
+                &authorization.authorized_source_tree_sha256,
+            )?;
+            validate_sha256(
+                "authorization attunement receipt digest",
+                &authorization.attunement_receipt_sha256,
+            )?;
+            validate_sha256(
+                "authorization tool request digest",
+                &authorization.tool_request_sha256,
+            )?;
+            validate_sha256(
+                "authorization plan payload digest",
+                &authorization.plan_payload_sha256,
+            )?;
+            if let Some(observation) = &authorization.observation_sha256 {
+                validate_sha256("tool observation digest", observation)?;
+            }
+            if let Some(result_tree) = &authorization.result_source_tree_sha256 {
+                validate_sha256("result source tree digest", result_tree)?;
+            }
+            if authorization.consumed != authorization.observation_sha256.is_some()
+                || (!authorization.consumed && authorization.result_source_tree_sha256.is_some())
+            {
+                return Err("work-plan authorization consumption evidence is inconsistent".into());
+            }
         }
         let mut previous_digest: Option<&str> = None;
         let mut previous_id: Option<&str> = None;

@@ -2,8 +2,9 @@ use super::persistence::load_aggregate_at;
 use super::{append_lifecycle_event, validate_active_mutation_authority, LifecycleAggregate};
 use rrd_contract::{
     LifecycleEventCommandV1, LifecycleEventTypeV1, LifecyclePayloadV1, LifecyclePhaseV1,
-    LifecycleReadStampV1, LifecycleSupervisorContextV1, LifecycleToolAuthorizationV1,
-    LifecycleToolCompletionV1, LifecycleToolRequestV1, LifecycleTraceContextV1,
+    LifecycleProjectionRefreshV1, LifecycleReadStampV1, LifecycleSupervisorContextV1,
+    LifecycleToolAuthorizationV1, LifecycleToolCompletionV1, LifecycleToolRequestV1,
+    LifecycleTraceContextV1,
 };
 use rrd_core::{digest, ScopeId};
 use rrd_store::Engine;
@@ -20,62 +21,66 @@ pub fn authorize_lifecycle_tool<E: Engine>(
 ) -> Result<LifecycleToolAuthorizationV1, Box<dyn std::error::Error>> {
     context.validate()?;
     request.validate()?;
+    require_enforced_mutation(context, request)?;
     let scope = ScopeId::new(context.scope.clone())?;
-    let aggregate = load_current(store, &scope, context)?;
-    if let Some(active) = aggregate.state.active_tool.as_ref() {
-        require_same_request(active, request)?;
-        return match aggregate.state.phase {
-            Some(LifecyclePhaseV1::ToolProposed) => {
-                authorize_proposal(store, context, &aggregate, request, now)
-            }
-            Some(LifecyclePhaseV1::ToolAuthorized) => active_authorization(active),
-            Some(LifecyclePhaseV1::ToolStarted) => {
-                Err("tool authorization was already consumed before execution".into())
-            }
-            _ => Err("active lifecycle tool is not in an authorizable phase".into()),
-        };
-    }
-    if aggregate
-        .events
-        .iter()
-        .any(|event| event.tool_call_id.as_deref() == Some(request.tool_call_id.as_str()))
-    {
-        return Err("tool-call identity already reached a terminal lifecycle state".into());
-    }
+    let aggregate = ensure_proposal(store, &scope, context, request, now)?;
+    finish_authorization(store, context, &aggregate, request, now)
+}
 
-    let turn_id = aggregate
-        .state
-        .active_turn_id
-        .clone()
-        .ok_or("mutation has no active lifecycle turn")?;
-    let reasoning_run_id = aggregate
-        .state
-        .active_reasoning_run_id
-        .clone()
-        .ok_or("mutation has no lifecycle-bound reasoning run")?;
-    let attempt_id = attempt_id(&aggregate, request)?;
-    let proposal = command(
+/// Binds the canonical lifecycle proposal to the materialized work-plan
+/// projection used by verification. The lifecycle proposal commits first;
+/// therefore a crash can leave a recoverable, non-executable proposal but can
+/// never launch an unbound mutation.
+#[allow(clippy::too_many_arguments)]
+pub fn authorize_planned_lifecycle_tool<E: Engine>(
+    store: &E,
+    context: &LifecycleSupervisorContextV1,
+    request: &LifecycleToolRequestV1,
+    source_tree_sha256: &str,
+    attunement_receipt_sha256: &str,
+    now: u64,
+) -> Result<LifecycleToolAuthorizationV1, Box<dyn std::error::Error>> {
+    context.validate()?;
+    request.validate()?;
+    require_enforced_mutation(context, request)?;
+    let scope = ScopeId::new(context.scope.clone())?;
+    let aggregate = ensure_proposal(store, &scope, context, request, now)?;
+    let (plan_id, work_item_id) = planning_coordinates(&aggregate)?;
+    super::super::workplan::authorize_work_item_tool(
         store,
-        context,
-        &aggregate,
-        LifecycleEventTypeV1::ToolProposed,
-        LifecyclePayloadV1::ToolProposed {
-            tool_name: request.tool_name.clone(),
-            tool_request_sha256: request.tool_request_sha256.clone(),
-            mutation: request.mutation,
+        &plan_id,
+        &work_item_id,
+        source_tree_sha256,
+        attunement_receipt_sha256,
+        &request.tool_request_sha256,
+        super::super::workplan::WorkPlanEventContext {
+            now,
+            actor: &context.actor,
+            correlation_id: &format!("supervisor-plan-{}", &request.tool_request_sha256[..16]),
         },
-        now,
-        Some(turn_id),
-        Some(reasoning_run_id),
-        Some(attempt_id),
-        Some(request.tool_call_id.clone()),
     )?;
-    append_lifecycle_event(store, proposal, now)?;
+    finish_authorization(store, context, &aggregate, request, now)
+}
 
-    // Reload after the proposal so the decision is causally and cryptographically
-    // bound to the exact state that will be authorized.
-    let aggregate = load_current(store, &scope, context)?;
-    authorize_proposal(store, context, &aggregate, request, now)
+fn require_enforced_mutation(
+    context: &LifecycleSupervisorContextV1,
+    request: &LifecycleToolRequestV1,
+) -> Result<(), Box<dyn std::error::Error>> {
+    if request.mutation
+        && !matches!(
+            context.enforcement_level,
+            rrd_contract::LifecycleEnforcementLevelV1::Intercepting
+                | rrd_contract::LifecycleEnforcementLevelV1::Orchestrated
+                | rrd_contract::LifecycleEnforcementLevelV1::Proxied
+        )
+    {
+        return Err(format!(
+            "mutation requires an intercepting, orchestrated, or proxied adapter; {:?} is not an enforcement boundary",
+            context.enforcement_level
+        )
+        .into());
+    }
+    Ok(())
 }
 
 /// Consumes one canonical authorization immediately before the side effect.
@@ -120,6 +125,22 @@ pub fn consume_lifecycle_tool_authorization<E: Engine>(
     Ok(())
 }
 
+pub fn load_active_lifecycle_tool_authorization<E: Engine>(
+    store: &E,
+    context: &LifecycleSupervisorContextV1,
+    request: &LifecycleToolRequestV1,
+) -> Result<LifecycleToolAuthorizationV1, Box<dyn std::error::Error>> {
+    context.validate()?;
+    request.validate()?;
+    let scope = ScopeId::new(context.scope.clone())?;
+    let aggregate = load_current(store, &scope, context)?;
+    if let Some(active) = aggregate.state.active_tool.as_ref() {
+        require_same_request(active, request)?;
+        return active_authorization(active);
+    }
+    terminal_authorization(&aggregate, request)
+}
+
 /// Records the exact result of a consumed request. Projection invalidation,
 /// refresh, verification, and outcome remain distinct subsequent lifecycle
 /// transitions; completion never silently claims them.
@@ -162,6 +183,306 @@ pub fn complete_lifecycle_tool<E: Engine>(
     )?;
     append_lifecycle_event(store, event, now)?;
     Ok(())
+}
+
+/// Completes the canonical event first and then advances the work-plan
+/// verification projection. Both completions are exact-replay idempotent, so
+/// a crash between them is recoverable without rerunning the side effect.
+pub fn complete_planned_lifecycle_tool<E: Engine>(
+    store: &E,
+    context: &LifecycleSupervisorContextV1,
+    authorization: &LifecycleToolAuthorizationV1,
+    completion: &LifecycleToolCompletionV1,
+    result_source_tree_sha256: Option<&str>,
+    now: u64,
+) -> Result<(), Box<dyn std::error::Error>> {
+    context.validate()?;
+    authorization.validate()?;
+    completion.validate()?;
+    let scope = ScopeId::new(context.scope.clone())?;
+    let aggregate = load_current(store, &scope, context)?;
+    let (plan_id, work_item_id) = planning_coordinates(&aggregate)?;
+    complete_lifecycle_tool(store, context, authorization, completion, now)?;
+    super::super::workplan::complete_work_item_tool(
+        store,
+        &plan_id,
+        &work_item_id,
+        &authorization.tool_request_sha256,
+        &completion.observation_sha256,
+        result_source_tree_sha256,
+        super::super::workplan::WorkPlanEventContext {
+            now,
+            actor: &context.actor,
+            correlation_id: &format!(
+                "supervisor-observe-{}",
+                &completion.observation_sha256[..16]
+            ),
+        },
+    )?;
+    Ok(())
+}
+
+pub fn refresh_lifecycle_projection<E: Engine>(
+    store: &E,
+    context: &LifecycleSupervisorContextV1,
+    refresh: &LifecycleProjectionRefreshV1,
+    now: u64,
+) -> Result<(), Box<dyn std::error::Error>> {
+    context.validate()?;
+    refresh.validate()?;
+    let scope = ScopeId::new(context.scope.clone())?;
+    let aggregate = load_current(store, &scope, context)?;
+    if aggregate.state.phase == Some(LifecyclePhaseV1::ProjectionReady)
+        && !aggregate.state.projection_stale
+    {
+        return replay_exact_projection_refresh(&aggregate, refresh);
+    }
+    if !matches!(
+        aggregate.state.phase,
+        Some(LifecyclePhaseV1::ToolCompleted | LifecyclePhaseV1::ToolFailed)
+    ) || !aggregate.state.projection_stale
+    {
+        return Err("projection refresh does not follow a project-changing tool result".into());
+    }
+    let invalidated = command(
+        store,
+        context,
+        &aggregate,
+        LifecycleEventTypeV1::ProjectStateInvalidated,
+        LifecyclePayloadV1::ProjectStateInvalidated {
+            before_tree_sha256: refresh.before_tree_sha256.clone(),
+            after_tree_sha256: refresh.after_tree_sha256.clone(),
+            changed_paths_sha256: refresh.changed_paths_sha256.clone(),
+        },
+        now,
+        aggregate.state.active_turn_id.clone(),
+        aggregate.state.active_reasoning_run_id.clone(),
+        None,
+        None,
+    )?;
+    append_lifecycle_event(store, invalidated, now)?;
+    let aggregate = load_current(store, &scope, context)?;
+    let completed = command(
+        store,
+        context,
+        &aggregate,
+        LifecycleEventTypeV1::ProjectionRefreshCompleted,
+        LifecyclePayloadV1::ProjectionRefresh {
+            projection_sha256: refresh.projection_sha256.clone(),
+            evidence_sha256: refresh.evidence_sha256.clone(),
+            fresh: true,
+        },
+        now,
+        aggregate.state.active_turn_id.clone(),
+        aggregate.state.active_reasoning_run_id.clone(),
+        None,
+        None,
+    )?;
+    append_lifecycle_event(store, completed, now)?;
+    Ok(())
+}
+
+fn terminal_authorization(
+    aggregate: &LifecycleAggregate,
+    request: &LifecycleToolRequestV1,
+) -> Result<LifecycleToolAuthorizationV1, Box<dyn std::error::Error>> {
+    let terminal = aggregate.events.iter().rev().find(|event| {
+        event.tool_call_id.as_deref() == Some(request.tool_call_id.as_str())
+            && matches!(
+                event.event_type,
+                LifecycleEventTypeV1::ToolCompleted | LifecycleEventTypeV1::ToolFailed
+            )
+    });
+    if terminal.is_none() {
+        return Err("canonical lifecycle has no active or terminal tool authorization".into());
+    }
+    let proposed = aggregate
+        .events
+        .iter()
+        .rev()
+        .find(|event| {
+            event.event_type == LifecycleEventTypeV1::ToolProposed
+                && event.tool_call_id.as_deref() == Some(request.tool_call_id.as_str())
+        })
+        .ok_or("terminal tool has no canonical proposal")?;
+    let LifecyclePayloadV1::ToolProposed {
+        tool_name,
+        tool_request_sha256,
+        mutation,
+    } = &proposed.payload
+    else {
+        unreachable!("event type and validated payload agree")
+    };
+    if tool_name != &request.tool_name
+        || tool_request_sha256 != &request.tool_request_sha256
+        || mutation != &request.mutation
+    {
+        return Err("terminal tool authorization belongs to another request".into());
+    }
+    let authorized = aggregate
+        .events
+        .iter()
+        .rev()
+        .find(|event| {
+            event.event_type == LifecycleEventTypeV1::ToolAuthorized
+                && event.tool_call_id.as_deref() == Some(request.tool_call_id.as_str())
+        })
+        .ok_or("terminal tool has no canonical authorization decision")?;
+    let LifecyclePayloadV1::ToolDecision {
+        decision_sha256,
+        allowed,
+        ..
+    } = &authorized.payload
+    else {
+        unreachable!("event type and validated payload agree")
+    };
+    if !allowed {
+        return Err("terminal tool authorization was not allowed".into());
+    }
+    Ok(LifecycleToolAuthorizationV1 {
+        attempt_id: proposed
+            .attempt_id
+            .clone()
+            .ok_or("terminal tool proposal has no attempt identity")?,
+        tool_call_id: request.tool_call_id.clone(),
+        tool_request_sha256: request.tool_request_sha256.clone(),
+        decision_sha256: decision_sha256.clone(),
+    })
+}
+
+fn replay_exact_projection_refresh(
+    aggregate: &LifecycleAggregate,
+    refresh: &LifecycleProjectionRefreshV1,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let invalidated = aggregate
+        .events
+        .iter()
+        .rev()
+        .find(|event| event.event_type == LifecycleEventTypeV1::ProjectStateInvalidated)
+        .ok_or("projection-ready lifecycle has no invalidation event")?;
+    let completed = aggregate
+        .events
+        .iter()
+        .rev()
+        .find(|event| event.event_type == LifecycleEventTypeV1::ProjectionRefreshCompleted)
+        .ok_or("projection-ready lifecycle has no refresh completion")?;
+    let LifecyclePayloadV1::ProjectStateInvalidated {
+        before_tree_sha256,
+        after_tree_sha256,
+        changed_paths_sha256,
+    } = &invalidated.payload
+    else {
+        unreachable!("event type and validated payload agree")
+    };
+    let LifecyclePayloadV1::ProjectionRefresh {
+        projection_sha256,
+        evidence_sha256,
+        fresh,
+    } = &completed.payload
+    else {
+        unreachable!("event type and validated payload agree")
+    };
+    if before_tree_sha256 == &refresh.before_tree_sha256
+        && after_tree_sha256 == &refresh.after_tree_sha256
+        && changed_paths_sha256 == &refresh.changed_paths_sha256
+        && projection_sha256 == &refresh.projection_sha256
+        && evidence_sha256 == &refresh.evidence_sha256
+        && *fresh
+    {
+        return Ok(());
+    }
+    Err("projection refresh replay carries different evidence".into())
+}
+
+fn ensure_proposal<E: Engine>(
+    store: &E,
+    scope: &ScopeId,
+    context: &LifecycleSupervisorContextV1,
+    request: &LifecycleToolRequestV1,
+    now: u64,
+) -> Result<LifecycleAggregate, Box<dyn std::error::Error>> {
+    let aggregate = load_current(store, scope, context)?;
+    if let Some(active) = aggregate.state.active_tool.as_ref() {
+        require_same_request(active, request)?;
+        return match aggregate.state.phase {
+            Some(LifecyclePhaseV1::ToolProposed | LifecyclePhaseV1::ToolAuthorized) => {
+                Ok(aggregate)
+            }
+            Some(LifecyclePhaseV1::ToolStarted) => {
+                Err("tool authorization was already consumed before execution".into())
+            }
+            _ => Err("active lifecycle tool is not in an authorizable phase".into()),
+        };
+    }
+    if aggregate
+        .events
+        .iter()
+        .any(|event| event.tool_call_id.as_deref() == Some(request.tool_call_id.as_str()))
+    {
+        return Err("tool-call identity already reached a terminal lifecycle state".into());
+    }
+
+    let turn_id = aggregate
+        .state
+        .active_turn_id
+        .clone()
+        .ok_or("mutation has no active lifecycle turn")?;
+    let reasoning_run_id = aggregate
+        .state
+        .active_reasoning_run_id
+        .clone()
+        .ok_or("mutation has no lifecycle-bound reasoning run")?;
+    let attempt_id = attempt_id(&aggregate, request)?;
+    let proposal = command(
+        store,
+        context,
+        &aggregate,
+        LifecycleEventTypeV1::ToolProposed,
+        LifecyclePayloadV1::ToolProposed {
+            tool_name: request.tool_name.clone(),
+            tool_request_sha256: request.tool_request_sha256.clone(),
+            mutation: request.mutation,
+        },
+        now,
+        Some(turn_id),
+        Some(reasoning_run_id),
+        Some(attempt_id),
+        Some(request.tool_call_id.clone()),
+    )?;
+    append_lifecycle_event(store, proposal, now)?;
+    load_current(store, scope, context)
+}
+
+fn finish_authorization<E: Engine>(
+    store: &E,
+    context: &LifecycleSupervisorContextV1,
+    aggregate: &LifecycleAggregate,
+    request: &LifecycleToolRequestV1,
+    now: u64,
+) -> Result<LifecycleToolAuthorizationV1, Box<dyn std::error::Error>> {
+    let active = aggregate
+        .state
+        .active_tool
+        .as_ref()
+        .ok_or("lifecycle proposal has no active tool binding")?;
+    match aggregate.state.phase {
+        Some(LifecyclePhaseV1::ToolProposed) => {
+            authorize_proposal(store, context, aggregate, request, now)
+        }
+        Some(LifecyclePhaseV1::ToolAuthorized) => active_authorization(active),
+        _ => Err("lifecycle tool is not in an authorizable phase".into()),
+    }
+}
+
+fn planning_coordinates(
+    aggregate: &LifecycleAggregate,
+) -> Result<(String, String), Box<dyn std::error::Error>> {
+    let binding = aggregate
+        .state
+        .planning_binding()
+        .ok_or("supervised mutation has no planning binding")?;
+    let (plan_id, _, work_item_id, ..) = binding.authority_coordinates();
+    Ok((plan_id.to_owned(), work_item_id.to_owned()))
 }
 
 fn authorize_proposal<E: Engine>(

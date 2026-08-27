@@ -4,24 +4,24 @@
 //! blocks or allows the tool call. `PLAN.md` Step P.
 //!
 //! Field names follow the Claude Code hook contract (the registry's one
-//! hooks-capable adapter); extraction is tolerant of absent fields, because
-//! a hook that panics on a shape change would take the operator's session
-//! down with it. Unknown shapes degrade to "do nothing", never to an error.
+//! hooks-capable adapter). Read-only payloads remain tolerant, but mutation
+//! payloads crossing a checked-in work plan fail closed unless they carry a
+//! stable canonical session and tool-call identity.
+
+mod supervision;
 
 use super::policy::{is_project_mutation_tool, tool_request_digest};
 use super::preflight::{preflight, Preflight};
 use super::reasoning::active_reasoning_run;
 use super::routing::ensure_routing_fresh;
 use super::stack;
+use super::sync_project_work_plan;
 use super::workflow::{
     resolve_package_argv, resolve_package_command, WorkflowDecision, WorkflowObservation,
 };
 use super::{
     authorize_attuned_tool, complete_attuned_tool, record_attunement_receipt,
     require_fresh_attunement,
-};
-use super::{
-    authorize_work_item_tool, complete_work_item_tool, sync_project_work_plan, WorkPlanEventContext,
 };
 use super::{evaluate_tool, DurableTraceSpan, ToolPolicy};
 use rrd_core::{
@@ -77,6 +77,8 @@ pub struct HookResponse {
     pub stdout: String,
     pub effectiveness: Option<Effectiveness>,
     pub detail: Option<String>,
+    pub lifecycle_context: Option<super::LifecycleSupervisorContextV1>,
+    pub lifecycle_authorization: Option<super::LifecycleToolAuthorizationV1>,
 }
 
 /// Everything a dispatch runs against: the estate, the project, the adapter,
@@ -204,6 +206,7 @@ fn handle_inner<E: Engine>(
                 stdout: context,
                 effectiveness: Some(effectiveness),
                 detail: (!warnings.is_empty()).then(|| format!("{} warning(s)", warnings.len())),
+                ..HookResponse::default()
             })
         }
 
@@ -285,6 +288,7 @@ fn handle_inner<E: Engine>(
                 stdout: lines.join("\n"),
                 effectiveness: Some(effectiveness),
                 detail: None,
+                ..HookResponse::default()
             })
         }
 
@@ -347,6 +351,7 @@ fn handle_inner<E: Engine>(
                     stdout: decision.to_string(),
                     effectiveness: None,
                     detail: Some("denied: projection quarantined".into()),
+                    ..HookResponse::default()
                 });
             }
             // The second wait gate is source evidence. It refreshes immediately
@@ -369,6 +374,7 @@ fn handle_inner<E: Engine>(
                         stdout: decision.to_string(),
                         effectiveness: None,
                         detail: Some("denied: routing freshness unavailable".into()),
+                        ..HookResponse::default()
                     });
                 }
             };
@@ -430,42 +436,13 @@ fn handle_inner<E: Engine>(
                 None => None,
             };
             let tool_sha256 = tool_request_digest(input)?;
-            let work_plan_item = match sync_project_work_plan(
+            let work_plan = match sync_project_work_plan(
                 store,
                 root,
                 now,
                 &format!("hook:{}", harness.unwrap_or("unknown")),
             ) {
-                Ok(Some(snapshot)) => {
-                    let Some(item_id) = snapshot.active_item_id else {
-                        return Ok(deny(
-                            "rrflow: mutation denied because the checked-in work plan has no active item. Activate the next dependency-ready item and record its plan before editing.".into(),
-                            "denied: no active work-plan item",
-                        ));
-                    };
-                    if let Err(error) = authorize_work_item_tool(
-                        store,
-                        &snapshot.plan_id,
-                        &item_id,
-                        &receipt.source_tree_sha256,
-                        &receipt.receipt_sha256,
-                        &tool_sha256,
-                        WorkPlanEventContext {
-                            now,
-                            actor: &format!("hook:{}", harness.unwrap_or("unknown")),
-                            correlation_id: &format!("hook-pre-tool-{}", &tool_sha256[..16]),
-                        },
-                    ) {
-                        return Ok(deny(
-                            format!(
-                                "rrflow: mutation denied by the enforced work plan. Wait: {error}"
-                            ),
-                            "denied: work-plan authorization unavailable",
-                        ));
-                    }
-                    Some(item_id)
-                }
-                Ok(None) => None,
+                Ok(snapshot) => snapshot,
                 Err(error) => {
                     return Ok(deny(
                         format!("rrflow: checked-in work plan cannot be trusted. Wait: {error}"),
@@ -473,35 +450,73 @@ fn handle_inner<E: Engine>(
                     ));
                 }
             };
-            let receipt = match authorize_attuned_tool(
-                store,
-                receipt,
-                &run_id,
-                &tool_sha256,
-                now,
-                &format!("hook:{}", harness.unwrap_or("unknown")),
-            ) {
-                Ok(receipt) => receipt,
-                Err(error) => {
-                    return Ok(deny(
-                        format!("rrflow: tool authorization is stale or consumed. Wait: {error}"),
-                        "denied: attunement tool authorization unavailable",
-                    ));
-                }
+            let mut lifecycle_context = None;
+            let mut lifecycle_authorization = None;
+            let (receipt_sha256, work_plan_item, consumed) = if let Some(snapshot) = &work_plan {
+                let supervised = match supervision::authorize(
+                    store, binding, harness, input, snapshot, &receipt, now,
+                ) {
+                    Ok(supervised) => supervised,
+                    Err(error) => {
+                        return Ok(deny(
+                            format!(
+                                "rrflow: mutation denied by the canonical work-plan lifecycle. Wait: {error}"
+                            ),
+                            "denied: canonical lifecycle authorization unavailable",
+                        ));
+                    }
+                };
+                let result = (
+                    receipt.receipt_sha256.clone(),
+                    Some(supervised.work_item_id.clone()),
+                    supervised.consumed,
+                );
+                lifecycle_context = Some(supervised.context);
+                lifecycle_authorization = Some(supervised.authorization);
+                result
+            } else {
+                let receipt = match authorize_attuned_tool(
+                    store,
+                    receipt,
+                    &run_id,
+                    &tool_sha256,
+                    now,
+                    &format!("hook:{}", harness.unwrap_or("unknown")),
+                ) {
+                    Ok(receipt) => receipt,
+                    Err(error) => {
+                        return Ok(deny(
+                            format!(
+                                "rrflow: tool authorization is stale or consumed. Wait: {error}"
+                            ),
+                            "denied: attunement tool authorization unavailable",
+                        ));
+                    }
+                };
+                (receipt.receipt_sha256, None, false)
             };
             let mut detail = format!(
                 "policy allowed ({policy_evidence}); routing freshness established: {}; attunement receipt {}",
-                ready.render(), receipt.receipt_sha256
+                ready.render(), receipt_sha256
             );
             if let Some(evidence) = workflow_evidence {
                 detail.push_str("; ");
                 detail.push_str(&evidence);
             }
             if let Some(item_id) = work_plan_item {
-                detail.push_str(&format!("; enforced work item {item_id}"));
+                detail.push_str(&format!(
+                    "; canonical lifecycle bound work item {item_id}; authorization {}",
+                    if consumed {
+                        "consumed"
+                    } else {
+                        "awaiting proxy consumption"
+                    }
+                ));
             }
             Ok(HookResponse {
                 detail: Some(detail),
+                lifecycle_context,
+                lifecycle_authorization,
                 ..HookResponse::default()
             })
         }
@@ -525,40 +540,28 @@ fn handle_inner<E: Engine>(
             // cannot ride the same declaration. Verification Bash calls are
             // similarly converted into typed pass/fail checks from exit code.
             if is_project_mutation_tool(tool) {
-                if let Some(snapshot) = sync_project_work_plan(
+                let work_plan = sync_project_work_plan(
                     store,
                     root,
-                    now,
-                    &format!("hook:{}", harness.unwrap_or("unknown")),
-                )? {
-                    let item_id = snapshot
-                        .active_item_id
-                        .ok_or("post-tool observation has no active work-plan item")?;
-                    let encoded = serde_json::to_vec(input)?;
-                    complete_work_item_tool(
-                        store,
-                        &snapshot.plan_id,
-                        &item_id,
-                        &tool_request_digest(input)?,
-                        &digest::sha256_hex(&encoded),
-                        WorkPlanEventContext {
-                            now,
-                            actor: &format!("hook:{}", harness.unwrap_or("unknown")),
-                            correlation_id: &format!(
-                                "hook-post-tool-{}",
-                                &digest::sha256_hex(&encoded)[..16]
-                            ),
-                        },
-                    )?;
-                    details.push(format!("work item {item_id} observation recorded"));
-                }
-                complete_attuned_tool(
-                    store,
-                    root,
-                    &tool_request_digest(input)?,
                     now,
                     &format!("hook:{}", harness.unwrap_or("unknown")),
                 )?;
+                if let Some(snapshot) = &work_plan {
+                    let completed =
+                        supervision::complete(store, root, binding, harness, input, snapshot, now)?;
+                    details.push(format!(
+                        "canonical work item {} observation recorded; projection_refreshed={}",
+                        completed.work_item_id, completed.projection_refreshed
+                    ));
+                } else {
+                    complete_attuned_tool(
+                        store,
+                        root,
+                        &tool_request_digest(input)?,
+                        now,
+                        &format!("hook:{}", harness.unwrap_or("unknown")),
+                    )?;
+                }
                 if let Some(run) = active_reasoning_run(store)? {
                     let encoded = serde_json::to_vec(input)?;
                     let evidence = Evidence {
@@ -744,6 +747,7 @@ fn handle_inner<E: Engine>(
                 stdout: String::new(),
                 effectiveness: None,
                 detail: Some(details.join("; ")),
+                ..HookResponse::default()
             })
         }
 
@@ -805,6 +809,7 @@ fn deny(reason: String, detail: &str) -> HookResponse {
         stdout: decision.to_string(),
         effectiveness: None,
         detail: Some(detail.to_owned()),
+        ..HookResponse::default()
     }
 }
 

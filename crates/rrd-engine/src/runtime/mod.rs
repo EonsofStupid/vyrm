@@ -59,11 +59,13 @@ pub use instance::{
     INSTANCE_FORMAT, PROJECT_AUTHORITY_FORMAT,
 };
 pub use lifecycle::{
-    append_lifecycle_event, authorize_lifecycle_tool, complete_lifecycle_tool,
-    consume_lifecycle_tool_authorization, load_lifecycle_events, load_lifecycle_session,
-    LifecycleEnforcementLevelV1, LifecycleEventCommandV1, LifecycleEventEnvelopeV1,
-    LifecycleEventTypeV1, LifecyclePayloadV1, LifecyclePhaseV1, LifecycleReadStampV1,
-    LifecycleRiskV1, LifecycleSessionSnapshotV1, LifecycleSupervisorContextV1, LifecycleTaskKindV1,
+    append_lifecycle_event, authorize_lifecycle_tool, authorize_planned_lifecycle_tool,
+    complete_lifecycle_tool, complete_planned_lifecycle_tool, consume_lifecycle_tool_authorization,
+    load_active_lifecycle_tool_authorization, load_lifecycle_events, load_lifecycle_session,
+    refresh_lifecycle_projection, LifecycleEnforcementLevelV1, LifecycleEventCommandV1,
+    LifecycleEventEnvelopeV1, LifecycleEventTypeV1, LifecyclePayloadV1, LifecyclePhaseV1,
+    LifecycleProjectionRefreshV1, LifecycleReadStampV1, LifecycleRiskV1,
+    LifecycleSessionSnapshotV1, LifecycleSupervisorContextV1, LifecycleTaskKindV1,
     LifecycleToolAuthorizationV1, LifecycleToolCompletionV1, LifecycleToolRequestV1,
     LifecycleTraceContextV1, LifecycleTurnStatusV1, LIFECYCLE_RUNTIME_EVENT_TYPE,
     LIFECYCLE_RUNTIME_SESSION_TYPE,
@@ -89,7 +91,7 @@ pub use stack::{
 };
 pub use tools::{
     is_runtime_tool, runtime_tool_catalogue, runtime_tool_contract_catalogue,
-    runtime_tool_operation, RuntimeToolAttunement, RuntimeToolDefinition, RuntimeToolResult,
+    runtime_tool_operation, RuntimeToolDefinition, RuntimeToolLifecyclePolicy, RuntimeToolResult,
 };
 pub use trace::{
     install_runtime_trace_contract, record_runtime_trace, DurableTraceSpan, TraceIdentity,
@@ -106,8 +108,9 @@ pub use workflow::{
 };
 pub use workplan::{
     activate_work_item, authorize_work_item_tool, complete_work_item_tool, install_work_plan,
-    load_active_work_item_plan, load_work_plan, read_work_plan, record_work_item_plan,
-    sync_project_work_plan, verify_work_item, WorkItemPlanRecord, WorkItemStatus,
-    WorkItemToolAuthorization, WorkItemVerification, WorkItemVerificationCheck,
-    WorkPlanEventContext, WorkPlanSnapshot, WORK_PLAN_FILE,
+    load_active_work_item_authorization, load_active_work_item_plan, load_work_plan,
+    read_work_plan, record_work_item_plan, sync_project_work_plan, verify_work_item,
+    WorkItemExecutionMode, WorkItemPlanRecord, WorkItemStatus, WorkItemToolAuthorization,
+    WorkItemVerification, WorkItemVerificationCheck, WorkPlanEventContext, WorkPlanSnapshot,
+    WORK_PLAN_FILE,
 };

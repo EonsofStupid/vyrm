@@ -30,9 +30,15 @@ pub enum RuntimeToolAuthorization {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
-pub enum RuntimeToolAttunement {
-    None,
-    ExactTool,
+pub enum RuntimeToolLifecyclePolicy {
+    /// The operation cannot mutate authoritative or derived RRD state.
+    ReadOnly,
+    /// The operation advances or rebuilds RRD's own guarded control state and
+    /// is validated by that control plane's state machine.
+    ControlTransition,
+    /// The operation can change project, data, index, archive, or deployment
+    /// state and must consume one exact canonical lifecycle authorization.
+    PlannedMutation,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -46,7 +52,7 @@ pub struct RuntimeToolDescriptor {
     pub mutation: bool,
     pub authorization: RuntimeToolAuthorization,
     pub action: SecurityAction,
-    pub attunement: RuntimeToolAttunement,
+    pub lifecycle: RuntimeToolLifecyclePolicy,
 }
 
 impl RuntimeToolDescriptor {
@@ -71,6 +77,22 @@ impl RuntimeToolDescriptor {
             && (self.mutation || self.action != SecurityAction::ServiceInspect)
         {
             return invalid("public runtime tools must be read-only service inspection");
+        }
+        match (self.mutation, self.lifecycle) {
+            (false, RuntimeToolLifecyclePolicy::ReadOnly)
+            | (true, RuntimeToolLifecyclePolicy::ControlTransition)
+            | (true, RuntimeToolLifecyclePolicy::PlannedMutation) => {}
+            (false, _) => {
+                return invalid("read-only runtime tools must use the read_only lifecycle policy")
+            }
+            (true, RuntimeToolLifecyclePolicy::ReadOnly) => {
+                return invalid("mutating runtime tools cannot use the read_only lifecycle policy")
+            }
+        }
+        if self.lifecycle == RuntimeToolLifecyclePolicy::PlannedMutation
+            && self.authorization != RuntimeToolAuthorization::Governed
+        {
+            return invalid("planned runtime mutations must use governed authorization");
         }
         Ok(())
     }

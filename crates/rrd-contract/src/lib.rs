@@ -27,17 +27,17 @@ pub use diagnostic::{
 };
 pub use lifecycle::{
     LifecycleEnforcementLevelV1, LifecycleEventCommandV1, LifecycleEventEnvelopeV1,
-    LifecycleEventTypeV1, LifecyclePayloadV1, LifecyclePhaseV1, LifecycleReadStampV1,
-    LifecycleRiskV1, LifecycleSessionSnapshotV1, LifecycleSupervisorContextV1, LifecycleTaskKindV1,
-    LifecycleToolAuthorizationV1, LifecycleToolCompletionV1, LifecycleToolRequestV1,
-    LifecycleTraceContextV1, LifecycleTurnStatusV1, LIFECYCLE_SPEC_VERSION,
-    MAX_LIFECYCLE_EVENT_BYTES,
+    LifecycleEventTypeV1, LifecyclePayloadV1, LifecyclePhaseV1, LifecycleProjectionRefreshV1,
+    LifecycleReadStampV1, LifecycleRiskV1, LifecycleSessionSnapshotV1,
+    LifecycleSupervisorContextV1, LifecycleTaskKindV1, LifecycleToolAuthorizationV1,
+    LifecycleToolCompletionV1, LifecycleToolRequestV1, LifecycleTraceContextV1,
+    LifecycleTurnStatusV1, LIFECYCLE_SPEC_VERSION, MAX_LIFECYCLE_EVENT_BYTES,
 };
 pub use runtime_tool::{
-    runtime_tool_arguments_sha256, ListRuntimeTools, RuntimeToolAttunement,
-    RuntimeToolAuthorization, RuntimeToolCatalogue, RuntimeToolDescriptor, RuntimeToolInvocation,
-    RuntimeToolInvocationResult, MAX_RUNTIME_TOOL_ARGUMENT_BYTES, MAX_RUNTIME_TOOL_RESULT_BYTES,
-    RUNTIME_TOOL_CATALOGUE_VERSION,
+    runtime_tool_arguments_sha256, ListRuntimeTools, RuntimeToolAuthorization,
+    RuntimeToolCatalogue, RuntimeToolDescriptor, RuntimeToolInvocation,
+    RuntimeToolInvocationResult, RuntimeToolLifecyclePolicy, MAX_RUNTIME_TOOL_ARGUMENT_BYTES,
+    MAX_RUNTIME_TOOL_RESULT_BYTES, RUNTIME_TOOL_CATALOGUE_VERSION,
 };
 pub use workplan::{
     WorkGateDefinition, WorkItemDefinition, WorkItemStatus, WorkItemStatusSnapshot,
@@ -54,7 +54,7 @@ use std::fmt;
 pub const PROTOCOL: &str = "rrd";
 pub const PROTOCOL_VERSION: u16 = 1;
 pub const OPENAPI_DOCUMENT_SHA256: &str =
-    "35b62d736846ff1fc2c353c54de42b6455e9a4ec2d5a9e793eec724418c9cfdc";
+    "c03843b99d3ee54d923bc44d1af2686037514e7c9b32db8e05af299a4cd2aa3e";
 pub const MAX_ID_BYTES: usize = 128;
 pub const MAX_MESSAGE_BYTES: usize = 4_096;
 pub const MAX_CAPABILITIES: usize = 512;

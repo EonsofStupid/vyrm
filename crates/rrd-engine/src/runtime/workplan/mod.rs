@@ -3,7 +3,8 @@
 mod model;
 
 pub use model::{
-    WorkItemPlanRecord, WorkItemToolAuthorization, WorkItemVerification, WorkItemVerificationCheck,
+    WorkItemExecutionMode, WorkItemPlanRecord, WorkItemToolAuthorization, WorkItemVerification,
+    WorkItemVerificationCheck,
 };
 
 use model::{validate_plan_record, validate_sha256, validate_verification, PersistedWorkPlan};
@@ -101,6 +102,17 @@ pub fn load_active_work_item_plan<E: Engine>(
     };
     let state = decode_state(&bytes)?;
     Ok(state.plan_record)
+}
+
+pub fn load_active_work_item_authorization<E: Engine>(
+    store: &E,
+    plan_id: &str,
+) -> Result<Option<WorkItemToolAuthorization>, Box<dyn std::error::Error>> {
+    let Some(bytes) = store.control_record(&state_key(plan_id))? else {
+        return Ok(None);
+    };
+    let state = decode_state(&bytes)?;
+    Ok(state.authorization)
 }
 
 pub fn activate_work_item<E: Engine>(
@@ -222,16 +234,35 @@ pub fn authorize_work_item_tool<E: Engine>(
                 .plan_record
                 .as_ref()
                 .ok_or("mutation denied: active work item has no recorded plan")?;
-            if plan.source_tree_sha256 != source_tree_sha256
-                || plan.attunement_receipt_sha256 != attunement_receipt_sha256
+            if plan.execution_mode != WorkItemExecutionMode::Change {
+                return Err("mutation denied: active work item is qualification-only".into());
+            }
+            let expected_source_tree = state
+                .authorization
+                .as_ref()
+                .filter(|authorization| authorization.consumed)
+                .and_then(|authorization| authorization.result_source_tree_sha256.as_deref())
+                .unwrap_or(plan.source_tree_sha256.as_str());
+            if expected_source_tree != source_tree_sha256 {
+                return Err(
+                    "mutation denied: source tree does not continue the observed work-item chain"
+                        .into(),
+                );
+            }
+            if state.authorization.is_none()
+                && plan.attunement_receipt_sha256 != attunement_receipt_sha256
             {
-                return Err("mutation denied: plan or attunement evidence is stale".into());
+                return Err("mutation denied: initial plan attunement evidence is stale".into());
             }
             let authorization = WorkItemToolAuthorization {
                 work_item_id: item_id.to_owned(),
                 plan_payload_sha256: plan.plan_payload_sha256.clone(),
+                authorized_source_tree_sha256: source_tree_sha256.to_owned(),
+                attunement_receipt_sha256: attunement_receipt_sha256.to_owned(),
                 tool_request_sha256: tool_request_sha256.to_owned(),
                 consumed: false,
+                observation_sha256: None,
+                result_source_tree_sha256: None,
             };
             if let Some(existing) = &state.authorization {
                 if existing == &authorization {
@@ -274,10 +305,14 @@ pub fn complete_work_item_tool<E: Engine>(
     item_id: &str,
     tool_request_sha256: &str,
     observation_sha256: &str,
+    result_source_tree_sha256: Option<&str>,
     context: WorkPlanEventContext<'_>,
 ) -> Result<WorkPlanSnapshot, Box<dyn std::error::Error>> {
     validate_sha256("tool request digest", tool_request_sha256)?;
     validate_sha256("tool observation digest", observation_sha256)?;
+    if let Some(result_tree) = result_source_tree_sha256 {
+        validate_sha256("result source tree digest", result_tree)?;
+    }
     mutate_state(
         store,
         plan_id,
@@ -292,16 +327,45 @@ pub fn complete_work_item_tool<E: Engine>(
                 .ok_or("tool completion has no outstanding authorization")?;
             if authorization.work_item_id != item_id
                 || authorization.tool_request_sha256 != tool_request_sha256
-                || authorization.consumed
             {
-                return Err("tool completion does not match an unconsumed authorization".into());
+                return Err("tool completion does not match the authorized request".into());
+            }
+            if authorization.consumed {
+                if authorization.observation_sha256.as_deref() != Some(observation_sha256) {
+                    return Err("tool completion replay carries another observation".into());
+                }
+                return match (
+                    authorization.result_source_tree_sha256.as_deref(),
+                    result_source_tree_sha256,
+                ) {
+                    (Some(existing), Some(replayed)) if existing == replayed => Ok(false),
+                    (None, None) | (Some(_), None) => Ok(false),
+                    (None, Some(observed)) => {
+                        authorization.result_source_tree_sha256 = Some(observed.to_owned());
+                        append_event(
+                            state,
+                            WorkPlanEventKind::ToolCompleted,
+                            Some(item_id),
+                            &(observation_sha256, observed),
+                            context.now,
+                            context.actor,
+                            context.correlation_id,
+                        )?;
+                        Ok(true)
+                    }
+                    (Some(_), Some(_)) => {
+                        Err("tool completion replay carries another result source tree".into())
+                    }
+                };
             }
             authorization.consumed = true;
+            authorization.observation_sha256 = Some(observation_sha256.to_owned());
+            authorization.result_source_tree_sha256 = result_source_tree_sha256.map(str::to_owned);
             append_event(
                 state,
                 WorkPlanEventKind::ToolCompleted,
                 Some(item_id),
-                &observation_sha256,
+                &(observation_sha256, result_source_tree_sha256),
                 context.now,
                 context.actor,
                 context.correlation_id,
@@ -326,16 +390,35 @@ pub fn verify_work_item<E: Engine>(
             .plan_record
             .as_ref()
             .ok_or("verification denied: active item has no recorded plan")?;
-        let authorization = state
-            .authorization
-            .as_ref()
-            .filter(|authorization| authorization.consumed)
-            .ok_or("verification denied: mutation authorization was not consumed")?;
-        if plan.source_tree_sha256 != verification.source_tree_sha256
-            || plan.plan_payload_sha256 != verification.plan_payload_sha256
-            || authorization.plan_payload_sha256 != verification.plan_payload_sha256
-        {
-            return Err("verification denied: evidence belongs to another plan or tree".into());
+        if plan.plan_payload_sha256 != verification.plan_payload_sha256 {
+            return Err("verification denied: evidence belongs to another plan".into());
+        }
+        match plan.execution_mode {
+            WorkItemExecutionMode::Change => {
+                let authorization = state
+                    .authorization
+                    .as_ref()
+                    .filter(|authorization| authorization.consumed)
+                    .ok_or("verification denied: mutation authorization was not consumed")?;
+                if authorization.result_source_tree_sha256.as_deref()
+                    != Some(verification.source_tree_sha256.as_str())
+                    || authorization.plan_payload_sha256 != verification.plan_payload_sha256
+                {
+                    return Err(
+                        "verification denied: evidence belongs to another mutation result".into(),
+                    );
+                }
+            }
+            WorkItemExecutionMode::Qualification => {
+                if state.authorization.is_some()
+                    || plan.source_tree_sha256 != verification.source_tree_sha256
+                {
+                    return Err(
+                        "verification denied: qualification changed the recorded source tree"
+                            .into(),
+                    );
+                }
+            }
         }
         let verification_sha256 = digest::sha256_hex(&serde_json::to_vec(&verification)?);
         append_event(

@@ -40,6 +40,7 @@ fn sha(byte: char) -> String {
 fn plan_record(item: &str) -> WorkItemPlanRecord {
     WorkItemPlanRecord {
         work_item_id: item.into(),
+        execution_mode: WorkItemExecutionMode::Change,
         source_tree_sha256: sha('a'),
         attunement_receipt_sha256: sha('b'),
         plan_payload_sha256: sha('c'),
@@ -131,6 +132,7 @@ fn persistent_work_plan_denies_skips_and_replays_verified_state() {
         "G00-W01",
         &sha('d'),
         &sha('e'),
+        Some(&sha('a')),
         WorkPlanEventContext {
             now: 8,
             actor: "test",
@@ -138,19 +140,22 @@ fn persistent_work_plan_denies_skips_and_replays_verified_state() {
         },
     )
     .unwrap();
-    assert!(complete_work_item_tool(
+    let before_replay = store.control_sequence().unwrap();
+    complete_work_item_tool(
         &store,
         "foundation",
         "G00-W01",
         &sha('d'),
         &sha('e'),
+        Some(&sha('a')),
         WorkPlanEventContext {
             now: 9,
             actor: "test",
             correlation_id: "complete-again",
-        }
+        },
     )
-    .is_err());
+    .unwrap();
+    assert_eq!(store.control_sequence().unwrap(), before_replay);
     assert!(verify_work_item(
         &store,
         "foundation",
@@ -193,6 +198,181 @@ fn installed_plan_is_idempotent_and_rejects_unreviewed_source_changes() {
     let mut changed = plan;
     changed.title = "Changed without revision".into();
     assert!(install_work_plan(&store, changed, 3, "test", "load-3").is_err());
+}
+
+#[test]
+fn qualification_mode_forbids_mutation_and_verifies_only_the_unchanged_tree() {
+    let root = tempfile::tempdir().unwrap();
+    let store = PersistentEngine::open(root.path()).unwrap();
+    install_work_plan(&store, definition(), 1, "test", "load").unwrap();
+    activate_work_item(&store, "foundation", "G00-W01", 2, "test", "activate").unwrap();
+    let mut record = plan_record("G00-W01");
+    record.execution_mode = WorkItemExecutionMode::Qualification;
+    record_work_item_plan(&store, "foundation", record, 3, "test", "qualify").unwrap();
+
+    assert!(authorize_work_item_tool(
+        &store,
+        "foundation",
+        "G00-W01",
+        &sha('a'),
+        &sha('b'),
+        &sha('d'),
+        WorkPlanEventContext {
+            now: 4,
+            actor: "test",
+            correlation_id: "mutation-denied",
+        },
+    )
+    .is_err());
+    let mut changed = verification("G00-W01", true);
+    changed.source_tree_sha256 = sha('f');
+    assert!(verify_work_item(
+        &store,
+        "foundation",
+        changed,
+        5,
+        "test",
+        "changed-qualification",
+    )
+    .is_err());
+    let verified = verify_work_item(
+        &store,
+        "foundation",
+        verification("G00-W01", true),
+        6,
+        "test",
+        "verified-qualification",
+    )
+    .unwrap();
+    assert_eq!(verified.items[0].status, WorkItemStatus::Verified);
+}
+
+#[test]
+fn observed_result_tree_chains_multiple_mutations_and_binds_verification() {
+    let root = tempfile::tempdir().unwrap();
+    let store = PersistentEngine::open(root.path()).unwrap();
+    install_work_plan(&store, definition(), 1, "test", "load").unwrap();
+    activate_work_item(&store, "foundation", "G00-W01", 2, "test", "activate").unwrap();
+    record_work_item_plan(
+        &store,
+        "foundation",
+        plan_record("G00-W01"),
+        3,
+        "test",
+        "plan",
+    )
+    .unwrap();
+
+    authorize_work_item_tool(
+        &store,
+        "foundation",
+        "G00-W01",
+        &sha('a'),
+        &sha('b'),
+        &sha('d'),
+        WorkPlanEventContext {
+            now: 4,
+            actor: "test",
+            correlation_id: "authorize-first",
+        },
+    )
+    .unwrap();
+    complete_work_item_tool(
+        &store,
+        "foundation",
+        "G00-W01",
+        &sha('d'),
+        &sha('e'),
+        Some(&sha('f')),
+        WorkPlanEventContext {
+            now: 5,
+            actor: "test",
+            correlation_id: "complete-first",
+        },
+    )
+    .unwrap();
+
+    assert!(authorize_work_item_tool(
+        &store,
+        "foundation",
+        "G00-W01",
+        &sha('a'),
+        &sha('1'),
+        &sha('2'),
+        WorkPlanEventContext {
+            now: 6,
+            actor: "test",
+            correlation_id: "stale-second",
+        },
+    )
+    .is_err());
+    authorize_work_item_tool(
+        &store,
+        "foundation",
+        "G00-W01",
+        &sha('f'),
+        &sha('1'),
+        &sha('2'),
+        WorkPlanEventContext {
+            now: 7,
+            actor: "test",
+            correlation_id: "authorize-second",
+        },
+    )
+    .unwrap();
+    complete_work_item_tool(
+        &store,
+        "foundation",
+        "G00-W01",
+        &sha('2'),
+        &sha('3'),
+        None,
+        WorkPlanEventContext {
+            now: 8,
+            actor: "test",
+            correlation_id: "refresh-failed",
+        },
+    )
+    .unwrap();
+    assert!(verify_work_item(
+        &store,
+        "foundation",
+        WorkItemVerification {
+            source_tree_sha256: sha('4'),
+            ..verification("G00-W01", true)
+        },
+        9,
+        "test",
+        "verify-without-result-tree",
+    )
+    .is_err());
+    complete_work_item_tool(
+        &store,
+        "foundation",
+        "G00-W01",
+        &sha('2'),
+        &sha('3'),
+        Some(&sha('4')),
+        WorkPlanEventContext {
+            now: 10,
+            actor: "test",
+            correlation_id: "refresh-recovered",
+        },
+    )
+    .unwrap();
+    let verified = verify_work_item(
+        &store,
+        "foundation",
+        WorkItemVerification {
+            source_tree_sha256: sha('4'),
+            ..verification("G00-W01", true)
+        },
+        11,
+        "test",
+        "verify-result-tree",
+    )
+    .unwrap();
+    assert_eq!(verified.items[0].status, WorkItemStatus::Verified);
 }
 
 #[test]

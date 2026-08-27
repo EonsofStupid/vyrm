@@ -2353,3 +2353,78 @@ index.
   completion. Existing CLI and runtime mutation paths still have to replace
   their older provider-shaped authorization path with this supervisor before
   the work item can truthfully satisfy “every mutation.”
+
+## 2026-08-26 — G00-W03 supervised AI mutation surfaces
+
+- Provider-neutral authority: checked-in-work-plan mutations now translate to
+  one strict lifecycle request and are authorized by the same RRD supervisor.
+  Native blocking hooks consume before returning allow, `rrflow exec` consumes
+  through the proxied boundary immediately before process spawn, and
+  engine-owned MCP/runtime operations consume through the orchestrated boundary
+  immediately before execution. Cooperative MCP and observe-only adapters fail
+  closed for mutation instead of being mistaken for enforcement.
+- Exact binding: authorization binds project, session, active turn, reasoning
+  run, attempt, stable tool-call identity, tool name, request digest, work-plan
+  revision, active work item, planning payload, source-tree digest, attunement
+  receipt, verification command digest, and permit lifetime. The active plan
+  and permit are re-read at authorization and consumption.
+- Completion and recovery: authorization is one-shot across reopen. Exact
+  terminal completion and projection-refresh retries are idempotent; changed
+  observations or refresh evidence are rejected. A source-changing post-tool
+  event records explicit invalidation and refresh before the lifecycle reaches
+  `projection_ready`. Duplicate provider delivery reuses the persisted fresh
+  receipt and does not advance the event chain.
+- Work-item source lineage: the first attempt to use the authoritative board
+  exposed that verification required both a consumed mutation and the original
+  pre-mutation tree, making real edits unverifiable. The state model now keeps
+  the tree and receipt at each authorization plus the observed result tree.
+  Subsequent mutations must continue from that exact result, refresh failure
+  leaves verification blocked but recoverable, and final verification binds to
+  the last observed tree. A persistent test proves two source-changing
+  mutations, stale-chain denial, refresh recovery, and verification against the
+  resulting tree. No no-op command is used to manufacture completion evidence.
+- Honest adoption/qualification: a recorded item now declares `change` or
+  `qualification` execution. Change mode requires the consumed mutation chain.
+  Qualification mode rejects mutation and verifies only if the attuned tree is
+  byte-identical to the recorded tree. This is the explicit path used to audit
+  W01–W03 work that existed before the checkout's RRD board was installed; it
+  cannot be used to disguise a tree change or manufacture a completion event.
+- Generated runtime-tool policy: the public catalogue no longer exposes the
+  ambiguous `attunement: none|exact_tool` field. Every tool now has one strict
+  `lifecycle` disposition: `read_only`, `control_transition`, or
+  `planned_mutation`. Contract validation rejects contradictory mutation
+  metadata. Multi-model commit, query-index creation, vector-collection
+  mutation, backup, and restore are planned mutations and receive generated
+  lifecycle coordinates. Preflight, routing, reasoning, lifecycle/hook
+  translation, and memory maintenance are explicit control transitions needed
+  to establish and maintain the governing state rather than hidden bypasses.
+- One catalogue: MCP discovery serializes this engine catalogue and engine
+  dispatch applies its policy internally. MCP does not keep a second tool list
+  or rely on a model to call a separate pre-tool authorization operation.
+  The TypeScript OpenAPI surface was regenerated from the reviewed in-place V1
+  contract; the canonical document digest is
+  `c03843b99d3ee54d923bc44d1af2686037514e7c9b32db8e05af299a4cd2aa3e`.
+- Real checkout state: `rrflow init --harness codex-cli` created the tracked
+  relocatable dedicated-instance manifest and RRFlow context block. Preflight
+  built routing for 372 files and 4,770 symbols, persisted an attunement
+  receipt, and installed all 65 work-plan items into the checkout's RRD. The
+  local database and verification output are now ignored while
+  `.rrflow/instance.toml` remains trackable.
+- Passing local gates on this exact source tree:
+  - all-target `rrd-contract` tests;
+  - all-target, all-feature `rrd-engine` tests, including 17 lifecycle-state,
+    13 supervisor, provider-hook source-change/retry, planned engine dispatch,
+    persistent reopen, policy, runtime catalogue, data, vector, backup, and
+    restore tests;
+  - all-target `rrflow-cli` and `rrflow-mcp` tests, including the real stdio MCP
+    process and exact-argv command proxy;
+  - strict affected-crate Clippy with `-D warnings` and formatting;
+  - TypeScript generation drift, Biome, typecheck, and client tests.
+- Scope boundary: this closes the implementation and local-evidence portion of
+  G00-W03 only after the authoritative work-plan verifier accepts those exact
+  commands. It does not claim G00-W04 verification-only completion semantics,
+  G00-W05 full generated surface parity, G07 native provider hook coverage, or
+  the complete RRFlow database/runtime foundation. The current Codex adapter
+  declares MCP cooperation without native blocking hooks, so enforceable Codex
+  mutations must use RRFlow's proxied or orchestrated boundaries until G07 is
+  qualified.

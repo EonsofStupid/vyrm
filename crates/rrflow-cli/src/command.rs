@@ -240,6 +240,10 @@ pub enum Command {
         /// Project root whose attunement, work plan, and instance bind this run.
         #[arg(long, default_value = ".")]
         root: std::path::PathBuf,
+        /// Canonical RRFlow lifecycle session. Required when the project has
+        /// a checked-in work plan; may also be supplied by RRFLOW_SESSION_ID.
+        #[arg(long, env = "RRFLOW_SESSION_ID")]
+        session_id: Option<String>,
         /// Working directory, relative to the project root unless absolute.
         #[arg(long)]
         cwd: Option<std::path::PathBuf>,
@@ -628,12 +632,20 @@ impl Command {
             ],
             Command::Exec {
                 root,
+                session_id,
                 cwd,
                 timeout_ms,
                 max_output_bytes,
                 exact_argv,
             } => vec![
                 format!("root={}", root.display()),
+                format!(
+                    "session_id_sha256={}",
+                    session_id.as_deref().map_or_else(
+                        || "none".into(),
+                        |value| digest::sha256_hex(value.as_bytes())
+                    )
+                ),
                 format!(
                     "cwd={}",
                     cwd.as_deref()
@@ -1024,6 +1036,7 @@ pub fn execute(
         }
         Command::Exec {
             root,
+            session_id,
             cwd,
             timeout_ms,
             max_output_bytes,
@@ -1034,6 +1047,7 @@ pub fn execute(
                 store,
                 crate::command_proxy::ExactCommandRequest {
                     root,
+                    session_id: session_id.as_deref(),
                     requested_cwd: cwd.as_deref(),
                     exact_argv,
                     timeout_ms: *timeout_ms,

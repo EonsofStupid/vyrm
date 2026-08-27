@@ -79,8 +79,9 @@ pub fn init<E: Engine>(
     }
 
     report.notes.push(format!(
-        "add `{}` (and `.rrflow/`) to .gitignore: the store is per-checkout state",
-        STORE_DIR
+        "add `/{}/` and `/.rrflow/verification/` to .gitignore: keep `{}` tracked, but keep the store and verification output per-checkout",
+        STORE_DIR,
+        INSTANCE_FILE,
     ));
 
     let scope = ScopeId::new(super::REASONING_SCOPE)?;
