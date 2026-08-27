@@ -39,6 +39,7 @@ use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 mod adapter;
 mod lifecycle;
+mod workplan;
 
 use adapter::{AdapterCaller, AdapterSession};
 use lifecycle::RuntimeToolLifecycle;
@@ -533,6 +534,9 @@ fn runtime_tool_operation_for_action(action: SecurityAction) -> crate::Result<Rr
         SecurityAction::ProjectRoute => RrdOperation::ProjectRoute,
         SecurityAction::ReasoningRead => RrdOperation::ReasoningRead,
         SecurityAction::ReasoningWrite => RrdOperation::ReasoningWrite,
+        SecurityAction::WorkPlanRead => RrdOperation::WorkPlanRead,
+        SecurityAction::WorkPlanControl => RrdOperation::WorkPlanControl,
+        SecurityAction::WorkPlanVerifyExecute => RrdOperation::WorkPlanVerifyExecute,
         SecurityAction::UnknownRequest
         | SecurityAction::SessionCreate
         | SecurityAction::SessionRenew
@@ -814,6 +818,7 @@ pub fn runtime_tool_catalogue() -> Vec<RuntimeToolDefinition> {
             RuntimeToolLifecyclePolicy::ReadOnly,
         ),
     ];
+    tools.extend(workplan::definitions());
     tools.sort_by_key(|definition| definition.name);
     tools
 }
@@ -898,6 +903,13 @@ fn typed_tool<T: JsonSchema>(
 }
 
 fn runtime_tool_action(name: &str) -> SecurityAction {
+    if let Some(operation) = workplan::operation(name) {
+        return match operation {
+            rrd_contract::WorkPlanOperation::Status => SecurityAction::WorkPlanRead,
+            rrd_contract::WorkPlanOperation::Verify => SecurityAction::WorkPlanVerifyExecute,
+            _ => SecurityAction::WorkPlanControl,
+        };
+    }
     match name {
         "rrflow_context" => SecurityAction::MemoryContextRead,
         "rrflow_forget" => SecurityAction::MemoryRetire,
@@ -940,6 +952,9 @@ fn execute_runtime_tool(
     invocation_at: u64,
     caller: AdapterCaller<'_>,
 ) -> Result<ExecutedTool, Box<dyn std::error::Error>> {
+    if workplan::operation(name).is_some() {
+        return workplan::execute(engine, root, name, args, invocation_at);
+    }
     let store = &engine.storage;
     match name {
         "rrflow_data_commit" => execute_data_commit(engine, args, invocation_at, caller),

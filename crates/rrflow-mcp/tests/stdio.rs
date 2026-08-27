@@ -68,6 +68,15 @@ fn stdio_server_negotiates_lists_tools_and_uses_the_shared_contract_gate() {
             .map(|definition| definition.name)
             .collect::<Vec<_>>()
     );
+    for operation in rrd_engine::WorkPlanOperation::ALL {
+        assert!(
+            listed
+                .iter()
+                .any(|tool| tool["name"] == operation.runtime_tool_name()),
+            "MCP omitted generated work-plan operation {:?}",
+            operation
+        );
+    }
     let hook = listed
         .iter()
         .find(|tool| tool["name"] == "rrflow_hook")

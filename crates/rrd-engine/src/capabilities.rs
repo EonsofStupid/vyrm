@@ -1,7 +1,7 @@
 use crate::runtime::runtime_tool_catalogue;
 use rrd_contract::{
     endpoint_catalogue, EndpointAction, ProductCapability, ProductCapabilityCatalogue,
-    ProductSurface, SurfaceBinding, SurfaceDisposition, PROTOCOL_VERSION,
+    ProductSurface, SurfaceBinding, SurfaceDisposition, WorkPlanOperation, PROTOCOL_VERSION,
 };
 
 /// Builds the single cross-surface capability truth from executable engine and
@@ -67,13 +67,20 @@ pub fn product_capability_catalogue() -> ProductCapabilityCatalogue {
             label: title(&suffix),
             category: "ai_runtime".into(),
             summary: tool.description.into(),
-            bindings: bindings(
-                available(format!("rrd-engine:runtime/{}", tool.name)),
-                not_applicable(),
-                available(tool.name),
-                planned(),
-                available(format!("/api/runtime/capabilities#{}", tool.name)),
-            ),
+            bindings: {
+                let operation = WorkPlanOperation::ALL
+                    .into_iter()
+                    .find(|operation| operation.runtime_tool_name() == tool.name);
+                bindings(
+                    available(format!("rrd-engine:runtime/{}", tool.name)),
+                    operation.map_or_else(not_applicable, |_| {
+                        available(format!("POST /v1/runtime/tools/invoke#{}", tool.name))
+                    }),
+                    available(tool.name),
+                    operation.map_or_else(planned, |operation| available(operation.cli_command())),
+                    available(format!("/api/runtime/tools/invoke#{}", tool.name)),
+                )
+            },
         });
     }
 

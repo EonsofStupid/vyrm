@@ -11,7 +11,20 @@ the [RRFlow/RRD architecture](docs/rrflow-rrd-architecture.md) and
 [identity cutover ledger](docs/rrflow-rename-ledger.md). Where historical
 product boundaries conflict with them, the newer documents are authoritative.
 
-## Active recovery execution board — 2026-08-25
+## Authoritative executable board — 2026-08-26
+
+[`rrflow.workplan.toml`](rrflow.workplan.toml), installed and replayed from
+`.rrflow/rrd`, is the only active implementation sequence. It contains 13
+dependency gates and 65 evidence-gated work items. G00-W01 through G00-W04 are
+persisted as verified; G00-W05 is active. No later engine, provider, Connectome,
+qualification, or competitor-evidence item is actionable until its recorded
+dependencies verify.
+
+The R0-R7 table below is retained as the recovery analysis that produced the
+executable G00-G12 board. It is not a second scheduler and does not authorize
+parallel work.
+
+## Historical recovery analysis — 2026-08-25
 
 This board is the only active implementation sequence. The historical overlays
 below remain evidence, but they do not authorize parallel feature work or a
@@ -41,8 +54,9 @@ recall, context, inspect, and history-preserving forget are executable; hybrid
 recall, document ingestion, reflection, code search, and collection deletion
 remain explicit planned rows. A1 service discovery and A2 exact-authorized
 atomic multi-model commit plus A3/A4 query-index ensure/list are now locally
-executable; A5-A7 live-query/changefeed reads are also real, bringing generated
-MCP discovery to 28 tools. A1-A17 are locally executable through the
+executable; A5-A7 live-query/changefeed reads are also real. MCP discovery is
+serialized from the validated engine catalogue rather than a fixed adapter
+count. A1-A17 are locally executable through the
 engine-owned registry, including named-vector operations and path-closed
 backup/restore, estate, and audit reads. The interactive MCP process suite now
 executes every implemented domain and Connectome consumes the same generated
@@ -52,7 +66,8 @@ remote-matrix checkpoint yet. R3 now passes local persistence, reopen, source-dr
 manifest-drift, exact-tool binding, one-outstanding-authorization, post-tool
 consumption, all-engine tests, and strict-Clippy gates. Binding authorization
 to canonical cross-platform argv/environment semantics remains part of the R5
-command-boundary work. R4/R5 are the active implementation sequence.
+command-boundary work. The executable G00-G12 board supersedes this recovery
+sequence.
 
 ### Immediate worklist
 

@@ -1,4 +1,5 @@
 use rrd_contract::{ProductSurface, SurfaceDisposition};
+use rrd_engine::WorkPlanOperation;
 
 #[test]
 fn every_http_operation_and_runtime_tool_has_one_authoritative_surface_row() {
@@ -78,5 +79,31 @@ fn required_unimplemented_foundation_is_visible_and_not_falsely_available() {
         assert!(capability.bindings.iter().all(|binding| {
             binding.disposition == SurfaceDisposition::Planned && binding.entrypoint.is_none()
         }));
+    }
+}
+
+#[test]
+fn generated_work_plan_capabilities_are_available_on_every_required_surface() {
+    let catalogue = rrd_engine::product_capability_catalogue();
+    for operation in WorkPlanOperation::ALL {
+        let capability = catalogue
+            .capabilities
+            .iter()
+            .find(|capability| capability.id == operation.capability_id())
+            .unwrap();
+        assert_eq!(capability.bindings.len(), ProductSurface::ALL.len());
+        assert!(capability.bindings.iter().all(|binding| {
+            binding.disposition == SurfaceDisposition::Available
+                && binding
+                    .entrypoint
+                    .as_deref()
+                    .is_some_and(|entry| !entry.is_empty())
+        }));
+        let cli = capability
+            .bindings
+            .iter()
+            .find(|binding| binding.surface == ProductSurface::Cli)
+            .unwrap();
+        assert_eq!(cli.entrypoint.as_deref(), Some(operation.cli_command()));
     }
 }

@@ -1,11 +1,12 @@
 use rrd_contract::{RuntimeToolAuthorization, RuntimeToolLifecyclePolicy, SecurityAction};
+use rrd_engine::WorkPlanOperation;
 
 #[test]
 fn executable_catalogue_is_the_valid_public_catalogue_with_exact_actions() {
     let executable = rrd_engine::runtime_tool_catalogue();
     let public = rrd_engine::runtime_tool_contract_catalogue();
     public.validate().unwrap();
-    assert_eq!(public.tools.len(), 29);
+    assert_eq!(public.tools.len(), 29 + WorkPlanOperation::ALL.len());
     assert_eq!(public.tools.len(), executable.len());
 
     let expected = [
@@ -107,4 +108,32 @@ fn executable_catalogue_is_the_valid_public_catalogue_with_exact_actions() {
     assert!(public.tools.iter().all(|tool| {
         (tool.lifecycle == RuntimeToolLifecyclePolicy::ReadOnly) == !tool.mutation
     }));
+
+    for operation in WorkPlanOperation::ALL {
+        let definition = public
+            .tools
+            .iter()
+            .find(|tool| tool.name.as_str() == operation.runtime_tool_name())
+            .unwrap();
+        assert_eq!(
+            definition.capability_id.as_ref().unwrap().as_str(),
+            operation.capability_id()
+        );
+        assert_eq!(
+            definition.action,
+            match operation {
+                WorkPlanOperation::Status => SecurityAction::WorkPlanRead,
+                WorkPlanOperation::Verify => SecurityAction::WorkPlanVerifyExecute,
+                _ => SecurityAction::WorkPlanControl,
+            }
+        );
+        assert_eq!(
+            definition.lifecycle,
+            match operation {
+                WorkPlanOperation::Status => RuntimeToolLifecyclePolicy::ReadOnly,
+                WorkPlanOperation::Verify => RuntimeToolLifecyclePolicy::VerificationExecution,
+                _ => RuntimeToolLifecyclePolicy::ControlTransition,
+            }
+        );
+    }
 }

@@ -41,6 +41,9 @@ pub enum RrdOperation {
     ProjectRoute,
     ReasoningRead,
     ReasoningWrite,
+    WorkPlanRead,
+    WorkPlanControl,
+    WorkPlanVerifyExecute,
     RuntimeToolCatalogueRead,
 }
 
@@ -64,6 +67,8 @@ impl RrdOperation {
                 | Self::ProjectAttune
                 | Self::ProjectRoute
                 | Self::ReasoningWrite
+                | Self::WorkPlanControl
+                | Self::WorkPlanVerifyExecute
         )
     }
 
@@ -105,6 +110,9 @@ impl RrdOperation {
             Self::ProjectRoute => SecurityAction::ProjectRoute,
             Self::ReasoningRead => SecurityAction::ReasoningRead,
             Self::ReasoningWrite => SecurityAction::ReasoningWrite,
+            Self::WorkPlanRead => SecurityAction::WorkPlanRead,
+            Self::WorkPlanControl => SecurityAction::WorkPlanControl,
+            Self::WorkPlanVerifyExecute => SecurityAction::WorkPlanVerifyExecute,
             Self::RuntimeToolCatalogueRead => SecurityAction::RuntimeToolCatalogueRead,
         }
     }

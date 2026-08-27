@@ -2509,3 +2509,48 @@ index.
   make the platform matrix green by assertion. The recorded W04 commands must
   pass again on the final tree, then the exact pushed commit must complete both
   required GitHub workflow runs before W05 begins.
+
+## 2026-08-26 — W04 remote closure and G00-W05 generated work-plan surfaces
+
+- Exact W04 publication evidence: persisted verification digest
+  `efee5d2debd7125253b9fbd4664b5f08873424dc91b0b73d5c379e757f0fa9f6`
+  is bound to commit `56f6a850c1093b1eae9eacab72c8959cfe39aad4`. GitHub push run
+  `33053901131` and PR run `33053905003` both completed green, including the
+  required Linux, macOS/ARM, Windows, workspace, strict-Clippy,
+  supervised-topology, and estate jobs. That evidence made G00-W05
+  dependency-ready; it did not establish the complete product foundation.
+- One operation identity: `rrd-contract::WorkPlanOperation` owns the exact
+  `sync`, `status`, `activate`, `record`, and `verify` set plus their runtime
+  tool, capability, and CLI identities. The engine generates the five public
+  runtime descriptors from that set. MCP serializes the engine catalogue;
+  Connectome discovers and invokes through authenticated RRD contracts; the
+  capability catalogue derives all five surface dispositions from the same
+  definitions; and CLI parser parity rejects missing or extra subcommands.
+- One execution authority: plan preparation and exact-command verification
+  moved out of `rrflow-cli` into `rrd-engine::runtime::workplan`. Adapters may
+  provide reviewed plan text and request verification, but cannot provide pass
+  results, output digests, repository identity, source-tree identity, or the
+  verified transition.
+- Privilege boundary: `status` requires `WorkPlanRead`; ordinary board changes
+  require `WorkPlanControl`; and the verifier's host-process execution requires
+  the distinct `WorkPlanVerifyExecute` action and
+  `verification_execution` lifecycle. It is not mislabeled as an ordinary RRD
+  control transition. Verification still executes only the exact argv already
+  sealed into the active work-item plan and retains bounded failed-command
+  artifacts.
+- Persistent focused proof: all five operations execute through the generated
+  engine catalogue; successful evidence and verified state survive RRD reopen;
+  a failed exact command leaves the item active after reopen; source-tree drift
+  cannot cross verification; MCP stdio exposes every generated identity; and
+  Connectome discovers all five and invokes status through its authenticated
+  backend. Product-surface parity and CLI parser parity tests pass.
+- V1 contract projection: the additive security and lifecycle vocabulary is
+  frozen under OpenAPI digest
+  `580c4723bc9b4e3061a81361322868a3b1c913e7ed149f088208d5db4f4e17cb`.
+  The TypeScript client was regenerated from `rrd-contract`; generation drift,
+  Biome, typecheck, and all client tests pass. The owner-controlled release and
+  protocol remain V1; no compatibility reader or parallel schema was added.
+- Status boundary: G00-W05 remains active. Focused tests are not completion.
+  Only the ten exact commands recorded before implementation may create its
+  persisted verification transition, and the resulting commit must then pass
+  the required remote platform matrix before work advances.

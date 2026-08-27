@@ -1,14 +1,16 @@
 //! Engine-owned execution of the checked-in RRFlow foundation work plan.
 
 mod model;
+mod verification;
 
 pub use model::{
     WorkItemExecutionMode, WorkItemPlanRecord, WorkItemToolAuthorization, WorkItemVerification,
     WorkItemVerificationArtifact, WorkItemVerificationCheck,
 };
+pub use verification::{record_project_work_item_plan, verify_recorded_work_item};
 
 use model::{validate_plan_record, validate_sha256, validate_verification, PersistedWorkPlan};
-pub use rrd_contract::{WorkItemStatus, WorkPlanDefinition, WorkPlanSnapshot};
+pub use rrd_contract::{WorkItemStatus, WorkPlanDefinition, WorkPlanOperation, WorkPlanSnapshot};
 use rrd_contract::{WorkPlanEventEnvelope, WorkPlanEventKind, WORK_PLAN_SCHEMA_VERSION};
 use rrd_core::digest;
 use rrd_store::{ControlTransition, Engine};

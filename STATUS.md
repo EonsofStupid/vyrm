@@ -8,7 +8,17 @@ vector, reasoning, server, security, SDK, estate, and Connectome code. The
 RRFlow `0.1.0` alpha identity cutover was committed and pushed as `3fc2842`, but
 several outward surfaces still bypass or duplicate the engine authority.
 
-The active recovery sequence is R0–R6 in `PLAN.md`. As of this entry:
+The active sequence is the 13-gate, 65-item contract in
+`rrflow.workplan.toml`, persisted under `.rrflow/rrd`. The older R0-R7 recovery
+overlay in `PLAN.md` is historical analysis, not a second scheduler. As of this
+entry, G00-W01 through G00-W04 are verified and G00-W05 is active:
+
+- G00-W04 is backed by persisted verification digest
+  `efee5d2debd7125253b9fbd4664b5f08873424dc91b0b73d5c379e757f0fa9f6`.
+  Both required GitHub workflow runs are green on exact commit
+  `56f6a850c1093b1eae9eacab72c8959cfe39aad4`: push run `33053901131` and PR
+  run `33053905003`, including Linux, macOS/ARM, Windows, workspace, strict
+  Clippy, supervised-topology, and estate jobs.
 
 - The owner-controlled release train is `0.1.0`. Rust workspace crates inherit
   that version, supported SDK package manifests mirror it, and CI rejects
@@ -22,7 +32,8 @@ The active recovery sequence is R0–R6 in `PLAN.md`. As of this entry:
   typed reasoning, lifecycle, claim-backed `remember`, bounded `context`,
   provenance/history `inspect`, history-preserving `forget`, public service/
   capability discovery, and exact-authorized atomic multi-model data commit.
-  Generated discovery currently contains 28 executable tools, including
+  Generated discovery currently contains 34 executable tools, including five
+  engine-owned work-plan operations plus
   governed query-index ensure/list, live-query/changefeed read/follow, and
   named-vector collection ensure/list, point retrieve/scroll, and exact search. The adapter
   serializes the engine-owned executable catalogue rather than maintaining a
@@ -32,7 +43,7 @@ The active recovery sequence is R0–R6 in `PLAN.md`. As of this entry:
   collection/vector address so same-field legacy or foreign-address rows cannot
   leak into collection-bound reads. The interactive stdio process test executes
   every implemented domain, and Connectome's parity test consumes the same
-  28-tool and product-surface catalogues. Credentialed secured-daemon mode plus
+  validated runtime-tool and product-surface catalogues. Credentialed secured-daemon mode plus
   the cohesive workspace and remote matrices remain open.
 - Development doctor report v3 records 14 passing checks and five blockers. It
   now distinguishes MCP's clean engine dependency boundary from actual daemon
@@ -40,7 +51,7 @@ The active recovery sequence is R0–R6 in `PLAN.md`. As of this entry:
   exclusive daemon mode uses authenticated `rrd-client` and no database path.
 - Daemon-mode slices D0 through D3 are locally complete: RRD now has strict public runtime
   catalogue/invocation/result contracts, argument and result digests, bounded
-  schemas, and an exhaustive granular policy action for every one of the 28
+  schemas, and an exhaustive granular policy action for every executable
   executable tools. `rrd-server` now discovers one project manifest, opens only
   its canonical `.rrflow/rrd` store, persists the immutable canonical project/
   store binding, and denies ordinary-start rebinding. Estate catalogue format
@@ -49,12 +60,12 @@ The active recovery sequence is R0–R6 in `PLAN.md`. As of this entry:
   preserves API-key/session principals through nested engine calls and exact
   granular audit. The public catalogue has 31 HTTP operations, including
   authenticated runtime-tool catalogue and invocation routes; invocation
-  derives authorization from the selected 28-tool descriptor and uses only
+  derives authorization from the selected engine descriptor and uses only
   the server-bound project root. The Rust client exercises allowance and
   granular denial against a real project-bound server. MCP now requires an
   explicit embedded or daemon mode; daemon mode takes no database/project
   path, authenticates from an owner-only credential file, validates exact
-  28-tool parity, invokes through `rrd-client`, refreshes expired sessions, and
+  exact catalogue parity, invokes through `rrd-client`, refreshes expired sessions, and
   preserves its principal in durable audit. Remote mTLS/every-domain parity
   and D5 topology qualification remain open.
 - D5.1a-c are locally implemented: the public catalogue now has 31 operations,

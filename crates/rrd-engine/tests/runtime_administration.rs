@@ -286,7 +286,10 @@ fn administration_tools_backup_restore_estate_and_audit_through_one_engine() {
 #[test]
 fn reviewed_a_series_is_fully_generated_and_capability_mapped() {
     let catalogue = rrd_engine::runtime_tool_catalogue();
-    assert_eq!(catalogue.len(), 29);
+    assert_eq!(
+        catalogue.len(),
+        29 + rrd_engine::WorkPlanOperation::ALL.len()
+    );
     for (name, capability, lifecycle, mutation, required_fields) in [
         (
             "rrflow_backup_create",

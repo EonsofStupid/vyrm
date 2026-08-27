@@ -36,6 +36,11 @@ pub enum RuntimeToolLifecyclePolicy {
     /// The operation advances or rebuilds RRD's own guarded control state and
     /// is validated by that control plane's state machine.
     ControlTransition,
+    /// Execute only the exact verification argv already persisted by the
+    /// work-plan state machine, then seal bounded process evidence. This is a
+    /// privileged host-process boundary, not an ordinary control transition
+    /// and not a project mutation proposed by an AI tool call.
+    VerificationExecution,
     /// The operation can change project, data, index, archive, or deployment
     /// state and must consume one exact canonical lifecycle authorization.
     PlannedMutation,
@@ -81,6 +86,7 @@ impl RuntimeToolDescriptor {
         match (self.mutation, self.lifecycle) {
             (false, RuntimeToolLifecyclePolicy::ReadOnly)
             | (true, RuntimeToolLifecyclePolicy::ControlTransition)
+            | (true, RuntimeToolLifecyclePolicy::VerificationExecution)
             | (true, RuntimeToolLifecyclePolicy::PlannedMutation) => {}
             (false, _) => {
                 return invalid("read-only runtime tools must use the read_only lifecycle policy")

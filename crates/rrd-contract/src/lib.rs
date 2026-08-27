@@ -41,8 +41,9 @@ pub use runtime_tool::{
 };
 pub use workplan::{
     WorkGateDefinition, WorkItemDefinition, WorkItemStatus, WorkItemStatusSnapshot,
-    WorkPlanDefinition, WorkPlanEventEnvelope, WorkPlanEventKind, WorkPlanSnapshot,
-    MAX_WORK_PLAN_GATES, MAX_WORK_PLAN_ITEMS, MAX_WORK_PLAN_TEXT_BYTES, WORK_PLAN_SCHEMA_VERSION,
+    WorkPlanDefinition, WorkPlanEventEnvelope, WorkPlanEventKind, WorkPlanOperation,
+    WorkPlanSnapshot, MAX_WORK_PLAN_GATES, MAX_WORK_PLAN_ITEMS, MAX_WORK_PLAN_TEXT_BYTES,
+    WORK_PLAN_SCHEMA_VERSION,
 };
 
 use schemars::JsonSchema;
@@ -54,7 +55,7 @@ use std::fmt;
 pub const PROTOCOL: &str = "rrd";
 pub const PROTOCOL_VERSION: u16 = 1;
 pub const OPENAPI_DOCUMENT_SHA256: &str =
-    "c03843b99d3ee54d923bc44d1af2686037514e7c9b32db8e05af299a4cd2aa3e";
+    "580c4723bc9b4e3061a81361322868a3b1c913e7ed149f088208d5db4f4e17cb";
 pub const MAX_ID_BYTES: usize = 128;
 pub const MAX_MESSAGE_BYTES: usize = 4_096;
 pub const MAX_CAPABILITIES: usize = 512;
@@ -1471,6 +1472,9 @@ pub enum SecurityAction {
     ProjectRoute,
     ReasoningRead,
     ReasoningWrite,
+    WorkPlanRead,
+    WorkPlanControl,
+    WorkPlanVerifyExecute,
     RuntimeToolCatalogueRead,
 }
 

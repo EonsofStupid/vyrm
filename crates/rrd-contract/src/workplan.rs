@@ -11,6 +11,63 @@ pub const MAX_WORK_PLAN_GATES: usize = 128;
 pub const MAX_WORK_PLAN_ITEMS: usize = 2_048;
 pub const MAX_WORK_PLAN_TEXT_BYTES: usize = 8_192;
 
+/// Stable operation identities for every public work-plan surface.
+///
+/// RRD owns this set. CLI, MCP, Connectome, and future adapters consume the
+/// engine catalogue generated from these identities instead of maintaining
+/// local command or tool registries.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum WorkPlanOperation {
+    Sync,
+    Status,
+    Activate,
+    Record,
+    Verify,
+}
+
+impl WorkPlanOperation {
+    pub const ALL: [Self; 5] = [
+        Self::Sync,
+        Self::Status,
+        Self::Activate,
+        Self::Record,
+        Self::Verify,
+    ];
+
+    pub const fn runtime_tool_name(self) -> &'static str {
+        match self {
+            Self::Sync => "rrflow_work_plan_sync",
+            Self::Status => "rrflow_work_plan_status",
+            Self::Activate => "rrflow_work_item_activate",
+            Self::Record => "rrflow_work_item_plan_record",
+            Self::Verify => "rrflow_work_item_verify",
+        }
+    }
+
+    pub const fn capability_id(self) -> &'static str {
+        match self {
+            Self::Sync => "work-plan-sync",
+            Self::Status => "work-plan-status",
+            Self::Activate => "work-item-activate",
+            Self::Record => "work-item-plan-record",
+            Self::Verify => "work-item-verify",
+        }
+    }
+
+    pub const fn cli_command(self) -> &'static str {
+        match self {
+            Self::Sync => "rrflow work-plan sync",
+            Self::Status => "rrflow work-plan status",
+            Self::Activate => "rrflow work-plan activate",
+            Self::Record => "rrflow work-plan record",
+            Self::Verify => "rrflow work-plan verify",
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct WorkPlanDefinition {
@@ -359,6 +416,26 @@ mod tests {
         let plan = plan();
         plan.validate().unwrap();
         assert_eq!(plan.sha256().unwrap(), plan.sha256().unwrap());
+    }
+
+    #[test]
+    fn operation_identities_are_complete_unique_and_stable() {
+        let names = WorkPlanOperation::ALL
+            .into_iter()
+            .map(WorkPlanOperation::runtime_tool_name)
+            .collect::<BTreeSet<_>>();
+        let capabilities = WorkPlanOperation::ALL
+            .into_iter()
+            .map(WorkPlanOperation::capability_id)
+            .collect::<BTreeSet<_>>();
+        let commands = WorkPlanOperation::ALL
+            .into_iter()
+            .map(WorkPlanOperation::cli_command)
+            .collect::<BTreeSet<_>>();
+        assert_eq!(names.len(), WorkPlanOperation::ALL.len());
+        assert_eq!(capabilities.len(), WorkPlanOperation::ALL.len());
+        assert_eq!(commands.len(), WorkPlanOperation::ALL.len());
+        assert!(names.iter().all(|name| name.starts_with("rrflow_work_")));
     }
 
     #[test]

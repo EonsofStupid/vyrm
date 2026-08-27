@@ -1,11 +1,17 @@
 use connectome_ui::{ConnectomeBackend, ConnectomeConfig, InvokeToolRequest, QueryRequest};
-use rrd_contract::{CanonicalId, QueryBudget, ResourceId, ResourceKind, ResourcePath};
+use rrd_contract::{
+    CanonicalId, QueryBudget, ResourceId, ResourceKind, ResourcePath, WorkGateDefinition,
+    WorkItemDefinition, WorkPlanDefinition,
+};
 use rrd_core::{
     digest, RuntimeCommit, RuntimeMutation, RuntimeProperties, RuntimePropertySchema,
     RuntimeRecord, RuntimeRecordSchema, RuntimeRef, RuntimeSchemaRegistry, RuntimeType,
     RuntimeValue, RuntimeValueType, ScopeId,
 };
-use rrd_engine::{load_or_create_token_key, InstanceBinding, InstanceManifest, RrdEngine};
+use rrd_engine::{
+    install_work_plan, load_or_create_token_key, InstanceBinding, InstanceManifest, RrdEngine,
+    WorkPlanOperation,
+};
 use rrd_security::{
     Action, Principal, PrincipalKind, ResourceGrant, SecurityRepository, SecurityState,
     SECURITY_FORMAT,
@@ -76,6 +82,32 @@ fn start_rrd() -> (tempfile::TempDir, RunningRrd) {
             ],
         })
         .unwrap();
+    install_work_plan(
+        &storage,
+        WorkPlanDefinition {
+            schema_version: 1,
+            plan_id: "connectome-plan".into(),
+            title: "Connectome generated work-plan contract".into(),
+            authority: "RRD".into(),
+            status_policy: "Evidence only".into(),
+            gate: vec![WorkGateDefinition {
+                id: "G00".into(),
+                title: "Control".into(),
+                depends_on: vec![],
+            }],
+            item: vec![WorkItemDefinition {
+                id: "G00-W05".into(),
+                gate: "G00".into(),
+                title: "Generated surfaces".into(),
+                depends_on: vec![],
+                acceptance: vec!["Connectome consumes RRD discovery".into()],
+            }],
+        },
+        101,
+        "connectome-fixture",
+        "connectome-plan-install",
+    )
+    .unwrap();
 
     let instance = CanonicalId::new("connectome-test").unwrap();
     let resource = ResourcePath {
@@ -94,6 +126,7 @@ fn start_rrd() -> (tempfile::TempDir, RunningRrd) {
             Action::RuntimeToolCatalogueRead,
             Action::ServiceInspect,
             Action::QueryExecute,
+            Action::WorkPlanRead,
         ]
         .into_iter()
         .map(|action| ResourceGrant {
@@ -165,6 +198,26 @@ fn connectome_uses_authenticated_public_rrd_contracts_end_to_end() {
 
     let service = backend.service_capabilities().unwrap();
     assert_eq!(service.instance.id.as_str(), "connectome-test");
+    let tools = backend.runtime_tool_catalogue().unwrap();
+    for operation in WorkPlanOperation::ALL {
+        assert!(
+            tools
+                .tools
+                .iter()
+                .any(|tool| tool.name.as_str() == operation.runtime_tool_name()),
+            "Connectome omitted generated work-plan operation {:?}",
+            operation
+        );
+    }
+    let work_plan_status = backend
+        .invoke_runtime_tool(InvokeToolRequest {
+            tool: CanonicalId::new(WorkPlanOperation::Status.runtime_tool_name()).unwrap(),
+            arguments: json!({"plan_id":"connectome-plan"}),
+        })
+        .unwrap();
+    let work_plan: serde_json::Value = serde_json::from_str(&work_plan_status.content).unwrap();
+    assert_eq!(work_plan["plan_id"], "connectome-plan");
+    assert_eq!(work_plan["items"][0]["status"], "pending");
     let snapshot = backend.diagnostic_snapshot().unwrap();
     assert_eq!(snapshot.scope, "instance:connectome-test");
     assert_eq!(snapshot.read.runtime_cursor, 2);

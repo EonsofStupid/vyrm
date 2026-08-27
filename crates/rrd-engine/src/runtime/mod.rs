@@ -109,8 +109,9 @@ pub use workflow::{
 pub use workplan::{
     activate_work_item, authorize_work_item_tool, complete_work_item_tool, install_work_plan,
     load_active_work_item_authorization, load_active_work_item_plan, load_work_item_verification,
-    load_work_plan, read_work_plan, record_work_item_plan, sync_project_work_plan,
-    verify_work_item, WorkItemExecutionMode, WorkItemPlanRecord, WorkItemStatus,
-    WorkItemToolAuthorization, WorkItemVerification, WorkItemVerificationArtifact,
-    WorkItemVerificationCheck, WorkPlanEventContext, WorkPlanSnapshot, WORK_PLAN_FILE,
+    load_work_plan, read_work_plan, record_project_work_item_plan, record_work_item_plan,
+    sync_project_work_plan, verify_recorded_work_item, verify_work_item, WorkItemExecutionMode,
+    WorkItemPlanRecord, WorkItemStatus, WorkItemToolAuthorization, WorkItemVerification,
+    WorkItemVerificationArtifact, WorkItemVerificationCheck, WorkPlanEventContext,
+    WorkPlanOperation, WorkPlanSnapshot, WORK_PLAN_FILE,
 };
