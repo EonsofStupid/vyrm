@@ -2428,3 +2428,53 @@ index.
   declares MCP cooperation without native blocking hooks, so enforceable Codex
   mutations must use RRFlow's proxied or orchestrated boundaries until G07 is
   qualified.
+
+## 2026-08-26 — G00-W04 exact verification evidence
+
+- Clean-checkout correction: the pushed workspace matrix exposed a declared
+  `rrd-cluster-node` Cargo target whose source existed locally but was excluded
+  by the repository-wide `**/bin/` rule. The Rust source is now tracked, the
+  ignore rule is limited to generated .NET SDK `bin`/`obj` directories, and a
+  workspace architecture test requires every Cargo metadata target source to
+  be present in Git. This turns the prior local/cloud discrepancy into a
+  reproducible local failure.
+- Full-workspace correction: the first RRD-owned W04 verification attempt then
+  exposed `RrdRaftTimingPolicy` hidden behind the optional transport feature
+  while its contract was feature-neutral. The policy now lives in the
+  always-available cluster contract and the transport consumes it. Failed
+  verification logs are retained under `.rrflow/verification` and their exact
+  paths and stderr digest are returned, so a red gate is diagnosable without a
+  blind rerun.
+- Catalogue parity correction: the next full gate exposed a real-server client
+  test with a duplicated hardcoded runtime-tool count. The test now compares
+  the validated runtime catalogue endpoint with the diagnostic snapshot's
+  catalogue, so additions or removals are governed by the authoritative RRD
+  catalogue instead of a second numeric registry.
+- Exact plan binding: verification is rejected unless its ordered argv vectors
+  are byte-for-byte equal to the commands recorded before implementation.
+  Missing, extra, reordered, or substituted checks cannot complete an item.
+- Inspectable durable evidence: each verified item now retains its complete
+  evidence after RRD reopen: work-item and plan identities, result source-tree
+  digest, repository revision bound to that tree, platform, exact argv, pass
+  result, exit code, stdout/stderr byte counts and SHA-256 identities, and a
+  sealed digest over the entire check. An opaque digest without its evidence is
+  invalid state.
+- Fail-closed completion: false results, nonzero or absent success exit codes,
+  tampered artifact metadata, stale result trees, missing mutation results, and
+  qualification tree changes are rejected. Dependent items remain blocked
+  until their declared prerequisites carry valid persisted verification.
+- Persistent proof: engine tests close and reopen native RRD before inspecting
+  exact evidence and exercise substituted-command, tampered-artifact, failed,
+  missing-result, stale-tree, one-shot mutation, qualification, and dependency
+  denial paths. The real CLI integration executes the recorded argv and reads
+  the same exact evidence after reopen.
+- Pre-release state rule: the earlier checkout-local board stored only opaque
+  verification hashes. It is preserved under
+  `.rrflow/dev/pre-w04-exact-evidence-20260826` and is not accepted by the
+  stricter V1 reader. The authoritative local board is rebuilt from the
+  checked-in 65-item plan with inspectable evidence; there is no dual reader or
+  compatibility mode.
+- Status boundary: targeted W04 and clean-target architecture tests pass
+  locally. W04 remains active until its recorded formatting, workspace test,
+  and strict workspace Clippy commands pass on the final tree and the pushed
+  Linux, macOS/ARM, and Windows matrix is green.

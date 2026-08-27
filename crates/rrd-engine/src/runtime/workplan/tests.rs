@@ -49,18 +49,33 @@ fn plan_record(item: &str) -> WorkItemPlanRecord {
 }
 
 fn verification(item: &str, passed: bool) -> WorkItemVerification {
+    verification_for_tree(item, passed, &sha('a'))
+}
+
+fn verification_for_tree(item: &str, passed: bool, tree: &str) -> WorkItemVerification {
+    let mut check = WorkItemVerificationCheck {
+        name: "targeted tests".into(),
+        argv: vec!["cargo".into(), "test".into()],
+        passed,
+        exit_code: Some(if passed { 0 } else { 1 }),
+        stdout: WorkItemVerificationArtifact {
+            byte_count: 12,
+            sha256: sha('1'),
+        },
+        stderr: WorkItemVerificationArtifact {
+            byte_count: 0,
+            sha256: sha('2'),
+        },
+        evidence_sha256: String::new(),
+    };
+    check.seal_evidence().unwrap();
     WorkItemVerification {
         work_item_id: item.into(),
-        source_tree_sha256: sha('a'),
+        source_tree_sha256: tree.into(),
         plan_payload_sha256: sha('c'),
-        repository_revision: "commit-1".into(),
+        repository_revision: format!("commit-1:{tree}"),
         platform: "linux-x86_64".into(),
-        checks: vec![WorkItemVerificationCheck {
-            name: "targeted tests".into(),
-            argv: vec!["cargo".into(), "test".into()],
-            passed,
-            evidence_sha256: sha('e'),
-        }],
+        checks: vec![check],
     }
 }
 
@@ -181,6 +196,13 @@ fn persistent_work_plan_denies_skips_and_replays_verified_state() {
     let reopened = PersistentEngine::open(&path).unwrap();
     let replayed = load_work_plan(&reopened, "foundation").unwrap().unwrap();
     assert_eq!(replayed, verified);
+    let evidence = load_work_item_verification(&reopened, "foundation", "G00-W01")
+        .unwrap()
+        .unwrap();
+    assert_eq!(evidence.checks[0].argv, vec!["cargo", "test"]);
+    assert_eq!(evidence.checks[0].exit_code, Some(0));
+    assert_eq!(evidence.checks[0].stdout.byte_count, 12);
+    evidence.checks[0].verify_evidence().unwrap();
     let advanced =
         activate_work_item(&reopened, "foundation", "G00-W02", 12, "test", "activate-2").unwrap();
     assert_eq!(advanced.active_item_id.as_deref(), Some("G00-W02"));
@@ -222,6 +244,29 @@ fn qualification_mode_forbids_mutation_and_verifies_only_the_unchanged_tree() {
             actor: "test",
             correlation_id: "mutation-denied",
         },
+    )
+    .is_err());
+    let mut substituted = verification("G00-W01", true);
+    substituted.checks[0].argv = vec!["cargo".into(), "check".into()];
+    substituted.checks[0].seal_evidence().unwrap();
+    assert!(verify_work_item(
+        &store,
+        "foundation",
+        substituted,
+        5,
+        "test",
+        "substituted-command",
+    )
+    .is_err());
+    let mut tampered = verification("G00-W01", true);
+    tampered.checks[0].stdout.byte_count += 1;
+    assert!(verify_work_item(
+        &store,
+        "foundation",
+        tampered,
+        5,
+        "test",
+        "tampered-artifact",
     )
     .is_err());
     let mut changed = verification("G00-W01", true);
@@ -337,10 +382,7 @@ fn observed_result_tree_chains_multiple_mutations_and_binds_verification() {
     assert!(verify_work_item(
         &store,
         "foundation",
-        WorkItemVerification {
-            source_tree_sha256: sha('4'),
-            ..verification("G00-W01", true)
-        },
+        verification_for_tree("G00-W01", true, &sha('4')),
         9,
         "test",
         "verify-without-result-tree",
@@ -363,10 +405,7 @@ fn observed_result_tree_chains_multiple_mutations_and_binds_verification() {
     let verified = verify_work_item(
         &store,
         "foundation",
-        WorkItemVerification {
-            source_tree_sha256: sha('4'),
-            ..verification("G00-W01", true)
-        },
+        verification_for_tree("G00-W01", true, &sha('4')),
         11,
         "test",
         "verify-result-tree",

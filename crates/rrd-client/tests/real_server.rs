@@ -248,7 +248,6 @@ async fn rust_client_negotiates_authenticates_queries_and_reads_audit() {
         )
         .await
         .unwrap();
-    assert_eq!(runtime_catalogue.tools.len(), 28);
     let service_status = client
         .invoke_runtime_tool(
             &session,
@@ -443,7 +442,7 @@ async fn rust_client_negotiates_authenticates_queries_and_reads_audit() {
         )
         .await;
     assert!(impossible_graph_cursor.is_err());
-    assert_eq!(diagnostics.runtime_tools.tools.len(), 28);
+    assert_eq!(diagnostics.runtime_tools, runtime_catalogue);
     assert!(diagnostics
         .sections
         .iter()

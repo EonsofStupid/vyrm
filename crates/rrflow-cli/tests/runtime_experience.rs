@@ -316,6 +316,18 @@ acceptance = ["qualification verifies an unchanged tree without a fake mutation"
     assert!(ok, "reopened work-plan status failed: {err}");
     assert!(out.contains("[x] G00-W01"), "{out}");
     assert!(out.contains("[x] G00-W02"), "{out}");
+    let store = PersistentEngine::open(&db).unwrap();
+    let evidence = rrd_engine::load_work_item_verification(&store, "foundation", "G00-W01")
+        .unwrap()
+        .unwrap();
+    assert_eq!(evidence.checks.len(), 1);
+    assert_eq!(
+        evidence.checks[0].argv,
+        serde_json::from_str::<Vec<String>>(&verification_argv).unwrap()
+    );
+    assert_eq!(evidence.checks[0].exit_code, Some(0));
+    assert!(evidence.checks[0].stdout.byte_count > 0);
+    evidence.checks[0].verify_evidence().unwrap();
 }
 
 #[test]

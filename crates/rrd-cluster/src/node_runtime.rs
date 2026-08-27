@@ -11,8 +11,8 @@ use crate::{
     artifact_transfer_trace_event, ArtifactTransferObservation, ArtifactTransferObserver,
     ArtifactTransferReceiver, ClusterError, ClusterId, NodeId, Result as ClusterResult,
     RrdRaftCommand, RrdRaftNetworkFactory, RrdRaftNode, RrdRaftResponse, RrdRaftStateMachine,
-    RrdRaftStore, RrdRaftTlsServer, RrdTlsGeneration, RrdTlsMaterial, RrdTlsReloader,
-    RrdTransportAdmissionPolicy, RrdTransportBinding, RrdTransportGate,
+    RrdRaftStore, RrdRaftTimingPolicy, RrdRaftTlsServer, RrdTlsGeneration, RrdTlsMaterial,
+    RrdTlsReloader, RrdTransportAdmissionPolicy, RrdTransportBinding, RrdTransportGate,
     RrdTransportTelemetrySnapshot, RrdTransportTrust, ShardId, ShardPlacement,
 };
 use openraft::metrics::Metric;
@@ -41,40 +41,6 @@ const CONSENSUS_TRACE_COMMIT_RETRIES: usize = 16;
 const CONSENSUS_TRACE_ROUTE_RETRIES: usize = 32;
 
 type RrdRaft = Raft<crate::RrdRaftTypeConfig>;
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct RrdRaftTimingPolicy {
-    pub heartbeat_interval_millis: u64,
-    pub election_timeout_min_millis: u64,
-    pub election_timeout_max_millis: u64,
-}
-
-impl Default for RrdRaftTimingPolicy {
-    fn default() -> Self {
-        Self {
-            heartbeat_interval_millis: 250,
-            election_timeout_min_millis: 1_000,
-            election_timeout_max_millis: 2_000,
-        }
-    }
-}
-
-impl RrdRaftTimingPolicy {
-    pub fn validate(&self) -> ClusterResult<()> {
-        if self.heartbeat_interval_millis == 0
-            || self.heartbeat_interval_millis > 60_000
-            || self.election_timeout_min_millis <= self.heartbeat_interval_millis
-            || self.election_timeout_max_millis <= self.election_timeout_min_millis
-            || self.election_timeout_max_millis > 300_000
-        {
-            return Err(ClusterError::Invalid(
-                "Raft timing policy is outside its bounded contract".into(),
-            ));
-        }
-        Ok(())
-    }
-}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

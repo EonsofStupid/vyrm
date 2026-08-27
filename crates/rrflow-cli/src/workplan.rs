@@ -192,27 +192,34 @@ pub fn execute(
             let mut checks = Vec::with_capacity(record.verification_commands.len());
             for argv in &record.verification_commands {
                 let output = run_verification(root, argv)?;
-                let evidence_sha256 =
-                    digest::sha256_hex(&serde_json::to_vec(&serde_json::json!({
-                        "argv": argv,
-                        "exit_code": output.exit_code,
-                        "success": output.success,
-                        "stdout_sha256": output.stdout_sha256,
-                        "stderr_sha256": output.stderr_sha256,
-                    }))?);
-                checks.push(rrd_engine::WorkItemVerificationCheck {
+                let mut check = rrd_engine::WorkItemVerificationCheck {
                     name: argv.join(" "),
                     argv: argv.clone(),
                     passed: output.success,
-                    evidence_sha256,
-                });
+                    exit_code: output.exit_code,
+                    stdout: rrd_engine::WorkItemVerificationArtifact {
+                        byte_count: output.stdout_byte_count,
+                        sha256: output.stdout_sha256,
+                    },
+                    stderr: rrd_engine::WorkItemVerificationArtifact {
+                        byte_count: output.stderr_byte_count,
+                        sha256: output.stderr_sha256,
+                    },
+                    evidence_sha256: String::new(),
+                };
+                check.seal_evidence()?;
                 if !output.success {
                     return Err(format!(
-                        "verification failed for {:?}: stderr sha256 {}",
-                        argv, output.stderr_sha256
+                        "verification failed for {:?}: stdout={} stderr={} stderr_sha256={}",
+                        argv,
+                        output.stdout_path.display(),
+                        output.stderr_path.display(),
+                        check.stderr.sha256
                     )
                     .into());
                 }
+                cleanup_verification_files(&output.stdout_path, &output.stderr_path);
+                checks.push(check);
             }
             let ready = rrd_engine::ensure_routing_fresh(store.runtime_store(), root)?;
             let receipt =
@@ -223,7 +230,7 @@ pub fn execute(
                         .into(),
                 );
             }
-            let repository_revision = repository_revision(root, &record.source_tree_sha256)?;
+            let repository_revision = repository_revision(root, &result_source_tree_sha256)?;
             rrd_engine::verify_work_item(
                 store.runtime_store(),
                 plan,
@@ -260,8 +267,12 @@ pub fn execute(
 struct VerificationProcessResult {
     success: bool,
     exit_code: Option<i32>,
+    stdout_byte_count: u64,
     stdout_sha256: String,
+    stderr_byte_count: u64,
     stderr_sha256: String,
+    stdout_path: std::path::PathBuf,
+    stderr_path: std::path::PathBuf,
 }
 
 fn run_verification(
@@ -327,12 +338,15 @@ fn run_verification(
     };
     let stdout = std::fs::read(&stdout_path)?;
     let stderr = std::fs::read(&stderr_path)?;
-    cleanup_verification_files(&stdout_path, &stderr_path);
     Ok(VerificationProcessResult {
         success: status.success(),
         exit_code: status.code(),
+        stdout_byte_count: stdout.len() as u64,
         stdout_sha256: digest::sha256_hex(&stdout),
+        stderr_byte_count: stderr.len() as u64,
         stderr_sha256: digest::sha256_hex(&stderr),
+        stdout_path,
+        stderr_path,
     })
 }
 
@@ -402,4 +416,34 @@ fn render(snapshot: &rrd_engine::WorkPlanSnapshot) -> String {
         )
     }));
     lines.join("\n")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn failed_verification_keeps_bounded_diagnostic_artifacts() {
+        let root = tempfile::tempdir().unwrap();
+        let argv = vec![
+            std::env::current_exe()
+                .unwrap()
+                .to_string_lossy()
+                .into_owned(),
+            "--rrflow-intentionally-invalid-test-argument".into(),
+        ];
+        let result = run_verification(root.path(), &argv).unwrap();
+        assert!(!result.success);
+        assert!(result.stdout_path.is_file());
+        assert!(result.stderr_path.is_file());
+        assert_eq!(
+            std::fs::metadata(&result.stdout_path).unwrap().len(),
+            result.stdout_byte_count
+        );
+        assert_eq!(
+            std::fs::metadata(&result.stderr_path).unwrap().len(),
+            result.stderr_byte_count
+        );
+        cleanup_verification_files(&result.stdout_path, &result.stderr_path);
+    }
 }

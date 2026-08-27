@@ -9,8 +9,8 @@
 **/dist/
 .tools/
 **/target/
-**/bin/
-**/obj/
+/sdks/dotnet/**/bin/
+/sdks/dotnet/**/obj/
 
 # Session transcripts and hooks — operator-local, never part of the product
 /.chat

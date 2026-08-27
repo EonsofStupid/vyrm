@@ -8,6 +8,7 @@ use std::process::Command;
 struct WorkspaceMetadata {
     root: PathBuf,
     packages: BTreeMap<String, PackageDependencies>,
+    target_sources: BTreeSet<PathBuf>,
 }
 
 struct PackageDependencies {
@@ -173,6 +174,39 @@ fn retired_pre_release_identity_is_absent_from_the_active_repository() {
     );
 }
 
+#[test]
+fn every_workspace_target_source_is_tracked() {
+    let metadata = workspace_metadata();
+    let output = Command::new("git")
+        .current_dir(&metadata.root)
+        .args(["ls-files", "-z", "--cached"])
+        .output()
+        .expect("git ls-files must start");
+    assert!(
+        output.status.success(),
+        "git ls-files failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let tracked = output
+        .stdout
+        .split(|byte| *byte == 0)
+        .filter(|path| !path.is_empty())
+        .map(|path| {
+            PathBuf::from(std::str::from_utf8(path).expect("repository paths must be UTF-8"))
+        })
+        .collect::<BTreeSet<_>>();
+    let missing = metadata
+        .target_sources
+        .difference(&tracked)
+        .cloned()
+        .collect::<Vec<_>>();
+
+    assert!(
+        missing.is_empty(),
+        "Cargo target sources must exist in a clean checkout; untracked targets: {missing:#?}"
+    );
+}
+
 fn workspace_metadata() -> WorkspaceMetadata {
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let workspace_root = manifest_dir
@@ -230,6 +264,7 @@ fn workspace_metadata() -> WorkspaceMetadata {
     );
 
     let mut packages = BTreeMap::new();
+    let mut target_sources = BTreeSet::new();
     for package in package_values {
         let id = package["id"].as_str().expect("package IDs must be strings");
         if !member_ids.contains(id) {
@@ -238,6 +273,27 @@ fn workspace_metadata() -> WorkspaceMetadata {
         let name = package["name"]
             .as_str()
             .expect("package names must be strings");
+        for target in package["targets"]
+            .as_array()
+            .expect("package targets must be an array")
+        {
+            let source = PathBuf::from(
+                target["src_path"]
+                    .as_str()
+                    .expect("target source paths must be strings"),
+            );
+            let relative = source
+                .strip_prefix(&root)
+                .unwrap_or_else(|_| {
+                    panic!(
+                        "workspace target source {} must be under {}",
+                        source.display(),
+                        root.display()
+                    )
+                })
+                .to_path_buf();
+            target_sources.insert(relative);
+        }
         let mut workspace = BTreeSet::new();
         let mut all = BTreeSet::new();
         for dependency in package["dependencies"]
@@ -263,7 +319,11 @@ fn workspace_metadata() -> WorkspaceMetadata {
         );
     }
 
-    WorkspaceMetadata { root, packages }
+    WorkspaceMetadata {
+        root,
+        packages,
+        target_sources,
+    }
 }
 
 fn production_workspace_dependencies<'a>(

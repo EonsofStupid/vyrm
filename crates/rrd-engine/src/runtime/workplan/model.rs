@@ -2,6 +2,7 @@ use rrd_contract::{
     WorkItemStatus, WorkItemStatusSnapshot, WorkPlanDefinition, WorkPlanEventEnvelope,
     WorkPlanSnapshot, WORK_PLAN_SCHEMA_VERSION,
 };
+use rrd_core::digest;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -26,6 +27,7 @@ pub(super) struct PersistedWorkPlan {
 pub(super) struct PersistedWorkItem {
     pub status: WorkItemStatus,
     pub verification_sha256: Option<String>,
+    pub verification: Option<WorkItemVerification>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -83,7 +85,33 @@ pub struct WorkItemVerificationCheck {
     pub name: String,
     pub argv: Vec<String>,
     pub passed: bool,
+    pub exit_code: Option<i32>,
+    pub stdout: WorkItemVerificationArtifact,
+    pub stderr: WorkItemVerificationArtifact,
     pub evidence_sha256: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WorkItemVerificationArtifact {
+    pub byte_count: u64,
+    pub sha256: String,
+}
+
+impl WorkItemVerificationCheck {
+    pub fn seal_evidence(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+        self.evidence_sha256.clear();
+        self.evidence_sha256 = verification_check_sha256(self)?;
+        Ok(())
+    }
+
+    pub fn verify_evidence(&self) -> Result<(), Box<dyn std::error::Error>> {
+        validate_sha256("verification evidence digest", &self.evidence_sha256)?;
+        if verification_check_sha256(self)? != self.evidence_sha256 {
+            return Err("verification check evidence digest mismatch".into());
+        }
+        Ok(())
+    }
 }
 
 impl PersistedWorkPlan {
@@ -97,6 +125,7 @@ impl PersistedWorkPlan {
                     PersistedWorkItem {
                         status: WorkItemStatus::Pending,
                         verification_sha256: None,
+                        verification: None,
                     },
                 )
             })
@@ -135,6 +164,28 @@ impl PersistedWorkPlan {
             .collect::<BTreeSet<_>>();
         if expected != actual {
             return Err("persisted work-plan item state does not match its definition".into());
+        }
+        for (item_id, item) in &self.items {
+            match (item.status, &item.verification_sha256, &item.verification) {
+                (WorkItemStatus::Verified, Some(expected_sha256), Some(verification)) => {
+                    validate_verification(verification)?;
+                    if verification.work_item_id != *item_id
+                        || digest::sha256_hex(&serde_json::to_vec(verification)?)
+                            != *expected_sha256
+                    {
+                        return Err(
+                            "persisted work-item verification evidence is inconsistent".into()
+                        );
+                    }
+                }
+                (WorkItemStatus::Verified, _, _) => {
+                    return Err("verified work item is missing its exact evidence".into());
+                }
+                (_, None, None) => {}
+                _ => {
+                    return Err("unverified work item cannot carry verification evidence".into());
+                }
+            }
         }
         let active = self
             .items
@@ -283,10 +334,48 @@ pub(super) fn validate_verification(
         {
             return Err("verification checks require a name and exact argv".into());
         }
-        validate_sha256("verification evidence digest", &check.evidence_sha256)?;
+        validate_sha256("verification stdout digest", &check.stdout.sha256)?;
+        validate_sha256("verification stderr digest", &check.stderr.sha256)?;
+        check.verify_evidence()?;
         if !check.passed {
             return Err(format!("verification check {} did not pass", check.name).into());
         }
+        if check.exit_code != Some(0) {
+            return Err(format!(
+                "verification check {} passed without exit code zero",
+                check.name
+            )
+            .into());
+        }
+    }
+    if !verification
+        .repository_revision
+        .ends_with(&format!(":{}", verification.source_tree_sha256))
+    {
+        return Err("verification revision is not bound to its source tree".into());
     }
     Ok(())
+}
+
+fn verification_check_sha256(
+    check: &WorkItemVerificationCheck,
+) -> Result<String, Box<dyn std::error::Error>> {
+    #[derive(Serialize)]
+    struct Evidence<'a> {
+        name: &'a str,
+        argv: &'a [String],
+        passed: bool,
+        exit_code: Option<i32>,
+        stdout: &'a WorkItemVerificationArtifact,
+        stderr: &'a WorkItemVerificationArtifact,
+    }
+
+    Ok(digest::sha256_hex(&serde_json::to_vec(&Evidence {
+        name: &check.name,
+        argv: &check.argv,
+        passed: check.passed,
+        exit_code: check.exit_code,
+        stdout: &check.stdout,
+        stderr: &check.stderr,
+    })?))
 }

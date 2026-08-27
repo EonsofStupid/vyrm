@@ -4,7 +4,7 @@ mod model;
 
 pub use model::{
     WorkItemExecutionMode, WorkItemPlanRecord, WorkItemToolAuthorization, WorkItemVerification,
-    WorkItemVerificationCheck,
+    WorkItemVerificationArtifact, WorkItemVerificationCheck,
 };
 
 use model::{validate_plan_record, validate_sha256, validate_verification, PersistedWorkPlan};
@@ -113,6 +113,23 @@ pub fn load_active_work_item_authorization<E: Engine>(
     };
     let state = decode_state(&bytes)?;
     Ok(state.authorization)
+}
+
+pub fn load_work_item_verification<E: Engine>(
+    store: &E,
+    plan_id: &str,
+    item_id: &str,
+) -> Result<Option<WorkItemVerification>, Box<dyn std::error::Error>> {
+    let Some(bytes) = store.control_record(&state_key(plan_id))? else {
+        return Ok(None);
+    };
+    let state = decode_state(&bytes)?;
+    Ok(state
+        .items
+        .get(item_id)
+        .ok_or_else(|| format!("unknown work item {item_id}"))?
+        .verification
+        .clone())
 }
 
 pub fn activate_work_item<E: Engine>(
@@ -393,6 +410,16 @@ pub fn verify_work_item<E: Engine>(
         if plan.plan_payload_sha256 != verification.plan_payload_sha256 {
             return Err("verification denied: evidence belongs to another plan".into());
         }
+        let observed_commands = verification
+            .checks
+            .iter()
+            .map(|check| check.argv.clone())
+            .collect::<Vec<_>>();
+        if observed_commands != plan.verification_commands {
+            return Err(
+                "verification denied: evidence does not match the exact recorded commands".into(),
+            );
+        }
         match plan.execution_mode {
             WorkItemExecutionMode::Change => {
                 let authorization = state
@@ -445,6 +472,7 @@ pub fn verify_work_item<E: Engine>(
             .expect("active item exists");
         item.status = WorkItemStatus::Verified;
         item.verification_sha256 = Some(verification_sha256);
+        item.verification = Some(verification);
         state.active_item_id = None;
         state.plan_record = None;
         state.authorization = None;
