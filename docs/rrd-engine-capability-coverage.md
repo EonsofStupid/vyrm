@@ -1,6 +1,6 @@
 # RRD engine capability coverage
 
-Audited: 2026-08-26
+Audited: 2026-08-27
 
 This is a source-and-test audit, not a product-green declaration. `Core present`
 means an executable engine path and focused test exist. `Partial` means a real
@@ -11,6 +11,33 @@ item is not implementation evidence.
 Audit total: **5 core-present, 14 partial, 1 missing**. `Core present` still
 does not mean the full product promise is closed; every remaining qualifier in
 the row is an acceptance obligation in `rrflow.workplan.toml`.
+
+The requested checklist is frozen one-for-one under stable IDs. None may be
+removed, merged away, or marked complete from a plan entry alone:
+
+1. `CAP-01` multi-model core — G03-W01/G03-W02.
+2. `CAP-02` graph engine — G03-W02/G03-W03/G06-W02.
+3. `CAP-03` ACID transactions — G02-W01/G03-W02/G05-W02.
+4. `CAP-04` HNSW metrics and SIMD — G04-W02/G04-W04.
+5. `CAP-05` full-text search — G03-W05.
+6. `CAP-06` hybrid search and RRF — G04-W03.
+7. `CAP-07` in-traversal metadata filtering — G04-W02.
+8. `CAP-08` scalar/product/binary quantization — G04-W04.
+9. `CAP-09` multivector/multimodal/late interaction — G04-W01/G04-W03.
+10. `CAP-10` boosting/model reranking/MMR — G04-W03.
+11. `CAP-11` WebSocket CDC and live queries — G03-W06.
+12. `CAP-12` immediate non-blocking indexing — G03-W05/G04-W02.
+13. `CAP-13` materialized analytics — G03-W05.
+14. `CAP-14` embedded scripting and functions — G03-W07.
+15. `CAP-15` multitenancy and partitioning — G05-W03/G08-W01/G08-W02.
+16. `CAP-16` JWT/OIDC/RBAC/row/field policy — G05-W03.
+17. `CAP-17` mmap/io_uring/storage-compute separation — G02-W01/G02-W06/G04-W04/G04-W05.
+18. `CAP-18` distributed HA and multi-region — G08-W01/G08-W02/G08-W03.
+19. `CAP-19` embedded/edge/daemon/distributed deployment — G05-W01/G08-W02/G10-W03.
+20. `CAP-20` RRFlowQL/GraphQL/HTTP/WebSocket/gRPC/SDKs — G06-W01/G06-W04/G06-W05.
+
+The detailed evidence and remaining qualifiers for those exact IDs follow in
+the same order.
 
 | Required capability | Current engine evidence | Truth now | Closure authority |
 |---|---|---|---|

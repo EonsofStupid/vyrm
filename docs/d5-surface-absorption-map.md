@@ -1,8 +1,9 @@
 # D5 outward-surface absorption map
 
-**Status:** authoritative implementation map as of 2026-08-25. This is derived
-from the active workspace sources after D4. D5.1a through D5.1c are implemented
-locally; D5.1 is not complete and this is not a cohesive-checkpoint claim.
+**Status:** authoritative implementation map as of 2026-08-27. This is derived
+from the active workspace sources after D4. D5.1a through D5.1c and the D5.2a
+client-only Connectome cutover are implemented; D5.1/D5.2 remain incomplete and
+this is not a cohesive-checkpoint claim.
 
 ## Invariant
 
@@ -118,12 +119,31 @@ retention pin. Because leases can change without advancing the data cursor or
 control journal, their canonical set digest is a separate part of the verified
 diagnostic read stamp; lease churn during assembly causes retry.
 
-D5.1 remains open for reasoning/routing/trace summaries, vector artifact
-catalogue, and cluster diagnostics currently assembled inside Connectome. A
+D5.1 remains open for reasoning/routing/trace summaries and cluster diagnostics
+previously assembled inside Connectome. A
 separate table-browser projection is not invented here: bounded
 data rows continue to belong to the existing typed query plane. Those sections
-must be absorbed behind the same engine contract before D5.2 can remove
-Connectome's physical read dependencies.
+must be absorbed behind the same engine contract before D5.2 can restore those
+views without reintroducing physical read dependencies.
+
+### D5.2a progress
+
+The in-repository `connectome-ui` runtime is now a strict `rrd-client` and
+`rrd-contract` consumer. It authenticates to one loopback RRD daemon, renews a
+bounded session, validates `DiagnosticSnapshot`, executes scope-bound RRFlowQL,
+and invokes only tools obtained from RRD's runtime-tool catalogue. Its normal
+dependency graph contains no physical engine, store, query, vector, estate,
+cluster, or core crate. A real-socket integration boots RRD, authenticates the
+client, reads and validates a seeded diagnostic graph/model snapshot, executes
+a query, and invokes `rrflow_service_status`.
+
+Temporary embedded diagnostic mutations and projections that lack a public RRD
+authority now return an explicit `501` with the required contract action; they
+are not silently emulated in Connectome. Flights, causal-trace summaries,
+cluster telemetry/history, and a first-class source-routing response therefore
+remain D5.1/D5.3 work. The canonical changefeed and temporal graph remain
+renderable through `/api/snapshot`. This closes the zero-bypass architecture
+gate for Connectome, not the complete Connectome feature-parity gate.
 
 ## Exit evidence
 

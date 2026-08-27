@@ -5,74 +5,31 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="color-scheme" content="dark">
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self'; script-src 'self'; img-src 'self' data:">
-  <title>Connectome Workbench</title>
+  <title>Connectome · RRD</title>
   <link rel="stylesheet" href="/app.css">
 </head>
 <body>
-  <div id="app" class="app-shell">
-    <aside class="sidebar">
-      <div class="brand">
-        <div class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></div>
-        <div><strong>connectome</strong><span>runtime workbench</span></div>
-      </div>
-      <section class="instance-card" id="instance-card" aria-live="polite">
-        <div class="eyebrow">INSTANCE</div>
-        <div class="instance-title skeleton">Loading</div>
-        <div class="instance-meta">Connecting to local runtime…</div>
-      </section>
-      <nav class="primary-nav" aria-label="Connectome Panel">
-        <button data-view="overview" class="nav-item active"><span class="nav-icon">⌂</span>Overview<span class="shortcut">1</span></button>
-        <button data-view="connections" class="nav-item"><span class="nav-icon">⌁</span>Connections<span class="nav-count" id="connection-count">0</span></button>
-        <button data-view="estates" class="nav-item"><span class="nav-icon">⎔</span>Estates<span class="nav-count" id="estate-count">0</span></button>
-        <button data-view="tables" class="nav-item"><span class="nav-icon">▤</span>Tables<span class="nav-count" id="table-count">0</span></button>
-        <button data-view="models" class="nav-item"><span class="nav-icon">⌘</span>Data models<span class="nav-count" id="model-count">0</span></button>
-        <button data-view="visuals" class="nav-item"><span class="nav-icon">✦</span>Visuals<span class="nav-count" id="visual-count">0</span></button>
+  <div class="shell">
+    <aside>
+      <div class="brand"><span class="mark"><i></i><i></i><i></i></span><div><strong>connectome</strong><small>RRD client</small></div></div>
+      <section class="instance" id="instance"><span>INSTANCE</span><strong>Connecting…</strong><small>Authenticated public contract</small></section>
+      <nav aria-label="Diagnostic views">
+        <button class="active" data-view="overview">Overview <kbd>1</kbd></button>
+        <button data-view="models">Models <b id="model-count">0</b></button>
+        <button data-view="graph">Graph <b id="graph-count">0</b></button>
+        <button data-view="activity">Activity <b id="change-count">0</b></button>
+        <button data-view="capabilities">Capabilities <b id="capability-count">0</b></button>
+        <button data-view="query">Query <kbd>6</kbd></button>
+        <button data-view="raw">Raw snapshot</button>
       </nav>
-      <div class="sidebar-section">
-        <div class="eyebrow">VISUAL LABS</div>
-        <button class="lens-row" data-view="flight"><span class="dot violet"></span>Prompt flights<span id="flight-count">0</span></button>
-        <button class="lens-row" data-view="stream"><span class="dot mint"></span>Temporal stream<span id="stream-count">0</span></button>
-        <button class="lens-row" data-view="traces"><span class="dot violet"></span>Causal traces<span id="trace-count">0</span></button>
-        <button class="lens-row" data-view="graph"><span class="dot amber"></span>Runtime graph</button>
-        <button class="lens-row" data-view="cluster"><span class="dot mint"></span>Cluster history<span id="cluster-count">0</span></button>
-      </div>
-      <div class="sidebar-section developer-tools">
-        <div class="eyebrow">DEVELOPER TOOLS</div>
-        <button class="lens-row" data-view="capabilities"><span>◉</span>Capabilities</button>
-        <button class="lens-row" data-view="query"><span>⌬</span>Query lab</button>
-        <button class="lens-row" data-view="runs"><span>↳</span>Runs<span id="run-count">0</span></button>
-        <button class="lens-row" data-view="claims"><span>◇</span>Claims<span id="claim-count">0</span></button>
-        <button class="lens-row" data-view="routes"><span>⌁</span>Routes<span id="file-count">0</span></button>
-        <button class="lens-row" data-view="activity"><span>≋</span>Activity</button>
-      </div>
-      <div class="sidebar-footer">
-        <div><span id="connection-dot" class="status-dot waiting"></span><span id="connection-label">Connecting</span></div>
-        <button id="refresh-button" class="icon-button" title="Refresh snapshot">↻</button>
-      </div>
+      <footer><span id="status-dot" class="dot waiting"></span><span id="status">Connecting</span></footer>
     </aside>
-
     <section class="workspace">
-      <header class="topbar">
-        <div class="breadcrumb"><span id="crumb-instance">instance</span><b>/</b><span id="crumb-view">overview</span></div>
-        <label class="command-field">
-          <span>⌕</span>
-          <input id="global-search" autocomplete="off" placeholder="Search runtime objects or route source…" aria-label="Search runtime">
-          <kbd>/</kbd>
-        </label>
-        <div class="top-actions">
-          <span id="snapshot-age" class="snapshot-age">—</span>
-          <button id="inspector-toggle" class="icon-button" title="Toggle inspector">◫</button>
-        </div>
-      </header>
-      <main id="main" class="main" tabindex="-1"></main>
+      <header><div><span id="crumb-instance">rrd</span><b>/</b><span id="crumb-view">overview</span></div><span id="stamp">—</span><button id="refresh" title="Refresh">Refresh</button></header>
+      <main id="main" tabindex="-1"><div class="loading">Reading a verified diagnostic snapshot…</div></main>
     </section>
-
-    <aside id="inspector" class="inspector">
-      <div class="inspector-head"><div><span class="eyebrow">INSPECTOR</span><h2 id="inspector-title">Nothing selected</h2></div><button id="inspector-close" class="icon-button">×</button></div>
-      <div id="inspector-body" class="inspector-body"><p class="muted">Select a claim, run, event, file, or invocation to inspect its runtime identity and evidence.</p></div>
-    </aside>
   </div>
-  <div id="toast" class="toast" role="status"></div>
+  <div id="toast" role="status"></div>
   <script src="/app.js"></script>
 </body>
 </html>

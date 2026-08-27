@@ -73,7 +73,7 @@ fn public_contract_and_client_stay_implementation_free() {
 }
 
 #[test]
-fn remaining_consumer_bypasses_match_frozen_debt() {
+fn outward_consumers_cannot_bypass_the_engine_boundary() {
     let metadata = workspace_metadata();
     let internal_components = names(&[
         "rrd-estate",
@@ -91,15 +91,8 @@ fn remaining_consumer_bypasses_match_frozen_debt() {
 
     assert_exact(
         &forbidden_edges(&metadata, "connectome-ui", &internal_components),
-        names(&[
-            "rrd-estate",
-            "rrd-cluster",
-            "rrd-core",
-            "rrd-query",
-            "rrd-store",
-            "rrd-vector",
-        ]),
-        "Connectome's frozen pre-migration engine bypasses",
+        BTreeSet::new(),
+        "Connectome must use only rrd-client and rrd-contract",
     );
     assert_exact(
         &forbidden_edges(&metadata, "rrflow-cli", &internal_components),

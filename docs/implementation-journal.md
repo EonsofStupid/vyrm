@@ -2259,3 +2259,27 @@ index.
   the existing provider-shaped hook/work-plan path does not yet emit and bind
   every planning or mutation decision through this canonical lifecycle. The
   remote Linux, macOS/ARM, and Windows matrix is also unclaimed.
+
+## 2026-08-27 — Connectome crosses the public RRD boundary
+
+- Authority cutover: the in-repository Connectome runtime no longer opens an
+  RRD database or composes core, engine, store, query, vector, estate, or
+  cluster crates. It authenticates through `rrd-client`, retains a bounded
+  renewable session, and renders the validated public diagnostic snapshot.
+- Public behavior: `/api/snapshot` returns the authoritative stamped snapshot;
+  `/api/runtime/capabilities` returns RRD service and runtime-tool catalogues;
+  scope-bound RRFlowQL and catalogue-resolved runtime-tool invocations use the
+  supported client. API-key files must be private on Unix and secrets are not
+  logged or returned.
+- Honest limitation: embedded lab-only flight writes, cluster sample writes,
+  trace summaries, and source-routing projections without a public RRD
+  contract return explicit `501` responses. They remain D5.1/D5.3 work rather
+  than surviving as a second data authority.
+- Evidence: Connectome unit and all-target tests, JavaScript syntax validation,
+  and strict all-target Clippy pass. The real-socket fixture boots RRD,
+  authenticates, validates a seeded model/graph snapshot, executes RRFlowQL,
+  and invokes `rrflow_service_status`. `rrflow dev doctor` advances from 15/4
+  to 16/3 with `surface.connectome-client-only` passing.
+- Capability audit: the requested twenty engine capabilities are frozen as
+  `CAP-01` through `CAP-20`, each mapped to explicit work-plan closure items.
+  Truth remains five core-present, fourteen partial, and one missing.

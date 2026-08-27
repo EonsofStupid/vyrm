@@ -4,24 +4,22 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 publish.workspace = true
-description = "Local developer workbench and visualizer for rrflow/connectome instances"
+description = "Client-only developer workbench and visualizer for RRD instances"
 
 [dependencies]
 rrd-contract = { path = "../rrd-contract" }
 rrd-client = { path = "../rrd-client" }
-rrd-estate = { path = "../rrd-estate" }
-rrd-core = { path = "../rrd-core" }
-rrd-cluster = { path = "../rrd-cluster", features = ["openraft-transport"] }
-rrd-query = { path = "../rrd-query" }
-rrd-engine = { path = "../rrd-engine" }
-rrd-store = { path = "../rrd-store" }
-rrd-vector = { path = "../rrd-vector" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tiny_http = "0.12"
-tokio = { version = "1", features = ["net", "rt", "time"] }
+tokio = { version = "1", features = ["net", "rt", "sync", "time"] }
 
 [dev-dependencies]
+rrd-core = { path = "../rrd-core" }
+rrd-engine = { path = "../rrd-engine" }
+rrd-security = { path = "../rrd-security" }
+rrd-server = { path = "../rrd-server" }
+rrd-store = { path = "../rrd-store" }
 tempfile = "3"
 
 [[bin]]

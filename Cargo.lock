@@ -905,14 +905,12 @@ name = "connectome-ui"
 version = "0.1.0"
 dependencies = [
  "rrd-client",
- "rrd-cluster",
  "rrd-contract",
  "rrd-core",
  "rrd-engine",
- "rrd-estate",
- "rrd-query",
+ "rrd-security",
+ "rrd-server",
  "rrd-store",
- "rrd-vector",
  "serde",
  "serde_json",
  "tempfile",
