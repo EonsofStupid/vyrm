@@ -17,8 +17,7 @@ mod workplan;
 
 use clap::Parser;
 use command::Cli;
-use rrd_core::Reader;
-use rrd_store::{InvocationInput, PersistentEngine};
+use rrd_engine::operator::{EmbeddedOperator, InvocationInput, Reader};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 fn now_millis() -> u64 {
@@ -72,7 +71,7 @@ fn main() -> std::process::ExitCode {
         };
     }
 
-    let store = match PersistentEngine::open(&cli.db) {
+    let store = match EmbeddedOperator::open(&cli.db) {
         Ok(store) => store,
         Err(error) => {
             eprintln!("cannot open database at {}: {error}", cli.db.display());

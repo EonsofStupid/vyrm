@@ -10,6 +10,8 @@ pub mod edge;
 #[cfg(feature = "full")]
 mod engine;
 #[cfg(feature = "full")]
+pub mod operator;
+#[cfg(feature = "full")]
 pub mod runtime;
 
 #[cfg(feature = "full")]

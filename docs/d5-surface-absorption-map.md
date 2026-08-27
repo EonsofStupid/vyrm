@@ -145,6 +145,23 @@ remain D5.1/D5.3 work. The canonical changefeed and temporal graph remain
 renderable through `/api/snapshot`. This closes the zero-bypass architecture
 gate for Connectome, not the complete Connectome feature-parity gate.
 
+### D5.4a progress
+
+`rrflow-cli` no longer has production dependencies on `rrd-core` or
+`rrd-store`. Ordinary embedded commands open an engine-owned
+`EmbeddedOperator`; its concrete persistent backend remains private to
+`rrd-engine`. Runtime, lifecycle, routing, reasoning, work-plan, query, recall,
+projection, and invocation behavior crosses that handle. Exclusive migration,
+format-upgrade, logical-archive, and backup operations are also named engine
+administration entrypoints rather than direct store calls.
+
+The complete pre-cutover CLI suite passes unchanged: four binary unit tests,
+two fixture tests, sixteen operator-surface tests, and nine runtime-experience
+tests. The workspace architecture suite now enforces zero physical dependencies
+for both Connectome and CLI. This closes the embedded CLI dependency boundary;
+authenticated daemon-mode selection and embedded/daemon behavior parity remain
+part of D5.4/G06-W04 rather than being inferred from this refactor.
+
 ## Exit evidence
 
 - Embedded and daemon views produce the same logical diagnostic snapshot at

@@ -96,8 +96,8 @@ fn outward_consumers_cannot_bypass_the_engine_boundary() {
     );
     assert_exact(
         &forbidden_edges(&metadata, "rrflow-cli", &internal_components),
-        names(&["rrd-core", "rrd-store"]),
-        "CLI's frozen pre-migration engine bypasses",
+        BTreeSet::new(),
+        "CLI must use only the public embedded engine boundary",
     );
     assert_exact(
         &forbidden_edges(&metadata, "rrflow-mcp", &internal_components),

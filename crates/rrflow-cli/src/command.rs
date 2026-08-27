@@ -6,11 +6,10 @@
 
 use crate::workplan::WorkPlanAction;
 use clap::{Parser, Subcommand};
-use rrd_core::{
-    digest, Claim, ClaimReader, Millis, Predicate, Producer, Reader, RecallQuery, ScopeId, Subject,
-};
-use rrd_store::{
-    Effectiveness, Engine, GroundingReport, Outcome, PersistentEngine, RecallOutcome, Trigger,
+use rrd_engine::operator::{
+    digest, Claim, CoreResult, Effectiveness, EmbeddedOperator, GroundingReport, Millis, Outcome,
+    Predicate, Producer, Reader, ReasoningPayload, RecallOutcome, RecallQuery, ScopeId, Subject,
+    Trigger,
 };
 
 /// What a command produced: the operator-facing text, the `SPEC.md` §13.1
@@ -703,9 +702,11 @@ pub fn execute_offline(
     Some((|| match action {
         StorageAction::Migrate | StorageAction::Status | StorageAction::Rollback => {
             let report = match action {
-                StorageAction::Migrate => Some(rrd_store::migrate_fjall_to_native(db, now)?),
-                StorageAction::Status => rrd_store::migration_status(db)?,
-                StorageAction::Rollback => Some(rrd_store::rollback_fjall_migration(db)?),
+                StorageAction::Migrate => Some(rrd_engine::operator::migrate_storage(db, now)?),
+                StorageAction::Status => rrd_engine::operator::storage_migration_status(db)?,
+                StorageAction::Rollback => {
+                    Some(rrd_engine::operator::rollback_storage_migration(db)?)
+                }
                 _ => unreachable!("matched migration action"),
             };
             let text = if json {
@@ -726,8 +727,8 @@ pub fn execute_offline(
             Ok(text.into())
         }
         StorageAction::ArchiveExport { archive } => {
-            let engine = PersistentEngine::open(db)?;
-            let inventory = rrd_store::export_logical_archive(&engine, archive)?;
+            let engine = EmbeddedOperator::open(db)?;
+            let inventory = engine.export_logical_archive(archive)?;
             let text = if json {
                 serde_json::to_string_pretty(&inventory)?
             } else {
@@ -740,7 +741,7 @@ pub fn execute_offline(
             Ok(text.into())
         }
         StorageAction::ArchiveInspect { archive } => {
-            let inventory = rrd_store::inspect_logical_archive(archive)?;
+            let inventory = rrd_engine::operator::inspect_logical_archive(archive)?;
             let text = if json {
                 serde_json::to_string_pretty(&inventory)?
             } else {
@@ -753,7 +754,7 @@ pub fn execute_offline(
             Ok(text.into())
         }
         StorageAction::ArchiveRestore { archive } => {
-            let report = rrd_store::restore_logical_archive_to_new_root(archive, db, now)?;
+            let report = rrd_engine::operator::restore_logical_archive(archive, db, now)?;
             let text = if json {
                 serde_json::to_string_pretty(&report)?
             } else {
@@ -766,8 +767,8 @@ pub fn execute_offline(
             Ok(text.into())
         }
         StorageAction::BackupCreate { catalogue, label } => {
-            let engine = PersistentEngine::open(db)?;
-            let entry = rrd_store::create_logical_backup(&engine, catalogue, label, now)?;
+            let engine = EmbeddedOperator::open(db)?;
+            let entry = engine.create_logical_backup(catalogue, label, now)?;
             let text = if json {
                 serde_json::to_string_pretty(&entry)?
             } else {
@@ -779,7 +780,7 @@ pub fn execute_offline(
             Ok(text.into())
         }
         StorageAction::BackupList { catalogue } => {
-            let verified = rrd_store::verify_backup_catalogue(catalogue)?;
+            let verified = rrd_engine::operator::verify_backup_catalogue(catalogue)?;
             let text = if json {
                 serde_json::to_string_pretty(&verified)?
             } else if verified.backups.is_empty() {
@@ -808,7 +809,8 @@ pub fn execute_offline(
             catalogue,
             backup_id,
         } => {
-            let report = rrd_store::restore_catalogued_backup(catalogue, backup_id, db, now)?;
+            let report =
+                rrd_engine::operator::restore_catalogued_backup(catalogue, backup_id, db, now)?;
             let text = if json {
                 serde_json::to_string_pretty(&report)?
             } else {
@@ -821,7 +823,7 @@ pub fn execute_offline(
             Ok(text.into())
         }
         StorageAction::FormatUpgrade => {
-            let ledger = rrd_store::migrate_native_format(db, now)?;
+            let ledger = rrd_engine::operator::migrate_native_format(db, now)?;
             let text = if json {
                 serde_json::to_string_pretty(&ledger)?
             } else {
@@ -837,7 +839,7 @@ pub fn execute_offline(
             Ok(text.into())
         }
         StorageAction::FormatStatus => {
-            let ledger = rrd_store::native_format_migration_status(db)?;
+            let ledger = rrd_engine::operator::native_format_migration_status(db)?;
             let text = if json {
                 serde_json::to_string_pretty(&ledger)?
             } else if let Some(ledger) = ledger {
@@ -860,7 +862,7 @@ pub fn execute_offline(
 /// `now` is supplied rather than read here, so that tests are deterministic and
 /// the clock enters at exactly one place (`main`).
 pub fn execute(
-    store: &PersistentEngine,
+    store: &EmbeddedOperator,
     command: &Command,
     reader: &Reader,
     now: Millis,
@@ -903,7 +905,7 @@ pub fn execute(
                 subjects: subjects
                     .iter()
                     .map(|s| Subject::new(s.clone()))
-                    .collect::<rrd_core::Result<Vec<_>>>()?,
+                    .collect::<CoreResult<Vec<_>>>()?,
                 predicates: if predicates.is_empty() {
                     None
                 } else {
@@ -911,12 +913,12 @@ pub fn execute(
                         predicates
                             .iter()
                             .map(|p| Predicate::new(p.clone()))
-                            .collect::<rrd_core::Result<Vec<_>>>()?,
+                            .collect::<CoreResult<Vec<_>>>()?,
                     )
                 },
                 as_of: at.unwrap_or(now),
             };
-            let set = rrd_core::recall(store, &query, *budget)?;
+            let set = store.recall(&query, *budget)?;
             // Every recalled claim is a read, recorded per SPEC.md §7.
             for claim in &set.claims {
                 store.observe(reader, &claim.subject, &claim.predicate, now)?;
@@ -1003,8 +1005,14 @@ pub fn execute(
             budget,
         } => {
             verify_instance_store(store, root)?;
-            let flight =
-                rrd_engine::preflight(store, root, harness.as_deref(), reader, now, *budget)?;
+            let flight = rrd_engine::preflight(
+                store.runtime_store(),
+                root,
+                harness.as_deref(),
+                reader,
+                now,
+                *budget,
+            )?;
             let detail = (!flight.warnings.is_empty())
                 .then(|| format!("{} warning(s)", flight.warnings.len()));
             return Ok(Execution {
@@ -1041,7 +1049,7 @@ pub fn execute(
             });
             verify_instance_store(store, &root)?;
             let ctx = rrd_engine::HookContext {
-                store,
+                store: store.runtime_store(),
                 root: &root,
                 harness: harness.as_deref(),
                 reader,
@@ -1078,7 +1086,7 @@ pub fn execute(
                 max_batch_rows: *max_batch_rows,
             };
             let result = rrd_engine::execute_traced_query(
-                store,
+                store.runtime_store(),
                 scope,
                 ql,
                 &parameters,
@@ -1185,7 +1193,7 @@ pub fn execute(
                             .join(", ")
                     )
                 })?;
-                let report = rrd_engine::init(store, root, adapter, now)?;
+                let report = rrd_engine::init(store.runtime_store(), root, adapter, now)?;
                 let mut lines: Vec<String> = report
                     .written
                     .iter()
@@ -1203,8 +1211,9 @@ pub fn execute(
                         payload,
                     },
             } => {
-                let payload: rrd_core::ReasoningPayload = serde_json::from_str(payload)?;
-                let event = rrd_engine::record_reasoning(store, run, now, actor, payload)?;
+                let payload: ReasoningPayload = serde_json::from_str(payload)?;
+                let event =
+                    rrd_engine::record_reasoning(store.runtime_store(), run, now, actor, payload)?;
                 Ok(if json {
                     serde_json::to_string_pretty(&event)?
                 } else {
@@ -1222,8 +1231,8 @@ pub fn execute(
                 action: ReasoningAction::Show { run },
             } => {
                 let run = match run {
-                    Some(id) => rrd_engine::reasoning_run(store, id)?,
-                    None => rrd_engine::active_reasoning_run(store)?,
+                    Some(id) => rrd_engine::reasoning_run(store.runtime_store(), id)?,
+                    None => rrd_engine::active_reasoning_run(store.runtime_store())?,
                 };
                 let Some(run) = run else {
                     return Ok("no matching reasoning run".into());
@@ -1259,8 +1268,13 @@ pub fn execute(
                 action: HarnessAction::Audit { name, evidence },
             } => {
                 let registry = rrd_engine::Registry::builtin();
-                let claim =
-                    registry.record_verification(store, name, now, evidence, reader.as_str())?;
+                let claim = registry.record_verification(
+                    store.runtime_store(),
+                    name,
+                    now,
+                    evidence,
+                    reader.as_str(),
+                )?;
                 Ok(format!(
                     "recorded: {} verified until {} ({})",
                     name,
@@ -1278,7 +1292,7 @@ pub fn execute(
                     let state = if let Some(when) = &adapter.retired {
                         format!("RETIRED ({when})")
                     } else {
-                        match registry.verification(store, adapter, now)? {
+                        match registry.verification(store.runtime_store(), adapter, now)? {
                             rrd_engine::Verification::Current { until } => format!(
                                 "verified until {}",
                                 until
@@ -1368,7 +1382,7 @@ pub fn execute(
             }
             Command::ResetRouting { root } => {
                 verify_instance_store(store, root)?;
-                let ready = rrd_engine::reset_routing(store, root)?;
+                let ready = rrd_engine::reset_routing(store.runtime_store(), root)?;
                 Ok(if json {
                     serde_json::to_string_pretty(&serde_json::json!({
                         "generation": ready.generation,
@@ -1482,7 +1496,7 @@ pub fn execute(
                 let access = store.access_count()?;
                 Ok(if json {
                     serde_json::to_string_pretty(&serde_json::json!({
-                        "storage_backend": store.backend().as_str(),
+                        "storage_backend": store.backend_name(),
                         "claim_sequence": sequence,
                         "invocations": invocations,
                         "access_records_approximate": access,
@@ -1493,7 +1507,7 @@ pub fn execute(
                      claim sequence      {sequence}\n\
                      invocations         {invocations}\n\
                      access records      {access} (approximate)",
-                        store.backend().as_str()
+                        store.backend_name()
                     )
                 })
             }
@@ -1546,7 +1560,7 @@ pub fn execute(
 }
 
 fn verify_instance_store(
-    store: &PersistentEngine,
+    store: &EmbeddedOperator,
     root: &std::path::Path,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let binding = rrd_engine::InstanceBinding::discover(root)?;

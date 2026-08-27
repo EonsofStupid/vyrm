@@ -2283,3 +2283,23 @@ index.
 - Capability audit: the requested twenty engine capabilities are frozen as
   `CAP-01` through `CAP-20`, each mapped to explicit work-plan closure items.
   Truth remains five core-present, fourteen partial, and one missing.
+
+## 2026-08-27 — CLI crosses the embedded engine boundary
+
+- Composition: `rrflow-cli` has no production `rrd-core` or `rrd-store`
+  dependency. The engine-owned `EmbeddedOperator` owns physical backend
+  selection and exposes the bounded ordinary and exclusive-administration
+  operations needed by the operator surface.
+- Preserved behavior: recall and provenance, claim CRUD/history, invocation and
+  effectiveness ledgers, projection rebuild/ground/reset, hooks, preflight,
+  RRFlowQL, reasoning, routing, exact-argv execution, work-plan enforcement,
+  migrations, archives, backups, and format upgrades retain their prior command
+  behavior and persistent fixtures.
+- Evidence: 31 CLI tests pass (4 binary unit, 2 fixture, 16 operator-surface,
+  and 9 runtime-experience), all 8 workspace architecture tests pass, and
+  strict all-target Clippy passes for `rrd-engine` and `rrflow-cli`.
+  `rrflow dev doctor` advances from 16/3 to 17/2; only supervised lifecycle and
+  its full-topology CI smoke remain blocked.
+- Honest limit: this closes the physical dependency boundary. Authenticated
+  daemon-mode CLI selection and embedded/daemon behavior parity remain open
+  D5.4/G06-W04 acceptance work.

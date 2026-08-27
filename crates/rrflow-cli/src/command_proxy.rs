@@ -5,8 +5,7 @@
 //! capture; it never parses a shell program.
 
 use crate::command::Execution;
-use rrd_core::{digest, Reader};
-use rrd_store::PersistentEngine;
+use rrd_engine::operator::{digest, EmbeddedOperator, Reader};
 use serde::Serialize;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
@@ -66,7 +65,7 @@ struct ExactCommandReport {
 }
 
 pub fn execute(
-    store: &PersistentEngine,
+    store: &EmbeddedOperator,
     request: ExactCommandRequest<'_>,
     reader: &Reader,
     now: u64,
@@ -124,7 +123,7 @@ pub fn execute(
     });
     let request_sha256 = tool_request_sha256(&lifecycle_input)?;
     let context = rrd_engine::HookContext {
-        store,
+        store: store.runtime_store(),
         root: &root,
         harness: Some("rrflow-exec"),
         reader,
@@ -146,7 +145,7 @@ pub fn execute(
     // spawn. A repeated request can be re-authorized before this point, but it
     // cannot consume the same permit and start a second process.
     rrd_engine::consume_attuned_tool_authorization(
-        store,
+        store.runtime_store(),
         &root,
         &request_sha256,
         now,
@@ -196,7 +195,7 @@ pub fn execute(
         "tool_response": tool_response,
     });
     let post_context = rrd_engine::HookContext {
-        store,
+        store: store.runtime_store(),
         root: &root,
         harness: Some("rrflow-exec"),
         reader,

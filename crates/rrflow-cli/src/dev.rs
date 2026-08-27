@@ -533,9 +533,10 @@ mod tests {
             check.id == "workspace.identity" && check.status == CheckStatus::Passed
         }));
         assert!(report.checks.iter().any(|check| {
-            check.id == "surface.connectome-client-only"
-                && check.status == CheckStatus::Blocked
-                && check.evidence.contains("rrd-store")
+            check.id == "surface.connectome-client-only" && check.status == CheckStatus::Passed
+        }));
+        assert!(report.checks.iter().any(|check| {
+            check.id == "surface.cli-engine-boundary" && check.status == CheckStatus::Passed
         }));
         assert!(report.checks.iter().any(|check| {
             check.id == "supervisor.lifecycle" && check.status == CheckStatus::Blocked

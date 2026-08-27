@@ -1,7 +1,6 @@
 use crate::command::Execution;
 use clap::Subcommand;
-use rrd_core::{digest, Reader};
-use rrd_store::PersistentEngine;
+use rrd_engine::operator::{digest, EmbeddedOperator, Reader};
 
 const MAX_VERIFICATION_OUTPUT_BYTES: u64 = 16 * 1024 * 1024;
 const MAX_VERIFICATION_RUNTIME: std::time::Duration = std::time::Duration::from_secs(15 * 60);
@@ -91,7 +90,7 @@ impl WorkPlanAction {
 }
 
 pub fn execute(
-    store: &PersistentEngine,
+    store: &EmbeddedOperator,
     action: &WorkPlanAction,
     reader: &Reader,
     now: u64,
@@ -102,17 +101,17 @@ pub fn execute(
             verify_project_store(store, root)?;
             let definition = rrd_engine::read_work_plan(root)?;
             rrd_engine::install_work_plan(
-                store,
+                store.runtime_store(),
                 definition,
                 now,
                 reader.as_str(),
                 "cli-workplan-sync",
             )?
         }
-        WorkPlanAction::Status { plan } => rrd_engine::load_work_plan(store, plan)?
+        WorkPlanAction::Status { plan } => rrd_engine::load_work_plan(store.runtime_store(), plan)?
             .ok_or_else(|| format!("work plan {plan} is not installed"))?,
         WorkPlanAction::Activate { plan, item } => rrd_engine::activate_work_item(
-            store,
+            store.runtime_store(),
             plan,
             item,
             now,
@@ -127,8 +126,9 @@ pub fn execute(
             verification_argv,
         } => {
             verify_project_store(store, root)?;
-            let ready = rrd_engine::ensure_routing_fresh(store, root)?;
-            let receipt = rrd_engine::require_fresh_attunement(store, root, &ready)?;
+            let ready = rrd_engine::ensure_routing_fresh(store.runtime_store(), root)?;
+            let receipt =
+                rrd_engine::require_fresh_attunement(store.runtime_store(), root, &ready)?;
             let commands = verification_argv
                 .iter()
                 .map(|encoded| {
@@ -143,7 +143,7 @@ pub fn execute(
                 format!("cannot read reviewed plan {}: {error}", plan_file.display())
             })?;
             rrd_engine::record_work_item_plan(
-                store,
+                store.runtime_store(),
                 plan,
                 rrd_engine::WorkItemPlanRecord {
                     work_item_id: item.clone(),
@@ -159,7 +159,7 @@ pub fn execute(
         }
         WorkPlanAction::Verify { root, plan } => {
             verify_project_store(store, root)?;
-            let record = rrd_engine::load_active_work_item_plan(store, plan)?
+            let record = rrd_engine::load_active_work_item_plan(store.runtime_store(), plan)?
                 .ok_or("work plan has no active recorded implementation plan")?;
             let mut checks = Vec::with_capacity(record.verification_commands.len());
             for argv in &record.verification_commands {
@@ -186,8 +186,9 @@ pub fn execute(
                     .into());
                 }
             }
-            let ready = rrd_engine::ensure_routing_fresh(store, root)?;
-            let receipt = rrd_engine::require_fresh_attunement(store, root, &ready)?;
+            let ready = rrd_engine::ensure_routing_fresh(store.runtime_store(), root)?;
+            let receipt =
+                rrd_engine::require_fresh_attunement(store.runtime_store(), root, &ready)?;
             if receipt.source_tree_sha256 != record.source_tree_sha256 {
                 return Err(
                     "verification denied: project tree changed after the plan was recorded".into(),
@@ -195,7 +196,7 @@ pub fn execute(
             }
             let repository_revision = repository_revision(root, &record.source_tree_sha256)?;
             rrd_engine::verify_work_item(
-                store,
+                store.runtime_store(),
                 plan,
                 rrd_engine::WorkItemVerification {
                     work_item_id: record.work_item_id,
@@ -312,7 +313,7 @@ fn cleanup_verification_files(stdout: &std::path::Path, stderr: &std::path::Path
 }
 
 fn verify_project_store(
-    store: &PersistentEngine,
+    store: &EmbeddedOperator,
     root: &std::path::Path,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let binding = rrd_engine::InstanceBinding::discover(root)?;

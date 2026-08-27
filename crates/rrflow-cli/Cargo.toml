@@ -7,9 +7,7 @@ publish.workspace = true
 description = "rrflow operator surface: explicit, recorded invocation of every trigger."
 
 [dependencies]
-rrd-core = { path = "../rrd-core" }
 rrd-engine = { path = "../rrd-engine" }
-rrd-store = { path = "../rrd-store" }
 clap = { version = "4", features = ["derive", "env"] }
 tracing-subscriber = { workspace = true }
 serde = { workspace = true }
@@ -19,6 +17,8 @@ sha2 = "0.11"
 
 [dev-dependencies]
 tempfile = "3"
+rrd-core = { path = "../rrd-core" }
+rrd-store = { path = "../rrd-store" }
 rrd-lsm = { path = "../rrd-lsm" }
 # A/B harness only: real token counts for both arms of the controlled
 # comparison. o200k_base is a proxy tokenizer — no Claude tokenizer is
