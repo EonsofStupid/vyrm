@@ -61,7 +61,7 @@ jobs:
       - name: Test RRD daemon process contract
         run: cargo test -p rrd-server --bin rrd-server --locked
       - name: Build cross-package controller fixture
-        run: cargo build -p rrd-estate --bin rrd-estate-controller --locked
+        run: cargo build -p rrflow-cli --bin rrd-estate-controller --locked
       - name: Test real child and controller recovery
         run: cargo test -p rrd-server --test local_estate_driver --locked -- --nocapture
       - name: Deny process-boundary warnings
@@ -94,7 +94,7 @@ jobs:
       - name: Enforce RRFlow engine ownership
         run: cargo test -p rrd-engine --test workspace_architecture --locked
       - name: Build cross-package controller fixture
-        run: cargo build -p rrd-estate --bin rrd-estate-controller --locked
+        run: cargo build -p rrflow-cli --bin rrd-estate-controller --locked
       - name: Test workspace
         env:
           RRFLOW_PGVECTOR_TEST_URL: postgresql://rrflow_test:rrflow_test_password@127.0.0.1:5432/rrd_operator_knowledge_test?sslmode=disable

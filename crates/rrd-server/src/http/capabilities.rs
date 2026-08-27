@@ -252,6 +252,7 @@ pub(super) fn capabilities(
             id: instance.clone(),
         },
         capabilities,
+        product_capabilities: product_capability_catalogue(),
     }
 }
 

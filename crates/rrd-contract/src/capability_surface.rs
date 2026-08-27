@@ -1,4 +1,4 @@
-use crate::{invalid, Result, PROTOCOL_VERSION};
+use crate::{invalid, Result, MAX_MESSAGE_BYTES, PROTOCOL_VERSION};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
@@ -31,9 +31,9 @@ impl ProductSurface {
 #[serde(rename_all = "snake_case")]
 pub enum SurfaceDisposition {
     Available,
-    Experimental,
     Planned,
-    NotApplicable,
+    Denied,
+    Unavailable,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -41,8 +41,10 @@ pub enum SurfaceDisposition {
 pub struct SurfaceBinding {
     pub surface: ProductSurface,
     pub disposition: SurfaceDisposition,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub entrypoints: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub entrypoint: Option<String>,
+    pub reason: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -87,15 +89,45 @@ impl ProductCapabilityCatalogue {
                 if !surfaces.insert(binding.surface) {
                     return invalid("product capability surfaces must be unique");
                 }
-                if binding.disposition == SurfaceDisposition::Available
-                    && binding.entrypoint.as_deref().is_none_or(str::is_empty)
+                if binding
+                    .entrypoints
+                    .iter()
+                    .any(|entrypoint| entrypoint.is_empty() || entrypoint.len() > MAX_MESSAGE_BYTES)
                 {
-                    return invalid("available product surfaces require an entrypoint");
+                    return invalid("product surface entrypoints must be bounded and non-empty");
                 }
-                if binding.disposition == SurfaceDisposition::NotApplicable
-                    && binding.entrypoint.is_some()
+                if binding
+                    .entrypoints
+                    .windows(2)
+                    .any(|pair| pair[0] >= pair[1])
                 {
-                    return invalid("not-applicable product surfaces cannot have an entrypoint");
+                    return invalid("product surface entrypoints must be sorted and unique");
+                }
+                match binding.disposition {
+                    SurfaceDisposition::Available => {
+                        if binding.entrypoints.is_empty() {
+                            return invalid("available product surfaces require an entrypoint");
+                        }
+                        if binding.reason.is_some() {
+                            return invalid("available product surfaces cannot carry a reason");
+                        }
+                    }
+                    SurfaceDisposition::Planned
+                    | SurfaceDisposition::Denied
+                    | SurfaceDisposition::Unavailable => {
+                        if !binding.entrypoints.is_empty() {
+                            return invalid(
+                                "non-executable product surfaces cannot advertise entrypoints",
+                            );
+                        }
+                        if binding.reason.as_deref().is_none_or(|reason| {
+                            reason.is_empty() || reason.len() > MAX_MESSAGE_BYTES
+                        }) {
+                            return invalid(
+                                "non-executable product surfaces require a bounded reason",
+                            );
+                        }
+                    }
                 }
             }
         }

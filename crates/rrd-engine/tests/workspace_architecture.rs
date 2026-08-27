@@ -265,6 +265,47 @@ fn outward_cli_owns_product_executables_while_physical_crates_own_none() {
             "{package} must remain a physical component library, not an independent product authority; targets={unexpected:?}"
         );
     }
+
+    let workflow = fs::read_to_string(metadata.root.join(".github/workflows/ci.yml"))
+        .expect("CI workflow must be readable");
+    let canonical_fixture = "cargo build -p rrflow-cli --bin rrd-estate-controller --locked";
+    assert_eq!(
+        workflow.matches(canonical_fixture).count(),
+        2,
+        "both CI matrices must build the controller fixture from its product owner"
+    );
+    assert!(
+        !workflow.contains("cargo build -p rrd-estate --bin rrd-estate-controller"),
+        "CI must not revive the retired physical-crate executable owner"
+    );
+}
+
+#[test]
+fn outward_tool_surfaces_serialize_the_authoritative_runtime_catalogue() {
+    let metadata = workspace_metadata();
+    let mcp = fs::read_to_string(metadata.root.join("crates/rrflow-mcp/src/main.rs"))
+        .expect("MCP source must be readable");
+    let compact_mcp = mcp.split_whitespace().collect::<String>();
+    assert!(
+        compact_mcp.contains("authority.catalogue().tools"),
+        "MCP tools/list must serialize the authority catalogue"
+    );
+    assert!(
+        !mcp.contains("RuntimeToolDescriptor {") && !mcp.contains("RuntimeToolDefinition {"),
+        "MCP must not define a second hardcoded runtime-tool registry"
+    );
+
+    let connectome = fs::read_to_string(metadata.root.join("crates/connectome-ui/src/lib.rs"))
+        .expect("Connectome source must be readable");
+    assert!(
+        connectome.contains("runtime_tool_catalogue"),
+        "Connectome must fetch the authoritative runtime-tool catalogue"
+    );
+    assert!(
+        !connectome.contains("RuntimeToolDescriptor {")
+            && !connectome.contains("RuntimeToolDefinition {"),
+        "Connectome must not define a second hardcoded runtime-tool registry"
+    );
 }
 
 #[test]

@@ -208,6 +208,10 @@ async fn rust_client_negotiates_authenticates_queries_and_reads_audit() {
     .unwrap();
     let capabilities = client.capabilities().await.unwrap();
     assert_eq!(capabilities.protocol_version, 1);
+    assert_eq!(
+        capabilities.product_capabilities,
+        rrd_engine::product_capability_catalogue()
+    );
     let catalogue = client.endpoint_catalogue().await.unwrap();
     assert_eq!(catalogue.endpoints.len(), 31);
     let openapi = client.openapi_document().await.unwrap();

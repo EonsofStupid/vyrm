@@ -1335,6 +1335,24 @@ export interface operations {
                                     /** @enum {string} */
                                     kind: "organization" | "estate" | "project" | "instance" | "tenant" | "namespace" | "database" | "table" | "collection" | "record" | "point" | "relation" | "alias" | "cluster" | "node" | "shard" | "replica" | "segment" | "transaction" | "snapshot" | "backup" | "operation";
                                 };
+                                product_capabilities: {
+                                    capabilities: {
+                                        bindings: {
+                                            /** @enum {string} */
+                                            disposition: "available" | "planned" | "denied" | "unavailable";
+                                            entrypoints?: string[];
+                                            reason?: string | null;
+                                            /** @enum {string} */
+                                            surface: "engine" | "rrd_http" | "mcp" | "cli" | "connectome";
+                                        }[];
+                                        category: string;
+                                        id: string;
+                                        label: string;
+                                        summary: string;
+                                    }[];
+                                    /** Format: uint16 */
+                                    contract_version: number;
+                                };
                                 protocol: string;
                                 /** Format: uint16 */
                                 protocol_version: number;
@@ -1408,6 +1426,24 @@ export interface operations {
                                     id: string;
                                     /** @enum {string} */
                                     kind: "organization" | "estate" | "project" | "instance" | "tenant" | "namespace" | "database" | "table" | "collection" | "record" | "point" | "relation" | "alias" | "cluster" | "node" | "shard" | "replica" | "segment" | "transaction" | "snapshot" | "backup" | "operation";
+                                };
+                                product_capabilities: {
+                                    capabilities: {
+                                        bindings: {
+                                            /** @enum {string} */
+                                            disposition: "available" | "planned" | "denied" | "unavailable";
+                                            entrypoints?: string[];
+                                            reason?: string | null;
+                                            /** @enum {string} */
+                                            surface: "engine" | "rrd_http" | "mcp" | "cli" | "connectome";
+                                        }[];
+                                        category: string;
+                                        id: string;
+                                        label: string;
+                                        summary: string;
+                                    }[];
+                                    /** Format: uint16 */
+                                    contract_version: number;
                                 };
                                 protocol: string;
                                 /** Format: uint16 */
@@ -7052,8 +7088,9 @@ export interface operations {
                                     capabilities: {
                                         bindings: {
                                             /** @enum {string} */
-                                            disposition: "available" | "experimental" | "planned" | "not_applicable";
-                                            entrypoint?: string | null;
+                                            disposition: "available" | "planned" | "denied" | "unavailable";
+                                            entrypoints?: string[];
+                                            reason?: string | null;
                                             /** @enum {string} */
                                             surface: "engine" | "rrd_http" | "mcp" | "cli" | "connectome";
                                         }[];
@@ -9197,8 +9234,9 @@ export interface operations {
                                     capabilities: {
                                         bindings: {
                                             /** @enum {string} */
-                                            disposition: "available" | "experimental" | "planned" | "not_applicable";
-                                            entrypoint?: string | null;
+                                            disposition: "available" | "planned" | "denied" | "unavailable";
+                                            entrypoints?: string[];
+                                            reason?: string | null;
                                             /** @enum {string} */
                                             surface: "engine" | "rrd_http" | "mcp" | "cli" | "connectome";
                                         }[];

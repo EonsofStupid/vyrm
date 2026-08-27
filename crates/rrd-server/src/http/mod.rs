@@ -19,9 +19,10 @@ use rrd_contract::{
     ServiceCapabilities, PROTOCOL, PROTOCOL_VERSION,
 };
 use rrd_engine::{
-    runtime_tool_contract_catalogue, runtime_tool_operation, AuthorizedInvocation, Invocation,
-    InvocationCompletion, InvocationCredential, ProjectAuthorityBinding, RrdEngine, RrdOperation,
-    ServiceError, ServiceErrorKind, MAX_AUDIT_PAGE_RECORDS,
+    product_capability_catalogue, runtime_tool_contract_catalogue, runtime_tool_operation,
+    AuthorizedInvocation, Invocation, InvocationCompletion, InvocationCredential,
+    ProjectAuthorityBinding, RrdEngine, RrdOperation, ServiceError, ServiceErrorKind,
+    MAX_AUDIT_PAGE_RECORDS,
 };
 use rustls::pki_types::{CertificateDer, PrivateKeyDer};
 use rustls::server::WebPkiClientVerifier;

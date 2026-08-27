@@ -35,9 +35,9 @@ pub fn product_capability_catalogue() -> ProductCapabilityCatalogue {
                 bindings: bindings(
                     available(engine_binding),
                     available(format!("{} {}", method(endpoint.method), endpoint.path)),
-                    planned(),
-                    planned(),
-                    planned(),
+                    unavailable("No MCP runtime tool maps this HTTP operation."),
+                    unavailable("No RRFlow CLI command maps this HTTP operation."),
+                    planned("Connectome operation control is scheduled by G09."),
                 ),
             }
         })
@@ -53,13 +53,28 @@ pub fn product_capability_catalogue() -> ProductCapabilityCatalogue {
             .iter_mut()
             .find(|capability| capability.id == id)
         {
-            let mcp = capability
-                .bindings
-                .iter_mut()
-                .find(|binding| binding.surface == ProductSurface::Mcp)
-                .expect("every product capability has an MCP disposition");
-            *mcp = available(tool.name);
-            mcp.surface = ProductSurface::Mcp;
+            expose(
+                binding(capability, ProductSurface::Engine),
+                format!("rrd-engine:runtime/{}", tool.name),
+            );
+            expose(
+                binding(capability, ProductSurface::RrdHttp),
+                format!("POST /v1/runtime/tools/invoke#{}", tool.name),
+            );
+            expose(binding(capability, ProductSurface::Mcp), tool.name);
+            expose(
+                binding(capability, ProductSurface::Connectome),
+                format!("/api/runtime/tools/invoke#{}", tool.name),
+            );
+            if let Some(operation) = WorkPlanOperation::ALL
+                .into_iter()
+                .find(|operation| operation.runtime_tool_name() == tool.name)
+            {
+                expose(
+                    binding(capability, ProductSurface::Cli),
+                    operation.cli_command(),
+                );
+            }
             continue;
         }
         capabilities.push(ProductCapability {
@@ -73,11 +88,12 @@ pub fn product_capability_catalogue() -> ProductCapabilityCatalogue {
                     .find(|operation| operation.runtime_tool_name() == tool.name);
                 bindings(
                     available(format!("rrd-engine:runtime/{}", tool.name)),
-                    operation.map_or_else(not_applicable, |_| {
-                        available(format!("POST /v1/runtime/tools/invoke#{}", tool.name))
-                    }),
+                    available(format!("POST /v1/runtime/tools/invoke#{}", tool.name)),
                     available(tool.name),
-                    operation.map_or_else(planned, |operation| available(operation.cli_command())),
+                    operation.map_or_else(
+                        || unavailable("No RRFlow CLI command maps this runtime tool."),
+                        |operation| available(operation.cli_command()),
+                    ),
                     available(format!("/api/runtime/tools/invoke#{}", tool.name)),
                 )
             },
@@ -205,7 +221,13 @@ pub fn product_capability_catalogue() -> ProductCapabilityCatalogue {
             label: label.into(),
             category: category.into(),
             summary: summary.into(),
-            bindings: bindings(planned(), planned(), planned(), planned(), planned()),
+            bindings: bindings(
+                planned(FOUNDATION_PLAN_REASON),
+                planned(FOUNDATION_PLAN_REASON),
+                planned(FOUNDATION_PLAN_REASON),
+                planned(FOUNDATION_PLAN_REASON),
+                planned(FOUNDATION_PLAN_REASON),
+            ),
         });
     }
 
@@ -237,25 +259,47 @@ fn available(entrypoint: impl Into<String>) -> SurfaceBinding {
     SurfaceBinding {
         surface: ProductSurface::Engine,
         disposition: SurfaceDisposition::Available,
-        entrypoint: Some(entrypoint.into()),
+        entrypoints: vec![entrypoint.into()],
+        reason: None,
     }
 }
 
-fn planned() -> SurfaceBinding {
+fn planned(reason: impl Into<String>) -> SurfaceBinding {
     SurfaceBinding {
         surface: ProductSurface::Engine,
         disposition: SurfaceDisposition::Planned,
-        entrypoint: None,
+        entrypoints: Vec::new(),
+        reason: Some(reason.into()),
     }
 }
 
-fn not_applicable() -> SurfaceBinding {
+fn unavailable(reason: impl Into<String>) -> SurfaceBinding {
     SurfaceBinding {
         surface: ProductSurface::Engine,
-        disposition: SurfaceDisposition::NotApplicable,
-        entrypoint: None,
+        disposition: SurfaceDisposition::Unavailable,
+        entrypoints: Vec::new(),
+        reason: Some(reason.into()),
     }
 }
+
+fn binding(capability: &mut ProductCapability, surface: ProductSurface) -> &mut SurfaceBinding {
+    capability
+        .bindings
+        .iter_mut()
+        .find(|binding| binding.surface == surface)
+        .expect("every product capability must declare every surface")
+}
+
+fn expose(binding: &mut SurfaceBinding, entrypoint: impl Into<String>) {
+    binding.disposition = SurfaceDisposition::Available;
+    binding.reason = None;
+    binding.entrypoints.push(entrypoint.into());
+    binding.entrypoints.sort();
+    binding.entrypoints.dedup();
+}
+
+const FOUNDATION_PLAN_REASON: &str =
+    "Scheduled by the checked-in RRFlow foundation work plan; no executable implementation is available yet.";
 
 fn category(id: &str) -> &str {
     id.split_once('-').map_or("service", |(prefix, _)| prefix)

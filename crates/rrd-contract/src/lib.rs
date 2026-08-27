@@ -57,7 +57,7 @@ use std::fmt;
 pub const PROTOCOL: &str = "rrd";
 pub const PROTOCOL_VERSION: u16 = 1;
 pub const OPENAPI_DOCUMENT_SHA256: &str =
-    "bfc1607e18f225faaa3d5d374d25bd455ba718f1f1636df08df9800003449eb3";
+    "08bfbc99be430b7a9defe00c1e2342706925e1e525d47f976c2325903d5648a4";
 pub const MAX_ID_BYTES: usize = 128;
 pub const MAX_MESSAGE_BYTES: usize = 4_096;
 pub const MAX_CAPABILITIES: usize = 512;
@@ -2895,6 +2895,7 @@ pub struct ServiceCapabilities {
     pub deployment_mode: DeploymentMode,
     pub instance: ResourceId,
     pub capabilities: Vec<CapabilityDescriptor>,
+    pub product_capabilities: ProductCapabilityCatalogue,
 }
 
 impl ServiceCapabilities {
@@ -2930,6 +2931,7 @@ impl ServiceCapabilities {
         {
             return invalid("service capabilities must be sorted by canonical name");
         }
+        self.product_capabilities.validate()?;
         Ok(())
     }
 }

@@ -198,6 +198,10 @@ fn connectome_uses_authenticated_public_rrd_contracts_end_to_end() {
 
     let service = backend.service_capabilities().unwrap();
     assert_eq!(service.instance.id.as_str(), "connectome-test");
+    assert_eq!(
+        service.product_capabilities,
+        rrd_engine::product_capability_catalogue()
+    );
     let tools = backend.runtime_tool_catalogue().unwrap();
     for operation in WorkPlanOperation::ALL {
         assert!(

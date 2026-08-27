@@ -6,15 +6,16 @@ use rrd_contract::{
     EstateBackupJobState, EstateBackupJobsSnapshot, EstateMutationResult, EstateSnapshot,
     ExecuteQuery, FollowChangefeed, HybridFusion, IdempotencyBinding, ListQueryIndexes,
     ListVectorCollections, Liveness, NamedVectorDefinition, PollLiveQuery, PreviewTransaction,
-    QueryBudget, QueryExecutionSnapshot, QueryIndexKind, QueryPlanCandidate, QueryPlanSnapshot,
-    QueryResult, QueryRowSnapshot, QueryValue, ReadAudit, ReadChangefeed, ReadEstate, Readiness,
-    RenewSession, RequestContext, RequestEnvelope, ResourceId, ResourceKind, ResourcePath,
-    ResponseEnvelope, ResponseOutcome, RestoreInstanceBackup, SearchHybrid, SearchVectors,
-    ServiceCapabilities, SessionEndState, SessionLease, SessionLimits, SessionTermination,
-    TransactionMutation, TransactionPreview, TransactionState, VectorIndexConfiguration,
-    VectorMemoryTier, VectorPayloadCondition, VectorPayloadFilter, VectorPayloadOperator,
-    VectorQuantizationBits, VectorSearchMetric, VectorSearchMode, VectorSearchQuery,
-    VectorValueKind, PROTOCOL, PROTOCOL_VERSION,
+    ProductCapability, ProductCapabilityCatalogue, ProductSurface, QueryBudget,
+    QueryExecutionSnapshot, QueryIndexKind, QueryPlanCandidate, QueryPlanSnapshot, QueryResult,
+    QueryRowSnapshot, QueryValue, ReadAudit, ReadChangefeed, ReadEstate, Readiness, RenewSession,
+    RequestContext, RequestEnvelope, ResourceId, ResourceKind, ResourcePath, ResponseEnvelope,
+    ResponseOutcome, RestoreInstanceBackup, SearchHybrid, SearchVectors, ServiceCapabilities,
+    SessionEndState, SessionLease, SessionLimits, SessionTermination, SurfaceBinding,
+    SurfaceDisposition, TransactionMutation, TransactionPreview, TransactionState,
+    VectorIndexConfiguration, VectorMemoryTier, VectorPayloadCondition, VectorPayloadFilter,
+    VectorPayloadOperator, VectorQuantizationBits, VectorSearchMetric, VectorSearchMode,
+    VectorSearchQuery, VectorValueKind, PROTOCOL, PROTOCOL_VERSION,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -68,6 +69,49 @@ fn contract_fixture() -> ContractFixture {
                     ),
                 },
             ],
+            product_capabilities: ProductCapabilityCatalogue {
+                contract_version: PROTOCOL_VERSION,
+                capabilities: vec![ProductCapability {
+                    id: "backup-create".into(),
+                    label: "Backup Create".into(),
+                    category: "backup".into(),
+                    summary: "Create one authenticated logical backup.".into(),
+                    bindings: vec![
+                        SurfaceBinding {
+                            surface: ProductSurface::Engine,
+                            disposition: SurfaceDisposition::Available,
+                            entrypoints: vec![
+                                "rrd-engine:RrdOperation::CreateInstanceBackup".into()
+                            ],
+                            reason: None,
+                        },
+                        SurfaceBinding {
+                            surface: ProductSurface::RrdHttp,
+                            disposition: SurfaceDisposition::Available,
+                            entrypoints: vec!["POST /v1/backups/create".into()],
+                            reason: None,
+                        },
+                        SurfaceBinding {
+                            surface: ProductSurface::Mcp,
+                            disposition: SurfaceDisposition::Unavailable,
+                            entrypoints: Vec::new(),
+                            reason: Some("No MCP runtime tool is present in this fixture.".into()),
+                        },
+                        SurfaceBinding {
+                            surface: ProductSurface::Cli,
+                            disposition: SurfaceDisposition::Unavailable,
+                            entrypoints: Vec::new(),
+                            reason: Some("No CLI command is present in this fixture.".into()),
+                        },
+                        SurfaceBinding {
+                            surface: ProductSurface::Connectome,
+                            disposition: SurfaceDisposition::Planned,
+                            entrypoints: Vec::new(),
+                            reason: Some("Connectome exposure is planned in this fixture.".into()),
+                        },
+                    ],
+                }],
+            },
         },
         request: RequestEnvelope {
             protocol: PROTOCOL.into(),

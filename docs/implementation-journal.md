@@ -2689,3 +2689,38 @@ index.
   still owns multi-model catalogue breadth and Arrow/DataFusion execution; G04
   owns the complete Qdrant-shaped collection/TurboQuant memory policy; G05 owns
   compiled RBAC/privilege performance and full security-service qualification.
+
+## 2026-08-27 — G01-W04 authoritative product capability catalogue
+
+- Board status: G01-W04 remains active until the frozen local verifier and both
+  publication matrices pass. This entry records implemented behavior and
+  targeted evidence; it does not mark the work item verified.
+- Contract: the RRD V1 product surface state is now exactly `available`,
+  `planned`, `denied`, or `unavailable`. Available bindings carry one or more
+  sorted, unique canonical entrypoints and no reason. Non-executable bindings
+  carry no entrypoint and require an explicit bounded reason.
+- One catalogue: `rrd-engine::product_capability_catalogue` derives executable
+  rows from the public endpoint catalogue and the engine-owned runtime-tool
+  catalogue, then appends visible planned foundation gaps. One row may expose
+  multiple real entrypoints on the same surface, including a direct RRD HTTP
+  operation and the generic governed runtime-tool invocation route.
+- Surface binding: every runtime tool is engine-executable, invokable through
+  `POST /v1/runtime/tools/invoke`, advertised by MCP, and invokable through
+  Connectome's client-only runtime route. Generated work-plan tools also expose
+  their canonical RRFlow CLI commands; missing CLI/operation mappings are
+  explicitly unavailable rather than implied or silently omitted.
+- Negotiation: `ServiceCapabilities` now embeds and validates the complete
+  product catalogue. RRD server construction uses the engine source directly;
+  Rust client and Connectome process tests assert exact equality with the
+  engine catalogue. The checked-in TypeScript V1 OpenAPI types were regenerated
+  from the reviewed Rust schema without introducing a V2 or compatibility shim.
+- Drift gates: architecture tests require MCP `tools/list` to serialize its
+  authority catalogue, require Connectome to fetch the runtime catalogue, reject
+  hardcoded runtime-tool definitions in either outward source, and require both
+  CI matrices to build `rrd-estate-controller` from its actual `rrflow-cli`
+  product owner rather than the retired physical crate.
+- Targeted evidence: capability catalogue and workspace architecture tests,
+  all RRD contract targets, TypeScript generation/lint/type/test checks, and the
+  server/client/MCP/Connectome target suites pass. Full workspace, strict
+  Clippy, exact work-plan verification, publication, and remote matrices remain
+  the closing gates.

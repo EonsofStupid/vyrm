@@ -856,8 +856,13 @@ No new adapter-specific feature may precede the neutral contract it consumes.
 - RRD owns one typed capability catalogue. Engine operations, RRD HTTP
   endpoints, MCP tools, CLI commands, SDK methods, and Connectome controls are
   projections of that catalogue, never independently handwritten inventories.
-- Every surface disposition is explicit: available, experimental, planned, or
-  not applicable. `Available` requires a real entrypoint and executable test.
+- Every surface disposition is explicit: available, planned, denied, or
+  unavailable. `Available` requires one or more sorted canonical entrypoints,
+  no explanatory reason, and executable evidence. Every non-executable state
+  forbids entrypoints and requires a bounded reason.
+- RRD service capability negotiation embeds the complete product catalogue.
+  The Rust client, generated SDKs, MCP, CLI disposition, and Connectome consume
+  that engine-owned contract; they do not maintain a second capability list.
 - Conformance fails in both directions: an advertised entrypoint without an
   implementation fails, and an implemented capability without a declared
   surface disposition fails.

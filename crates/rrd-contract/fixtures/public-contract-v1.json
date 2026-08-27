@@ -25,7 +25,49 @@
         },
         "limitation": "local alpha; independent-host qualification remains open"
       }
-    ]
+    ],
+    "product_capabilities": {
+      "contract_version": 1,
+      "capabilities": [
+        {
+          "id": "backup-create",
+          "label": "Backup Create",
+          "category": "backup",
+          "summary": "Create one authenticated logical backup.",
+          "bindings": [
+            {
+              "surface": "engine",
+              "disposition": "available",
+              "entrypoints": [
+                "rrd-engine:RrdOperation::CreateInstanceBackup"
+              ]
+            },
+            {
+              "surface": "rrd_http",
+              "disposition": "available",
+              "entrypoints": [
+                "POST /v1/backups/create"
+              ]
+            },
+            {
+              "surface": "mcp",
+              "disposition": "unavailable",
+              "reason": "No MCP runtime tool is present in this fixture."
+            },
+            {
+              "surface": "cli",
+              "disposition": "unavailable",
+              "reason": "No CLI command is present in this fixture."
+            },
+            {
+              "surface": "connectome",
+              "disposition": "planned",
+              "reason": "Connectome exposure is planned in this fixture."
+            }
+          ]
+        }
+      ]
+    }
   },
   "request": {
     "protocol": "rrd",
