@@ -142,6 +142,10 @@ fn physical_snapshot_bundle_round_trips_installs_atomically_and_continues_writes
         .iter()
         .map(|pair| u8::from_str_radix(std::str::from_utf8(pair).unwrap(), 16).unwrap())
         .collect::<Vec<_>>();
+    assert_eq!(
+        fixture_bytes, encoded,
+        "the checked-in V1 fixture must equal the canonical current export"
+    );
     let fixture = SnapshotBundle::decode(&fixture_bytes).unwrap();
     assert_eq!(fixture.get(b"alpha").unwrap(), Some(b"one".to_vec()));
     assert_eq!(fixture.get(b"beta").unwrap(), None);
@@ -163,7 +167,7 @@ fn physical_snapshot_bundle_round_trips_installs_atomically_and_continues_writes
         )
         .unwrap();
     let prior_manifest = target.manifest().digest.clone();
-    let installed = target.install_snapshot_bundle(&decoded, 20).unwrap();
+    let installed = target.install_snapshot_bundle(&fixture, 20).unwrap();
     assert_eq!(installed.parent.as_deref(), Some(prior_manifest.as_str()));
     assert_eq!(installed.durable_sequence, 4);
     assert_eq!(installed.wal_start_sequence, 5);
@@ -183,7 +187,7 @@ fn physical_snapshot_bundle_round_trips_installs_atomically_and_continues_writes
         None
     );
     assert_eq!(
-        target.install_snapshot_bundle(&decoded, 21).unwrap(),
+        target.install_snapshot_bundle(&fixture, 21).unwrap(),
         installed,
         "reinstalling the current bundle is idempotent"
     );
@@ -196,7 +200,7 @@ fn physical_snapshot_bundle_round_trips_installs_atomically_and_continues_writes
         .unwrap();
     assert_eq!(receipt.first_sequence, 5);
     assert!(matches!(
-        target.install_snapshot_bundle(&decoded, 22),
+        target.install_snapshot_bundle(&fixture, 22),
         Err(Error::InvalidManifest(reason)) if reason.contains("does not advance")
     ));
     drop(target);

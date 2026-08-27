@@ -273,6 +273,20 @@ fn workspace_metadata() -> WorkspaceMetadata {
         let name = package["name"]
             .as_str()
             .expect("package names must be strings");
+        let manifest_path = PathBuf::from(
+            package["manifest_path"]
+                .as_str()
+                .expect("package manifest paths must be strings"),
+        );
+        let package_directory_name = manifest_path
+            .parent()
+            .and_then(Path::file_name)
+            .and_then(|value| value.to_str())
+            .expect("workspace package manifests must have UTF-8 parent directories");
+        assert_eq!(
+            package_directory_name, name,
+            "workspace package {name} must live in a same-named directory; forwarding package boundaries are forbidden"
+        );
         for target in package["targets"]
             .as_array()
             .expect("package targets must be an array")
@@ -300,12 +314,18 @@ fn workspace_metadata() -> WorkspaceMetadata {
             .as_array()
             .expect("package dependencies must be an array")
         {
-            if dependency["kind"].as_str() == Some("dev") {
-                continue;
-            }
             let dependency_name = dependency["name"]
                 .as_str()
                 .expect("dependency names must be strings");
+            if workspace_names.contains(dependency_name) {
+                assert!(
+                    dependency["rename"].is_null(),
+                    "workspace package {name} must depend on {dependency_name} by its canonical package name; Cargo rename aliases are forbidden"
+                );
+            }
+            if dependency["kind"].as_str() == Some("dev") {
+                continue;
+            }
             all.insert(dependency_name.to_owned());
             if workspace_names.contains(dependency_name) {
                 workspace.insert(dependency_name.to_owned());

@@ -654,9 +654,6 @@ fn link_value(link: &TraceLink) -> RuntimeValue {
                 "commit_cursor".into(),
                 RuntimeValue::Unsigned(stamp.commit_cursor),
             );
-            // Retain the original v1 alias for existing consumers while the
-            // exact field name makes the complete stamp reconstructable.
-            value.insert("cursor".into(), RuntimeValue::Unsigned(stamp.commit_cursor));
             if let Some(head_digest) = &stamp.head_digest {
                 value.insert(
                     "head_digest".into(),
@@ -1051,6 +1048,10 @@ mod tests {
         assert_eq!(
             read_link["commit_cursor"],
             RuntimeValue::Unsigned(read.commit_cursor)
+        );
+        assert!(
+            !read_link.contains_key("cursor"),
+            "read links must not retain a compatibility alias for commit_cursor"
         );
         assert_eq!(
             read_link["head_digest"],
