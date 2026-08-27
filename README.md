@@ -185,9 +185,13 @@ typed launch/shutdown template, and refuses to overwrite an existing target.
 
 Local estate mutations now have a separate deny-by-default operator boundary.
 `rrd-estate-admin` requires a validity-windowed, exact-estate/action policy and
-the matching owner-private 32-byte key before it opens storage; create and
-desired-state retries are durable and return the frozen public mutation result.
-Remote mutation remains disabled. See
+the matching owner-private 32-byte key before it opens storage. It also requires
+an explicit estate-control `--authority-instance`, keeping the RRD engine
+identity distinct from the estate it manages. The admin, estate-controller,
+backup-controller, and security-bootstrap executables are thin outward adapters
+owned by `rrflow-cli`; only `RrdEngine` constructs their repositories, drivers,
+or physical storage. Create and desired-state retries are durable and return the
+frozen public mutation result. Remote mutation remains disabled. See
 [`docs/local-estate-authorization-v1.md`](docs/local-estate-authorization-v1.md).
 
 The system makes operational reasoning observable and enforceable without

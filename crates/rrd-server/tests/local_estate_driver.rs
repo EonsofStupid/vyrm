@@ -69,12 +69,24 @@ fn workspace_binary(name: &str) -> PathBuf {
     })
 }
 
+struct TestCatalog {
+    _snapshot_directory: tempfile::TempDir,
+    value: LocalDeploymentCatalog,
+}
+
 fn catalog() -> LocalDeploymentCatalog {
-    static CATALOG: OnceLock<LocalDeploymentCatalog> = OnceLock::new();
+    static CATALOG: OnceLock<TestCatalog> = OnceLock::new();
     CATALOG
         .get_or_init(|| {
-            let executable = std::fs::canonicalize(env!("CARGO_BIN_EXE_rrd-server")).unwrap();
-            LocalDeploymentCatalog {
+            let cargo_executable = std::fs::canonicalize(env!("CARGO_BIN_EXE_rrd-server")).unwrap();
+            let snapshot_directory =
+                tempfile::tempdir_in(cargo_executable.parent().unwrap()).unwrap();
+            let executable = snapshot_directory
+                .path()
+                .join(cargo_executable.file_name().unwrap());
+            std::fs::hard_link(&cargo_executable, &executable).unwrap();
+            let executable = std::fs::canonicalize(executable).unwrap();
+            let value = LocalDeploymentCatalog {
                 format: LOCAL_DEPLOYMENT_FORMAT,
                 deployments: BTreeMap::from([(
                     "rrd-server".into(),
@@ -108,8 +120,13 @@ fn catalog() -> LocalDeploymentCatalog {
                         },
                     },
                 )]),
+            };
+            TestCatalog {
+                _snapshot_directory: snapshot_directory,
+                value,
             }
         })
+        .value
         .clone()
 }
 
@@ -186,6 +203,8 @@ fn run_controller_and_kill(
             .args([
                 "--db",
                 database.to_str().unwrap(),
+                "--authority-instance",
+                "estate-control-instance",
                 "--state-root",
                 state_root.to_str().unwrap(),
                 "--catalog",

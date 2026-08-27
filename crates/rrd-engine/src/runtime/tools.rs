@@ -299,9 +299,15 @@ impl RrdEngine {
         let instance = CanonicalId::new(binding.manifest.id.clone())
             .map_err(|error| ServiceError::Contract(error.to_string()))?;
         let database = binding.expected_store();
+        // Establish the authenticated native storage identity before placing
+        // the engine-owned token file inside it. Creating the token first
+        // would make a new non-empty directory look like a legacy substrate.
+        let mut engine = Self::open(&database, instance, [0_u8; 32])?;
         let token_key = load_or_create_token_key(&database.join(LOCAL_TOKEN_KEY_FILE))
             .map_err(|error| ServiceError::Storage(error.to_string()))?;
-        Self::open_bound_with_token_key(binding, instance, token_key, wall_clock_millis())
+        engine.token_key = token_key;
+        engine.bind_project_authority(binding, wall_clock_millis())?;
+        Ok(engine)
     }
 
     /// Opens RRD with operator-selected token material while retaining the same

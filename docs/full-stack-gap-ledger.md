@@ -463,7 +463,10 @@ completed, and failed receipts. The one-step `rrd-backup-controller` fixes
 source and catalogue paths under one canonical state root, denies a retained
 process record before mutation, authenticates the F1 catalogue before and after
 creation, and converges across a process kill after the archive effect but
-before its completion receipt. This removes hand-written direct database
+before its completion receipt. The admin and controller executables are now
+thin outward adapters owned by `rrflow-cli`, require a distinct estate-control
+authority instance, and invoke engine-owned operations; `rrd-estate` no longer
+opens an independent physical store. This removes hand-written direct database
 mutation from the local workflow without claiming restore, retention, F4 remote
 authentication, or organization-wide authorization.
 

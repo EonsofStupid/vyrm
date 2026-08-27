@@ -9,6 +9,10 @@ This decision supersedes older repository text that presented the retired
 pre-release identity as a permanent product or independently branded storage
 subsystem. Active source must use the RRFlow/RRD contract below.
 
+Canonical platform resource and topology terms are defined only in
+[`platform/README.md`](platform/README.md). This document describes engine and
+lifecycle architecture and must not create alternate meanings for those terms.
+
 The complete product/data boundary is authoritative in
 [`rrflow-rrd-architecture.md`](rrflow-rrd-architecture.md). The in-place V1
 identity cutover and durable-format names are tracked in

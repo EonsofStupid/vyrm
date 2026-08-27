@@ -20,8 +20,9 @@ No file or capability is deleted merely to make the dependency test green.
 ### RRFlow CLI
 
 The CLI's physical-store bypass is closed: production code depends on
-`rrd-engine` and uses its bounded `EmbeddedOperator`/offline administration
-surface. The remaining gap is authenticated daemon-mode selection and
+`rrd-engine` and uses `RrdEngine` for bounded embedded and offline
+administration. There is no second embedded handle or physical-store escape.
+The remaining gap is authenticated daemon-mode selection and
 embedded/daemon behavior parity for runtime commands.
 
 Required absorption:
@@ -150,12 +151,18 @@ gate for Connectome, not the complete Connectome feature-parity gate.
 ### D5.4a progress
 
 `rrflow-cli` no longer has production dependencies on `rrd-core` or
-`rrd-store`. Ordinary embedded commands open an engine-owned
-`EmbeddedOperator`; its concrete persistent backend remains private to
-`rrd-engine`. Runtime, lifecycle, routing, reasoning, work-plan, query, recall,
+`rrd-store`. Ordinary embedded commands open the canonical project-bound
+`RrdEngine`; its concrete persistent backend remains private. Runtime,
+lifecycle, routing, reasoning, work-plan, query, recall,
 projection, and invocation behavior crosses that handle. Exclusive migration,
 format-upgrade, logical-archive, and backup operations are also named engine
 administration entrypoints rather than direct store calls.
+
+The security bootstrap and three estate executables are also owned by
+`rrflow-cli` as thin adapters. Their policy/repository/driver construction and
+all local authority openings live inside typed `RrdEngine` operations. The
+estate and security crates expose physical/domain behavior but declare no
+product authority executables.
 
 The complete pre-cutover CLI suite passes unchanged: four binary unit tests,
 two fixture tests, sixteen operator-surface tests, and nine runtime-experience

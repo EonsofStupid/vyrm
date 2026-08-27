@@ -1,101 +1,89 @@
 # Instance topology
 
-| Layer | Meaning |
-|---|---|
-| Suite | RRFlow: umbrella brand and deployable system |
-| Orchestration | RRO: Automaton/LFG execution, policy, and lifecycle composition |
-| Data runtime | RRD: unified durable contracts over storage capabilities |
-| Storage engine | RRFlow: native LSM authority; columnar path only after measured implementation |
-| Operator client | Connectome Panel: visualization, replay, comparison, and control |
-| Instance | One deployed, isolated runtime molded to a platform or an explicit umbrella |
-| Member | A project admitted to an umbrella instance |
-| Upstream | A capability source such as SurrealDB or Qdrant; never an automatic merge target |
+The canonical platform terms and hierarchy are defined only in
+[`platform/README.md`](platform/README.md). This document applies that
+terminology to deployment and does not define a second glossary.
 
-## Deployment rule
+## Locked deployment rule
 
-A major platform gets a dedicated instance. Its claims, reasoning ledger,
-routing projection, policy evidence, and runtime configuration remain local to
-that platform.
+One RRFlow instance is bound to exactly:
 
-The deployable Raft node config now carries a required `project_scope`. Its
-typed supervisor `runtime_commit` command denies any commit for another scope,
-and snapshot artifact derivation uses the same scope before authenticated
-transfer. This makes the per-project boundary executable at the storage-node
-edge rather than relying only on directory convention.
+- one project;
+- one environment;
+- one logical RRD authority.
 
-A set of genuinely related small projects may use one umbrella instance. The
-umbrella has an explicit member list; filesystem proximity is not membership.
-An unlisted project is denied rather than silently included.
+An instance can run embedded, as a single server node, or through a cluster.
+Those execution shapes do not change its logical ownership. An estate manages
+multiple project instances and their lifecycle; a cluster supplies physical
+nodes, consensus, placement, replication, and availability. Neither estate nor
+cluster is a logical database or a multi-project instance.
 
-There is no estate-wide default instance. New work starts by creating an
-instance for the target platform and molding adapters, policy, retrieval, and
-projections to that platform while retaining the shared runtime invariants.
+`workspace` describes discovered build topology inside a project. It is not a
+deployment, authorization, catalogue, or data-isolation resource. `namespace`
+owns logical catalogue isolation inside RRD.
 
-## Invariants shared by every instance
+## Format-1 manifest contract
 
-1. Recall is injected before reasoning.
-2. Mutation requires a valid typed reasoning transition and fresh evidence.
-3. Authoritative records are append-only; projections are rebuildable and
-   grounding can quarantine them.
-4. Instance identity and project membership are checked before runtime state is
-   read or changed.
-5. Dedicated state is never rebound to another platform implicitly.
-6. Umbrella membership is explicit and scoped; adding a member is an operator
-   decision.
-7. Platform-specific extensions sit above stable storage and lifecycle ports.
-8. External project knowledge such as pgvector is bound to an explicit member,
-   model space, adapter configuration, and source revision. It never becomes an
-   implicit cross-instance read or a claimed cross-database ACID transaction.
+`.rrflow/instance.toml` remains a relocatable identity manifest. Format 1 has a
+single valid shape:
 
-## Operator knowledge
+```toml
+format = 1
+id = "project-instance"
+mode = "dedicated"
+members = ["."]
+```
 
-An instance may project or query operator-authored project knowledge through a
-capability adapter. pgvector is the first planned compatibility target for
-existing Postgres estates. RRD remains authoritative for RRFlow reasoning,
-policy, audit, trace, graph, projection freshness, and adapter decisions;
-Postgres owns its rows and transaction history. An idempotent outbox coordinates
-writes and a persisted trace link records the exact project and external source
-revision.
-See [`runtime-tracing-operator-knowledge.md`](runtime-tracing-operator-knowledge.md).
+`mode` and `members` remain serialized only because the persisted
+`ProjectAuthorityBinding` digest already covers those fields. They are frozen
+V1 compatibility fields, not extension points. The runtime rejects any other
+mode or member list and refuses to bind a nested or neighboring project.
 
-The portable boundary is now executable in `rrd-operator-knowledge`: immutable
-project/member and source/tenant/model bindings, snapshot/catalog/stable-revision
-evidence, exact/HNSW/IVFFlat controls, bounded results, safe pgvector SQL shapes,
-and idempotent vector-outbox work. A live PostgreSQL connection and deployment
-now have repeatable-read snapshot/catalog capture, project revision controls,
-typed upsert/delete work, and exact/HNSW/IVFFlat endpoint differentials behind
-an opt-in feature. Certificate-backed TLS endpoint, process-restart, concurrent
-failure injection, typed payload filters, and scale evidence remain before
-promotion.
+The environment identity is a required part of the canonical instance model,
+but it is not added silently to manifest V1: doing so would invalidate existing
+authority digests. A successor manifest and project-authority format must add
+the environment through an explicit, fail-closed migration with reopen and
+rollback fixtures.
 
-## Upstream capability adoption
+## Runtime invariants
 
-SurrealDB and Qdrant are postponed inputs to capability work. When resumed,
-their implementations may be inspected and adapted for this private
-proof-of-concept, but they are not merged wholesale into the product kernel.
-Each adopted capability must name:
+1. Instance identity and the exact project root are verified before runtime
+   state is read or changed.
+2. A database authority is never rebound to another project or filesystem root
+   as a startup side effect.
+3. Recall is injected before reasoning; mutation requires a valid typed
+   reasoning transition, current authorization, and fresh evidence.
+4. Authoritative records are append-only; rebuildable projections carry
+   freshness evidence and can be quarantined by grounding.
+5. Platform-specific extensions sit above stable engine and lifecycle ports.
+6. External knowledge adapters bind an exact project, environment, tenant,
+   model space, source revision, and authorization context. They do not imply
+   cross-instance reads or cross-database ACID.
 
-- the frontier-runtime gap it closes;
-- the instance layer that owns it;
-- the invariant and differential tests that constrain it;
-- whether it is shared kernel behavior or a platform-specific extension.
+## Provisioning and routing
 
-Surreal-derived work precedes Qdrant-derived work when this sequence is
-unpostponed.
+Estate and cluster controllers provision the same project-instance contract
+before starting `rrd-server`. The embedded profile applies the identical
+contract in the project checkout. All service faces must resolve to the same
+`RrdEngine` authority rather than independently opening storage.
 
-## Current implementation boundary
+The intended routing chain is:
 
-The existing `.rrflow/store` layout and persisted routing root binding implement
-dedicated per-checkout isolation. A versioned `.rrflow/instance.toml` now carries
-relocatable identity and topology. Model-facing CLI paths and `rrflow-mcp` reject a
-missing manifest or foreign store/root pairing.
+```text
+organization
+  -> estate
+    -> project + environment
+      -> instance
+        -> logical RRD authority
+          -> namespace -> database -> tenant
+            -> table / collection / relation / alias
+```
 
-Missing `.rrflow/store` paths now initialize native `RRD LSM`. Runtime entry points
-share `PersistentEngine`: an authenticated native `CURRENT` marker selects
-native on reopen, while an existing non-native directory selects the explicit
-Fjall compatibility adapter. Store identity is derived from durable bytes, not
-from filesystem proximity or a mutable environment default.
+Physical placement remains a separate chain:
 
-Umbrella manifests validate explicit, relative, non-escaping membership, but
-runtime execution intentionally remains denied until routing, reasoning, and
-policy state have explicit member scoping and cross-member tests.
+```text
+estate -> cluster -> node -> shard -> replica -> segment
+```
+
+The complete query, transaction, vector, security, and implementation flow is
+owned by [`rrflow-rrd-architecture.md`](rrflow-rrd-architecture.md).

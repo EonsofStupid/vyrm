@@ -6,7 +6,7 @@ This document remains release-gated rather than calendar-gated.
 
 ## Product boundary
 
-The canonical umbrella is **RRFlow**:
+The canonical product is **RRFlow**:
 
 - RRO composes Automaton's provider/session brokerage with LFG's just-in-time
   context encoding and routing.
@@ -23,9 +23,9 @@ The canonical umbrella is **RRFlow**:
 - PostgreSQL/pgvector is project-scoped shared operator knowledge behind the
   external adapter; it is neither RRFlow's canonical persistence nor LFG's JIT
   compiler.
-- Clyffy will package RRFlow into installable per-platform and umbrella
-  deployments. It consumes versioned RRFlow/RRD interfaces; it does not fork
-  RRD internals into a second implementation.
+- Clyffy will package RRFlow into installable project and estate deployments.
+  It consumes versioned RRFlow/RRD interfaces; it does not fork RRD internals
+  into a second implementation.
 
 The Clyffy repository should not be created by pooling old repositories. It
 starts from a release manifest that pins reviewed versions of Automaton, LFG,
@@ -93,7 +93,7 @@ distributed durability merely because its interfaces reserve shard fields.
 
 | Tier | Shape | Update behavior |
 |---|---|---|
-| Developer | One embedded instance per major checkout; explicit umbrella membership for small related projects | Opt-in stable/beta channel, signed manifest, local migration backup and health rollback |
+| Developer | One embedded instance per project and environment | Opt-in stable/beta channel, signed manifest, local migration backup and health rollback |
 | Workstation | `rrflow-mcp` owns multiple isolated instances and provider adapters | Staged daemon restart, schema compatibility check, per-instance rollback |
 | Team | Authenticated service with explicit tenant/shard placement and object storage | Rolling update only after mixed-version simulation and migration fencing |
 | Edge | Offline, resource-capped exact/ANN search with no required network | Side-loaded signed bundle and atomic slot switch |

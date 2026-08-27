@@ -6,6 +6,9 @@ This document defines the target system boundary. It supersedes older text that
 treated the retired pre-release identity or any physical crate as a separately
 governed product. The in-place RRFlow `0.1.0` alpha identity contract is enforced by
 [`rrflow-rename-ledger.md`](rrflow-rename-ledger.md).
+The sole canonical platform vocabulary and hierarchy are in
+[`platform/README.md`](platform/README.md); this document defines how those
+resources execute and must not create a second glossary.
 
 ## Decision
 
@@ -23,20 +26,43 @@ configuration, adapters, SDK family, and RRFlowQL language. RRD owns the single
 engine/daemon contract. The retired pre-release identity has no compatibility
 reader, alias, or forwarding shim in V1.
 
-## Controlled vocabulary
+## Reference architecture precedence
 
-| Term | Meaning | Must not mean |
-|---|---|---|
-| RRFlow | Reason Ready Flow: the complete product, repository, CLI, configuration namespace, SDK family, and user-facing platform | One component beside RRFlow or RRD |
-| RRD | Reason Ready Daemon: RRFlow's single native engine/runtime and service process | A second product brand, a thin HTTP wrapper, an alias for only the LSM, or only the reasoning loop |
-| Connectome | RRFlow's local and enterprise operator/developer client | An authoritative database, policy store, or second runtime |
-| RRFlowQL | RRFlow's query language and typed query contract | A separately persisted engine |
-| adapter | A provider, runtime, protocol, package-runner, object-store, accelerator, or compatibility implementation behind an RRFlow port | An owner of policy, catalogue, transaction, or lifecycle truth |
-| projection | Rebuildable data derived from an authoritative RRD commit | A competing source of truth |
-| physical operator | A specialized LSM, columnar, graph, vector, temporal, geo, inference, or distributed execution implementation | A separate logical database |
+RRFlow has one architectural spine. References are applied in this order and
+are not blended into competing abstractions:
 
-Product-facing names use `RRFlow`. `RRD` is reserved for the engine/daemon role,
-its process identity, internal physical modules, and service protocol.
+1. **SurrealDB-shaped logical database flow.** RRD follows one Rust engine and
+   one API/query contract across embedded, single-node, and distributed service
+   faces; namespace → database → table/record/relation is the logical hierarchy;
+   schema, transactions, permissions, indexes, live changes, backup, and
+   deployment remain capabilities of that engine. See
+   [SurrealDB architecture](https://surrealdb.com/docs/architecture) and its
+   [namespace/database architecture](https://surrealdb.com/docs/learn/schema-management/multi-tenancy/namespace-and-database-architecture).
+2. **RRD execution-plane integration.** RRFlowQL retains RRD semantics, but
+   bound logical plans lower to DataFusion and stream Arrow `RecordBatch`es.
+   This is the deliberate query-execution integration, not another catalogue,
+   storage authority, or public data model. See the official
+   [DataFusion introduction](https://datafusion.apache.org/user-guide/introduction.html)
+   and [Arrow streaming model](https://datafusion.apache.org/user-guide/arrow-introduction.html).
+3. **Qdrant-shaped vector subsystem.** Collections, points, named vectors,
+   payloads, payload indexes, strict-mode resource protection, HNSW, sparse and
+   hybrid retrieval, segments, shards, replicas, memory tiers, quantization,
+   oversampling, and exact rescoring follow Qdrant's public capability flow.
+   They remain internal to the same RRD catalogue, transaction, read stamp,
+   security, and audit authority. See [Qdrant data management](https://qdrant.tech/documentation/manage-data/),
+   [distributed deployment](https://qdrant.tech/documentation/scaling/distributed_deployment/),
+   and [quantization](https://qdrant.tech/documentation/manage-data/quantization/).
+4. **TurboQuant for qualified memory pressure.** TurboQuant is a vector
+   artifact and scoring path, not a replacement engine. RRD keeps the canonical
+   full-precision vector, uses full-precision queries, and may select a prebuilt
+   4-, 2-, 1.5-, or 1-bit artifact when an explicit memory policy and measured
+   recall budget permit it. The algorithm reference is
+   [TurboQuant](https://arxiv.org/abs/2504.19874); operational behavior is
+   constrained by the Qdrant quantization lifecycle above.
+
+HelixDB remains bounded research for graph/vector/text transactional cohesion.
+It does not define RRFlow's hierarchy, control plane, public terminology, or a
+second implementation route.
 
 ## System boundary
 
@@ -76,6 +102,63 @@ bounded relational operations over one materialized stamped snapshot. Custom
 streaming providers, full pushdown/spill governance, and broader physical
 optimization remain incomplete; reference row semantics remain the conformance
 oracle.
+
+## Complete end-to-end RRFlow flow
+
+Every embedded, local-daemon, remote, project, and estate operation follows the
+same ordered path. A surface may omit unavailable operations; it cannot invent
+another path.
+
+```text
+project or estate command
+  → resolve organization/project/environment/instance and exact resource path
+  → authenticate session and load revision-bound AuthorizationContext
+  → select namespace/database and capture catalogue revision + RRD read stamp
+  → parse RRFlowQL or validate the equivalent typed operation
+  → bind table/collection/record/point/relation/index identities
+  → inject tenant/row/field privileges as indexed logical predicates
+  → optimize the logical plan
+  → lower to DataFusion plus typed RRD extension nodes
+  → execute storage/graph/vector/temporal/geo operators
+  → stream schema-bound Arrow RecordBatches with budgets and backpressure
+  → commit mutation + audit + outbox atomically, or return a stamped read
+  → publish live/change/reasoning events from the same commit identity
+  → project generated API/SDK/CLI/MCP/Connectome results
+```
+
+### Data and transaction path
+
+1. The instance resolves exactly one project and environment; the estate is a
+   manager of instances, never an implicit data scope.
+2. Namespace and database selection is explicit. Session defaults may be
+   ergonomic aliases only after the fully resolved resource path is retained.
+3. One immutable catalogue snapshot resolves schemas, tables, collections,
+   relations, aliases, indexes, strict-mode policy, functions, and capabilities.
+4. One read stamp fixes MVCC visibility, valid time, known-at time, catalogue
+   revision, security revision, and required projection generations.
+5. A mutation stages every logical model through one transaction coordinator.
+   WAL, MVCC, LSM, object, index-integrity, audit, and outbox changes publish
+   one commit cursor or none publish.
+6. Async graph, text, vector, columnar, embedding, and live projections retain
+   the source cursor and never become unstamped truth.
+7. The same logical request and fixtures run through embedded, daemon, remote,
+   and distributed faces.
+
+### Query and authorization path
+
+1. RRFlowQL or a generated typed request parses into one RRD logical plan.
+2. A compiled `AuthorizationContext` admits the operation once. Tenant, row,
+   and field restrictions become plan predicates and projections before
+   physical selection.
+3. DataFusion performs common logical and physical work over Arrow; RRD
+   extension nodes own temporal reads, graph traversal, vector retrieval,
+   lifecycle operations, and other semantics DataFusion does not natively own.
+4. Exact/inexact/unsupported pushdown is explicit. Security predicates may
+   never disappear during pushdown, post-filtering, approximation, or fallback.
+5. Record, byte, memory, spill, time, concurrency, candidate, and result budgets
+   are fixed before execution and enforced while batches stream.
+6. No storage read, policy interpretation, or allocation for RBAC occurs inside
+   record, graph-edge, vector-candidate, or segment scoring loops.
 
 ## One engine product
 
@@ -204,6 +287,57 @@ value as canonical. Multi-vector and late-interaction retrieval use one object
 identity and one transaction boundary; application middleware must not create
 parallel records solely to join those vectors later.
 
+## Qdrant-shaped vector and TurboQuant flow
+
+The vector path is one branch of the RRD plan, not a side database:
+
+```text
+database catalogue
+  → resolve collection or same-kind alias
+  → resolve point record + named vector schema + payload schema
+  → bind metric, dimensions, strict mode, tenant policy and read stamp
+  → plan payload indexes and shard route
+  → choose exact / HNSW / sparse / hybrid / multivector operator
+  → choose full-precision or qualified quantized artifact
+  → retrieve an oversampled candidate set
+  → exact-rescore from canonical vectors when policy requires and budget permits
+  → deterministic top-k point records + payload projection
+  → Arrow RecordBatch stream and stamped query evidence
+```
+
+### Memory-pressure policy
+
+Memory pressure changes artifact placement and the chosen access path; it never
+changes logical results silently or destroys the canonical vector.
+
+1. **Full-precision hot path:** keep canonical vectors and the selected index
+   pinned or cached when the collection budget permits.
+2. **Separated hot/cold path:** move canonical vectors to mmap/cold storage
+   while keeping the routing graph and compact scoring artifact pinned or
+   cached.
+3. **TurboQuant path:** prefer a prebuilt 4-bit artifact for the first compact
+   tier; select 2-, 1.5-, or 1-bit only when corpus-specific recall, latency,
+   and compression gates pass. Queries remain full precision.
+4. **Candidate and rescore path:** retrieve more than `top_k` from the compact
+   artifact, then rescore canonical full-precision vectors when the collection
+   policy requires it. Cold-vector I/O is budgeted and reported.
+5. **Fallback:** if the required artifact is absent, stale, corrupt, or outside
+   its recall contract, use an allowed exact/full-precision path or fail
+   explicitly. Never build or select an unrecorded codec because free memory
+   happened to fall during a request.
+
+Every vector artifact binds collection, named vector, source cursor, catalogue
+revision, dimensions, metric, codec, bit depth, rotation/seed, build version,
+memory tier, checksum, and benchmark corpus. TurboQuant must pass exact-oracle
+recall plus end-to-end compression, build-time, latency, SIMD/scalar, restart,
+and corruption differentials before becoming selectable.
+
+Qdrant documents 4-bit TurboQuant as an 8× representation and the lower bit
+depths as progressively smaller, with quantized vectors stored alongside
+originals and optional oversampling/rescoring. RRD adopts that lifecycle and
+validates it against its own data rather than treating a published ratio as a
+local performance claim.
+
 ## AI-runtime ownership
 
 RRD stores and enforces the provider-neutral lifecycle described in
@@ -283,20 +417,59 @@ The RRD executable is `rrd`. User/project commands use `rrflow`. Cooperative
 MCP tools and provider adapters use RRFlow names because they are product-facing
 surfaces, not the daemon itself.
 
+## Work-plan ownership map
+
+The enforced 65-item RRFlow board is the implementation order for this flow:
+
+| Flow slice | RRFlow gate/work items |
+|---|---|
+| Enforced planning, mutation authorization, and verification evidence | G00-W01 through G00-W05 |
+| One RRD composition root, vocabulary, authority, and capability catalogue | G01-W01 through G01-W04 |
+| WAL/MVCC/LSM, recovery, archives, backup, migration, time travel, and tiered persistence | G02-W01 through G02-W06 |
+| Namespace/database catalogue, multi-model transactions, RRFlowQL, Arrow/DataFusion, indexes, live queries, and functions | G03-W01 through G03-W07 |
+| Qdrant-shaped collections/points/payloads, ANN/hybrid retrieval, TurboQuant and other codecs, memory tiers, inference, and GPU | G04-W01 through G04-W07 |
+| Equivalent service faces, sessions, client transactions, RBAC/privileges, TLS, and audit | G05-W01 through G05-W04 |
+| Generated API, MCP, CLI, and SDK surfaces | G06-W01 through G06-W05 |
+| Project attunement, context, architecture assessment, exact tool control, and provider/local-model adapters | G07-W01 through G07-W05 |
+| Estate reconciliation, distributed consensus/data placement, Kubernetes, and hybrid-cloud operation | G08-W01 through G08-W03 |
+| Connectome application, canonical client, connection profiles, operations, diagnostics, and board control | G09-W01 through G09-W06 |
+| Persistent scenarios, surface/process matrices, destructive faults, and recovery/security qualification | G10-W01 through G10-W04 |
+| Reproducible SurrealDB/Qdrant/Fjall differentials and evidence-backed reports | G11-W01 through G11-W05 |
+| Repository/platform quality, packaging, upgrade/rollback, and firm-alpha declaration | G12-W01 through G12-W04 |
+
+The work plan is complete as a target map, not as implementation. Only six of
+65 items are verified as of 2026-08-27; no unchecked row may be described as a
+finished capability.
+
 ## Current implementation truth
 
-As of 2026-08-25:
+As of 2026-08-27:
 
 - substantial persistence, query, vector, runtime, protocol/server, SDK,
   estate/security, cluster, and Connectome capabilities are real but distributed
   across canonical RRD physical crate boundaries;
-- `rrd-engine` is the composition root, but Connectome and the CLI still have
-  direct lower-crate dependencies recorded by the architecture test;
+- `rrd-engine` is the only product composition and storage-opening authority;
+  Connectome is client-only, CLI embedded operations use the project-bound
+  engine, and security/estate product executables are thin outward adapters;
+  the architecture test rejects any return of `EmbeddedOperator`,
+  `runtime_store`, outward `PersistentEngine::open`, or physical-crate
+  executable ownership;
 - query parsing/execution and vector planning have separate catalogues and
   execution paths that still require unification behind the RRD catalogue and
   transaction/read-stamp contract;
+- the SurrealDB-shaped namespace/database hierarchy now has canonical public
+  resource terms, but catalogue persistence and query integration are not yet
+  complete; executable multi-project instance topology has been removed while
+  an explicit successor-format migration is still required to persist the
+  environment identity without invalidating format-1 authority digests;
 - typed Arrow conversion and DataFusion execution are present, but the current
   bounded `MemTable` path is not the final streaming/pushdown/spill plane;
+- TurboQuant contract variants and an experimental physical artifact path are
+  present, but they are not a qualified Qdrant-complete collection lifecycle or
+  an automatic memory-pressure policy;
+- current authorization reloads security state and linearly scans direct
+  grants per request; compiled roles/privileges and the locked warm-path
+  performance invariant remain incomplete;
 - several source files exceed 2,000 lines, so migration must extract reviewed
   responsibilities rather than merely rename oversized modules;
 - existing RRD wire contracts and SDK names are closer to the target than the

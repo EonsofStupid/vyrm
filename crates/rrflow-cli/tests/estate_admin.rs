@@ -10,11 +10,44 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 use std::process::{Command, Output};
 
-fn run(arguments: &[&str]) -> Output {
+fn invoke(arguments: Vec<String>) -> Output {
     Command::new(env!("CARGO_BIN_EXE_rrd-estate-admin"))
         .args(arguments)
         .output()
         .unwrap()
+}
+
+#[allow(clippy::too_many_arguments)]
+fn arguments(
+    action: &str,
+    database: &Path,
+    policy: &Path,
+    key: &Path,
+    estate: &str,
+    at: u64,
+    request: &str,
+    operation: &str,
+) -> Vec<String> {
+    [
+        action.to_owned(),
+        "--db".into(),
+        database.display().to_string(),
+        "--authority-instance".into(),
+        "estate-control-instance".into(),
+        "--policy".into(),
+        policy.display().to_string(),
+        "--key".into(),
+        key.display().to_string(),
+        "--estate".into(),
+        estate.into(),
+        "--at".into(),
+        at.to_string(),
+        "--request".into(),
+        request.into(),
+        "--operation".into(),
+        operation.into(),
+    ]
+    .into()
 }
 
 fn value(output: &Output) -> serde_json::Value {
@@ -66,77 +99,62 @@ fn authorized_admin_mutations_replay_reopen_and_journal_exact_identity() {
     std::fs::write(&policy_path, serde_json::to_vec(&policy).unwrap()).unwrap();
     private(&policy_path);
 
-    let denied = run(&[
+    let denied = invoke(arguments(
         "create",
-        "--db",
-        denied_database.to_str().unwrap(),
-        "--policy",
-        policy_path.to_str().unwrap(),
-        "--key",
-        key_path.to_str().unwrap(),
-        "--estate",
+        &denied_database,
+        &policy_path,
+        &key_path,
         "estate-b",
-        "--at",
-        "20",
-        "--request",
+        20,
         "create-request",
-        "--operation",
         "create-estate",
-    ]);
+    ));
     assert!(!denied.status.success());
     assert!(!denied_database.exists());
 
-    let create = [
+    let create = arguments(
         "create",
-        "--db",
-        database.to_str().unwrap(),
-        "--policy",
-        policy_path.to_str().unwrap(),
-        "--key",
-        key_path.to_str().unwrap(),
-        "--estate",
+        &database,
+        &policy_path,
+        &key_path,
         "estate-a",
-        "--at",
-        "20",
-        "--request",
+        20,
         "create-request",
-        "--operation",
         "create-estate",
-    ];
-    assert_eq!(value(&run(&create))["idempotent_replay"], false);
-    assert_eq!(value(&run(&create))["idempotent_replay"], true);
+    );
+    assert_eq!(value(&invoke(create.clone()))["idempotent_replay"], false);
+    assert_eq!(value(&invoke(create))["idempotent_replay"], true);
 
-    let desired = [
+    let mut desired = arguments(
         "set-desired",
-        "--db",
-        database.to_str().unwrap(),
-        "--policy",
-        policy_path.to_str().unwrap(),
-        "--key",
-        key_path.to_str().unwrap(),
-        "--estate",
+        &database,
+        &policy_path,
+        &key_path,
         "estate-a",
-        "--at",
-        "30",
-        "--request",
+        30,
         "desired-request",
-        "--operation",
         "start-project",
-        "--instance",
-        "project-a",
-        "--idempotency",
-        "start-project",
-        "--phase",
-        "stopped",
-        "--deployment",
-        "rrd-server",
-        "--version",
-        "0.1.0",
-        "--configuration-sha256",
-        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-    ];
-    assert_eq!(value(&run(&desired))["idempotent_replay"], false);
-    assert_eq!(value(&run(&desired))["idempotent_replay"], true);
+    );
+    desired.extend(
+        [
+            "--instance",
+            "project-a",
+            "--idempotency",
+            "start-project",
+            "--phase",
+            "stopped",
+            "--deployment",
+            "rrd-server",
+            "--version",
+            "0.1.0",
+            "--configuration-sha256",
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        ]
+        .into_iter()
+        .map(str::to_owned),
+    );
+    assert_eq!(value(&invoke(desired.clone()))["idempotent_replay"], false);
+    assert_eq!(value(&invoke(desired))["idempotent_replay"], true);
 
     let engine = PersistentEngine::open(&database).unwrap();
     let repository = EstateRepository::new(&engine, CanonicalId::new("estate-a").unwrap());
@@ -192,33 +210,32 @@ fn authorized_admin_mutations_replay_reopen_and_journal_exact_identity() {
         .unwrap();
     drop(engine);
 
-    let backup = [
+    let mut backup = arguments(
         "schedule-backup",
-        "--db",
-        database.to_str().unwrap(),
-        "--policy",
-        policy_path.to_str().unwrap(),
-        "--key",
-        key_path.to_str().unwrap(),
-        "--estate",
+        &database,
+        &policy_path,
+        &key_path,
         "estate-a",
-        "--at",
-        "90",
-        "--request",
+        90,
         "backup-request",
-        "--operation",
         "backup-daily",
-        "--instance",
-        "project-a",
-        "--idempotency",
-        "backup-daily",
-        "--label",
-        "daily.0001",
-    ];
-    let accepted = value(&run(&backup));
+    );
+    backup.extend(
+        [
+            "--instance",
+            "project-a",
+            "--idempotency",
+            "backup-daily",
+            "--label",
+            "daily.0001",
+        ]
+        .into_iter()
+        .map(str::to_owned),
+    );
+    let accepted = value(&invoke(backup.clone()));
     assert_eq!(accepted["idempotent_replay"], false);
     assert_eq!(accepted["job"]["state"], "pending");
-    assert_eq!(value(&run(&backup))["idempotent_replay"], true);
+    assert_eq!(value(&invoke(backup))["idempotent_replay"], true);
 
     let engine = PersistentEngine::open(&database).unwrap();
     let repository = EstateRepository::new(&engine, CanonicalId::new("estate-a").unwrap());

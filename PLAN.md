@@ -2,23 +2,23 @@
 
 | Field | Value |
 |-------|-------|
-| Status | RRFlow `0.1.0` alpha identity cutover active 2026-08-25; implementation history retained below |
+| Status | Executable board has 7/65 verified; no item active on 2026-08-27; G01-W03 is the next dependency-ready item |
 | Governs | Historical sequencing plus executable capability work not superseded by the current identity contract |
-| Does not govern | Product boundary or terminology; those are `docs/rrflow-rrd-architecture.md` and `docs/rrflow-rename-ledger.md` |
+| Does not govern | Terminology or product architecture; those are `docs/platform/README.md` and `docs/rrflow-rrd-architecture.md` |
 
 This document retains substantial implementation history. Current work follows
 the [RRFlow/RRD architecture](docs/rrflow-rrd-architecture.md) and
-[identity cutover ledger](docs/rrflow-rename-ledger.md). Where historical
-product boundaries conflict with them, the newer documents are authoritative.
+[platform canon](docs/platform/README.md). Where historical product boundaries
+or names conflict with them, the canonical documents are authoritative.
 
 ## Authoritative executable board — 2026-08-26
 
 [`rrflow.workplan.toml`](rrflow.workplan.toml), installed and replayed from
 `.rrflow/rrd`, is the only active implementation sequence. It contains 13
-dependency gates and 65 evidence-gated work items. G00-W01 through G00-W04 are
-persisted as verified; G00-W05 is active. No later engine, provider, Connectome,
-qualification, or competitor-evidence item is actionable until its recorded
-dependencies verify.
+dependency gates and 65 evidence-gated work items. G00-W01 through G00-W05 and
+G01-W01 through G01-W02 are persisted as verified; no item is active. No later engine,
+provider, Connectome, qualification, or competitor-evidence item is actionable
+until its recorded dependencies verify.
 
 The R0-R7 table below is retained as the recovery analysis that produced the
 executable G00-G12 board. It is not a second scheduler and does not authorize
@@ -26,11 +26,11 @@ parallel work.
 
 ## Historical recovery analysis — 2026-08-25
 
-This board is the only active implementation sequence. The historical overlays
-below remain evidence, but they do not authorize parallel feature work or a
-second composition root. RRFlow is the product; RRD is its single embedded or
-daemon engine authority; Connectome, MCP, CLI, SDKs, and provider hooks are
-surfaces over that authority.
+The executable G00-G12 board above is the only active implementation sequence.
+The historical overlays below remain evidence, but they do not authorize
+parallel feature work or a second composition root. RRFlow is the product; RRD
+is its single embedded or daemon engine authority; Connectome, MCP, CLI, SDKs,
+and provider hooks are surfaces over that authority.
 
 | Order | Slice | Current truth | Exit gate |
 |---:|---|---|---|
@@ -39,7 +39,7 @@ surfaces over that authority.
 | R2 | Complete the truthful memory MCP foundation | Exact recall, routing, query, reasoning, lifecycle, and preflight exist; memory write/inspect/retire/context and document/vector administration are incomplete | `remember`, `recall`, `context`, `inspect`, and history-preserving `forget` pass persistence/reopen tests; every unavailable tool remains explicitly planned rather than falsely advertised |
 | R3 | Enforce project attunement before planning and mutation | Preflight refreshes routing, but no one-shot planning receipt binds the inspected file tree to a later mutation | A persisted attunement receipt binds project root, source fingerprints, manifests, routing generation, RRD read stamp, and attempt; stale or absent receipts deny mutation across every enforcing adapter |
 | R4 | Surface the same truth in Connectome | Connectome has useful diagnostics and replay UI, but its capability cards are handwritten and can drift | Connectome renders catalogue-derived engine/MCP/HTTP/CLI/UI dispositions, evidence, limitations, and missing entrypoints; UI contract tests consume the same catalogue |
-| R5 | Remove product-surface bypasses | Connectome and CLI still directly compose lower physical crates | Architecture tests require engine/protocol-only production dependencies for MCP, CLI, Connectome, SDKs, and edge |
+| R5 | Remove product-surface bypasses | Connectome is client-only and CLI embedded operations use `RrdEngine`; G01-W02 removes the remaining second handle and product-executable store openings | Architecture tests require engine/protocol-only production dependencies and reject any second storage-opening handle |
 | R6 | Qualify the cohesive checkpoint | Targeted local checks have passed at points; the current absorption is not product-green | Format, locked workspace tests, all-target Clippy `-D warnings`, recovery fixtures, architecture gates, and required Linux/macOS/Windows CI all pass on the same commit |
 | R7 | Operable development topology | Connectome is manually launched in embedded direct-store mode; the current browser exposure is an isolated temporary tunnel; no checked-in supervisor owns lifecycle | `rrflow dev doctor` is green, then `rrflow dev up/status/logs/stop` supervises one RRD authority plus client-only Connectome/CLI/MCP, persists a runtime manifest, performs readiness/capability handshakes, and has an end-to-end topology test |
 
@@ -133,13 +133,11 @@ boundaries so it cannot launch multiple authorities against one database.
 > `STATUS.md` for current state and `eval/results/2026-08-18-summary.json` for
 > measured evaluation evidence.
 
-> **Instance-topology overlay (2026-08-18).** rrflow/connectome is rolled out as
-> an isolated, platform-molded instance for each major platform. Related small
-> projects may use an explicitly configured umbrella instance. There is no
-> implicit estate-wide store. The active follow-on is to enforce this boundary
-> with a versioned instance manifest and scoped runtime state. The earlier
-> sentence postponing SurrealDB/Qdrant capability analysis is superseded by the
-> 2026-08-23 full-stack correction above. See `docs/instance-topology.md`.
+> **Retired instance-topology overlay (2026-08-18).** This historical overlay
+> proposed multi-project instances and is not active. The locked rule is one
+> project plus one environment per instance and one logical RRD authority;
+> estate control manages multiple instances. See `docs/platform/README.md` and
+> `docs/instance-topology.md`.
 
 > **Prompt-flight overlay (2026-08-18).** Connectome now records controlled
 > fresh/pruned/full prompt flights. Fresh means a new provider session with zero
@@ -1199,7 +1197,7 @@ comparison with unstructured context on the same query (§13.1).
   `rrflow outcome`, `rrflow ledger` (records plus outcome distribution). Driven
   end-to-end through the compiled binary in tests.
 
-**Measured outcome of the A/B (2026-08-12, `examples/recall_ab.rs`,
+**Measured outcome of the A/B (2026-08-12, `crates/rrflow-eval/examples/recall_ab.rs`,
 fixtures checked in):** corpus = 32 claims extracted from the frozen
 2026-08-12 PLAN.md snapshot; baseline arm = every journal section mentioning
 a queried subject, stacked whole (mechanical md-stacking); both arms counted

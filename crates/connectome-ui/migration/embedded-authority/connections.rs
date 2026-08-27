@@ -1,4 +1,4 @@
-//! Persistent Connectome connection profiles and live RRD negotiation.
+//! Preserved Connectome connection profiles and live RRD negotiation.
 
 use rrd_client::{ClientConfig, RrdClient};
 use rrd_contract::{CanonicalId, ServiceCapabilities};

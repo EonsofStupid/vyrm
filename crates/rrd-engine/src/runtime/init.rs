@@ -49,10 +49,8 @@ pub fn init<E: Engine>(
         report.written.push(root.join(INSTANCE_FILE));
     }
     report.notes.push(format!(
-        "instance {} uses {:?} topology with {} declared member(s)",
-        instance.id,
-        instance.mode,
-        instance.members.len()
+        "instance {} is bound to exactly one project root",
+        instance.id
     ));
 
     let context_path = root.join(&harness.context_file);

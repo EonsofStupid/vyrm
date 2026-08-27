@@ -60,11 +60,13 @@ mod core;
 mod diagnostic;
 mod error;
 mod estate;
+mod estate_control;
 mod invocation;
 mod model;
 mod query;
 mod retrieval;
 mod security;
+mod security_bootstrap;
 mod session;
 mod token_key;
 mod transaction;
@@ -73,11 +75,15 @@ mod vector;
 use control::*;
 pub use core::RrdEngine;
 pub use error::{Result, ServiceError, ServiceErrorKind};
+pub use estate_control::{
+    EstateAdminAction, EstateAdminResult, EstateBackupReconcileOutcome, EstateReconcileOutcome,
+};
 pub use invocation::{
     AuthorizedInvocation, Invocation, InvocationCompletion, InvocationCredential, RrdOperation,
 };
 use model::*;
 pub use security::MAX_AUDIT_PAGE_RECORDS;
+pub use security_bootstrap::SecurityBootstrapOutcome;
 use session::*;
 pub use token_key::{
     load_or_create_api_key, load_or_create_token_key, API_KEY_HEX_BYTES, TOKEN_KEY_BYTES,

@@ -111,7 +111,9 @@ observed and completed transitions for both start and stop. It also holds and
 kills the controller after the real external effect but before the `applied`
 record. Start resumes with the same child PID; stop resumes after observing the
 child already gone, retains its data directory, and completes exactly once.
-These debug-only hold points are rejected in release builds.
+These debug-only hold points are rejected in release builds. The executable is
+now a thin `rrflow-cli` adapter requiring `--authority-instance`; `RrdEngine`
+owns authority opening, catalogue/driver construction, and reconciliation.
 
 GitHub Actions run
 [`32667681611`](https://github.com/EonsofStupid/rrflow/actions/runs/32667681611)

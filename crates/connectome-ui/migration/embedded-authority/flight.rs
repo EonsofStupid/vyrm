@@ -1,4 +1,4 @@
-//! Prompt-flight capture and controlled context experiments.
+//! Preserved prompt-flight capture and controlled context experiments.
 //!
 //! A flight records only externally observable runtime/provider events. It does
 //! not request, infer, or persist hidden chain-of-thought.

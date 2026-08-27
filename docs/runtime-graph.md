@@ -109,7 +109,7 @@ The following are not represented as complete:
 2. Incremental grounded materialized graph lenses carrying source watermark,
    digest, and quarantine state; current graph-at-cursor reconstruction replays
    the bounded authoritative feed.
-3. Umbrella-member scope propagation and capability-based remote authorization.
+3. Estate-to-instance scope propagation and capability-based remote authorization.
 4. Retention checkpoints and archival for high-volume event histories.
 
 Fjall is the transitional compatibility adapter, not the destination. The

@@ -25,7 +25,7 @@
 //! result, printed with the same weight as a reduction.
 //!
 //! ```text
-//! cargo run --release -p rrflow-cli --example recall_ab -- <store-path>
+//! cargo run --release -p rrflow-eval --example recall_ab -- <store-path>
 //! ```
 
 use rrd_core::{recall, Claim, RecallQuery, Subject};

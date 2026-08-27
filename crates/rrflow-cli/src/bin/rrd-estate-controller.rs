@@ -1,9 +1,5 @@
 use rrd_contract::CanonicalId;
-use rrd_estate::{
-    DriverEffect, DriverError, DriverObservation, DriverRequest, EstateDriver,
-    LocalDeploymentCatalog, LocalProcessDriver, Reconciler,
-};
-use rrd_store::PersistentEngine;
+use rrd_engine::RrdEngine;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -13,33 +9,13 @@ const HOLD_AFTER_STEP_ENV: &str = "RRD_ESTATE_TEST_HOLD_AFTER_STEP_FILE";
 
 struct Args {
     db: PathBuf,
+    authority_instance: CanonicalId,
     state_root: PathBuf,
     catalog: PathBuf,
     estate: CanonicalId,
     worker: CanonicalId,
     lease_ms: u64,
     at: u64,
-}
-
-struct EffectHoldDriver {
-    inner: LocalProcessDriver,
-}
-
-impl EstateDriver for EffectHoldDriver {
-    fn apply(&mut self, request: &DriverRequest) -> std::result::Result<DriverEffect, DriverError> {
-        let effect = self.inner.apply(request)?;
-        maybe_test_hold(HOLD_AFTER_EFFECT_ENV, &effect.evidence_sha256).map_err(|error| {
-            DriverError::retryable(error.to_string(), effect.evidence_sha256.clone())
-        })?;
-        Ok(effect)
-    }
-
-    fn observe(
-        &mut self,
-        request: &DriverRequest,
-    ) -> std::result::Result<DriverObservation, DriverError> {
-        self.inner.observe(request)
-    }
 }
 
 fn main() {
@@ -52,23 +28,22 @@ fn main() {
 fn run() -> Result<(), Box<dyn std::error::Error>> {
     let args = parse_args(std::env::args().skip(1))
         .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error))?;
-    let catalog = LocalDeploymentCatalog::load_json(&args.catalog)
-        .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
-    let engine = PersistentEngine::open(&args.db)?;
-    let driver = LocalProcessDriver::new(&args.state_root, catalog)
-        .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error))?;
-    let mut reconciler = Reconciler::new(
-        &engine,
+    let hold_after_effect = std::env::var_os(HOLD_AFTER_EFFECT_ENV).map(PathBuf::from);
+    let outcome = RrdEngine::reconcile_estate_store(
+        &args.db,
+        args.authority_instance,
+        &args.state_root,
+        &args.catalog,
         args.estate,
         args.worker,
         args.lease_ms,
-        EffectHoldDriver { inner: driver },
+        args.at,
+        hold_after_effect.as_deref(),
     )?;
-    let outcome = reconciler.step(args.at)?;
     let encoded = serde_json::to_vec(&outcome)?;
-    std::io::stdout().write_all(&encoded)?;
-    std::io::stdout().write_all(b"\n")?;
-    std::io::stdout().flush()?;
+    io::stdout().write_all(&encoded)?;
+    io::stdout().write_all(b"\n")?;
+    io::stdout().flush()?;
     maybe_test_hold(
         HOLD_AFTER_STEP_ENV,
         std::str::from_utf8(&encoded).unwrap_or("completed"),
@@ -112,6 +87,7 @@ fn write_marker(path: &Path, contents: &str) -> io::Result<()> {
 
 fn parse_args(arguments: impl Iterator<Item = String>) -> Result<Args, String> {
     let mut db = None;
+    let mut authority_instance = None;
     let mut state_root = None;
     let mut catalog = None;
     let mut estate = None;
@@ -122,6 +98,12 @@ fn parse_args(arguments: impl Iterator<Item = String>) -> Result<Args, String> {
     while let Some(argument) = arguments.next() {
         match argument.as_str() {
             "--db" => db = Some(PathBuf::from(required(&mut arguments, "--db")?)),
+            "--authority-instance" => {
+                authority_instance = Some(
+                    CanonicalId::new(required(&mut arguments, "--authority-instance")?)
+                        .map_err(|error| error.to_string())?,
+                );
+            }
             "--state-root" => {
                 state_root = Some(PathBuf::from(required(&mut arguments, "--state-root")?));
             }
@@ -157,6 +139,7 @@ fn parse_args(arguments: impl Iterator<Item = String>) -> Result<Args, String> {
     }
     Ok(Args {
         db: db.ok_or("--db is required")?,
+        authority_instance: authority_instance.ok_or("--authority-instance is required")?,
         state_root: state_root.ok_or("--state-root is required")?,
         catalog: catalog.ok_or("--catalog is required")?,
         estate: estate.ok_or("--estate is required")?,
@@ -181,7 +164,7 @@ mod tests {
         let error = parse_args(["--db".into(), "/tmp/db".into()].into_iter())
             .err()
             .expect("incomplete arguments must fail");
-        assert_eq!(error, "--state-root is required");
+        assert_eq!(error, "--authority-instance is required");
     }
 
     #[test]
@@ -190,6 +173,8 @@ mod tests {
             [
                 "--db",
                 "/tmp/db",
+                "--authority-instance",
+                "estate-authority",
                 "--state-root",
                 "/tmp/state",
                 "--catalog",
@@ -209,6 +194,7 @@ mod tests {
         .expect("complete arguments must parse");
 
         assert_eq!(args.db, PathBuf::from("/tmp/db"));
+        assert_eq!(args.authority_instance.as_str(), "estate-authority");
         assert_eq!(args.state_root, PathBuf::from("/tmp/state"));
         assert_eq!(args.catalog, PathBuf::from("/tmp/catalog.json"));
         assert_eq!(args.estate.as_str(), "estate-a");

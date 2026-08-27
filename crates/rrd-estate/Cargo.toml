@@ -7,20 +7,8 @@ publish.workspace = true
 description = "Persistent RRD estate authority and reconciliation contracts."
 
 [[bin]]
-name = "rrd-backup-controller"
-path = "src/commands/rrd-backup-controller.rs"
-
-[[bin]]
 name = "rrd-deployment-catalog"
 path = "src/commands/rrd-deployment-catalog.rs"
-
-[[bin]]
-name = "rrd-estate-admin"
-path = "src/commands/rrd-estate-admin.rs"
-
-[[bin]]
-name = "rrd-estate-controller"
-path = "src/commands/rrd-estate-controller.rs"
 
 [dependencies]
 rrd-contract = { path = "../rrd-contract" }

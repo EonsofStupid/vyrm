@@ -30,8 +30,14 @@ fn scratch(name: &str) -> PathBuf {
     path.push("cli-scratch");
     path.push(name);
     let _ = std::fs::remove_dir_all(&path);
-    std::fs::create_dir_all(&path).expect("create scratch directory");
-    path
+    project_db(&path, name)
+}
+
+fn project_db(project: &Path, instance: &str) -> PathBuf {
+    std::fs::create_dir_all(project).expect("create project directory");
+    rrd_engine::InstanceManifest::ensure_dedicated_as(project, instance)
+        .expect("initialize project instance");
+    project.join(rrd_engine::STORE_DIR)
 }
 
 #[test]
@@ -146,8 +152,8 @@ fn native_format_upgrade_cli_resumes_and_reports_the_ledger() {
 #[test]
 fn logical_archive_cli_exports_inspects_and_restores_a_new_root() {
     let root = tempfile::tempdir().unwrap();
-    let source = root.path().join("archive-source");
-    let target = root.path().join("archive-restored");
+    let source = project_db(&root.path().join("archive-source"), "archive-source");
+    let target = project_db(&root.path().join("archive-restored"), "archive-restored");
     let archive = root.path().join("source.rrd-archive");
     let archive_arg = archive.to_str().unwrap();
     let (ok, _, err) = rrflow(
@@ -216,7 +222,7 @@ fn logical_archive_cli_exports_inspects_and_restores_a_new_root() {
 #[test]
 fn backup_catalogue_cli_creates_lists_and_restores() {
     let root = tempfile::tempdir().unwrap();
-    let source = root.path().join("backup-source");
+    let source = project_db(&root.path().join("backup-source"), "backup-source");
     let target = root.path().join("backup-restored");
     let catalogue = root.path().join("backups");
     let catalogue_arg = catalogue.to_str().unwrap();

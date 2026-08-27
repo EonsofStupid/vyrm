@@ -1,4 +1,4 @@
-//! Integrity of the A/B fixtures. The harness (`examples/recall_ab.rs`) is
+//! Integrity of the A/B fixtures. The eval harness (`examples/recall_ab.rs`) is
 //! only reproducible while the checked-in corpus stays parseable and every
 //! queried subject still has claims to recall.
 

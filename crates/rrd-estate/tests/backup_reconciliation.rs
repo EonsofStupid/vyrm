@@ -4,12 +4,12 @@ use rrd_estate::{
     BackupCompleteRequest, BackupDriverRequest, BackupJobState, BackupLeaseRequest,
     BackupReconcileBoundary, BackupReconcileOutcome, BackupReconciler, BackupResult, DesiredPhase,
     DesiredTarget, DriverError, Error, EstateBackupDriver, EstateRepository, LeaseRequest,
-    LocalEstateBackupDriver, MutationContext, ObservationRequest, ObservedPhase, ReceiptBoundary,
-    ReceiptRequest, ScheduleBackup, SetDesired,
+    MutationContext, ObservationRequest, ObservedPhase, ReceiptBoundary, ReceiptRequest,
+    ScheduleBackup, SetDesired,
 };
-use rrd_store::{verify_backup_catalogue, Engine, NativeEngine, PersistentEngine};
+use rrd_store::{Engine, NativeEngine};
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 fn id(value: &str) -> CanonicalId {
     CanonicalId::new(value).unwrap()
@@ -266,59 +266,4 @@ fn expired_prepared_lease_is_taken_over_and_stale_worker_is_fenced() {
         completed.backup_jobs["backup-daily"].state,
         BackupJobState::Succeeded
     );
-}
-
-fn local_request(instance: &str, job: &str) -> BackupDriverRequest {
-    BackupDriverRequest {
-        estate_id: id("estate-a"),
-        job_id: id(job),
-        instance_id: id(instance),
-        source_generation: 1,
-        label: "daily.0001".into(),
-        created_at: 100,
-    }
-}
-
-fn create_state_root(parent: &Path) -> PathBuf {
-    let root = parent.join("state");
-    fs::create_dir(&root).unwrap();
-    fs::create_dir(root.join("instances")).unwrap();
-    fs::create_dir(root.join("processes")).unwrap();
-    fs::canonicalize(root).unwrap()
-}
-
-#[test]
-fn local_driver_creates_one_authenticated_catalogue_entry_on_replay() {
-    let temporary = tempfile::tempdir().unwrap();
-    let state_root = create_state_root(temporary.path());
-    let source = state_root.join("instances/instance-a/.rrflow/rrd");
-    let engine = PersistentEngine::open(&source).unwrap();
-    drop(engine);
-    let request = local_request("instance-a", "backup-daily");
-    let mut driver = LocalEstateBackupDriver::new(&state_root).unwrap();
-
-    let first = driver.create(&request).unwrap();
-    let replay = driver.create(&request).unwrap();
-    assert_eq!(replay, first);
-    let catalogue = verify_backup_catalogue(&driver.catalogue_path(&request)).unwrap();
-    assert_eq!(catalogue.revision, 1);
-    assert_eq!(catalogue.backups.len(), 1);
-    assert_eq!(catalogue.backups[0].backup_id, first.backup_id);
-}
-
-#[test]
-fn local_driver_denies_process_record_before_catalogue_creation() {
-    let temporary = tempfile::tempdir().unwrap();
-    let state_root = create_state_root(temporary.path());
-    let source = state_root.join("instances/instance-a/.rrflow/rrd");
-    let engine = PersistentEngine::open(&source).unwrap();
-    drop(engine);
-    fs::write(state_root.join("processes/instance-a.json"), b"retained").unwrap();
-    let request = local_request("instance-a", "backup-daily");
-    let mut driver = LocalEstateBackupDriver::new(&state_root).unwrap();
-
-    let error = driver.create(&request).unwrap_err();
-    assert_eq!(error.kind, rrd_estate::DriverErrorKind::Permanent);
-    assert!(error.message.contains("retained process record"));
-    assert!(!driver.catalogue_path(&request).exists());
 }

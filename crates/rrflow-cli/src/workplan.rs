@@ -1,7 +1,6 @@
 use crate::command::Execution;
 use clap::Subcommand;
-use rrd_engine::operator::{digest, EmbeddedOperator, Reader};
-use rrd_engine::WorkPlanOperation;
+use rrd_engine::{digest, Reader, RrdEngine, WorkPlanOperation};
 
 #[derive(Subcommand, Debug, Clone)]
 pub enum WorkPlanAction {
@@ -98,7 +97,7 @@ impl WorkPlanAction {
 }
 
 pub fn execute(
-    store: &EmbeddedOperator,
+    store: &RrdEngine,
     action: &WorkPlanAction,
     reader: &Reader,
     now: u64,
@@ -108,18 +107,17 @@ pub fn execute(
         WorkPlanAction::Sync { root } => {
             verify_project_store(store, root)?;
             let definition = rrd_engine::read_work_plan(root)?;
-            rrd_engine::install_work_plan(
-                store.runtime_store(),
+            store.install_operator_work_plan(
                 definition,
                 now,
                 reader.as_str(),
                 "cli-workplan-sync",
             )?
         }
-        WorkPlanAction::Status { plan } => rrd_engine::load_work_plan(store.runtime_store(), plan)?
+        WorkPlanAction::Status { plan } => store
+            .operator_work_plan(plan)?
             .ok_or_else(|| format!("work plan {plan} is not installed"))?,
-        WorkPlanAction::Activate { plan, item } => rrd_engine::activate_work_item(
-            store.runtime_store(),
+        WorkPlanAction::Activate { plan, item } => store.activate_operator_work_item(
             plan,
             item,
             now,
@@ -148,8 +146,7 @@ pub fn execute(
             let payload = std::fs::read(plan_file).map_err(|error| {
                 format!("cannot read reviewed plan {}: {error}", plan_file.display())
             })?;
-            rrd_engine::record_project_work_item_plan(
-                store.runtime_store(),
+            store.record_operator_work_item_plan(
                 root,
                 plan,
                 item,
@@ -167,8 +164,7 @@ pub fn execute(
         }
         WorkPlanAction::Verify { root, plan } => {
             verify_project_store(store, root)?;
-            rrd_engine::verify_recorded_work_item(
-                store.runtime_store(),
+            store.verify_operator_work_item(
                 root,
                 plan,
                 now,
@@ -194,13 +190,10 @@ pub fn execute(
 }
 
 fn verify_project_store(
-    store: &EmbeddedOperator,
+    store: &RrdEngine,
     root: &std::path::Path,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let binding = rrd_engine::InstanceBinding::discover(root)?;
-    binding.require_runtime_ready()?;
-    binding.verify_store_path(store.path())?;
-    Ok(())
+    store.verify_project_store(root)
 }
 
 fn render(snapshot: &rrd_engine::WorkPlanSnapshot) -> String {

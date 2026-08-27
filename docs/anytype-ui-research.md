@@ -8,7 +8,7 @@ copy Anytype's branding or source.
 | Anytype pattern | Connectome translation |
 |---|---|
 | Objects accumulate properties and relationships | Claims, runs, evidence, files, and invocations are inspectable objects with stable identities |
-| A Channel/Space owns its objects and sidebar | A rrflow instance owns its runtime state and navigation; an umbrella must still name members explicitly |
+| A Channel/Space owns its objects and sidebar | One RRFlow project instance owns its runtime state and navigation; estate navigation may select among instances without merging their authority |
 | Sidebar widgets provide persistent lenses | Estates, Tables, Data models, and Visuals are stable operator workspaces; the deeper runtime labs remain directly reachable |
 | Types, Queries, and Collections can render through different Views | The same runtime snapshot can render as graph, timeline, table, route result, or inspector |
 | Global and local graph navigation | Global instance map exists, but local selection-centered graphs are the default |
@@ -110,8 +110,8 @@ an explicit warning-bearing override for remote binding.
 4. Keep provider execution read-only until operator actions can cross the
    existing lifecycle/policy contract and show the differential before
    confirmation.
-5. Enable umbrella instances only after every query and visualization carries
-   an explicit member scope.
+5. Add estate-level multi-instance navigation only after every query and
+   visualization carries exact project, environment, and instance scope.
 
 Browser acceptance is reproducible against a running workbench:
 

@@ -100,10 +100,11 @@ RRFlow
 └─ Connectome: RRD-backed operations and diagnostics client
 ```
 
-The package rename does not by itself prove that this boundary is complete.
-The architecture test records remaining consumer bypasses explicitly so they
-cannot be hidden by the new names. Those bypasses must be absorbed into
-`rrd-engine`; they are not alternate applications.
+The package rename did not by itself prove this boundary. G01-W02 subsequently
+made it executable: the architecture suite rejects a public operator module,
+`EmbeddedOperator`, `runtime_store`, outward physical-store openings, and
+security/estate ownership of product executables. Remaining G03/G04/G05 work
+expands behavior behind this authority; it does not authorize another engine.
 
 ## Executable acceptance gates
 
@@ -134,11 +135,20 @@ must never be reported as Linux/macOS/Windows CI success.
 - Repository-wide no-retired-identity gate: implemented in
   `rrd-engine/tests/workspace_architecture.rs`; it scans every active tracked or
   untracked repository file case-insensitively, has no source allowlist, and
-  passes on the current tree.
-- Local verification: metadata, formatting, all-target checking, the complete
-  all-target workspace test suite, strict all-target Clippy, V1 fixture reopen,
-  and the architecture suite pass on the current tree.
-- Remote platform CI: not run for this uncommitted cutover and therefore not
-  claimed.
+  also rejects workspace dependency rename aliases and package-directory/name
+  mismatches.
+- Runtime trace read links now serialize only the canonical `commit_cursor`;
+  the retained compatibility field has been removed and is denied by test.
+- The physical snapshot test proves the checked-in V1 bytes equal the current
+  canonical export, installs and reinstalls those fixture bytes, continues the
+  write sequence, and reopens the resulting database.
+- Focused local evidence: all targets for `rrd-core`, `rrd-lsm`, and
+  `rrd-engine` pass together after these corrections.
+- Full local verification: G01-W01 is persisted as verified under digest
+  `c6a9a19a057baad305e57a73b04680a7e9de5ee661ff0948b07146186af442a2`.
+- Remote platform CI: source commit
+  `38f1a19bcc9ad76389cceed7eb0988452e694235` passed push run
+  `33075846902` and PR run `33075851923`. This documentary ledger change still
+  requires clean publication and must not absorb concurrent G01-W02 files.
 - Remaining engine cohesion and capability gaps: governed by
   [`full-stack-gap-ledger.md`](full-stack-gap-ledger.md), not concealed here.

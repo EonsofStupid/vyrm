@@ -8,6 +8,7 @@
 mod capability_surface;
 mod diagnostic;
 mod lifecycle;
+mod platform;
 mod runtime_tool;
 mod workplan;
 
@@ -33,6 +34,7 @@ pub use lifecycle::{
     LifecycleToolCompletionV1, LifecycleToolRequestV1, LifecycleTraceContextV1,
     LifecycleTurnStatusV1, LIFECYCLE_SPEC_VERSION, MAX_LIFECYCLE_EVENT_BYTES,
 };
+pub use platform::{PlatformTermDefinition, PlatformTermRole, PLATFORM_TERMS};
 pub use runtime_tool::{
     runtime_tool_arguments_sha256, ListRuntimeTools, RuntimeToolAuthorization,
     RuntimeToolCatalogue, RuntimeToolDescriptor, RuntimeToolInvocation,
@@ -55,7 +57,7 @@ use std::fmt;
 pub const PROTOCOL: &str = "rrd";
 pub const PROTOCOL_VERSION: u16 = 1;
 pub const OPENAPI_DOCUMENT_SHA256: &str =
-    "580c4723bc9b4e3061a81361322868a3b1c913e7ed149f088208d5db4f4e17cb";
+    "bfc1607e18f225faaa3d5d374d25bd455ba718f1f1636df08df9800003449eb3";
 pub const MAX_ID_BYTES: usize = 128;
 pub const MAX_MESSAGE_BYTES: usize = 4_096;
 pub const MAX_CAPABILITIES: usize = 512;
@@ -2692,11 +2694,20 @@ pub enum ResourceKind {
     Estate,
     Project,
     Instance,
+    Tenant,
+    Namespace,
+    Database,
+    Table,
+    Collection,
+    Record,
+    Point,
+    Relation,
+    Alias,
+    Cluster,
     Node,
     Shard,
-    Collection,
-    Table,
-    Record,
+    Replica,
+    Segment,
     Transaction,
     Snapshot,
     Backup,

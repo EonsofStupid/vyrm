@@ -17,7 +17,7 @@ mod workplan;
 
 use clap::Parser;
 use command::Cli;
-use rrd_engine::operator::{EmbeddedOperator, InvocationInput, Reader};
+use rrd_engine::{OperatorInvocationInput, Reader, RrdEngine};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 fn now_millis() -> u64 {
@@ -71,7 +71,7 @@ fn main() -> std::process::ExitCode {
         };
     }
 
-    let store = match EmbeddedOperator::open(&cli.db) {
+    let store = match RrdEngine::open_project_store(&cli.db) {
         Ok(store) => store,
         Err(error) => {
             eprintln!("cannot open database at {}: {error}", cli.db.display());
@@ -99,7 +99,7 @@ fn main() -> std::process::ExitCode {
     // The invocation is recorded whether the command succeeded or failed. A log
     // containing only successes would misrepresent which triggers are useful.
     // A recall's §13.1 effectiveness fields travel in the same record.
-    if let Err(error) = store.record_invocation(InvocationInput {
+    if let Err(error) = store.record_operator_invocation(OperatorInvocationInput {
         at: now,
         trigger: cli.command.trigger(),
         command: cli.command.name(),

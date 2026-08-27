@@ -4544,15 +4544,17 @@ name = "rrflow-cli"
 version = "0.1.0"
 dependencies = [
  "clap",
+ "rrd-contract",
  "rrd-core",
  "rrd-engine",
+ "rrd-estate",
  "rrd-lsm",
+ "rrd-security",
  "rrd-store",
  "serde",
  "serde_json",
  "sha2",
  "tempfile",
- "tiktoken-rs",
  "toml",
  "tracing-subscriber",
 ]
@@ -4570,9 +4572,12 @@ dependencies = [
 name = "rrflow-eval"
 version = "0.1.0"
 dependencies = [
+ "rrd-core",
+ "rrd-store",
  "serde",
  "serde_json",
  "tempfile",
+ "tiktoken-rs",
 ]
 
 [[package]]

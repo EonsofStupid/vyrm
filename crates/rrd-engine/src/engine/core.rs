@@ -4,9 +4,22 @@ pub struct RrdEngine {
     pub(crate) storage: PersistentEngine,
     pub(crate) objects: rrd_store::LocalObjectStore,
     pub(in crate::engine) instance: CanonicalId,
-    pub(in crate::engine) token_key: [u8; 32],
+    pub(crate) token_key: [u8; 32],
 }
 impl RrdEngine {
+    /// Opens a local engine authority for engine-owned control/bootstrap
+    /// operations that cannot yet rely on a project manifest. The constructor
+    /// remains private to `rrd-engine`; outward adapters call typed operations.
+    pub(in crate::engine) fn open_local_authority(
+        root: &Path,
+        instance: CanonicalId,
+    ) -> Result<Self> {
+        let mut engine = Self::open(root, instance, [0_u8; TOKEN_KEY_BYTES])?;
+        engine.token_key = load_or_create_token_key(&root.join("RRD.SECRET"))
+            .map_err(|error| ServiceError::Storage(error.to_string()))?;
+        Ok(engine)
+    }
+
     pub(in crate::engine) fn query_scope(&self, requested: &str) -> Result<ScopeId> {
         let expected_scope = format!("instance:{}", self.instance);
         if requested != expected_scope {

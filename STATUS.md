@@ -1,4 +1,4 @@
-# Runtime status — 2026-08-26
+# Runtime status — 2026-08-27
 
 ## Current recovery truth
 
@@ -6,12 +6,21 @@ There is no verified cohesive RRFlow product checkpoint for the current
 worktree. The repository contains substantial executable storage, query,
 vector, reasoning, server, security, SDK, estate, and Connectome code. The
 RRFlow `0.1.0` alpha identity cutover was committed and pushed as `3fc2842`, but
-several outward surfaces still bypass or duplicate the engine authority.
+the current G01-W02 authority consolidation is still uncommitted. It has passed
+its exact same-tree local qualification matrix but not the required remote
+Linux/macOS/Windows gates. In the current
+tree, Connectome is client-only, the CLI opens `RrdEngine`, and the security and
+estate product executables are thin CLI adapters over engine-owned operations;
+no second embedded or physical-store product authority remains.
 
 The active sequence is the 13-gate, 65-item contract in
 `rrflow.workplan.toml`, persisted under `.rrflow/rrd`. The older R0-R7 recovery
 overlay in `PLAN.md` is historical analysis, not a second scheduler. As of this
-entry, G00-W01 through G00-W04 are verified and G00-W05 is active:
+entry, G00-W01 through G00-W05 and G01-W01 through G01-W02 are verified; no
+item is active, and G01-W03 is the next dependency-ready item.
+Canonical platform terminology is owned only by `docs/platform/README.md`, and
+the end-to-end execution/implementation map is owned only by
+`docs/rrflow-rrd-architecture.md`.
 
 - G00-W04 is backed by persisted verification digest
   `efee5d2debd7125253b9fbd4664b5f08873424dc91b0b73d5c379e757f0fa9f6`.
@@ -28,6 +37,18 @@ entry, G00-W01 through G00-W04 are verified and G00-W05 is active:
   knowledge, cluster, CLI, MCP, evaluation, and edge package moves exist in the
   pushed commit. Current product-green and cross-platform qualification remain
   open.
+- G01-W02 implementation now has one public storage-opening authority type:
+  `RrdEngine`. The former `EmbeddedOperator` and `runtime_store` escape are
+  removed. Security bootstrap, estate administration, process reconciliation,
+  and backup reconciliation construct their repositories/drivers/storage only
+  inside the engine. Architecture tests reject regression and the cross-model
+  authority fixture proves security, session transaction, mixed data, vector,
+  query, lifecycle, changefeed, audit, diagnostic, denial, close, and reopen
+  coordinates. Its exact 12-command local matrix passes on the evidence tree,
+  and the executable board persisted G01-W02 as verified with digest
+  `f8efbee2b5bd20cdb29e2746450c83266720411c672429aedf4b57d8f566f9b6`.
+  This is not publication evidence: the required remote platform matrix has
+  not run on a published commit.
 - MCP currently has executable preflight, exact recall, routing, RRFlowQL,
   typed reasoning, lifecycle, claim-backed `remember`, bounded `context`,
   provenance/history `inspect`, history-preserving `forget`, public service/
@@ -87,8 +108,9 @@ entry, G00-W01 through G00-W04 are verified and G00-W05 is active:
   remaining RRD server adapters must not be advertised as working MCP tools
   until their executable engine paths and tests exist.
 - Connectome is a real local UI and replay client, but its capability matrix is
-  still partly separately authored and its production crate still depends
-  directly on lower engine components. It now renders the generated
+  still partly separately authored. Its compiled production target consumes
+  the public RRD client/contract boundary; retained uncompiled flight/cluster
+  sources are migration input rather than another authority. It now renders the generated
   engine/HTTP/MCP/CLI/Connectome surface matrix and the current durable project
   attunement receipt; it is not yet proof of the zero-bypass engine boundary.
 - Preflight and prompt lifecycle events persist a hash-sealed project
@@ -848,18 +870,21 @@ custom streaming provider; pushdown, spill governance, and the remaining
 physical optimization work are still open. See
 `docs/rrd-arrow-datafusion-bm25-plan.md`.
 
-A major platform receives one isolated RRFlow/RRD instance molded to that
-platform. A set of related small projects may share an umbrella instance only
-through explicit membership. Per-checkout state lives under the canonical
-`.rrflow` product directory; physical storage selection remains an RRD concern.
+A project and deployment environment receive one isolated RRFlow instance with
+one logical RRD authority. An estate manages multiple instances; it never
+combines projects into one instance. Per-project state lives under the
+canonical `.rrflow` product directory; physical storage selection remains an
+RRD concern.
 
 The current routing projection is bound to one canonical project root and
-refuses implicit rebinding. The instance manifest now prevents a different
-store from being paired with that root. Explicit umbrella execution is the
-remaining topology work. SurrealDB inspired the record-edge, transaction,
+refuses implicit rebinding. Manifest format 1 now accepts only the frozen
+`dedicated` plus `members = ["."]` representation and prevents a different or
+nested project from pairing with that authority. Explicit environment identity
+requires a successor-format migration because existing authority digests cover
+the format-1 fields. SurrealDB inspired the record-edge, transaction,
 changefeed, reference-integrity, and temporal-query capability analysis; no
 SurrealDB code or database dependency was imported. Search/vector work remains
-separate. A new external-process claim-runtime differential pins SurrealDB
+inside the same RRD authority. A new external-process claim-runtime differential pins SurrealDB
 3.0.5/SurrealKV and verifies both complete corpora. RRFlow wins the bounded
 throughput, latency, restart, and RSS cells, including against Surreal's
 server-reported execution time, but loses reopened allocated disk at 1.380×;

@@ -1,4 +1,4 @@
-//! Retained, source-bound observations of reset-explicit cluster health.
+//! Preserved, source-bound observations of reset-explicit cluster health.
 //!
 //! A sample proves what Connectome observed from one validated node status at
 //! one runtime cursor. It does not turn process counters into consensus truth.

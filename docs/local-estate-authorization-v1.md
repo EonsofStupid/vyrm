@@ -34,14 +34,21 @@ rrd-estate-admin set-desired ...
 rrd-estate-admin schedule-backup ...
 ```
 
-All actions require database, policy, key, estate, timestamp, request ID, and
-operation ID arguments. Desired-state mutation additionally requires instance,
+All actions require database, an explicit estate-control authority instance,
+policy, key, estate, timestamp, request ID, and operation ID arguments. The
+authority instance identifies the running RRD engine and must not be replaced by
+the managed estate ID. Desired-state mutation additionally requires instance,
 idempotency key, phase, deployment, version, and configuration SHA-256. Backup
 scheduling requires instance, idempotency key, and canonical label; the estate
 authority rejects it unless desired and observed state are stopped at the same
 generation with no process ID. No shell string, secret value, implicit current
 account, wildcard target, or remote session credential enters the estate
 document.
+
+The executable is an outward adapter in `rrflow-cli`. Authorization, repository
+construction, local authority opening, and mutation execution are one typed
+`RrdEngine` operation; `rrd-estate` owns state-machine contracts but no longer
+owns or opens an admin executable.
 
 Authorization supplies the journal actor; callers cannot override it. Accepted
 mutations return the frozen `rrd-contract::EstateMutationResult`, or the

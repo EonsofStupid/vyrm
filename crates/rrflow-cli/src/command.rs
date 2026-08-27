@@ -6,9 +6,9 @@
 
 use crate::workplan::WorkPlanAction;
 use clap::{Parser, Subcommand};
-use rrd_engine::operator::{
-    digest, Claim, CoreResult, Effectiveness, EmbeddedOperator, GroundingReport, Millis, Outcome,
-    Predicate, Producer, Reader, ReasoningPayload, RecallOutcome, RecallQuery, ScopeId, Subject,
+use rrd_engine::{
+    digest, Claim, CoreResult, Effectiveness, GroundingReport, Millis, Outcome, Predicate,
+    Producer, Reader, ReasoningPayload, RecallOutcome, RecallQuery, RrdEngine, ScopeId, Subject,
     Trigger,
 };
 
@@ -859,11 +859,9 @@ pub fn execute_offline(
     Some((|| match action {
         StorageAction::Migrate | StorageAction::Status | StorageAction::Rollback => {
             let report = match action {
-                StorageAction::Migrate => Some(rrd_engine::operator::migrate_storage(db, now)?),
-                StorageAction::Status => rrd_engine::operator::storage_migration_status(db)?,
-                StorageAction::Rollback => {
-                    Some(rrd_engine::operator::rollback_storage_migration(db)?)
-                }
+                StorageAction::Migrate => Some(RrdEngine::migrate_storage(db, now)?),
+                StorageAction::Status => RrdEngine::storage_migration_status(db)?,
+                StorageAction::Rollback => Some(RrdEngine::rollback_storage_migration(db)?),
                 _ => unreachable!("matched migration action"),
             };
             let text = if json {
@@ -884,7 +882,7 @@ pub fn execute_offline(
             Ok(text.into())
         }
         StorageAction::ArchiveExport { archive } => {
-            let engine = EmbeddedOperator::open(db)?;
+            let engine = RrdEngine::open_project_store(db)?;
             let inventory = engine.export_logical_archive(archive)?;
             let text = if json {
                 serde_json::to_string_pretty(&inventory)?
@@ -901,7 +899,7 @@ pub fn execute_offline(
             Ok(text.into())
         }
         StorageAction::ArchiveInspect { archive } => {
-            let inventory = rrd_engine::operator::inspect_logical_archive(archive)?;
+            let inventory = RrdEngine::inspect_logical_archive(archive)?;
             let text = if json {
                 serde_json::to_string_pretty(&inventory)?
             } else {
@@ -916,7 +914,7 @@ pub fn execute_offline(
             Ok(text.into())
         }
         StorageAction::ArchiveRestore { archive } => {
-            let report = rrd_engine::operator::restore_logical_archive(archive, db, now)?;
+            let report = RrdEngine::restore_logical_archive(archive, db, now)?;
             let text = if json {
                 serde_json::to_string_pretty(&report)?
             } else {
@@ -929,7 +927,7 @@ pub fn execute_offline(
             Ok(text.into())
         }
         StorageAction::BackupCreate { catalogue, label } => {
-            let engine = EmbeddedOperator::open(db)?;
+            let engine = RrdEngine::open_project_store(db)?;
             let entry = engine.create_logical_backup(catalogue, label, now)?;
             let text = if json {
                 serde_json::to_string_pretty(&entry)?
@@ -942,7 +940,7 @@ pub fn execute_offline(
             Ok(text.into())
         }
         StorageAction::BackupList { catalogue } => {
-            let verified = rrd_engine::operator::verify_backup_catalogue(catalogue)?;
+            let verified = RrdEngine::verify_backup_catalogue(catalogue)?;
             let text = if json {
                 serde_json::to_string_pretty(&verified)?
             } else if verified.backups.is_empty() {
@@ -971,8 +969,7 @@ pub fn execute_offline(
             catalogue,
             backup_id,
         } => {
-            let report =
-                rrd_engine::operator::restore_catalogued_backup(catalogue, backup_id, db, now)?;
+            let report = RrdEngine::restore_catalogued_backup(catalogue, backup_id, db, now)?;
             let text = if json {
                 serde_json::to_string_pretty(&report)?
             } else {
@@ -985,7 +982,7 @@ pub fn execute_offline(
             Ok(text.into())
         }
         StorageAction::FormatUpgrade => {
-            let ledger = rrd_engine::operator::migrate_native_format(db, now)?;
+            let ledger = RrdEngine::migrate_native_format(db, now)?;
             let text = if json {
                 serde_json::to_string_pretty(&ledger)?
             } else {
@@ -1001,7 +998,7 @@ pub fn execute_offline(
             Ok(text.into())
         }
         StorageAction::FormatStatus => {
-            let ledger = rrd_engine::operator::native_format_migration_status(db)?;
+            let ledger = RrdEngine::native_format_migration_status(db)?;
             let text = if json {
                 serde_json::to_string_pretty(&ledger)?
             } else if let Some(ledger) = ledger {
@@ -1024,7 +1021,7 @@ pub fn execute_offline(
 /// `now` is supplied rather than read here, so that tests are deterministic and
 /// the clock enters at exactly one place (`main`).
 pub fn execute(
-    store: &EmbeddedOperator,
+    store: &RrdEngine,
     command: &Command,
     reader: &Reader,
     now: Millis,
@@ -1169,14 +1166,7 @@ pub fn execute(
             budget,
         } => {
             verify_instance_store(store, root)?;
-            let flight = rrd_engine::preflight(
-                store.runtime_store(),
-                root,
-                harness.as_deref(),
-                reader,
-                now,
-                *budget,
-            )?;
+            let flight = store.runtime_preflight(root, harness.as_deref(), reader, now, *budget)?;
             let detail = (!flight.warnings.is_empty())
                 .then(|| format!("{} warning(s)", flight.warnings.len()));
             return Ok(Execution {
@@ -1212,15 +1202,15 @@ pub fn execute(
                     .unwrap_or_else(|| ".".into())
             });
             verify_instance_store(store, &root)?;
-            let ctx = rrd_engine::HookContext {
-                store: store.runtime_store(),
+            let response = store.handle_runtime_hook(rrd_engine::RuntimeHookRequest {
                 root: &root,
                 harness: harness.as_deref(),
                 reader,
                 now,
                 budget: *budget,
-            };
-            let response = rrd_engine::handle(&ctx, event, &input)?;
+                event,
+                input: &input,
+            })?;
             return Ok(Execution {
                 text: response.stdout,
                 effectiveness: response.effectiveness,
@@ -1249,8 +1239,7 @@ pub fn execute(
                 max_output_bytes: *max_output_bytes,
                 max_batch_rows: *max_batch_rows,
             };
-            let result = rrd_engine::execute_traced_query(
-                store.runtime_store(),
+            let result = store.execute_operator_query(
                 scope,
                 ql,
                 &parameters,
@@ -1357,7 +1346,7 @@ pub fn execute(
                             .join(", ")
                     )
                 })?;
-                let report = rrd_engine::init(store.runtime_store(), root, adapter, now)?;
+                let report = store.initialize_runtime(root, adapter, now)?;
                 let mut lines: Vec<String> = report
                     .written
                     .iter()
@@ -1376,8 +1365,7 @@ pub fn execute(
                     },
             } => {
                 let payload: ReasoningPayload = serde_json::from_str(payload)?;
-                let event =
-                    rrd_engine::record_reasoning(store.runtime_store(), run, now, actor, payload)?;
+                let event = store.record_reasoning_event(run, now, actor, payload)?;
                 Ok(if json {
                     serde_json::to_string_pretty(&event)?
                 } else {
@@ -1395,8 +1383,8 @@ pub fn execute(
                 action: ReasoningAction::Show { run },
             } => {
                 let run = match run {
-                    Some(id) => rrd_engine::reasoning_run(store.runtime_store(), id)?,
-                    None => rrd_engine::active_reasoning_run(store.runtime_store())?,
+                    Some(id) => store.reasoning_run_by_id(id)?,
+                    None => store.active_reasoning()?,
                 };
                 let Some(run) = run else {
                     return Ok("no matching reasoning run".into());
@@ -1432,8 +1420,8 @@ pub fn execute(
                 action: HarnessAction::Audit { name, evidence },
             } => {
                 let registry = rrd_engine::Registry::builtin();
-                let claim = registry.record_verification(
-                    store.runtime_store(),
+                let claim = store.record_harness_verification(
+                    &registry,
                     name,
                     now,
                     evidence,
@@ -1456,7 +1444,7 @@ pub fn execute(
                     let state = if let Some(when) = &adapter.retired {
                         format!("RETIRED ({when})")
                     } else {
-                        match registry.verification(store.runtime_store(), adapter, now)? {
+                        match store.harness_verification(&registry, adapter, now)? {
                             rrd_engine::Verification::Current { until } => format!(
                                 "verified until {}",
                                 until
@@ -1546,7 +1534,7 @@ pub fn execute(
             }
             Command::ResetRouting { root } => {
                 verify_instance_store(store, root)?;
-                let ready = rrd_engine::reset_routing(store.runtime_store(), root)?;
+                let ready = store.reset_project_routing(root)?;
                 Ok(if json {
                     serde_json::to_string_pretty(&serde_json::json!({
                         "generation": ready.generation,
@@ -1587,7 +1575,7 @@ pub fn execute(
                         session: None,
                     },
                 );
-                let outcome = store.assert(&claim)?;
+                let outcome = store.assert_claim(&claim)?;
                 Ok(if json {
                     serde_json::to_string_pretty(&serde_json::json!({
                         "sequence": outcome.last_sequence,
@@ -1606,7 +1594,7 @@ pub fn execute(
                 let subject = Subject::new(subject.clone())?;
                 let predicate = Predicate::new(predicate.clone())?;
                 let at = at.unwrap_or(now);
-                let resolved = store.as_of(&subject, &predicate, at)?;
+                let resolved = store.claim_as_of(&subject, &predicate, at)?;
                 // A read is recorded, per SPEC.md §7.
                 store.observe(reader, &subject, &predicate, now)?;
                 Ok(match (&resolved, json) {
@@ -1629,7 +1617,7 @@ pub fn execute(
             Command::History { subject, predicate } => {
                 let subject = Subject::new(subject.clone())?;
                 let predicate = Predicate::new(predicate.clone())?;
-                let versions = store.history(&subject, &predicate)?;
+                let versions = store.claim_history(&subject, &predicate)?;
                 store.observe(reader, &subject, &predicate, now)?;
                 Ok(if json {
                     serde_json::to_string_pretty(&versions)?
@@ -1724,13 +1712,10 @@ pub fn execute(
 }
 
 fn verify_instance_store(
-    store: &EmbeddedOperator,
+    store: &RrdEngine,
     root: &std::path::Path,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let binding = rrd_engine::InstanceBinding::discover(root)?;
-    binding.require_runtime_ready()?;
-    binding.verify_store_path(store.path())?;
-    Ok(())
+    store.verify_project_store(root)
 }
 
 fn query_parameter_object(

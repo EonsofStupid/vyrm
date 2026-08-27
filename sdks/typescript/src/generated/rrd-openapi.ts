@@ -678,7 +678,7 @@ export interface operations {
                              */
                             id: string;
                             /** @enum {string} */
-                            kind: "organization" | "estate" | "project" | "instance" | "node" | "shard" | "collection" | "table" | "record" | "transaction" | "snapshot" | "backup" | "operation";
+                            kind: "organization" | "estate" | "project" | "instance" | "tenant" | "namespace" | "database" | "table" | "collection" | "record" | "point" | "relation" | "alias" | "cluster" | "node" | "shard" | "replica" | "segment" | "transaction" | "snapshot" | "backup" | "operation";
                         }[];
                     };
                 };
@@ -735,7 +735,7 @@ export interface operations {
                                              */
                                             id: string;
                                             /** @enum {string} */
-                                            kind: "organization" | "estate" | "project" | "instance" | "node" | "shard" | "collection" | "table" | "record" | "transaction" | "snapshot" | "backup" | "operation";
+                                            kind: "organization" | "estate" | "project" | "instance" | "tenant" | "namespace" | "database" | "table" | "collection" | "record" | "point" | "relation" | "alias" | "cluster" | "node" | "shard" | "replica" | "segment" | "transaction" | "snapshot" | "backup" | "operation";
                                         }[];
                                     };
                                     response_sha256: string;
@@ -821,7 +821,7 @@ export interface operations {
                                              */
                                             id: string;
                                             /** @enum {string} */
-                                            kind: "organization" | "estate" | "project" | "instance" | "node" | "shard" | "collection" | "table" | "record" | "transaction" | "snapshot" | "backup" | "operation";
+                                            kind: "organization" | "estate" | "project" | "instance" | "tenant" | "namespace" | "database" | "table" | "collection" | "record" | "point" | "relation" | "alias" | "cluster" | "node" | "shard" | "replica" | "segment" | "transaction" | "snapshot" | "backup" | "operation";
                                         }[];
                                     };
                                     response_sha256: string;
@@ -900,7 +900,7 @@ export interface operations {
                              */
                             id: string;
                             /** @enum {string} */
-                            kind: "organization" | "estate" | "project" | "instance" | "node" | "shard" | "collection" | "table" | "record" | "transaction" | "snapshot" | "backup" | "operation";
+                            kind: "organization" | "estate" | "project" | "instance" | "tenant" | "namespace" | "database" | "table" | "collection" | "record" | "point" | "relation" | "alias" | "cluster" | "node" | "shard" | "replica" | "segment" | "transaction" | "snapshot" | "backup" | "operation";
                         }[];
                     };
                 };
@@ -1107,7 +1107,7 @@ export interface operations {
                              */
                             id: string;
                             /** @enum {string} */
-                            kind: "organization" | "estate" | "project" | "instance" | "node" | "shard" | "collection" | "table" | "record" | "transaction" | "snapshot" | "backup" | "operation";
+                            kind: "organization" | "estate" | "project" | "instance" | "tenant" | "namespace" | "database" | "table" | "collection" | "record" | "point" | "relation" | "alias" | "cluster" | "node" | "shard" | "replica" | "segment" | "transaction" | "snapshot" | "backup" | "operation";
                         }[];
                     };
                 };
@@ -1333,7 +1333,7 @@ export interface operations {
                                      */
                                     id: string;
                                     /** @enum {string} */
-                                    kind: "organization" | "estate" | "project" | "instance" | "node" | "shard" | "collection" | "table" | "record" | "transaction" | "snapshot" | "backup" | "operation";
+                                    kind: "organization" | "estate" | "project" | "instance" | "tenant" | "namespace" | "database" | "table" | "collection" | "record" | "point" | "relation" | "alias" | "cluster" | "node" | "shard" | "replica" | "segment" | "transaction" | "snapshot" | "backup" | "operation";
                                 };
                                 protocol: string;
                                 /** Format: uint16 */
@@ -1407,7 +1407,7 @@ export interface operations {
                                      */
                                     id: string;
                                     /** @enum {string} */
-                                    kind: "organization" | "estate" | "project" | "instance" | "node" | "shard" | "collection" | "table" | "record" | "transaction" | "snapshot" | "backup" | "operation";
+                                    kind: "organization" | "estate" | "project" | "instance" | "tenant" | "namespace" | "database" | "table" | "collection" | "record" | "point" | "relation" | "alias" | "cluster" | "node" | "shard" | "replica" | "segment" | "transaction" | "snapshot" | "backup" | "operation";
                                 };
                                 protocol: string;
                                 /** Format: uint16 */
@@ -1484,7 +1484,7 @@ export interface operations {
                              */
                             id: string;
                             /** @enum {string} */
-                            kind: "organization" | "estate" | "project" | "instance" | "node" | "shard" | "collection" | "table" | "record" | "transaction" | "snapshot" | "backup" | "operation";
+                            kind: "organization" | "estate" | "project" | "instance" | "tenant" | "namespace" | "database" | "table" | "collection" | "record" | "point" | "relation" | "alias" | "cluster" | "node" | "shard" | "replica" | "segment" | "transaction" | "snapshot" | "backup" | "operation";
                         }[];
                     };
                 };
@@ -3362,7 +3362,7 @@ export interface operations {
                              */
                             id: string;
                             /** @enum {string} */
-                            kind: "organization" | "estate" | "project" | "instance" | "node" | "shard" | "collection" | "table" | "record" | "transaction" | "snapshot" | "backup" | "operation";
+                            kind: "organization" | "estate" | "project" | "instance" | "tenant" | "namespace" | "database" | "table" | "collection" | "record" | "point" | "relation" | "alias" | "cluster" | "node" | "shard" | "replica" | "segment" | "transaction" | "snapshot" | "backup" | "operation";
                         }[];
                     };
                 };
@@ -5246,7 +5246,7 @@ export interface operations {
                              */
                             id: string;
                             /** @enum {string} */
-                            kind: "organization" | "estate" | "project" | "instance" | "node" | "shard" | "collection" | "table" | "record" | "transaction" | "snapshot" | "backup" | "operation";
+                            kind: "organization" | "estate" | "project" | "instance" | "tenant" | "namespace" | "database" | "table" | "collection" | "record" | "point" | "relation" | "alias" | "cluster" | "node" | "shard" | "replica" | "segment" | "transaction" | "snapshot" | "backup" | "operation";
                         }[];
                     };
                 };
@@ -5310,7 +5310,7 @@ export interface operations {
                                                  */
                                                 id: string;
                                                 /** @enum {string} */
-                                                kind: "organization" | "estate" | "project" | "instance" | "node" | "shard" | "collection" | "table" | "record" | "transaction" | "snapshot" | "backup" | "operation";
+                                                kind: "organization" | "estate" | "project" | "instance" | "tenant" | "namespace" | "database" | "table" | "collection" | "record" | "point" | "relation" | "alias" | "cluster" | "node" | "shard" | "replica" | "segment" | "transaction" | "snapshot" | "backup" | "operation";
                                             }[];
                                         };
                                         response_sha256: string;
@@ -7021,7 +7021,7 @@ export interface operations {
                                      */
                                     id: string;
                                     /** @enum {string} */
-                                    kind: "organization" | "estate" | "project" | "instance" | "node" | "shard" | "collection" | "table" | "record" | "transaction" | "snapshot" | "backup" | "operation";
+                                    kind: "organization" | "estate" | "project" | "instance" | "tenant" | "namespace" | "database" | "table" | "collection" | "record" | "point" | "relation" | "alias" | "cluster" | "node" | "shard" | "replica" | "segment" | "transaction" | "snapshot" | "backup" | "operation";
                                 };
                                 models: {
                                     models: {
@@ -7455,7 +7455,7 @@ export interface operations {
                                                  */
                                                 id: string;
                                                 /** @enum {string} */
-                                                kind: "organization" | "estate" | "project" | "instance" | "node" | "shard" | "collection" | "table" | "record" | "transaction" | "snapshot" | "backup" | "operation";
+                                                kind: "organization" | "estate" | "project" | "instance" | "tenant" | "namespace" | "database" | "table" | "collection" | "record" | "point" | "relation" | "alias" | "cluster" | "node" | "shard" | "replica" | "segment" | "transaction" | "snapshot" | "backup" | "operation";
                                             }[];
                                         };
                                         response_sha256: string;
@@ -9166,7 +9166,7 @@ export interface operations {
                                      */
                                     id: string;
                                     /** @enum {string} */
-                                    kind: "organization" | "estate" | "project" | "instance" | "node" | "shard" | "collection" | "table" | "record" | "transaction" | "snapshot" | "backup" | "operation";
+                                    kind: "organization" | "estate" | "project" | "instance" | "tenant" | "namespace" | "database" | "table" | "collection" | "record" | "point" | "relation" | "alias" | "cluster" | "node" | "shard" | "replica" | "segment" | "transaction" | "snapshot" | "backup" | "operation";
                                 };
                                 models: {
                                     models: {
@@ -9584,7 +9584,7 @@ export interface operations {
                              */
                             id: string;
                             /** @enum {string} */
-                            kind: "organization" | "estate" | "project" | "instance" | "node" | "shard" | "collection" | "table" | "record" | "transaction" | "snapshot" | "backup" | "operation";
+                            kind: "organization" | "estate" | "project" | "instance" | "tenant" | "namespace" | "database" | "table" | "collection" | "record" | "point" | "relation" | "alias" | "cluster" | "node" | "shard" | "replica" | "segment" | "transaction" | "snapshot" | "backup" | "operation";
                         }[];
                     };
                 };
@@ -10199,7 +10199,7 @@ export interface operations {
                              */
                             id: string;
                             /** @enum {string} */
-                            kind: "organization" | "estate" | "project" | "instance" | "node" | "shard" | "collection" | "table" | "record" | "transaction" | "snapshot" | "backup" | "operation";
+                            kind: "organization" | "estate" | "project" | "instance" | "tenant" | "namespace" | "database" | "table" | "collection" | "record" | "point" | "relation" | "alias" | "cluster" | "node" | "shard" | "replica" | "segment" | "transaction" | "snapshot" | "backup" | "operation";
                         }[];
                     };
                 };
@@ -10502,7 +10502,7 @@ export interface operations {
                              */
                             id: string;
                             /** @enum {string} */
-                            kind: "organization" | "estate" | "project" | "instance" | "node" | "shard" | "collection" | "table" | "record" | "transaction" | "snapshot" | "backup" | "operation";
+                            kind: "organization" | "estate" | "project" | "instance" | "tenant" | "namespace" | "database" | "table" | "collection" | "record" | "point" | "relation" | "alias" | "cluster" | "node" | "shard" | "replica" | "segment" | "transaction" | "snapshot" | "backup" | "operation";
                         }[];
                     };
                 };
@@ -10678,7 +10678,7 @@ export interface operations {
                              */
                             id: string;
                             /** @enum {string} */
-                            kind: "organization" | "estate" | "project" | "instance" | "node" | "shard" | "collection" | "table" | "record" | "transaction" | "snapshot" | "backup" | "operation";
+                            kind: "organization" | "estate" | "project" | "instance" | "tenant" | "namespace" | "database" | "table" | "collection" | "record" | "point" | "relation" | "alias" | "cluster" | "node" | "shard" | "replica" | "segment" | "transaction" | "snapshot" | "backup" | "operation";
                         }[];
                     };
                 };
@@ -10924,7 +10924,7 @@ export interface operations {
                              */
                             id: string;
                             /** @enum {string} */
-                            kind: "organization" | "estate" | "project" | "instance" | "node" | "shard" | "collection" | "table" | "record" | "transaction" | "snapshot" | "backup" | "operation";
+                            kind: "organization" | "estate" | "project" | "instance" | "tenant" | "namespace" | "database" | "table" | "collection" | "record" | "point" | "relation" | "alias" | "cluster" | "node" | "shard" | "replica" | "segment" | "transaction" | "snapshot" | "backup" | "operation";
                         }[];
                     };
                 };
@@ -11431,7 +11431,7 @@ export interface operations {
                              */
                             id: string;
                             /** @enum {string} */
-                            kind: "organization" | "estate" | "project" | "instance" | "node" | "shard" | "collection" | "table" | "record" | "transaction" | "snapshot" | "backup" | "operation";
+                            kind: "organization" | "estate" | "project" | "instance" | "tenant" | "namespace" | "database" | "table" | "collection" | "record" | "point" | "relation" | "alias" | "cluster" | "node" | "shard" | "replica" | "segment" | "transaction" | "snapshot" | "backup" | "operation";
                         }[];
                     };
                 };
@@ -11617,7 +11617,7 @@ export interface operations {
                              */
                             id: string;
                             /** @enum {string} */
-                            kind: "organization" | "estate" | "project" | "instance" | "node" | "shard" | "collection" | "table" | "record" | "transaction" | "snapshot" | "backup" | "operation";
+                            kind: "organization" | "estate" | "project" | "instance" | "tenant" | "namespace" | "database" | "table" | "collection" | "record" | "point" | "relation" | "alias" | "cluster" | "node" | "shard" | "replica" | "segment" | "transaction" | "snapshot" | "backup" | "operation";
                         }[];
                     };
                 };
@@ -11761,7 +11761,7 @@ export interface operations {
                              */
                             id: string;
                             /** @enum {string} */
-                            kind: "organization" | "estate" | "project" | "instance" | "node" | "shard" | "collection" | "table" | "record" | "transaction" | "snapshot" | "backup" | "operation";
+                            kind: "organization" | "estate" | "project" | "instance" | "tenant" | "namespace" | "database" | "table" | "collection" | "record" | "point" | "relation" | "alias" | "cluster" | "node" | "shard" | "replica" | "segment" | "transaction" | "snapshot" | "backup" | "operation";
                         }[];
                     };
                 };
@@ -12168,7 +12168,7 @@ export interface operations {
                              */
                             id: string;
                             /** @enum {string} */
-                            kind: "organization" | "estate" | "project" | "instance" | "node" | "shard" | "collection" | "table" | "record" | "transaction" | "snapshot" | "backup" | "operation";
+                            kind: "organization" | "estate" | "project" | "instance" | "tenant" | "namespace" | "database" | "table" | "collection" | "record" | "point" | "relation" | "alias" | "cluster" | "node" | "shard" | "replica" | "segment" | "transaction" | "snapshot" | "backup" | "operation";
                         }[];
                     };
                 };
@@ -12322,7 +12322,7 @@ export interface operations {
                              */
                             id: string;
                             /** @enum {string} */
-                            kind: "organization" | "estate" | "project" | "instance" | "node" | "shard" | "collection" | "table" | "record" | "transaction" | "snapshot" | "backup" | "operation";
+                            kind: "organization" | "estate" | "project" | "instance" | "tenant" | "namespace" | "database" | "table" | "collection" | "record" | "point" | "relation" | "alias" | "cluster" | "node" | "shard" | "replica" | "segment" | "transaction" | "snapshot" | "backup" | "operation";
                         }[];
                     };
                 };
@@ -12452,7 +12452,7 @@ export interface operations {
                              */
                             id: string;
                             /** @enum {string} */
-                            kind: "organization" | "estate" | "project" | "instance" | "node" | "shard" | "collection" | "table" | "record" | "transaction" | "snapshot" | "backup" | "operation";
+                            kind: "organization" | "estate" | "project" | "instance" | "tenant" | "namespace" | "database" | "table" | "collection" | "record" | "point" | "relation" | "alias" | "cluster" | "node" | "shard" | "replica" | "segment" | "transaction" | "snapshot" | "backup" | "operation";
                         }[];
                     };
                 };
@@ -12614,7 +12614,7 @@ export interface operations {
                              */
                             id: string;
                             /** @enum {string} */
-                            kind: "organization" | "estate" | "project" | "instance" | "node" | "shard" | "collection" | "table" | "record" | "transaction" | "snapshot" | "backup" | "operation";
+                            kind: "organization" | "estate" | "project" | "instance" | "tenant" | "namespace" | "database" | "table" | "collection" | "record" | "point" | "relation" | "alias" | "cluster" | "node" | "shard" | "replica" | "segment" | "transaction" | "snapshot" | "backup" | "operation";
                         }[];
                     };
                 };
@@ -12758,7 +12758,7 @@ export interface operations {
                              */
                             id: string;
                             /** @enum {string} */
-                            kind: "organization" | "estate" | "project" | "instance" | "node" | "shard" | "collection" | "table" | "record" | "transaction" | "snapshot" | "backup" | "operation";
+                            kind: "organization" | "estate" | "project" | "instance" | "tenant" | "namespace" | "database" | "table" | "collection" | "record" | "point" | "relation" | "alias" | "cluster" | "node" | "shard" | "replica" | "segment" | "transaction" | "snapshot" | "backup" | "operation";
                         }[];
                     };
                 };
@@ -13719,7 +13719,7 @@ export interface operations {
                              */
                             id: string;
                             /** @enum {string} */
-                            kind: "organization" | "estate" | "project" | "instance" | "node" | "shard" | "collection" | "table" | "record" | "transaction" | "snapshot" | "backup" | "operation";
+                            kind: "organization" | "estate" | "project" | "instance" | "tenant" | "namespace" | "database" | "table" | "collection" | "record" | "point" | "relation" | "alias" | "cluster" | "node" | "shard" | "replica" | "segment" | "transaction" | "snapshot" | "backup" | "operation";
                         }[];
                     };
                 };
@@ -14681,7 +14681,7 @@ export interface operations {
                              */
                             id: string;
                             /** @enum {string} */
-                            kind: "organization" | "estate" | "project" | "instance" | "node" | "shard" | "collection" | "table" | "record" | "transaction" | "snapshot" | "backup" | "operation";
+                            kind: "organization" | "estate" | "project" | "instance" | "tenant" | "namespace" | "database" | "table" | "collection" | "record" | "point" | "relation" | "alias" | "cluster" | "node" | "shard" | "replica" | "segment" | "transaction" | "snapshot" | "backup" | "operation";
                         }[];
                     };
                 };
@@ -16468,7 +16468,7 @@ export interface operations {
                              */
                             id: string;
                             /** @enum {string} */
-                            kind: "organization" | "estate" | "project" | "instance" | "node" | "shard" | "collection" | "table" | "record" | "transaction" | "snapshot" | "backup" | "operation";
+                            kind: "organization" | "estate" | "project" | "instance" | "tenant" | "namespace" | "database" | "table" | "collection" | "record" | "point" | "relation" | "alias" | "cluster" | "node" | "shard" | "replica" | "segment" | "transaction" | "snapshot" | "backup" | "operation";
                         }[];
                     };
                 };
@@ -16676,7 +16676,7 @@ export interface operations {
                              */
                             id: string;
                             /** @enum {string} */
-                            kind: "organization" | "estate" | "project" | "instance" | "node" | "shard" | "collection" | "table" | "record" | "transaction" | "snapshot" | "backup" | "operation";
+                            kind: "organization" | "estate" | "project" | "instance" | "tenant" | "namespace" | "database" | "table" | "collection" | "record" | "point" | "relation" | "alias" | "cluster" | "node" | "shard" | "replica" | "segment" | "transaction" | "snapshot" | "backup" | "operation";
                         }[];
                     };
                 };
@@ -16918,7 +16918,7 @@ export interface operations {
                              */
                             id: string;
                             /** @enum {string} */
-                            kind: "organization" | "estate" | "project" | "instance" | "node" | "shard" | "collection" | "table" | "record" | "transaction" | "snapshot" | "backup" | "operation";
+                            kind: "organization" | "estate" | "project" | "instance" | "tenant" | "namespace" | "database" | "table" | "collection" | "record" | "point" | "relation" | "alias" | "cluster" | "node" | "shard" | "replica" | "segment" | "transaction" | "snapshot" | "backup" | "operation";
                         }[];
                     };
                 };
@@ -17758,7 +17758,7 @@ export interface operations {
                              */
                             id: string;
                             /** @enum {string} */
-                            kind: "organization" | "estate" | "project" | "instance" | "node" | "shard" | "collection" | "table" | "record" | "transaction" | "snapshot" | "backup" | "operation";
+                            kind: "organization" | "estate" | "project" | "instance" | "tenant" | "namespace" | "database" | "table" | "collection" | "record" | "point" | "relation" | "alias" | "cluster" | "node" | "shard" | "replica" | "segment" | "transaction" | "snapshot" | "backup" | "operation";
                         }[];
                     };
                 };
@@ -18636,7 +18636,7 @@ export interface operations {
                              */
                             id: string;
                             /** @enum {string} */
-                            kind: "organization" | "estate" | "project" | "instance" | "node" | "shard" | "collection" | "table" | "record" | "transaction" | "snapshot" | "backup" | "operation";
+                            kind: "organization" | "estate" | "project" | "instance" | "tenant" | "namespace" | "database" | "table" | "collection" | "record" | "point" | "relation" | "alias" | "cluster" | "node" | "shard" | "replica" | "segment" | "transaction" | "snapshot" | "backup" | "operation";
                         }[];
                     };
                 };

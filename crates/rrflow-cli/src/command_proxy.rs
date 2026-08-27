@@ -5,7 +5,7 @@
 //! capture; it never parses a shell program.
 
 use crate::command::Execution;
-use rrd_engine::operator::{digest, EmbeddedOperator, Reader};
+use rrd_engine::{digest, Reader, RrdEngine};
 use serde::Serialize;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
@@ -66,7 +66,7 @@ struct ExactCommandReport {
 }
 
 pub fn execute(
-    store: &EmbeddedOperator,
+    store: &RrdEngine,
     request: ExactCommandRequest<'_>,
     reader: &Reader,
     now: u64,
@@ -132,19 +132,15 @@ pub fn execute(
     if let Some(session_id) = session_id {
         lifecycle_object.insert("session_id".into(), Value::String(session_id.into()));
     }
-    let context = rrd_engine::HookContext {
-        store: store.runtime_store(),
+    let authorization = store.handle_runtime_hook(rrd_engine::RuntimeHookRequest {
         root: &root,
         harness: Some("rrflow-exec"),
         reader,
         now,
         budget: 1_500,
-    };
-    let authorization = rrd_engine::handle(
-        &context,
-        rrd_engine::HookEvent::PreToolUse,
-        &lifecycle_input,
-    )?;
+        event: rrd_engine::HookEvent::PreToolUse,
+        input: &lifecycle_input,
+    })?;
     if response_denied(&authorization.stdout) {
         return Err(denial_reason(&authorization.stdout)
             .unwrap_or_else(|| "exact command was denied by the RRFlow lifecycle gate".into())
@@ -160,21 +156,14 @@ pub fn execute(
         authorization.lifecycle_authorization.as_ref(),
     ) {
         (Some(lifecycle_context), Some(lifecycle_authorization)) => {
-            rrd_engine::consume_lifecycle_tool_authorization(
-                store.runtime_store(),
+            store.consume_lifecycle_authorization(
                 lifecycle_context,
                 lifecycle_authorization,
                 now,
             )?;
         }
         (None, None) => {
-            rrd_engine::consume_attuned_tool_authorization(
-                store.runtime_store(),
-                &root,
-                &request_sha256,
-                now,
-                "cli:rrflow-exec",
-            )?;
+            store.consume_attuned_authorization(&root, &request_sha256, now, "cli:rrflow-exec")?;
         }
         _ => return Err("lifecycle gate returned a partial authorization".into()),
     }
@@ -228,22 +217,19 @@ pub fn execute(
             .expect("exact post-tool input is an object")
             .insert("session_id".into(), Value::String(session_id.into()));
     }
-    let post_context = rrd_engine::HookContext {
-        store: store.runtime_store(),
-        root: &root,
-        harness: Some("rrflow-exec"),
-        reader,
-        now: now.saturating_add(duration_ms),
-        budget: 1_500,
-    };
-    rrd_engine::handle(
-        &post_context,
-        rrd_engine::HookEvent::PostToolUse,
-        &post_input,
-    )
-    .map_err(|error| {
-        format!("exact command ran but its durable lifecycle observation failed: {error}")
-    })?;
+    store
+        .handle_runtime_hook(rrd_engine::RuntimeHookRequest {
+            root: &root,
+            harness: Some("rrflow-exec"),
+            reader,
+            now: now.saturating_add(duration_ms),
+            budget: 1_500,
+            event: rrd_engine::HookEvent::PostToolUse,
+            input: &post_input,
+        })
+        .map_err(|error| {
+            format!("exact command ran but its durable lifecycle observation failed: {error}")
+        })?;
 
     let text = if json_output {
         serde_json::to_string_pretty(&report)?

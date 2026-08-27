@@ -1,17 +1,16 @@
-//! Versioned deployment boundary for an RRFlow/Connectome instance.
+//! Versioned deployment authority for one RRFlow project instance.
 //!
-//! A major platform owns a dedicated instance. Related small projects may be
-//! admitted to an umbrella, but only by an explicit relative member path. The
-//! manifest deliberately contains no canonical absolute paths so an instance
-//! can be relocated without becoming a different instance.
+//! Manifest format 1 retains its original `mode` and `members` fields so its
+//! serialized bytes and persisted project-authority digest remain stable. The
+//! only valid topology is one project root: `mode = "dedicated"` and
+//! `members = ["."]`.
 
 use rrd_contract::CanonicalId;
 use rrd_core::digest;
 use rrd_store::{ControlTransition, Engine};
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeSet;
 use std::io::Write;
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::{RrdEngine, ServiceError};
@@ -26,7 +25,6 @@ static MANIFEST_STAGING_SEQUENCE: AtomicU64 = AtomicU64::new(1);
 #[serde(rename_all = "snake_case")]
 pub enum InstanceMode {
     Dedicated,
-    Umbrella,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -117,20 +115,6 @@ impl InstanceManifest {
         Ok(manifest)
     }
 
-    pub fn umbrella(
-        id: impl Into<String>,
-        members: impl IntoIterator<Item = PathBuf>,
-    ) -> Result<Self, Box<dyn std::error::Error>> {
-        let manifest = Self {
-            format: INSTANCE_FORMAT,
-            id: id.into(),
-            mode: InstanceMode::Umbrella,
-            members: members.into_iter().collect(),
-        };
-        manifest.validate()?;
-        Ok(manifest)
-    }
-
     pub fn load(root: &Path) -> Result<Self, Box<dyn std::error::Error>> {
         let path = root.join(INSTANCE_FILE);
         let raw = std::fs::read_to_string(&path).map_err(|error| {
@@ -143,9 +127,8 @@ impl InstanceManifest {
         Ok(manifest)
     }
 
-    /// Initializes a dedicated instance unless a valid manifest already
-    /// exists. Existing topology is never rewritten as a side effect of
-    /// harness setup.
+    /// Initializes a project instance unless a valid manifest already exists.
+    /// Existing identity is never rewritten as a side effect of harness setup.
     pub fn ensure_dedicated(root: &Path) -> Result<(Self, bool), Box<dyn std::error::Error>> {
         let id = root
             .file_name()
@@ -156,7 +139,7 @@ impl InstanceManifest {
         Self::ensure_dedicated_as(root, id)
     }
 
-    /// Initializes or verifies a dedicated instance with an operator-selected
+    /// Initializes or verifies a project instance with an operator-selected
     /// identity. This is the provisioning boundary used by estate and cluster
     /// controllers before they start `rrd-server`.
     pub fn ensure_dedicated_as(
@@ -240,33 +223,13 @@ impl InstanceManifest {
         }
         CanonicalId::new(self.id.clone())
             .map_err(|error| format!("instance id is not canonical: {error}"))?;
-        if self.members.is_empty() {
-            return Err("instance must declare at least one member".into());
-        }
-
-        let mut unique = BTreeSet::new();
-        for member in &self.members {
-            validate_member(member)?;
-            if !unique.insert(member.clone()) {
-                return Err(format!("duplicate instance member {}", member.display()).into());
-            }
-        }
-
-        if self.mode == InstanceMode::Dedicated && self.members.as_slice() != [PathBuf::from(".")] {
-            return Err("dedicated instances must contain exactly the `.` member".into());
-        }
-        if self.mode == InstanceMode::Umbrella
-            && self.members.iter().any(|member| member == Path::new("."))
-        {
-            return Err("umbrella instances must name each member; `.` would include the whole root implicitly".into());
+        if self.mode != InstanceMode::Dedicated || self.members.as_slice() != [PathBuf::from(".")] {
+            return Err(
+                "instance manifest format 1 must bind exactly one project root (`mode = dedicated`, `members = [\".\"]`)"
+                    .into(),
+            );
         }
         Ok(())
-    }
-
-    /// Tests declared membership only. Filesystem existence and canonical
-    /// containment are checked when the runtime binds a manifest to a root.
-    pub fn admits(&self, member: &Path) -> bool {
-        self.members.iter().any(|candidate| candidate == member)
     }
 }
 
@@ -297,8 +260,8 @@ fn default_instance_id(name: &str) -> String {
 
 impl InstanceBinding {
     /// Finds the nearest enclosing manifest and proves that `project_root` is
-    /// an admitted root. Nearest wins so a dedicated major instance nested
-    /// beneath an umbrella cannot accidentally bind to the umbrella.
+    /// the instance root. A project below another project's manifest is never
+    /// implicitly admitted to that instance.
     pub fn discover(project_root: &Path) -> Result<Self, Box<dyn std::error::Error>> {
         let project_root = std::fs::canonicalize(project_root).map_err(|error| {
             format!(
@@ -325,51 +288,16 @@ impl InstanceBinding {
             })?;
         let manifest = InstanceManifest::load(&instance_root)?;
 
-        let member = match manifest.mode {
-            InstanceMode::Dedicated => {
-                if project_root != instance_root {
-                    return Err(format!(
-                        "dedicated instance {} admits only its root {}, not {}",
-                        manifest.id,
-                        instance_root.display(),
-                        project_root.display()
-                    )
-                    .into());
-                }
-                PathBuf::from(".")
-            }
-            InstanceMode::Umbrella => {
-                let mut matched = None;
-                for member in &manifest.members {
-                    let path = instance_root.join(member);
-                    let canonical = std::fs::canonicalize(&path).map_err(|error| {
-                        format!(
-                            "umbrella member {} cannot be resolved beneath {}: {error}",
-                            member.display(),
-                            instance_root.display()
-                        )
-                    })?;
-                    if !canonical.starts_with(&instance_root) {
-                        return Err(format!(
-                            "umbrella member {} escapes instance root {}",
-                            member.display(),
-                            instance_root.display()
-                        )
-                        .into());
-                    }
-                    if canonical == project_root {
-                        matched = Some(member.clone());
-                    }
-                }
-                matched.ok_or_else(|| {
-                    format!(
-                        "project {} is not an explicit member of umbrella instance {}",
-                        project_root.display(),
-                        manifest.id
-                    )
-                })?
-            }
-        };
+        if project_root != instance_root {
+            return Err(format!(
+                "instance {} admits only its project root {}, not {}",
+                manifest.id,
+                instance_root.display(),
+                project_root.display()
+            )
+            .into());
+        }
+        let member = PathBuf::from(".");
 
         Ok(Self {
             manifest,
@@ -379,17 +307,10 @@ impl InstanceBinding {
         })
     }
 
-    /// Umbrella declarations are valid configuration, but execution remains
-    /// closed until every mutable projection and ledger is member-scoped.
+    /// Revalidates the frozen format-1 project-instance invariant before a
+    /// caller mutates runtime state.
     pub fn require_runtime_ready(&self) -> Result<(), Box<dyn std::error::Error>> {
-        if self.manifest.mode == InstanceMode::Umbrella {
-            return Err(format!(
-                "umbrella instance {} is declared but runtime execution is postponed until member-scoped routing, reasoning, and policy state land",
-                self.manifest.id
-            )
-            .into());
-        }
-        Ok(())
+        self.manifest.validate()
     }
 
     pub fn expected_store(&self) -> PathBuf {
@@ -559,31 +480,5 @@ fn sync_parent(path: &Path) -> std::io::Result<()> {
     }
     #[cfg(not(unix))]
     let _ = path;
-    Ok(())
-}
-
-fn validate_member(member: &Path) -> Result<(), Box<dyn std::error::Error>> {
-    if member.as_os_str().is_empty() || member.is_absolute() {
-        return Err(format!(
-            "instance member {} must be a non-empty relative path",
-            member.display()
-        )
-        .into());
-    }
-    if member == Path::new(".") {
-        return Ok(());
-    }
-    for component in member.components() {
-        if !matches!(component, Component::Normal(_)) {
-            return Err(format!(
-                "instance member {} must not contain parent, root, or current-directory components",
-                member.display()
-            )
-            .into());
-        }
-    }
-    if member.starts_with(".rrflow") {
-        return Err("the runtime state directory cannot be an instance member".into());
-    }
     Ok(())
 }

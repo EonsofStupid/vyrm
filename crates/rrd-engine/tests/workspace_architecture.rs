@@ -14,6 +14,7 @@ struct WorkspaceMetadata {
 struct PackageDependencies {
     workspace: BTreeSet<String>,
     all: BTreeSet<String>,
+    targets: BTreeSet<String>,
 }
 
 #[test]
@@ -105,6 +106,165 @@ fn outward_consumers_cannot_bypass_the_engine_boundary() {
         BTreeSet::new(),
         "MCP adapter must use only the engine boundary",
     );
+}
+
+#[test]
+fn outward_product_sources_do_not_import_physical_components() {
+    let metadata = workspace_metadata();
+    let physical = [
+        "rrd_cluster",
+        "rrd_core",
+        "rrd_estate",
+        "rrd_graph",
+        "rrd_inference",
+        "rrd_lsm",
+        "rrd_operator_knowledge",
+        "rrd_query",
+        "rrd_security",
+        "rrd_store",
+        "rrd_vector",
+    ];
+    let mut violations = Vec::new();
+    for relative in [
+        "crates/rrd-client/src",
+        "crates/rrd-server/src",
+        "crates/rrflow-cli/src",
+        "crates/rrflow-cli/examples",
+        "crates/rrflow-mcp/src",
+        "crates/connectome-ui/src",
+    ] {
+        let directory = metadata.root.join(relative);
+        if directory.is_dir() {
+            collect_physical_import_violations(
+                &metadata.root,
+                &directory,
+                &physical,
+                &mut violations,
+            );
+        }
+    }
+    violations.sort();
+    violations.dedup();
+    assert!(
+        violations.is_empty(),
+        "outward product source imports a physical/domain component instead of rrd-engine, rrd-client, or rrd-contract: {violations:#?}"
+    );
+}
+
+#[test]
+fn tracked_and_untracked_text_files_have_no_trailing_horizontal_whitespace() {
+    let metadata = workspace_metadata();
+    let output = Command::new("git")
+        .current_dir(&metadata.root)
+        .args([
+            "ls-files",
+            "-z",
+            "--cached",
+            "--others",
+            "--exclude-standard",
+        ])
+        .output()
+        .expect("git ls-files must start");
+    assert!(
+        output.status.success(),
+        "git ls-files failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let mut violations = Vec::new();
+    for encoded in output.stdout.split(|byte| *byte == 0) {
+        if encoded.is_empty() {
+            continue;
+        }
+        let relative = PathBuf::from(
+            std::str::from_utf8(encoded).expect("repository paths must be valid UTF-8"),
+        );
+        let path = metadata.root.join(&relative);
+        if !path.is_file() {
+            continue;
+        }
+        let bytes = fs::read(&path)
+            .unwrap_or_else(|error| panic!("cannot read {}: {error}", path.display()));
+        if bytes.contains(&0) || std::str::from_utf8(&bytes).is_err() {
+            continue;
+        }
+        for (index, encoded_line) in bytes.split(|byte| *byte == b'\n').enumerate() {
+            let line = encoded_line.strip_suffix(b"\r").unwrap_or(encoded_line);
+            if line.last().is_some_and(|byte| matches!(byte, b' ' | b'\t')) {
+                violations.push(format!("{}:{}", relative.display(), index + 1));
+            }
+        }
+    }
+    assert!(
+        violations.is_empty(),
+        "tracked or untracked text contains trailing horizontal whitespace: {violations:#?}"
+    );
+}
+
+#[test]
+fn one_engine_authority_owns_every_product_storage_opening() {
+    let metadata = workspace_metadata();
+    let mut violations = Vec::new();
+    collect_authority_opening_violations(&metadata.root.join("crates"), &mut violations);
+    violations.sort();
+    assert!(
+        violations.is_empty(),
+        "production code outside rrd-engine/rrd-store must not open physical storage or revive a second embedded handle: {violations:#?}"
+    );
+
+    let engine_library = fs::read_to_string(metadata.root.join("crates/rrd-engine/src/lib.rs"))
+        .expect("rrd-engine library source must be readable");
+    assert!(
+        !engine_library.contains("pub mod operator;"),
+        "the engine-owned operator implementation must remain private"
+    );
+    let mut duplicate_handles = Vec::new();
+    collect_rust_sources(
+        &metadata.root.join("crates/rrd-engine/src"),
+        &mut duplicate_handles,
+        "EmbeddedOperator",
+    );
+    collect_rust_sources(
+        &metadata.root.join("crates/rrd-engine/src"),
+        &mut duplicate_handles,
+        "pub fn runtime_store",
+    );
+    duplicate_handles.sort();
+    duplicate_handles.dedup();
+    assert!(
+        duplicate_handles.is_empty(),
+        "rrd-engine must expose only RrdEngine as its storage-opening authority: {duplicate_handles:#?}"
+    );
+}
+
+#[test]
+fn outward_cli_owns_product_executables_while_physical_crates_own_none() {
+    let metadata = workspace_metadata();
+    let product_executables = names(&[
+        "rrd-backup-controller",
+        "rrd-estate-admin",
+        "rrd-estate-controller",
+        "rrd-security-bootstrap",
+    ]);
+    let cli_targets = &metadata.packages["rrflow-cli"].targets;
+    let missing = product_executables
+        .difference(cli_targets)
+        .cloned()
+        .collect::<Vec<_>>();
+    assert!(
+        missing.is_empty(),
+        "rrflow-cli must own every thin product executable; missing={missing:?}"
+    );
+    for package in ["rrd-estate", "rrd-security"] {
+        let unexpected = metadata.packages[package]
+            .targets
+            .intersection(&product_executables)
+            .cloned()
+            .collect::<Vec<_>>();
+        assert!(
+            unexpected.is_empty(),
+            "{package} must remain a physical component library, not an independent product authority; targets={unexpected:?}"
+        );
+    }
 }
 
 #[test]
@@ -310,6 +470,17 @@ fn workspace_metadata() -> WorkspaceMetadata {
         }
         let mut workspace = BTreeSet::new();
         let mut all = BTreeSet::new();
+        let targets = package["targets"]
+            .as_array()
+            .expect("package targets must be an array")
+            .iter()
+            .map(|target| {
+                target["name"]
+                    .as_str()
+                    .expect("target names must be strings")
+                    .to_owned()
+            })
+            .collect();
         for dependency in package["dependencies"]
             .as_array()
             .expect("package dependencies must be an array")
@@ -333,7 +504,14 @@ fn workspace_metadata() -> WorkspaceMetadata {
         }
         assert!(
             packages
-                .insert(name.to_owned(), PackageDependencies { workspace, all })
+                .insert(
+                    name.to_owned(),
+                    PackageDependencies {
+                        workspace,
+                        all,
+                        targets,
+                    },
+                )
                 .is_none(),
             "duplicate workspace package name {name}"
         );
@@ -415,6 +593,110 @@ fn collect_rust_sources(directory: &Path, violations: &mut Vec<PathBuf>, forbidd
             if source.contains(forbidden) {
                 violations.push(path);
             }
+        }
+    }
+}
+
+fn collect_authority_opening_violations(crates: &Path, violations: &mut Vec<PathBuf>) {
+    let mut packages = fs::read_dir(crates)
+        .expect("workspace crates directory must be readable")
+        .collect::<Result<Vec<_>, _>>()
+        .expect("workspace crate entries must be readable");
+    packages.sort_by_key(fs::DirEntry::path);
+    for package in packages {
+        let name = package.file_name();
+        if name == "rrd-engine" || name == "rrd-store" {
+            continue;
+        }
+        let source = package.path().join("src");
+        if source.is_dir() {
+            collect_authority_source_tree(crates, &source, violations);
+        }
+    }
+}
+
+fn collect_physical_import_violations(
+    root: &Path,
+    directory: &Path,
+    physical: &[&str],
+    violations: &mut Vec<PathBuf>,
+) {
+    let mut entries = fs::read_dir(directory)
+        .unwrap_or_else(|error| panic!("cannot inspect {}: {error}", directory.display()))
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap_or_else(|error| panic!("cannot enumerate {}: {error}", directory.display()));
+    entries.sort_by_key(fs::DirEntry::path);
+    for entry in entries {
+        let path = entry.path();
+        let file_type = entry
+            .file_type()
+            .unwrap_or_else(|error| panic!("cannot inspect {}: {error}", path.display()));
+        if file_type.is_symlink() {
+            continue;
+        }
+        if file_type.is_dir() {
+            collect_physical_import_violations(root, &path, physical, violations);
+            continue;
+        }
+        if path.extension().is_none_or(|extension| extension != "rs") {
+            continue;
+        }
+        let source = fs::read_to_string(&path)
+            .unwrap_or_else(|error| panic!("cannot read {}: {error}", path.display()));
+        if physical.iter().any(|component| {
+            source.contains(&format!("use {component}"))
+                || source.contains(&format!("{component}::"))
+                || source.contains(&format!("extern crate {component}"))
+        }) {
+            violations.push(
+                path.strip_prefix(root)
+                    .expect("outward source must be workspace-relative")
+                    .to_path_buf(),
+            );
+        }
+    }
+}
+
+fn collect_authority_source_tree(crates: &Path, directory: &Path, violations: &mut Vec<PathBuf>) {
+    let mut entries = fs::read_dir(directory)
+        .unwrap_or_else(|error| panic!("cannot inspect {}: {error}", directory.display()))
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap_or_else(|error| panic!("cannot enumerate {}: {error}", directory.display()));
+    entries.sort_by_key(fs::DirEntry::path);
+    for entry in entries {
+        let path = entry.path();
+        let file_type = entry
+            .file_type()
+            .unwrap_or_else(|error| panic!("cannot inspect {}: {error}", path.display()));
+        if file_type.is_symlink() {
+            continue;
+        }
+        if file_type.is_dir() {
+            collect_authority_source_tree(crates, &path, violations);
+            continue;
+        }
+        if path.extension().is_none_or(|extension| extension != "rs") {
+            continue;
+        }
+        let source = fs::read_to_string(&path)
+            .unwrap_or_else(|error| panic!("cannot read {}: {error}", path.display()));
+        // Source-level unit fixtures are allowed to inspect persistence. The
+        // product surface before the first cfg(test) boundary is not.
+        let production = source.split("#[cfg(test)]").next().unwrap_or(&source);
+        if [
+            "PersistentEngine::open(",
+            "EmbeddedOperator",
+            ".runtime_store(",
+            "rrd_engine::operator",
+        ]
+        .iter()
+        .any(|forbidden| production.contains(forbidden))
+        {
+            violations.push(
+                path.strip_prefix(crates.parent().expect("crates has a workspace parent"))
+                    .expect("crate source must be workspace-relative")
+                    .to_path_buf(),
+            );
         }
     }
 }

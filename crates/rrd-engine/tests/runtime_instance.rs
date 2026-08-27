@@ -38,31 +38,20 @@ fn dedicated_initialization_is_versioned_relocatable_and_idempotent() {
 }
 
 #[test]
-fn umbrella_membership_is_explicit() {
-    let manifest = InstanceManifest::umbrella(
-        "small-tools",
-        [PathBuf::from("formatter"), PathBuf::from("linter")],
-    )
-    .unwrap();
-    assert!(manifest.admits(Path::new("formatter")));
-    assert!(manifest.admits(Path::new("linter")));
-    assert!(!manifest.admits(Path::new("unlisted-neighbor")));
-}
-
-#[test]
 fn invalid_or_ambiguous_topologies_fail_closed() {
-    assert!(InstanceManifest::umbrella("x", []).is_err());
-    assert!(InstanceManifest::umbrella("x", [PathBuf::from("../outside")]).is_err());
-    assert!(InstanceManifest::umbrella("x", [PathBuf::from("/outside")]).is_err());
-    assert!(InstanceManifest::umbrella("x", [PathBuf::from(".rrflow/rrd")]).is_err());
-    assert!(InstanceManifest::umbrella("x", [PathBuf::from(".")]).is_err());
-    assert!(
-        InstanceManifest::umbrella("x", [PathBuf::from("same"), PathBuf::from("same")]).is_err()
-    );
+    let canonical = InstanceManifest::dedicated("x").unwrap();
 
-    let mut dedicated = InstanceManifest::dedicated("x").unwrap();
-    dedicated.members.push(PathBuf::from("another"));
-    assert!(dedicated.validate().is_err());
+    let mut missing_root = canonical.clone();
+    missing_root.members.clear();
+    assert!(missing_root.validate().is_err());
+
+    let mut extra_project = canonical.clone();
+    extra_project.members.push(PathBuf::from("another"));
+    assert!(extra_project.validate().is_err());
+
+    let mut replaced_root = canonical;
+    replaced_root.members = vec![PathBuf::from("another")];
+    assert!(replaced_root.validate().is_err());
 }
 
 #[test]
@@ -88,6 +77,16 @@ fn unknown_fields_and_versions_are_rejected() {
         .unwrap_err()
         .to_string()
         .contains("unknown field"));
+
+    std::fs::write(
+        root.path().join(INSTANCE_FILE),
+        "format = 1\nid = \"x\"\nmode = \"umbrella\"\nmembers = [\"project-a\"]\n",
+    )
+    .unwrap();
+    assert!(InstanceManifest::load(root.path())
+        .unwrap_err()
+        .to_string()
+        .contains("unknown variant"));
 }
 
 #[test]
@@ -112,31 +111,16 @@ fn nearest_manifest_binds_dedicated_roots_and_denies_neighbors() {
 }
 
 #[test]
-fn umbrella_binding_requires_exact_members_and_execution_stays_postponed() {
+fn nested_project_cannot_bind_to_a_parent_project_instance() {
     let root = tempfile::tempdir().unwrap();
-    let listed = root.path().join("listed");
-    let unlisted = root.path().join("unlisted");
-    std::fs::create_dir(&listed).unwrap();
-    std::fs::create_dir(&unlisted).unwrap();
-    std::fs::create_dir(root.path().join(".rrflow")).unwrap();
-    let manifest = InstanceManifest::umbrella("tools", [PathBuf::from("listed")]).unwrap();
-    std::fs::write(
-        root.path().join(INSTANCE_FILE),
-        toml::to_string_pretty(&manifest).unwrap(),
-    )
-    .unwrap();
+    let nested = root.path().join("nested-project");
+    std::fs::create_dir(&nested).unwrap();
+    InstanceManifest::ensure_dedicated_as(root.path(), "parent-project").unwrap();
 
-    let binding = InstanceBinding::discover(&listed).unwrap();
-    assert_eq!(binding.member, Path::new("listed"));
-    assert!(binding
-        .require_runtime_ready()
+    assert!(InstanceBinding::discover(&nested)
         .unwrap_err()
         .to_string()
-        .contains("postponed"));
-    assert!(InstanceBinding::discover(&unlisted)
-        .unwrap_err()
-        .to_string()
-        .contains("not an explicit member"));
+        .contains("admits only its project root"));
 }
 
 #[test]

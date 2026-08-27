@@ -2286,10 +2286,11 @@ index.
 
 ## 2026-08-27 — CLI crosses the embedded engine boundary
 
-- Composition: `rrflow-cli` has no production `rrd-core` or `rrd-store`
-  dependency. The engine-owned `EmbeddedOperator` owns physical backend
-  selection and exposes the bounded ordinary and exclusive-administration
-  operations needed by the operator surface.
+- Intermediate composition checkpoint: `rrflow-cli` removed its production
+  `rrd-core` and `rrd-store` dependencies, but still entered through the
+  temporary engine-owned `EmbeddedOperator`. G01-W02 later removed that second
+  handle and moved the same bounded operations directly onto `RrdEngine`; this
+  entry is retained as sequencing evidence, not current architecture.
 - Preserved behavior: recall and provenance, claim CRUD/history, invocation and
   effectiveness ledgers, projection rebuild/ground/reset, hooks, preflight,
   RRFlowQL, reasoning, routing, exact-argv execution, work-plan enforcement,
@@ -2554,3 +2555,137 @@ index.
   Only the ten exact commands recorded before implementation may create its
   persisted verification transition, and the resulting commit must then pass
   the required remote platform matrix before work advances.
+
+## 2026-08-27 — G01-W01 in-place V1 identity cutover proof corrections
+
+- Reviewed scope: G01-W01 is bound in RRD to a plan with 13 exact commands.
+  The row covers canonical workspace identities, the no-retired-identity gate,
+  V1 fixture reopen, five generated SDK projections, formatting, workspace
+  check/test, and warning-denying Clippy. It does not claim the G01-W02 unified
+  engine-authority boundary or any later capability gate.
+- Runtime enforcement: lifecycle session `codex-g01-w01` reached
+  `plan.recorded` with the active work item, reasoning run, source-tree digest,
+  reviewed-plan digest, and verification-plan digest. The first supervised
+  mutation was denied because a later preflight made the recorded attunement
+  receipt stale. The worktree remained unchanged; the same plan was rebound to
+  the fresh receipt before the retry. This is invocation `167` followed by the
+  successful supervised mutation at invocation `175`.
+- Alias correction: read-stamp trace links no longer publish both
+  `commit_cursor` and a compatibility `cursor`. The canonical field remains;
+  a negative assertion prevents the compatibility field from returning.
+  Canonical cursor fields belonging to runtime-cursor and snapshot link kinds
+  are unchanged.
+- Package identity correction: workspace metadata validation now rejects Cargo
+  rename aliases for every workspace edge, including development edges, and
+  requires every package manifest to live in a directory matching the package
+  name. The existing case-insensitive active-tree scan remains no-allowlist.
+- V1 recovery correction: the checked-in snapshot-bundle fixture must be
+  byte-identical to a newly exported canonical V1 bundle. The test now installs
+  and reinstalls that checked-in fixture, performs the successor write, and
+  reopens the target database. Previously, the fixture was decoded and read but
+  the install/reopen path used the freshly generated in-memory bundle.
+- Passing focused command: `/tmp/rrflow-g00-w05-tools/cargo test -p rrd-core
+  -p rrd-lsm -p rrd-engine --all-targets --locked` completed with exit code 0
+  through `rrflow exec` (invocation `180`).
+- Completion evidence: G01-W01 is persisted as verified under digest
+  `c6a9a19a057baad305e57a73b04680a7e9de5ee661ff0948b07146186af442a2`.
+  The source commit is `38f1a19bcc9ad76389cceed7eb0988452e694235`; push run
+  `33075846902` and PR run `33075851923` completed green. Publication of this
+  journal/ledger evidence remains a separate clean-tree step and must not
+  silently absorb G01-W02 work.
+
+## 2026-08-27 — G01-W02 canonical platform baseline slice
+
+- One terminology authority: `docs/platform/README.md` owns the exact ordered
+  list of 25 platform terms. `rrd-contract::PLATFORM_TERMS` is its
+  machine-readable mirror; tests reject duplicates, order drift, missing public
+  resource mappings, and public `domain`, `boundary`, `workspace`, or
+  `umbrella` resources.
+- Public resource baseline: `ResourceKind` now contains organization, estate,
+  project, instance, tenant, namespace, database, table, collection, record,
+  point, relation, alias, cluster, node, shard, replica, and segment, while
+  retaining transaction, snapshot, backup, and operation. The intentional
+  additive OpenAPI change is frozen under digest
+  `bfc1607e18f225faaa3d5d374d25bd455ba718f1f1636df08df9800003449eb3`;
+  the TypeScript schema was regenerated and its generation, lint, typecheck,
+  and tests pass.
+- Project-instance enforcement: executable multi-project topology was removed.
+  Manifest format 1 accepts only `mode = "dedicated"` and `members = ["."]`;
+  nested projects, alternate modes, foreign stores, and startup rebinding fail
+  closed. The old fields remain serialized so existing manifest and
+  `ProjectAuthorityBinding` digests remain byte-compatible.
+- Explicit migration boundary: environment is a required canonical instance
+  attribute but is not defaulted into format 1. A successor manifest and
+  project-authority format must migrate it explicitly with reopen and rollback
+  evidence; silently changing V1 would invalidate persisted authority.
+- One documentation direction: `docs/rrflow-rrd-architecture.md` is the sole
+  end-to-end implementation map; `docs/platform/research/README.md` is the one
+  research index; root PLAN/STATUS and active topology, UI, trace, graph, and
+  Clyffy notes now point toward estate-managed project instances instead of the
+  retired topology.
+- Local qualification passed: locked metadata; `rrd-contract` all targets;
+  focused instance/architecture, CLI, and server targets; TypeScript `pnpm
+  check`; formatting; workspace all-target check; full workspace all-target
+  tests with no fail-fast; and workspace all-target Clippy with `-D warnings`.
+- Status boundary: this is a tested G01-W02 baseline slice, not completion of
+  the work item. G01-W02 remains active until one `RrdEngine` authority absorbs
+  the remaining `EmbeddedOperator`/`runtime_store` escape and independent
+  `PersistentEngine` openings and proves one catalogue, transaction
+  coordinator, read stamp, security authority, event log, and audit root.
+
+## 2026-08-27 — G01-W02 single RrdEngine authority consolidation
+
+- One embedded handle: claim, recall, invocation, projection, runtime,
+  work-plan, archive, backup, migration, and format-administration operations
+  now belong to `RrdEngine`. The `EmbeddedOperator` type, public operator
+  module, and `runtime_store` escape were removed without an alias or forwarding
+  compatibility constructor. `rrflow` discovers and verifies the canonical
+  `<project>/.rrflow/rrd` binding before opening it.
+- One product-executable boundary: `rrd-security-bootstrap`,
+  `rrd-estate-admin`, `rrd-estate-controller`, and `rrd-backup-controller` are
+  thin outward binaries owned by `rrflow-cli`. Their production sources import
+  only the engine/contract boundary. Security and estate policy, repository,
+  process-driver, backup-driver, and storage construction moved inside typed
+  engine operations; `rrd-security` and `rrd-estate` retain domain/physical
+  libraries but no longer declare those binaries.
+- Identity correction: estate commands require a distinct
+  `--authority-instance`; an estate ID is never silently reused as the identity
+  of the running RRD engine. Denied admin policy is still evaluated before the
+  database can be created.
+- Store initialization correction: project-bound and local-authority opens now
+  initialize/authenticate the RRD substrate before placing `RRD.SECRET` inside
+  a missing database directory. This prevents a fresh token file from causing
+  the backend selector to misclassify the directory as compatibility storage.
+- Persistent/process parity: security drift/idempotency, estate admin replay
+  and journal identity, backup effect-gap kill/replay, physical estate state
+  machines, and the real RRD child/controller start-stop crash matrix pass
+  after executable ownership moves.
+- Executable invariant: `workspace_architecture` now rejects outward production
+  `PersistentEngine::open`, `EmbeddedOperator`, `runtime_store`, a public
+  operator module, untracked Cargo targets, or physical-crate ownership of the
+  four product executables.
+- Cross-authority proof: `engine_authority` initializes security and estate
+  state, creates an authenticated session, commits schema/record/vector/claim
+  mutations, records lifecycle state, advances vector and query catalogues,
+  observes the common diagnostic read stamp and changefeed head, proves allowed
+  and denied audit records, closes/reopens, and replays the exact close and
+  bootstrap identities through one `RrdEngine` database.
+- Whole-workspace qualification exposed a process-fixture identity race: the
+  estate driver had authenticated Cargo's mutable profile-root `rrd-server`
+  path. The fixture now hard-links that artifact into a test-lifetime snapshot
+  before hashing or spawning it, so an artifact replacement cannot invalidate
+  the trusted executable during the crash/reopen matrix.
+- Verification boundary: all 12 exact evidence-tree local commands pass: focused
+  engine authority and architecture tests; CLI, security, estate, server, and
+  MCP all-target tests; formatting; workspace all-target check; the complete
+  workspace all-target test suite with no fail-fast; warning-denying workspace
+  Clippy; and diff whitespace validation. A recovered in-flight `work-plan
+  verify` process persisted G01-W02 as verified with digest
+  `f8efbee2b5bd20cdb29e2746450c83266720411c672429aedf4b57d8f566f9b6`,
+  bringing the executable board to 7/65 with no active item. The executable
+  board does not itself enforce the reviewed plan's publication/remote-CI
+  condition, so Linux/macOS/Windows evidence on a published commit remains an
+  explicit release gap rather than a claim silently manufactured here. G03
+  still owns multi-model catalogue breadth and Arrow/DataFusion execution; G04
+  owns the complete Qdrant-shaped collection/TurboQuant memory policy; G05 owns
+  compiled RBAC/privilege performance and full security-service qualification.

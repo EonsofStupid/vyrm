@@ -103,6 +103,8 @@ fn command(database: &Path, state_root: &Path, at: u64) -> Command {
     command.args([
         "--db",
         database.to_str().unwrap(),
+        "--authority-instance",
+        "estate-control-instance",
         "--state-root",
         state_root.to_str().unwrap(),
         "--estate",

@@ -171,11 +171,11 @@ policy; control-class digests/counts/timings are the default.
 
 ## Per-project deployment
 
-One major project receives one RRFlow instance. The instance manifest is the
-authority for project ID, root, storage identity, adapters, trace retention,
-embedding model spaces, and permitted operator-knowledge sources. An umbrella
-instance still requires an explicit member on every trace and adapter request;
-filesystem proximity is never membership.
+Each project and environment receives one RRFlow instance. The instance
+authority binds the project ID, root, storage identity, adapters, trace
+retention, embedding model spaces, and permitted operator-knowledge sources.
+Estate routing must preserve the exact project, environment, and instance on
+every trace and adapter request; filesystem proximity is never authority.
 
 The target operator methods are:
 
