@@ -59,11 +59,14 @@ pub use instance::{
     INSTANCE_FORMAT, PROJECT_AUTHORITY_FORMAT,
 };
 pub use lifecycle::{
-    append_lifecycle_event, load_lifecycle_events, load_lifecycle_session,
+    append_lifecycle_event, authorize_lifecycle_tool, complete_lifecycle_tool,
+    consume_lifecycle_tool_authorization, load_lifecycle_events, load_lifecycle_session,
     LifecycleEnforcementLevelV1, LifecycleEventCommandV1, LifecycleEventEnvelopeV1,
     LifecycleEventTypeV1, LifecyclePayloadV1, LifecyclePhaseV1, LifecycleReadStampV1,
-    LifecycleRiskV1, LifecycleSessionSnapshotV1, LifecycleTaskKindV1, LifecycleTraceContextV1,
-    LifecycleTurnStatusV1, LIFECYCLE_RUNTIME_EVENT_TYPE, LIFECYCLE_RUNTIME_SESSION_TYPE,
+    LifecycleRiskV1, LifecycleSessionSnapshotV1, LifecycleSupervisorContextV1, LifecycleTaskKindV1,
+    LifecycleToolAuthorizationV1, LifecycleToolCompletionV1, LifecycleToolRequestV1,
+    LifecycleTraceContextV1, LifecycleTurnStatusV1, LIFECYCLE_RUNTIME_EVENT_TYPE,
+    LIFECYCLE_RUNTIME_SESSION_TYPE,
 };
 pub use operator_knowledge::{
     execute_traced_operator_search, execute_traced_operator_sync, TracedOperatorSearch,

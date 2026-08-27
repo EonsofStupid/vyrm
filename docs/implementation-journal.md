@@ -2323,3 +2323,33 @@ index.
   parity, D5.4 authenticated daemon-mode CLI parity, and the CAP-01–CAP-20
   engine gaps remain open exactly as recorded in their capability/workplan
   ledgers.
+
+## 2026-08-27 — G00-W03 canonical mutation-supervisor primitive
+
+- Exact authority: strict adapter-neutral request, authorization, completion,
+  and supervisor-context contracts now drive `tool.proposed`,
+  `tool.authorized`, `tool.started`, and terminal tool events through the
+  canonical lifecycle aggregate. The authorization digest binds the active
+  attempt, tool-call identity, request digest, and current lifecycle state.
+- Side-effect gate: work-plan revision, active item, recorded plan payload,
+  source-tree identity, verification commands, and permit expiry are re-read
+  both when authorization is issued and immediately before it is consumed.
+  A proposal that was valid before plan drift or expiry therefore cannot start
+  a mutation afterward.
+- Retry and recovery: one decision can be consumed once across native reopen;
+  completed tool-call identities cannot be authorized again; and an exact
+  terminal completion retry is idempotent while substituted authorization or
+  result coordinates fail without advancing RRD.
+- Surface separation: `rrflow_lifecycle` now accepts only strict canonical
+  lifecycle envelopes. Provider hook translation is explicit under
+  `rrflow_hook`; generated schemas, runtime action mapping, MCP discovery, and
+  process fixtures cover both surfaces. A public runtime-tool execution test
+  proves canonical persistence across reopen and cross-shaped payload denial.
+- Evidence: all-target `rrd-contract`, `rrd-engine`, `rrflow-mcp`, and
+  `rrflow-cli` tests pass; repository formatting and strict affected-crate
+  Clippy pass; and `rrflow dev doctor` remains 20 passed, zero blocked, zero
+  warnings.
+- Status boundary: this is reviewed executable G00-W03 progress, not G00-W03
+  completion. Existing CLI and runtime mutation paths still have to replace
+  their older provider-shaped authorization path with this supervisor before
+  the work item can truthfully satisfy “every mutation.”

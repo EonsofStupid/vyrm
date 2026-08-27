@@ -27,7 +27,7 @@ fn authorize(engine: &RrdEngine, root: &std::path::Path, tool_name: &str, args: 
     let result = call(
         engine,
         root,
-        "rrflow_lifecycle",
+        "rrflow_hook",
         json!({
             "event":"pre-tool-use",
             "at":at,
@@ -286,7 +286,7 @@ fn administration_tools_backup_restore_estate_and_audit_through_one_engine() {
 #[test]
 fn reviewed_a_series_is_fully_generated_and_capability_mapped() {
     let catalogue = rrd_engine::runtime_tool_catalogue();
-    assert_eq!(catalogue.len(), 28);
+    assert_eq!(catalogue.len(), 29);
     for (name, capability, attunement, mutation, required_fields) in [
         (
             "rrflow_backup_create",

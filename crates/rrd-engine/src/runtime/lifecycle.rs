@@ -8,17 +8,23 @@ mod aggregate;
 mod binding;
 mod persistence;
 mod state;
+mod supervisor;
 
 use aggregate::LifecycleAggregate;
 use persistence::{event_mutation, lifecycle_schema_update, load_aggregate_at, session_record};
 pub use rrd_contract::{
     LifecycleEnforcementLevelV1, LifecycleEventCommandV1, LifecycleEventEnvelopeV1,
     LifecycleEventTypeV1, LifecyclePayloadV1, LifecyclePhaseV1, LifecycleReadStampV1,
-    LifecycleRiskV1, LifecycleSessionSnapshotV1, LifecycleTaskKindV1, LifecycleTraceContextV1,
-    LifecycleTurnStatusV1,
+    LifecycleRiskV1, LifecycleSessionSnapshotV1, LifecycleSupervisorContextV1, LifecycleTaskKindV1,
+    LifecycleToolAuthorizationV1, LifecycleToolCompletionV1, LifecycleToolRequestV1,
+    LifecycleTraceContextV1, LifecycleTurnStatusV1,
 };
 use rrd_core::{RuntimeCommit, RuntimeMutation, ScopeId};
 use rrd_store::Engine;
+
+pub use supervisor::{
+    authorize_lifecycle_tool, complete_lifecycle_tool, consume_lifecycle_tool_authorization,
+};
 
 pub const LIFECYCLE_RUNTIME_EVENT_TYPE: &str = "rrflow_lifecycle_event_v1";
 pub const LIFECYCLE_RUNTIME_SESSION_TYPE: &str = "rrflow_lifecycle_session_v1";
@@ -147,6 +153,46 @@ fn validate_work_plan_authority<E: Engine>(
             }
         }
         _ => {}
+    }
+    Ok(())
+}
+
+/// Rechecks the authoritative work-plan state at the side-effect boundary.
+/// A valid proposal cannot be used after its permit expires or after the
+/// active plan/revision/evidence changes.
+fn validate_active_mutation_authority<E: Engine>(
+    store: &E,
+    aggregate: &LifecycleAggregate,
+    at: u64,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let binding = aggregate
+        .state
+        .planning_binding()
+        .ok_or("mutating tool has no lifecycle planning binding")?;
+    binding.require_fresh_plan(at)?;
+    let (plan_id, plan_revision, work_item_id, plan_sha256, source_tree_sha256, event_verification) =
+        binding.authority_coordinates();
+    let snapshot = super::workplan::load_work_plan(store, plan_id)?
+        .ok_or("lifecycle planning references an uninstalled work plan")?;
+    if snapshot.revision != plan_revision
+        || snapshot.active_item_id.as_deref() != Some(work_item_id)
+    {
+        return Err(
+            "lifecycle planning does not match the active work-plan revision and item".into(),
+        );
+    }
+    let record = super::workplan::load_active_work_item_plan(store, plan_id)?
+        .ok_or("active work item has no recorded implementation plan")?;
+    let verification_plan_sha256 =
+        rrd_core::digest::sha256_hex(&serde_json::to_vec(&record.verification_commands)?);
+    if record.work_item_id != work_item_id
+        || plan_sha256 != Some(record.plan_payload_sha256.as_str())
+        || source_tree_sha256 != Some(record.source_tree_sha256.as_str())
+        || event_verification != Some(verification_plan_sha256.as_str())
+    {
+        return Err(
+            "mutating tool planning evidence is stale or belongs to another work item".into(),
+        );
     }
     Ok(())
 }

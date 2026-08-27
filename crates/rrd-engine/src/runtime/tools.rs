@@ -6,10 +6,10 @@
 
 use super::policy::tool_request_digest;
 use super::{
-    active_reasoning_run, consume_attuned_tool_authorization, ensure_routing_fresh,
-    execute_traced_query, handle, load_routing, preflight, query_parameters_from_json,
-    reasoning_run, record_reasoning, require_fresh_attunement, ExecutionBudget, HookContext,
-    HookEvent, InstanceBinding, REASONING_SCOPE,
+    active_reasoning_run, append_lifecycle_event, consume_attuned_tool_authorization,
+    ensure_routing_fresh, execute_traced_query, handle, load_routing, preflight,
+    query_parameters_from_json, reasoning_run, record_reasoning, require_fresh_attunement,
+    ExecutionBudget, HookContext, HookEvent, InstanceBinding, REASONING_SCOPE,
 };
 use crate::{
     load_or_create_token_key, product_capability_catalogue, Invocation, InvocationCompletion,
@@ -18,12 +18,12 @@ use crate::{
 use rrd_contract::{
     endpoint_catalogue, transaction_operation_sha256, AuditDecision, BeginTransaction, CanonicalId,
     CommitTransaction, CorrelationId, CreateInstanceBackup, EnsureQueryIndex,
-    EnsureVectorCollection, FollowChangefeed, ListInstanceBackups, ListQueryIndexes,
-    ListVectorCollections, PollLiveQuery, ReadAudit, ReadChangefeed, RequestContext,
-    RestoreInstanceBackup, RetrieveVectorPoints, RuntimeToolCatalogue, RuntimeToolDescriptor,
-    RuntimeToolInvocation, RuntimeToolInvocationResult, ScrollVectorPoints, SearchVectors,
-    SecurityAction, TransactionMutation, MAX_LEASE_MS, MIN_LEASE_MS, PROTOCOL, PROTOCOL_VERSION,
-    RUNTIME_TOOL_CATALOGUE_VERSION,
+    EnsureVectorCollection, FollowChangefeed, LifecycleEventCommandV1, ListInstanceBackups,
+    ListQueryIndexes, ListVectorCollections, PollLiveQuery, ReadAudit, ReadChangefeed,
+    RequestContext, RestoreInstanceBackup, RetrieveVectorPoints, RuntimeToolCatalogue,
+    RuntimeToolDescriptor, RuntimeToolInvocation, RuntimeToolInvocationResult, ScrollVectorPoints,
+    SearchVectors, SecurityAction, TransactionMutation, MAX_LEASE_MS, MIN_LEASE_MS, PROTOCOL,
+    PROTOCOL_VERSION, RUNTIME_TOOL_CATALOGUE_VERSION,
 };
 pub use rrd_contract::{RuntimeToolAttunement, RuntimeToolAuthorization};
 use rrd_core::{
@@ -75,6 +75,48 @@ pub struct RuntimeToolDefinition {
 struct ServiceStatusArguments {
     /// Observation time; defaults to the adapter invocation time.
     at: Option<u64>,
+}
+
+#[derive(Debug, Clone, serde::Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct LifecycleApplyArguments {
+    /// Strict provider-neutral lifecycle command to append to RRD.
+    command: LifecycleEventCommandV1,
+    /// Durable observation time; defaults to the adapter invocation time.
+    recorded_at_unix_ms: Option<u64>,
+}
+
+#[derive(Debug, Clone, Copy, serde::Deserialize, JsonSchema)]
+#[serde(rename_all = "kebab-case")]
+enum HookApplyEvent {
+    SessionStart,
+    UserPromptSubmit,
+    PreToolUse,
+    PostToolUse,
+    Stop,
+    PreCompact,
+}
+
+impl HookApplyEvent {
+    fn runtime_event(self) -> HookEvent {
+        match self {
+            Self::SessionStart => HookEvent::SessionStart,
+            Self::UserPromptSubmit => HookEvent::UserPromptSubmit,
+            Self::PreToolUse => HookEvent::PreToolUse,
+            Self::PostToolUse => HookEvent::PostToolUse,
+            Self::Stop => HookEvent::Stop,
+            Self::PreCompact => HookEvent::PreCompact,
+        }
+    }
+}
+
+#[derive(Debug, Clone, serde::Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct HookApplyArguments {
+    event: HookApplyEvent,
+    input: Value,
+    at: Option<u64>,
+    budget: Option<usize>,
 }
 
 #[derive(Debug, Clone, serde::Deserialize, JsonSchema)]
@@ -589,17 +631,27 @@ pub fn runtime_tool_catalogue() -> Vec<RuntimeToolDefinition> {
             json!({"type":"object","required":["subject","predicate"],"properties":{"subject":{"type":"string"},"predicate":{"type":"string"},"at":{"type":"integer"}}}),
             true,
         ),
+        typed_tool::<HookApplyArguments>(
+            "rrflow_hook",
+            None,
+            "Translate one supported provider hook payload through RRFlow's current hook adapter",
+            true,
+            RuntimeToolAuthorization::Governed,
+            RuntimeToolAttunement::None,
+        ),
         tool(
             "rrflow_inspect",
             "Inspect memory history, metadata, and provenance for a subject and optional predicate",
             json!({"type":"object","required":["subject"],"properties":{"subject":{"type":"string"},"predicate":{"type":"string"},"limit":{"type":"integer"}}}),
             false,
         ),
-        tool(
+        typed_tool::<LifecycleApplyArguments>(
             "rrflow_lifecycle",
-            "Apply the same session, prompt, tool, stop, and compaction lifecycle semantics as hook runtimes",
-            json!({"type":"object","required":["event","input"],"properties":{"event":{"type":"string","enum":["session-start","user-prompt-submit","pre-tool-use","post-tool-use","stop","pre-compact"]},"input":{"type":"object"},"at":{"type":"integer"},"budget":{"type":"integer"}}}),
+            None,
+            "Append one strict provider-neutral lifecycle transition to the authoritative RRD event chain",
             true,
+            RuntimeToolAuthorization::Governed,
+            RuntimeToolAttunement::None,
         ),
         tool(
             "rrflow_preflight",
@@ -859,6 +911,7 @@ fn runtime_tool_action(name: &str) -> SecurityAction {
     match name {
         "rrflow_context" => SecurityAction::MemoryContextRead,
         "rrflow_forget" => SecurityAction::MemoryRetire,
+        "rrflow_hook" => SecurityAction::LifecycleApply,
         "rrflow_inspect" => SecurityAction::MemoryInspect,
         "rrflow_lifecycle" => SecurityAction::LifecycleApply,
         "rrflow_preflight" => SecurityAction::ProjectAttune,
@@ -1221,19 +1274,30 @@ fn execute_runtime_tool(
             })
         }
         "rrflow_lifecycle" => {
-            let event =
-                HookEvent::parse(arg_str(args, "event")?).ok_or("unknown lifecycle event")?;
-            let input = args.get("input").cloned().unwrap_or_else(|| json!({}));
+            let request: LifecycleApplyArguments = serde_json::from_value(args.clone())?;
+            let recorded_at = request.recorded_at_unix_ms.unwrap_or(invocation_at);
+            let snapshot = append_lifecycle_event(store, request.command, recorded_at)?;
+            Ok(ExecutedTool {
+                text: serde_json::to_string_pretty(&snapshot)?,
+                effectiveness: None,
+                detail: Some(format!(
+                    "canonical lifecycle {} event {} state {}",
+                    snapshot.session_id, snapshot.event_count, snapshot.state_sha256
+                )),
+            })
+        }
+        "rrflow_hook" => {
+            let request: HookApplyArguments = serde_json::from_value(args.clone())?;
             let reader = reader(args)?;
             let context = HookContext {
                 store,
                 root,
                 harness: Some("mcp"),
                 reader: &reader,
-                now: arg_u64(args, "at").unwrap_or(invocation_at),
-                budget: arg_u64(args, "budget").unwrap_or(1_500) as usize,
+                now: request.at.unwrap_or(invocation_at),
+                budget: request.budget.unwrap_or(1_500),
             };
-            let response = handle(&context, event, &input)?;
+            let response = handle(&context, request.event.runtime_event(), &request.input)?;
             Ok(ExecutedTool {
                 text: response.stdout,
                 effectiveness: response.effectiveness,

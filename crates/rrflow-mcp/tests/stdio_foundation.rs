@@ -64,7 +64,7 @@ fn authorize(
         stdin,
         stdout,
         next_id,
-        "rrflow_lifecycle",
+        "rrflow_hook",
         json!({
             "event":"pre-tool-use",
             "input":{"tool_name":tool_name,"tool_input":arguments}

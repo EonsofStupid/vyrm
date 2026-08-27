@@ -23,7 +23,7 @@ fn stdio_server_negotiates_lists_tools_and_uses_the_shared_contract_gate() {
         serde_json::json!({"jsonrpc":"2.0","method":"notifications/initialized"}),
         serde_json::json!({"jsonrpc":"2.0","id":2,"method":"tools/list"}),
         serde_json::json!({"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"rrflow_preflight","arguments":{"at":1000}}}),
-        serde_json::json!({"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"rrflow_lifecycle","arguments":{"event":"pre-tool-use","at":1001,"input":{"tool_name":"Edit","tool_input":{"file_path":"lib.rs"}}}}}),
+        serde_json::json!({"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"rrflow_hook","arguments":{"event":"pre-tool-use","at":1001,"input":{"tool_name":"Edit","tool_input":{"file_path":"lib.rs"}}}}}),
         serde_json::json!({"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"rrflow_query","arguments":{"at":1002,"ql":"FROM event:runtime_trace AT VALID 18446744073709551615 KNOWN HEAD PROJECT name, phase EXPLAIN CONTRACT"}}}),
         serde_json::json!({"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"rrflow_remember","arguments":{"subject":"project:alpha","predicate":"status","object":"foundation-active","actor":"agent:test","at":2000}}}),
         serde_json::json!({"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"rrflow_inspect","arguments":{"subject":"project:alpha","predicate":"status"}}}),
@@ -67,6 +67,22 @@ fn stdio_server_negotiates_lists_tools_and_uses_the_shared_contract_gate() {
             .iter()
             .map(|definition| definition.name)
             .collect::<Vec<_>>()
+    );
+    let hook = listed
+        .iter()
+        .find(|tool| tool["name"] == "rrflow_hook")
+        .expect("provider hook adapter must be advertised separately");
+    assert_eq!(
+        hook["inputSchema"]["required"],
+        serde_json::json!(["event", "input"])
+    );
+    let lifecycle = listed
+        .iter()
+        .find(|tool| tool["name"] == "rrflow_lifecycle")
+        .expect("canonical lifecycle tool must be advertised");
+    assert_eq!(
+        lifecycle["inputSchema"]["required"],
+        serde_json::json!(["command"])
     );
     assert!(responses[2]["result"]["content"][0]["text"]
         .as_str()

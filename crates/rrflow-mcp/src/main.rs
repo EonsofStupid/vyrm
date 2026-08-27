@@ -62,7 +62,7 @@ fn dispatch(authority: &mut RuntimeAuthority, id: Value, request: &Value) -> Val
                 "resultType":"complete",
                 "supportedVersions":["2026-07-28","2025-11-25","2025-06-18"],
                 "capabilities":{"tools":{}},
-                "instructions":"Call rrflow_preflight before reasoning. Project mutation must cross rrflow_lifecycle(pre-tool-use), then report its result with rrflow_lifecycle(post-tool-use)."
+                "instructions":"Call rrflow_preflight before reasoning. Provider hook payloads use rrflow_hook; rrflow_lifecycle accepts only strict canonical lifecycle envelopes."
             }
         }),
         "initialize" => {
@@ -82,7 +82,7 @@ fn dispatch(authority: &mut RuntimeAuthority, id: Value, request: &Value) -> Val
                     "protocolVersion": negotiated,
                     "capabilities": {"tools": {"listChanged": false}},
                     "serverInfo": {"name": "rrflow-mcp", "version": env!("CARGO_PKG_VERSION")},
-                    "instructions": "Call rrflow_preflight before reasoning. Project mutation must cross rrflow_lifecycle(pre-tool-use), then report the result through rrflow_lifecycle(post-tool-use)."
+                    "instructions": "Call rrflow_preflight before reasoning. Provider hook payloads use rrflow_hook; rrflow_lifecycle accepts only strict canonical lifecycle envelopes."
                 }
             })
         }

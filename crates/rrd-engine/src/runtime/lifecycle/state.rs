@@ -83,7 +83,7 @@ impl ReplayState {
             _ => {
                 return Err(
                     "lifecycle instance, member, or scope changed within one session".into(),
-                )
+                );
             }
         }
         Ok(())
@@ -242,7 +242,13 @@ impl ReplayState {
                 self.last_verification_passed = None;
                 Phase::ToolProposed
             }
-            Event::ToolAuthorized if current == Some(Phase::ToolProposed) => Phase::ToolAuthorized,
+            Event::ToolAuthorized if current == Some(Phase::ToolProposed) => {
+                self.active_tool
+                    .as_mut()
+                    .ok_or("tool.authorized has no active tool")?
+                    .authorize(event)?;
+                Phase::ToolAuthorized
+            }
             Event::ToolDenied if current == Some(Phase::ToolProposed) => {
                 self.clear_tool();
                 Phase::ToolDenied
@@ -251,7 +257,7 @@ impl ReplayState {
                 self.active_tool
                     .as_mut()
                     .ok_or("tool.started has no active tool")?
-                    .consume()?;
+                    .consume(event)?;
                 Phase::ToolStarted
             }
             Event::ToolCompleted if current == Some(Phase::ToolStarted) => {
@@ -339,7 +345,7 @@ impl ReplayState {
                     current.map_or("uninitialized", LifecyclePhaseV1::as_str),
                     event.event_type.as_str()
                 )
-                .into())
+                .into());
             }
         };
         Ok(next)

@@ -2,6 +2,7 @@ mod envelope;
 mod event;
 mod payload;
 mod snapshot;
+mod supervision;
 mod validation;
 
 pub use envelope::{
@@ -16,3 +17,7 @@ pub use payload::{
     LifecyclePayloadV1, LifecycleRiskV1, LifecycleTaskKindV1, LifecycleTurnStatusV1,
 };
 pub use snapshot::LifecycleSessionSnapshotV1;
+pub use supervision::{
+    LifecycleSupervisorContextV1, LifecycleToolAuthorizationV1, LifecycleToolCompletionV1,
+    LifecycleToolRequestV1,
+};

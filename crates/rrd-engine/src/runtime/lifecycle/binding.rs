@@ -106,6 +106,7 @@ pub(super) struct ToolBinding {
     pub tool_name: String,
     pub tool_request_sha256: String,
     pub mutation: bool,
+    pub authorization_sha256: Option<String>,
     pub consumed: bool,
 }
 
@@ -131,8 +132,28 @@ impl ToolBinding {
             tool_name: tool_name.clone(),
             tool_request_sha256: tool_request_sha256.clone(),
             mutation: *mutation,
+            authorization_sha256: None,
             consumed: false,
         })
+    }
+
+    pub fn authorize(
+        &mut self,
+        event: &LifecycleEventEnvelopeV1,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let LifecyclePayloadV1::ToolDecision {
+            decision_sha256,
+            allowed: true,
+            ..
+        } = &event.payload
+        else {
+            return Err("tool authorization has the wrong decision payload".into());
+        };
+        if self.authorization_sha256.is_some() {
+            return Err("tool proposal was already authorized".into());
+        }
+        self.authorization_sha256 = Some(decision_sha256.clone());
+        Ok(())
     }
 
     pub fn require_coordinates(
@@ -147,9 +168,21 @@ impl ToolBinding {
         Ok(())
     }
 
-    pub fn consume(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+    pub fn consume(
+        &mut self,
+        event: &LifecycleEventEnvelopeV1,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let LifecyclePayloadV1::ToolStarted {
+            authorization_sha256,
+        } = &event.payload
+        else {
+            return Err("tool start has the wrong payload".into());
+        };
         if self.consumed {
             return Err("tool authorization was already consumed".into());
+        }
+        if self.authorization_sha256.as_deref() != Some(authorization_sha256.as_str()) {
+            return Err("tool start does not match the authorized decision".into());
         }
         self.consumed = true;
         Ok(())
@@ -170,5 +203,9 @@ impl ToolBinding {
             return Err("tool result does not match one consumed authorization".into());
         }
         Ok(())
+    }
+
+    pub(super) fn authorization_sha256(&self) -> Option<&str> {
+        self.authorization_sha256.as_deref()
     }
 }

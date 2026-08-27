@@ -700,9 +700,10 @@ remote repetition remains required before compatibility retirement.
 
 - The evaluation sample is a harness validation, not statistical significance:
   one trial per cell on synthetic repository fixtures.
-- MCP cannot intercept another runtime's private tools. Hookless clients receive
-  identical semantics through `rrflow_lifecycle` and must place that call around
-  their mutations; server-owned operations remain directly enforceable.
+- MCP cannot intercept another runtime's private tools. Provider hook payloads
+  cross the explicit `rrflow_hook` adapter; strict lifecycle event producers
+  use `rrflow_lifecycle`. Neither surface substitutes for host interception,
+  while server-owned operations remain directly enforceable.
 - Runtime scopes are present in every commit and feed query. Current reasoning
   and flight composition uses the physically isolated store's
   `instance:default` scope; umbrella member routing and capability-based remote

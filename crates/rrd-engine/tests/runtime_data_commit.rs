@@ -22,7 +22,7 @@ fn authorize(engine: &RrdEngine, root: &std::path::Path, tool_name: &str, args: 
     let result = call(
         engine,
         root,
-        "rrflow_lifecycle",
+        "rrflow_hook",
         json!({
             "event":"pre-tool-use",
             "at":at,

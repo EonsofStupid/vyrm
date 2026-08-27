@@ -1,7 +1,8 @@
 use rrd_contract::{
     LifecycleEnforcementLevelV1, LifecycleEventCommandV1, LifecycleEventEnvelopeV1,
-    LifecycleEventTypeV1, LifecyclePayloadV1, LifecycleTraceContextV1, LIFECYCLE_SPEC_VERSION,
-    MAX_LIFECYCLE_EVENT_BYTES,
+    LifecycleEventTypeV1, LifecyclePayloadV1, LifecycleSupervisorContextV1,
+    LifecycleToolAuthorizationV1, LifecycleToolCompletionV1, LifecycleToolRequestV1,
+    LifecycleTraceContextV1, LIFECYCLE_SPEC_VERSION, MAX_LIFECYCLE_EVENT_BYTES,
 };
 
 fn sha(byte: char) -> String {
@@ -175,4 +176,45 @@ fn golden_v1_command_roundtrips_without_hidden_defaults() {
     let encoded = serde_json::to_value(&command).unwrap();
     let golden: serde_json::Value = serde_json::from_str(source).unwrap();
     assert_eq!(encoded, golden);
+}
+
+#[test]
+fn supervisor_contracts_are_strict_and_validate_exact_identities() {
+    let context = LifecycleSupervisorContextV1 {
+        scope: "project:foundation".into(),
+        project_id: "foundation".into(),
+        session_id: "session-1".into(),
+        actor: "contract-test".into(),
+        adapter_kind: "command_proxy".into(),
+        adapter_version: "1.0.0".into(),
+        enforcement_level: LifecycleEnforcementLevelV1::Proxied,
+    };
+    context.validate().unwrap();
+    let mut encoded = serde_json::to_value(&context).unwrap();
+    encoded["unknown"] = serde_json::json!(true);
+    assert!(serde_json::from_value::<LifecycleSupervisorContextV1>(encoded).is_err());
+
+    LifecycleToolRequestV1 {
+        tool_name: "RRFlowExec".into(),
+        tool_request_sha256: sha('a'),
+        tool_call_id: "tool-1".into(),
+        mutation: true,
+    }
+    .validate()
+    .unwrap();
+    assert!(LifecycleToolAuthorizationV1 {
+        attempt_id: "attempt-1".into(),
+        tool_call_id: "tool-1".into(),
+        tool_request_sha256: sha('a'),
+        decision_sha256: "not-a-digest".into(),
+    }
+    .validate()
+    .is_err());
+    assert!(LifecycleToolCompletionV1 {
+        observation_sha256: "not-a-digest".into(),
+        success: true,
+        project_state_changed: false,
+    }
+    .validate()
+    .is_err());
 }
