@@ -4,6 +4,8 @@
 //! repository invariants required before `rrflow dev up` can safely supervise
 //! one RRD authority and its client surfaces.
 
+pub mod supervisor;
+
 use serde::Serialize;
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
@@ -142,6 +144,34 @@ pub fn doctor(root: &Path) -> Result<DevDoctorReport, Box<dyn std::error::Error>
             "the daemon must compose only the public engine and protocol contract",
         ),
     ];
+
+    let capability_path = root.join("docs/rrd-engine-capability-coverage.md");
+    let capability_source = std::fs::read_to_string(&capability_path)?;
+    let workplan_source = std::fs::read_to_string(root.join("rrflow.workplan.toml"))?;
+    let stable_capabilities = (1..=20).all(|number| {
+        capability_source
+            .lines()
+            .any(|line| line.starts_with(&format!("{number}. `CAP-{number:02}`")))
+    });
+    let closure_gates = coverage_gate_ids(&capability_source);
+    let closure_gates_exist = closure_gates.len() == 24
+        && closure_gates
+            .iter()
+            .all(|gate| workplan_source.contains(&format!("id = \"{gate}\"")));
+    checks.push(check(
+        "capabilities.coverage-ledger",
+        stable_capabilities && closure_gates_exist,
+        "all twenty requested engine capabilities have stable IDs and real work-plan closure gates",
+        format!(
+            "{}: 20 ordered CAP rows; rrflow.workplan.toml: {}/24 referenced gates found",
+            relative(&root, &capability_path),
+            closure_gates
+                .iter()
+                .filter(|gate| workplan_source.contains(&format!("id = \"{gate}\"")))
+                .count()
+        ),
+        "restore CAP-01 through CAP-20 one-for-one and repair every dangling Gxx-Wxx closure mapping",
+    ));
 
     let mcp_source_path = root.join("crates/rrflow-mcp/src/main.rs");
     let mcp_config_path = root.join("crates/rrflow-mcp/src/config.rs");
@@ -304,28 +334,42 @@ pub fn doctor(root: &Path) -> Result<DevDoctorReport, Box<dyn std::error::Error>
         "implement rrflow exec with one-shot attunement authorization, argv/cwd/environment/revision digests, observation, and verification",
     ));
 
-    let has_supervisor = root
-        .join("crates/rrflow-cli/src/dev/supervisor.rs")
-        .is_file();
+    let supervisor_path = root.join("crates/rrflow-cli/src/dev/supervisor.rs");
+    let supervisor_source = std::fs::read_to_string(&supervisor_path).unwrap_or_default();
+    let has_supervisor = supervisor_path.is_file()
+        && ["Up {", "Status {", "Logs {", "Stop {"]
+            .iter()
+            .all(|variant| command_source.contains(variant))
+        && supervisor_source.contains("rrd-security-bootstrap")
+        && supervisor_source.contains("spawn_rrd")
+        && supervisor_source.contains("spawn_connectome")
+        && supervisor_source.contains("wait_for_service")
+        && supervisor_source.contains("shutdown_complete_file");
     checks.push(check(
         "supervisor.lifecycle",
         has_supervisor,
         "one command owns build, start, readiness, status, logs, and graceful stop",
         if has_supervisor {
-            "crates/rrflow-cli/src/dev/supervisor.rs"
+            "typed commands, security bootstrap, ordered child startup, readiness probes, and paired shutdown completion markers"
         } else {
-            "no checked-in supervisor implementation"
+            "the supervisor command or one of its required lifecycle controls is absent"
         },
         "implement rrflow dev up|status|logs|stop after every surface crosses the RRD boundary",
     ));
 
+    let has_topology_smoke = ci_source.contains("rrflow dev up")
+        && ci_source.contains("/v1/health/ready")
+        && ci_source.contains("/api/snapshot")
+        && ci_source.contains("rrflow_path\" dev stop");
     checks.push(check(
         "ci.full-topology-smoke",
-        ci_source.contains("rrflow dev up")
-            && ci_source.contains("/v1/health/ready")
-            && ci_source.contains("/api/snapshot"),
+        has_topology_smoke,
         "CI boots and probes the same RRD/Connectome topology used by developers",
-        "no full-topology smoke job detected",
+        if has_topology_smoke {
+            "CI starts the supervisor, probes RRD readiness and authenticated Connectome snapshot, then requests graceful stop"
+        } else {
+            "no complete full-topology smoke job detected"
+        },
         "add a black-box smoke job after the supervisor and client boundaries are complete",
     ));
 
@@ -435,7 +479,10 @@ fn surface_boundary(
         if disallowed.is_empty() {
             format!("{package_name}: no physical-layer bypass")
         } else {
-            format!("{package_name} bypasses RRD through {}", disallowed.join(", "))
+            format!(
+                "{package_name} bypasses RRD through {}",
+                disallowed.join(", ")
+            )
         },
         "move the required operation into rrd-engine/rrd-contract and consume it through rrd-client",
     )
@@ -520,15 +567,31 @@ fn relative(root: &Path, path: &Path) -> String {
         .to_string()
 }
 
+fn coverage_gate_ids(source: &str) -> BTreeSet<String> {
+    source
+        .split(|character: char| !(character.is_ascii_alphanumeric() || character == '-'))
+        .filter(|token| {
+            let bytes = token.as_bytes();
+            bytes.len() == 7
+                && bytes[0] == b'G'
+                && bytes[1..3].iter().all(u8::is_ascii_digit)
+                && bytes[3] == b'-'
+                && bytes[4] == b'W'
+                && bytes[5..7].iter().all(u8::is_ascii_digit)
+        })
+        .map(str::to_owned)
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn current_workspace_reports_real_boundary_blockers() {
+    fn current_workspace_passes_every_foundation_invariant() {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
         let report = doctor(&root).unwrap();
-        assert!(!report.ready);
+        assert!(report.ready);
         assert!(report.checks.iter().any(|check| {
             check.id == "workspace.identity" && check.status == CheckStatus::Passed
         }));
@@ -539,7 +602,12 @@ mod tests {
             check.id == "surface.cli-engine-boundary" && check.status == CheckStatus::Passed
         }));
         assert!(report.checks.iter().any(|check| {
-            check.id == "supervisor.lifecycle" && check.status == CheckStatus::Blocked
+            check.id == "supervisor.lifecycle" && check.status == CheckStatus::Passed
+        }));
+        assert!(report.checks.iter().any(|check| {
+            check.id == "capabilities.coverage-ledger"
+                && check.status == CheckStatus::Passed
+                && check.evidence.contains("24/24")
         }));
         assert!(report.checks.iter().any(|check| {
             check.id == "surface.mcp-engine-boundary" && check.status == CheckStatus::Passed

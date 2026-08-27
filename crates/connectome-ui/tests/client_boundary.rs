@@ -159,6 +159,7 @@ fn connectome_uses_authenticated_public_rrd_contracts_end_to_end() {
         api_key: "connectome-api-key".into(),
         scope: "instance:connectome-test".into(),
         bind: "127.0.0.1:4387".parse().unwrap(),
+        shutdown: None,
     })
     .unwrap();
 

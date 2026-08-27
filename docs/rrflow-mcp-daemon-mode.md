@@ -103,7 +103,7 @@ Daemon mode is complete only when black-box tests prove:
 | D2 — implemented locally | Make engine runtime dispatch accept and preserve an authenticated caller context | API-key/session allowance, policy denial, payload-drift, nested-session, and exact audit-principal tests |
 | D3 — implemented locally | Add bounded authenticated runtime catalogue/invoke routes and `rrd-client` methods | project-bound real-server catalogue/invocation, granular denial/audit, generated-protocol drift, and child-process server tests |
 | D4 — implemented locally | Add mutually exclusive embedded/daemon runtime authority to `rrflow-mcp` | parser rejects mixed modes; black-box secured daemon process proves one server opener, exact catalogue parity, authenticated invocation, clean close, and principal audit |
-| D5 | Follow `docs/d5-surface-absorption-map.md`: absorb Connectome/CLI physical access behind engine/protocol contracts, then implement the proxy, supervisor, and full-topology CI smoke | zero-bypass behavior parity plus `cargo rrflow-dev doctor` green on the same tested commit |
+| D5 — topology implemented; surface parity remains | Follow `docs/d5-surface-absorption-map.md`: absorb Connectome/CLI physical access behind engine/protocol contracts, then implement the proxy, supervisor, and full-topology CI smoke | zero-bypass behavior parity plus `cargo rrflow-dev doctor` green on the same tested commit |
 
 No URL-only shortcut, compatibility shim, duplicate tool registry, anonymous
 server-side invocation, or second database opener satisfies these gates.
@@ -149,5 +149,6 @@ runs the MCP process using only URL/instance/principal/credential-reference.
 It proves 28-tool name/schema parity, a real authenticated service-status
 result, clean session close, and the original MCP principal in durable audit.
 The development doctor now derives this as a passing boundary check. Full
-mutation-domain parity, response-loss replay, remote mTLS, and supervisor smoke
-remain explicit D5/full-conformance work.
+mutation-domain parity, response-loss replay, and remote mTLS remain explicit
+D5/full-conformance work. The supervised RRD + authenticated Connectome
+black-box smoke is implemented; it does not substitute for those differentials.

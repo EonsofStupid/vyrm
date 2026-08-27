@@ -14,6 +14,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::io::Read;
 use std::net::SocketAddr;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -36,6 +37,13 @@ pub struct ConnectomeConfig {
     pub api_key: String,
     pub scope: String,
     pub bind: SocketAddr,
+    pub shutdown: Option<ShutdownFiles>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ShutdownFiles {
+    pub request: PathBuf,
+    pub complete: PathBuf,
 }
 
 impl ConnectomeConfig {
@@ -48,6 +56,14 @@ impl ConnectomeConfig {
         }
         let request = diagnostic_request(&self.scope, now_unix_ms()?);
         request.validate()?;
+        if let Some(shutdown) = &self.shutdown {
+            if !shutdown.request.is_absolute()
+                || !shutdown.complete.is_absolute()
+                || shutdown.request == shutdown.complete
+            {
+                return Err("shutdown control files must be distinct absolute paths".into());
+            }
+        }
         Ok(())
     }
 }
@@ -265,9 +281,38 @@ pub fn serve(config: ConnectomeConfig) -> Result<()> {
         "connectome: http://{} -> rrd://{} instance={} scope={} principal={}",
         config.bind, config.rrd_address, config.instance, config.scope, config.principal
     );
-    for request in server.incoming_requests() {
-        respond(request, &backend);
+    loop {
+        if config
+            .shutdown
+            .as_ref()
+            .is_some_and(|shutdown| shutdown.request.is_file())
+        {
+            break;
+        }
+        if let Some(request) = server.recv_timeout(Duration::from_millis(100))? {
+            respond(request, &backend);
+        }
     }
+    if let Some(shutdown) = config.shutdown {
+        write_shutdown_completion(&shutdown.complete)?;
+    }
+    Ok(())
+}
+
+fn write_shutdown_completion(path: &Path) -> std::io::Result<()> {
+    use std::io::Write;
+
+    let temporary = path.with_extension("complete.new");
+    let _ = std::fs::remove_file(&temporary);
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&temporary)?;
+    file.write_all(b"connectome-graceful-shutdown-v1\n")?;
+    file.sync_all()?;
+    std::fs::rename(&temporary, path)?;
+    #[cfg(unix)]
+    std::fs::File::open(path.parent().expect("shutdown marker has a parent"))?.sync_all()?;
     Ok(())
 }
 
@@ -457,6 +502,7 @@ mod tests {
             api_key: "secret".into(),
             scope: "instance:test-instance".into(),
             bind: "127.0.0.1:4387".parse().unwrap(),
+            shutdown: None,
         };
         assert!(config
             .validate()

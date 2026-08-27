@@ -16,6 +16,8 @@ fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let mut principal = None;
     let mut api_key_file = None;
     let mut scope = None;
+    let mut shutdown_request_file = None;
+    let mut shutdown_complete_file = None;
     let mut allow_remote = false;
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
@@ -30,10 +32,22 @@ fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             }
             "--scope" => scope = Some(required(&mut args, "--scope")?),
             "--bind" => bind = required(&mut args, "--bind")?.parse()?,
+            "--shutdown-request-file" => {
+                shutdown_request_file = Some(PathBuf::from(required(
+                    &mut args,
+                    "--shutdown-request-file",
+                )?))
+            }
+            "--shutdown-complete-file" => {
+                shutdown_complete_file = Some(PathBuf::from(required(
+                    &mut args,
+                    "--shutdown-complete-file",
+                )?))
+            }
             "--allow-remote" => allow_remote = true,
             "--help" | "-h" => {
                 println!(
-                    "connectome --instance ID --principal ID --api-key-file PATH [--rrd-address 127.0.0.1:9477] [--scope SCOPE] [--bind 127.0.0.1:4387] [--allow-remote]\n\nClient-only Connectome gateway. RRD remains the sole database authority."
+                    "connectome --instance ID --principal ID --api-key-file PATH [--rrd-address 127.0.0.1:9477] [--scope SCOPE] [--bind 127.0.0.1:4387] [--shutdown-request-file PATH --shutdown-complete-file PATH] [--allow-remote]\n\nClient-only Connectome gateway. RRD remains the sole database authority."
                 );
                 return Ok(());
             }
@@ -46,6 +60,14 @@ fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     if !bind.ip().is_loopback() && !allow_remote {
         return Err("non-loopback Connectome binding requires --allow-remote".into());
     }
+    if shutdown_request_file.is_some() != shutdown_complete_file.is_some() {
+        return Err(
+            "--shutdown-request-file and --shutdown-complete-file must be provided together".into(),
+        );
+    }
+    let shutdown = shutdown_request_file
+        .zip(shutdown_complete_file)
+        .map(|(request, complete)| connectome_ui::ShutdownFiles { request, complete });
     let api_key = read_secret(&api_key_file)?;
     let scope = scope.unwrap_or_else(|| format!("instance:{instance}"));
     connectome_ui::serve(connectome_ui::ConnectomeConfig {
@@ -55,6 +77,7 @@ fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         api_key,
         scope,
         bind,
+        shutdown,
     })
 }
 

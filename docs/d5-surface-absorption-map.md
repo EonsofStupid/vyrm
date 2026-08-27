@@ -1,9 +1,10 @@
 # D5 outward-surface absorption map
 
 **Status:** authoritative implementation map as of 2026-08-27. This is derived
-from the active workspace sources after D4. D5.1a through D5.1c and the D5.2a
-client-only Connectome cutover are implemented; D5.1/D5.2 remain incomplete and
-this is not a cohesive-checkpoint claim.
+from the active workspace sources after D4. D5.1a through D5.1c, the D5.2a
+client-only Connectome cutover, D5.4a embedded CLI boundary, D5.5 zero-bypass
+gate, and D5.6 supervised topology are implemented. D5.1 through D5.4 remain
+incomplete and this is not a cohesive-checkpoint claim.
 
 ## Invariant
 
@@ -18,10 +19,10 @@ No file or capability is deleted merely to make the dependency test green.
 
 ### RRFlow CLI
 
-`crates/rrflow-cli/src/main.rs` opens `PersistentEngine` and records invocation
-rows directly. `command.rs` directly owns claim CRUD/recall/projections,
-archive and migration functions, workflow/preflight/hook/query/reasoning
-composition, and internal `rrd-core` wire values.
+The CLI's physical-store bypass is closed: production code depends on
+`rrd-engine` and uses its bounded `EmbeddedOperator`/offline administration
+surface. The remaining gap is authenticated daemon-mode selection and
+embedded/daemon behavior parity for runtime commands.
 
 Required absorption:
 
@@ -37,9 +38,10 @@ Required absorption:
 
 ### Connectome
 
-`connectome-ui/src/main.rs` opens `PersistentEngine`. `lib.rs`, `flight.rs`,
-`cluster.rs`, and `connections.rs` construct snapshots and mutations directly
-from storage/query/vector/cluster/estate/runtime internals.
+The compiled `connectome-ui` runtime is client-only and has no physical RRD
+dependencies. Legacy flight/cluster/connection source remains uncompiled as
+migration input until equivalent governed contracts exist; those missing
+views and writes return explicit `501` responses.
 
 The current local API rows are:
 
@@ -162,6 +164,26 @@ for both Connectome and CLI. This closes the embedded CLI dependency boundary;
 authenticated daemon-mode selection and embedded/daemon behavior parity remain
 part of D5.4/G06-W04 rather than being inferred from this refactor.
 
+### D5.6 progress
+
+`rrflow dev up|status|logs|stop` is now an executable supervisor rather than a
+reserved command name. It creates or verifies one dedicated instance, uses the
+existing one-time security bootstrap with a persistent owner-only 256-bit
+credential and catalogue-derived least-privilege grants, starts RRD first,
+waits for `/v1/health/ready`, then starts the
+authenticated client-only Connectome and waits for `/api/snapshot`. Its atomic
+manifest records process IDs, exact executables, ports, logs, and paired
+shutdown markers but never credential material. Logs are bounded on read and
+both services must acknowledge graceful shutdown; timeout retains failed state
+for diagnosis instead of silently claiming success.
+
+The CI `topology-smoke` job builds the same binaries, runs `rrflow dev up`,
+probes both endpoints, checks supervisor status, and runs `rrflow dev stop`.
+A local black-box run passed the same sequence. `rrflow dev doctor` is now
+20 passed, zero blocked, zero warnings. This closes D5.5/D5.6 infrastructure;
+it does not close the remaining diagnostic/write parity or daemon-mode CLI
+work in D5.1 through D5.4, and it does not change the CAP-01–CAP-20 audit.
+
 ## Exit evidence
 
 - Embedded and daemon views produce the same logical diagnostic snapshot at
@@ -172,3 +194,9 @@ part of D5.4/G06-W04 rather than being inferred from this refactor.
 - The daemon topology has one process capable of opening the store.
 - The existing UI behavior and recorded history survive absorption; a green
   dependency test alone is insufficient.
+- Supervised-topology evidence includes the private credential reopen test,
+  Connectome unit and real-socket tests, 33 CLI tests, a real RRD + Connectome
+  up/status/logs/stop run, and the checked-in CI black-box smoke. The doctor is
+  green at 20/0/0; that means the canonical development topology is runnable,
+  not that the remaining D5 behavior parity or twenty engine capabilities are
+  complete.

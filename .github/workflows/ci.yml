@@ -8,6 +8,35 @@ permissions:
   contents: read
 
 jobs:
+  topology-smoke:
+    name: supervised RRD + Connectome topology
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.98.0
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: topology-smoke
+      - name: Build supervisor and service processes
+        run: cargo build --locked -p rrflow-cli -p rrd-server -p connectome-ui -p rrd-security
+      - name: rrflow dev up full-topology smoke
+        run: |
+          set -euo pipefail
+          smoke_root="$RUNNER_TEMP/rrflow-topology-smoke"
+          mkdir -p "$smoke_root"
+          rrflow_path="${CARGO_TARGET_DIR:-target}/debug/rrflow"
+          cleanup() {
+            "$rrflow_path" dev stop --root "$smoke_root" --timeout-ms 5000 >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+          "$rrflow_path" dev up --root "$smoke_root" --instance ci-topology --rrd-bind 127.0.0.1:19477 --connectome-bind 127.0.0.1:14387 --no-build
+          "$rrflow_path" dev status --root "$smoke_root"
+          curl --fail --silent --show-error http://127.0.0.1:19477/v1/health/ready
+          curl --fail --silent --show-error http://127.0.0.1:14387/api/snapshot >/dev/null
+          "$rrflow_path" dev stop --root "$smoke_root" --timeout-ms 5000
+          trap - EXIT
+
   estate-process-matrix:
     name: estate process (${{ matrix.os }})
     runs-on: ${{ matrix.os }}

@@ -2303,3 +2303,23 @@ index.
 - Honest limit: this closes the physical dependency boundary. Authenticated
   daemon-mode CLI selection and embedded/daemon behavior parity remain open
   D5.4/G06-W04 acceptance work.
+
+## 2026-08-27 — Recoverable authenticated development topology
+
+- Supervisor: `rrflow dev up|status|logs|stop` now owns companion builds,
+  dedicated-instance verification, one-time `rrd-security-bootstrap`, ordered
+  RRD-before-Connectome startup, HTTP readiness, bounded retained logs, atomic
+  non-secret state, and paired graceful shutdown acknowledgements.
+- Security: an engine-owned helper creates/reopens a private printable 256-bit
+  API credential. Connectome's base grants and every engine-catalogued runtime
+  tool action generate the bootstrap policy. Bootstrap is idempotent only for
+  the same principal, grants, and credential; a different existing authority
+  remains a hard error rather than being overwritten or bypassed.
+- Evidence: a real process run proved `/v1/health/ready`, authenticated
+  `/api/snapshot`, status/log recovery, and graceful completion for both
+  services. CI now repeats that black-box topology. Connectome and CLI tests
+  pass, and `rrflow dev doctor` reports 20 passed, zero blocked, zero warnings.
+- Limit: green development topology closes D5.5/D5.6 only. D5.1/D5.3 feature
+  parity, D5.4 authenticated daemon-mode CLI parity, and the CAP-01–CAP-20
+  engine gaps remain open exactly as recorded in their capability/workplan
+  ledgers.

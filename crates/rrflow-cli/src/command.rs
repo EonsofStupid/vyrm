@@ -281,6 +281,42 @@ pub enum DevAction {
         #[arg(long, default_value = ".")]
         root: std::path::PathBuf,
     },
+    /// Build and start one RRD authority followed by its authenticated
+    /// Connectome client, then wait for both readiness probes.
+    Up {
+        #[arg(long, default_value = ".")]
+        root: std::path::PathBuf,
+        #[arg(long)]
+        instance: Option<String>,
+        #[arg(long, default_value = "127.0.0.1:9477")]
+        rrd_bind: std::net::SocketAddr,
+        #[arg(long, default_value = "127.0.0.1:4387")]
+        connectome_bind: std::net::SocketAddr,
+        /// Reuse companion binaries beside rrflow (or in RRFLOW_DEV_BIN_DIR).
+        #[arg(long)]
+        no_build: bool,
+    },
+    /// Probe the services recorded by the recoverable supervisor manifest.
+    Status {
+        #[arg(long, default_value = ".")]
+        root: std::path::PathBuf,
+    },
+    /// Read a bounded tail of the retained service logs.
+    Logs {
+        #[arg(long, default_value = ".")]
+        root: std::path::PathBuf,
+        #[arg(long, default_value = "all")]
+        service: String,
+        #[arg(long, default_value_t = 100)]
+        lines: usize,
+    },
+    /// Request graceful shutdown from both services and wait for completion.
+    Stop {
+        #[arg(long, default_value = ".")]
+        root: std::path::PathBuf,
+        #[arg(long, default_value_t = 10_000)]
+        timeout_ms: u64,
+    },
 }
 
 #[derive(Subcommand, Debug, Clone)]
@@ -372,6 +408,18 @@ impl Command {
             Command::Dev {
                 action: DevAction::Doctor { .. },
             } => "dev-doctor",
+            Command::Dev {
+                action: DevAction::Up { .. },
+            } => "dev-up",
+            Command::Dev {
+                action: DevAction::Status { .. },
+            } => "dev-status",
+            Command::Dev {
+                action: DevAction::Logs { .. },
+            } => "dev-logs",
+            Command::Dev {
+                action: DevAction::Stop { .. },
+            } => "dev-stop",
             Command::WorkPlan { action } => action.name(),
             Command::Assert { .. } => "assert",
             Command::AsOf { .. } => "as-of",
@@ -658,6 +706,48 @@ impl Command {
             Command::Dev {
                 action: DevAction::Doctor { root },
             } => vec![format!("root={}", root.display())],
+            Command::Dev {
+                action:
+                    DevAction::Up {
+                        root,
+                        instance,
+                        rrd_bind,
+                        connectome_bind,
+                        no_build,
+                    },
+            } => {
+                let mut arguments = vec![
+                    format!("root={}", root.display()),
+                    format!("rrd_bind={rrd_bind}"),
+                    format!("connectome_bind={connectome_bind}"),
+                    format!("no_build={no_build}"),
+                ];
+                if let Some(instance) = instance {
+                    arguments.push(format!("instance={instance}"));
+                }
+                arguments
+            }
+            Command::Dev {
+                action: DevAction::Status { root },
+            } => vec![format!("root={}", root.display())],
+            Command::Dev {
+                action:
+                    DevAction::Logs {
+                        root,
+                        service,
+                        lines,
+                    },
+            } => vec![
+                format!("root={}", root.display()),
+                format!("service={service}"),
+                format!("lines={lines}"),
+            ],
+            Command::Dev {
+                action: DevAction::Stop { root, timeout_ms },
+            } => vec![
+                format!("root={}", root.display()),
+                format!("timeout_ms={timeout_ms}"),
+            ],
             Command::WorkPlan { action } => action.arguments(),
         }
     }
@@ -672,27 +762,82 @@ pub fn execute_offline(
     now: Millis,
     json: bool,
 ) -> Option<Result<Execution, Box<dyn std::error::Error>>> {
-    if let Command::Dev {
-        action: DevAction::Doctor { root },
-    } = command
-    {
-        return Some((|| {
-            let report = crate::dev::doctor(root)?;
-            let success = report.ready;
-            let text = if json {
-                serde_json::to_string_pretty(&report)?
-            } else {
-                report.render()
-            };
-            Ok(Execution {
-                text,
-                effectiveness: None,
-                detail: Some(format!(
-                    "{} passed, {} blocked, {} warnings",
-                    report.passed, report.blocked, report.warnings
-                )),
-                success,
-            })
+    if let Command::Dev { action } = command {
+        return Some((|| match action {
+            DevAction::Doctor { root } => {
+                let report = crate::dev::doctor(root)?;
+                let success = report.ready;
+                let text = if json {
+                    serde_json::to_string_pretty(&report)?
+                } else {
+                    report.render()
+                };
+                Ok(Execution {
+                    text,
+                    effectiveness: None,
+                    detail: Some(format!(
+                        "{} passed, {} blocked, {} warnings",
+                        report.passed, report.blocked, report.warnings
+                    )),
+                    success,
+                })
+            }
+            DevAction::Up {
+                root,
+                instance,
+                rrd_bind,
+                connectome_bind,
+                no_build,
+            } => {
+                let report = crate::dev::supervisor::up(
+                    crate::dev::supervisor::UpOptions {
+                        root: root.clone(),
+                        instance: instance.clone(),
+                        rrd_bind: *rrd_bind,
+                        connectome_bind: *connectome_bind,
+                        no_build: *no_build,
+                    },
+                    now,
+                )?;
+                let text = if json {
+                    serde_json::to_string_pretty(&report)?
+                } else {
+                    report.render()
+                };
+                Ok(text.into())
+            }
+            DevAction::Status { root } => {
+                let report = crate::dev::supervisor::status(root)?;
+                let success = report.rrd_ready && report.connectome_ready;
+                let text = if json {
+                    serde_json::to_string_pretty(&report)?
+                } else {
+                    report.render()
+                };
+                Ok(Execution {
+                    text,
+                    effectiveness: None,
+                    detail: Some(format!("topology status: {}", report.status)),
+                    success,
+                })
+            }
+            DevAction::Logs {
+                root,
+                service,
+                lines,
+            } => Ok(crate::dev::supervisor::logs(root, service, *lines)?.into()),
+            DevAction::Stop { root, timeout_ms } => {
+                let report = crate::dev::supervisor::stop(
+                    root,
+                    std::time::Duration::from_millis(*timeout_ms),
+                )?;
+                let text = if json {
+                    serde_json::to_string_pretty(&report)?
+                } else {
+                    report.render()
+                };
+                Ok(text.into())
+            }
         })());
     }
     let action = match command {
@@ -734,8 +879,11 @@ pub fn execute_offline(
             } else {
                 format!(
                     "logical archive: {} actions / {} claims / {} runtime mutations / sha256 {}\nArchive: {}",
-                    inventory.action_count, inventory.claim_sequence,
-                    inventory.runtime_mutations, inventory.archive_sha256, archive.display()
+                    inventory.action_count,
+                    inventory.claim_sequence,
+                    inventory.runtime_mutations,
+                    inventory.archive_sha256,
+                    archive.display()
                 )
             };
             Ok(text.into())
@@ -747,8 +895,10 @@ pub fn execute_offline(
             } else {
                 format!(
                     "logical archive verified: {} actions / claim sequence {} / runtime cursor {} / sha256 {}",
-                    inventory.action_count, inventory.claim_sequence,
-                    inventory.runtime_cursor, inventory.archive_sha256
+                    inventory.action_count,
+                    inventory.claim_sequence,
+                    inventory.runtime_cursor,
+                    inventory.archive_sha256
                 )
             };
             Ok(text.into())
@@ -986,8 +1136,8 @@ pub fn execute(
                 "unknown" => RecallOutcome::Unknown,
                 other => {
                     return Err(format!(
-                        "unknown outcome {other:?}: expected accepted | corrected | discarded | unknown"
-                    )
+                    "unknown outcome {other:?}: expected accepted | corrected | discarded | unknown"
+                )
                     .into())
                 }
             };

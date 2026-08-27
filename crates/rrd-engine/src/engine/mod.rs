@@ -79,7 +79,9 @@ pub use invocation::{
 use model::*;
 pub use security::MAX_AUDIT_PAGE_RECORDS;
 use session::*;
-pub use token_key::{load_or_create_token_key, TOKEN_KEY_BYTES};
+pub use token_key::{
+    load_or_create_api_key, load_or_create_token_key, API_KEY_HEX_BYTES, TOKEN_KEY_BYTES,
+};
 
 const SESSION_STATE_FORMAT: u16 = 2;
 const MAX_SESSION_RENEWALS: usize = 64;
