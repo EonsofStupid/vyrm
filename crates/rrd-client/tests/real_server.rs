@@ -187,19 +187,36 @@ async fn rust_client_negotiates_authenticates_queries_and_reads_audit() {
 
     let proxy_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let proxy_address = proxy_listener.local_addr().unwrap();
+    let (proxy_shutdown, mut proxy_shutdown_receiver) = tokio::sync::watch::channel(false);
     let proxy = tokio::spawn(async move {
         let (first, _) = proxy_listener.accept().await.unwrap();
         drop(first);
-        let (mut downstream, _) = proxy_listener.accept().await.unwrap();
-        let mut upstream = tokio::net::TcpStream::connect(address).await.unwrap();
-        tokio::io::copy_bidirectional(&mut downstream, &mut upstream)
-            .await
-            .unwrap();
+        let mut connections = tokio::task::JoinSet::new();
+        loop {
+            tokio::select! {
+                changed = proxy_shutdown_receiver.changed() => {
+                    if changed.is_err() || *proxy_shutdown_receiver.borrow() {
+                        break;
+                    }
+                }
+                accepted = proxy_listener.accept() => {
+                    let (mut downstream, _) = accepted.unwrap();
+                    connections.spawn(async move {
+                        let mut upstream = tokio::net::TcpStream::connect(address).await.unwrap();
+                        tokio::io::copy_bidirectional(&mut downstream, &mut upstream)
+                            .await
+                            .unwrap();
+                    });
+                }
+            }
+        }
+        connections.abort_all();
+        while connections.join_next().await.is_some() {}
     });
 
     let client = RrdClient::connect_local(
         proxy_address,
-        instance,
+        instance.clone(),
         ClientConfig {
             request_timeout: Duration::from_secs(2),
             max_attempts: 2,
@@ -482,6 +499,23 @@ async fn rust_client_negotiates_authenticates_queries_and_reads_audit() {
         Err(Error::Contract(_))
     ));
     drop(client);
+    for _ in 0..10 {
+        let reconnected = RrdClient::connect_local(
+            proxy_address,
+            instance.clone(),
+            ClientConfig {
+                request_timeout: Duration::from_secs(2),
+                max_attempts: 2,
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            reconnected.capabilities().await.unwrap().protocol_version,
+            1
+        );
+        drop(reconnected);
+    }
+    proxy_shutdown.send(true).unwrap();
     proxy.await.unwrap();
     shutdown.send(()).unwrap();
     task.await.unwrap().unwrap();
