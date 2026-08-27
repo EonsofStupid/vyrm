@@ -1,7 +1,7 @@
 use rrd_core::{digest, DecisionKind, Reader, ReasoningPayload, ReasoningState};
 use rrd_engine::{
-    activate_work_item, active_reasoning_run, handle, preflight, record_reasoning,
-    record_work_item_plan, HookContext, HookEvent, WorkItemPlanRecord,
+    activate_work_item, active_reasoning_run, consume_attuned_tool_authorization, handle,
+    preflight, record_reasoning, record_work_item_plan, HookContext, HookEvent, WorkItemPlanRecord,
 };
 use rrd_store::MemoryEngine;
 
@@ -56,6 +56,32 @@ fn one_attempt_authorizes_one_tool_and_post_tool_closes_it_with_evidence() {
         .unwrap()
         .stdout
         .is_empty());
+    let tool_request_sha256 = digest::sha256_hex(
+        &serde_json::to_vec(&serde_json::json!({
+            "tool_name": edit["tool_name"],
+            "tool_input": edit["tool_input"],
+        }))
+        .unwrap(),
+    );
+    consume_attuned_tool_authorization(
+        &store,
+        root.path(),
+        &tool_request_sha256,
+        4,
+        "test:adapter",
+    )
+    .unwrap();
+    let replay = consume_attuned_tool_authorization(
+        &store,
+        root.path(),
+        &tool_request_sha256,
+        4,
+        "test:adapter",
+    )
+    .unwrap_err();
+    assert!(replay
+        .to_string()
+        .contains("already consumed before execution"));
     let competing = serde_json::json!({
         "tool_name": "Edit",
         "tool_input": {"file_path": "other.rs"}

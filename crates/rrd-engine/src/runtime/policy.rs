@@ -123,10 +123,12 @@ pub fn evaluate_tool(run: Option<&ReasoningRun>, input: &Value) -> ToolPolicy {
 }
 
 pub(super) fn is_project_mutation_tool(tool: &str) -> bool {
-    matches!(tool, "Edit" | "Write" | "NotebookEdit" | "Bash")
-        || runtime_tool_catalogue().iter().any(|definition| {
-            definition.name == tool && definition.attunement == RuntimeToolAttunement::ExactTool
-        })
+    matches!(
+        tool,
+        "Edit" | "Write" | "NotebookEdit" | "Bash" | "RRFlowExec"
+    ) || runtime_tool_catalogue().iter().any(|definition| {
+        definition.name == tool && definition.attunement == RuntimeToolAttunement::ExactTool
+    })
 }
 
 pub(super) fn tool_request_digest(input: &Value) -> Result<String, serde_json::Error> {
@@ -214,6 +216,16 @@ mod tests {
         .unwrap();
         assert!(matches!(
             evaluate_tool(Some(&run), &serde_json::json!({"tool_name":"Edit"})),
+            ToolPolicy::Allow { .. }
+        ));
+        assert!(matches!(
+            evaluate_tool(
+                Some(&run),
+                &serde_json::json!({
+                    "tool_name":"RRFlowExec",
+                    "tool_input":{"exact_argv":["printf", "%s", "a; b"]}
+                })
+            ),
             ToolPolicy::Allow { .. }
         ));
         assert_eq!(

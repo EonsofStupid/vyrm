@@ -1,0 +1,82 @@
+# RRD engine capability coverage
+
+Audited: 2026-08-26
+
+This is a source-and-test audit, not a product-green declaration. `Core present`
+means an executable engine path and focused test exist. `Partial` means a real
+subset exists but the stated product capability is not closed. `Missing` means
+there is no authoritative engine implementation matching the claim. A work-plan
+item is not implementation evidence.
+
+Audit total: **5 core-present, 14 partial, 1 missing**. `Core present` still
+does not mean the full product promise is closed; every remaining qualifier in
+the row is an acceptance obligation in `rrflow.workplan.toml`.
+
+| Required capability | Current engine evidence | Truth now | Closure authority |
+|---|---|---|---|
+| Native document, graph, relational, time-series, geo, key-value, strict-schema, and schemaless models | `RuntimeMutation` and the public transaction vocabulary atomically cover records, relations, events, vectors, series, geo, objects, and claims. A schema registry governs record/relation/event types. | **Partial.** Mixed-model persistence is real. There is no first-class document or key-value vocabulary, and non-claim data requires a registered schema; fully schemaless multi-model operation is not implemented. | G03-W01, G03-W02 |
+| Graph engine with typed directed links and deep traversal | Typed `RuntimeRelation` values and RRFlowQL `traverse:` execution are exercised by the real HTTP process fixture. | **Core present.** Complete graph administration, mutation grammar, and surface parity remain open. | G03-W02, G03-W03, G06-W02 |
+| Multi-row, multi-table ACID transactions | One `RuntimeCommit` atomically carries mixed mutation families under one global cursor; the server stages, previews, commits, aborts, and idempotently replays client transactions. | **Core present; qualification open.** The persistent happy path is real, but the complete crash/disk-full/concurrent-writer ACID matrix is not closed. | G02-W01, G03-W02, G05-W02 |
+| HNSW vector search with cosine, dot, Euclidean, Manhattan, and SIMD | Public and internal metric enums cover all four metrics; persistent HNSW build/open/search and exact rerank exist. AVX2 is used by the compact dense scorer. | **Partial.** The functional metric paths exist; a complete HNSW/metric SIMD differential and production performance matrix does not. | G04-W02, G04-W04 |
+| Full-text indexing, configurable analysis, BM25, relevance, and highlighting | Deterministic BM25 artifacts, `MATCH`, planner selection, exact fallback, and hybrid consumption exist. | **Partial.** V1 exposes one Unicode-lowercase analyzer and BM25 scoring. Configurable tokenizer/analyzer families and offset highlighting are missing. | G03-W05 |
+| Dense, sparse, and keyword hybrid fusion with RRF | `RrdEngine::search_hybrid` executes BM25 and vector branches at one read stamp and applies weighted reciprocal-rank fusion. Sparse vector queries are executable. | **Core present.** Native SPLADE generation and the broader multistage query algebra remain open. | G04-W03 |
+| Metadata filtering during HNSW traversal | HNSW validates indexed filter properties and passes visibility/filter admission into graph-layer search; a selective-filter test covers the crossover. | **Core present.** Fixed selectivity, update, and reopen qualification corpora remain open. | G04-W02 |
+| Scalar, product, binary quantization and up-to-64x memory reduction | TurboQuant supports 4, 2, 1.5, and 1-bit packed artifacts with exact reranking; scalar quantization primitives also exist. | **Partial.** Product quantization and a separately governed binary-quantization lifecycle are missing, and no accepted universal 64x/recall claim exists. | G04-W04 |
+| Multiple vectors, multimodal retrieval, and ColBERT-style late interaction | Collections support named dense, sparse, and multi-dense values; multi-dense search uses MaxSim. | **Core present.** End-to-end multimodal ingestion/model provenance and the complete late-interaction surface are not qualified. | G04-W01, G04-W03 |
+| Score boosting, model reranking, and MMR diversity | HNSW/TurboQuant perform exact reranking, and hybrid search performs weighted RRF. | **Partial.** General boosting, model reranking, and MMR do not exist. | G04-W03 |
+| Real-time CDC and live queries over WebSockets | Retained changefeed read/follow and resumable bounded live-query long polling exist through engine, HTTP, and MCP. | **Partial.** Server push, WebSocket transport, durable subscription leases, and distributed ordering are missing. | G03-W06 |
+| Immediate, non-blocking real-time indexing | New authoritative vectors are immediately available to exact search; derived artifacts carry source cursors and fail closed when stale. | **Partial.** Persistent HNSW/TurboQuant maintenance is an explicit build/publish path, not a proven online non-blocking updater. | G03-W05, G04-W02 |
+| Incremental materialized views and analytics | Materialized scalar/BM25 query indexes and runtime projections exist. | **Partial.** General materialized views and incremental aggregations are missing. | G03-W05 |
+| Embedded scripting and functions | No in-database JavaScript or equivalent governed function runtime is present. | **Missing.** | G03-W07 |
+| Multitenancy and partitioning | Runtime scopes, resource-prefix grants, tenant filter properties, estate identities, and shard types exist. | **Partial.** Complete tenant isolation, partition placement, and cross-tenant fault tests are missing. | G05-W03, G08-W01, G08-W02 |
+| JWT/third-party auth, RBAC, row-level, and field-level permissions | Persistent principals, API-key authentication, resource/action grants, revocation/expiry, session tokens, TLS 1.3, and mTLS exist. | **Partial.** JWT issuance, OIDC/third-party identity, role inheritance, and row/field policy are missing. | G05-W03 |
+| MMap, io_uring, storage-compute separation, and low-RAM storage | The custom RRD LSM has WAL/MVCC/segments/compaction; compact vector and edge artifacts can use mmap; logical objects and S3-compatible storage exist. | **Partial.** io_uring and qualified storage-compute separation are missing, and low-RAM claims need measured evidence. | G02-W01, G02-W06, G04-W04, G04-W05 |
+| Distributed HA, automatic sharding, multi-region replication, and read replicas | Estate, shard/replica contracts, traced object transfer, reconciliation primitives, and Kubernetes resources exist. | **Partial foundation only.** Consensus-integrated data commits, independent-host failover, automatic sharding, multi-region replication, and HA qualification are missing. | G08-W01, G08-W02, G08-W03 |
+| In-memory, embedded, daemon, edge, remote, and distributed deployment | Memory, native embedded, standalone HTTP daemon, persistent client modes, and an mmap/offline edge executable exist. | **Partial.** Distributed deployment and complete cross-mode conformance are missing. | G05-W01, G08-W02, G10-W03 |
+| RRFlowQL, GraphQL, REST/HTTP, WebSocket, gRPC, and native SDKs | RRFlowQL, generated OpenAPI REST/HTTP, MCP, CLI, and the Rust engine/client boundary exist. | **Partial.** GraphQL, WebSocket, gRPC, and the promised TypeScript/Python/Go/Java/.NET SDK qualification do not. | G06-W01, G06-W04, G06-W05 |
+
+## Evidence anchors
+
+- Mixed-model commit and schema authority: `crates/rrd-core/src/runtime.rs`,
+  `crates/rrd-core/src/schema.rs`, and
+  `crates/rrd-server/tests/http_process.rs::data_transaction_atomically_commits_every_public_model_and_replays_after_restart`.
+- Query, graph traversal, BM25, and hybrid fusion: `crates/rrd-query/src`,
+  `crates/rrd-engine/src/engine/query.rs`, and
+  `crates/rrd-engine/src/engine/retrieval.rs`.
+- Vector HNSW, one-stage filters, MaxSim, quantization, exact reranking, and SIMD:
+  `crates/rrd-vector/src/hnsw.rs`, `crates/rrd-vector/src/exact.rs`,
+  `crates/rrd-vector/src/turboquant.rs`, and `crates/rrd-vector/src/compact.rs`.
+- CDC/live query: `crates/rrd-engine/src/engine/changefeed.rs`,
+  `crates/rrd-engine/src/engine/query.rs`, and
+  `crates/rrd-server/src/http/capabilities.rs`.
+- Security and transport: `crates/rrd-security/src/lib.rs` and
+  `crates/rrd-server/src/http/server.rs`.
+- Native persistence, edge, cluster, and estate: `crates/rrd-lsm`,
+  `crates/rrd-store/src/native.rs`, `crates/rrflow-edge`,
+  `crates/rrd-cluster`, `crates/rrd-estate`, and `crates/rrd-kubernetes`.
+
+The checked-in `rrflow.workplan.toml` is the closure authority. The table must
+be regenerated from executable capability dispositions before firm-alpha; this
+manual audit is an interim correction, not a second catalogue.
+
+## Native storage comparison
+
+Fresh pinned evidence from 2026-08-26 establishes bounded promotion wins over
+Fjall 3.1.8; it does not establish universal backend superiority.
+
+- The 9-trial standard workload passes its correctness-and-promotion gate.
+  Native/Fjall ratios are 1.243 for write throughput, 1.701 for read throughput,
+  0.836 for write p95 latency, 0.616 for read p95 latency, 0.168 for clean-reopen
+  recovery time, 0.921 for peak RSS, and 0.915 for clean-reopen allocated bytes.
+  Lower latency, recovery, memory, and footprint ratios are better.
+- The 5-trial embedding metadata-fanout workload also passes: 1.716 for resolved
+  item throughput, 0.536 for p95 request latency, and 0.963 for clean-reopen
+  allocated bytes.
+- Earlier read-heavy evidence contains a losing native write-p95 cell (1.357).
+  That result remains part of the record and prevents a claim that Fjall is
+  categorically weaker across every workload and metric.
+
+The full configurations, per-trial observations, footprint contracts, and
+promotion decisions are in
+`eval/results/2026-08-26-rrd-lsm-standard-current.json` and
+`eval/results/2026-08-26-rrd-lsm-ai-metadata-fanout-current.json`.

@@ -37,6 +37,11 @@ pub struct ProjectAttunementReceipt {
     pub reasoning_run_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub authorized_tool_sha256: Option<String>,
+    /// Set atomically before an exact tool is started. An authorization with
+    /// this field set cannot start a second process, even when an adapter
+    /// retries the same request after losing its response.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub authorized_tool_started_at: Option<u64>,
     pub receipt_sha256: String,
 }
 
@@ -158,6 +163,11 @@ pub fn authorize_attuned_tool<E: Engine>(
     }
     if let Some(bound) = receipt.authorized_tool_sha256.as_deref() {
         if bound == tool_sha256 {
+            if receipt.authorized_tool_started_at.is_some() {
+                return Err(
+                    "exact-tool authorization was already consumed before execution".into(),
+                );
+            }
             return Ok(receipt);
         }
         return Err("attunement receipt already authorizes another unobserved tool request".into());
@@ -165,6 +175,7 @@ pub fn authorize_attuned_tool<E: Engine>(
     let expected = serde_json::to_vec(&receipt)?;
     receipt.reasoning_run_id = Some(reasoning_run_id.to_owned());
     receipt.authorized_tool_sha256 = Some(tool_sha256.to_owned());
+    receipt.authorized_tool_started_at = None;
     receipt.seal();
     commit_receipt(
         store,
@@ -174,6 +185,47 @@ pub fn authorize_attuned_tool<E: Engine>(
         now,
         actor,
         "runtime.attunement.authorize",
+    )?;
+    Ok(receipt)
+}
+
+/// Atomically consumes an exact-tool authorization before the external side
+/// effect begins. This closes the retry race left by completing only after a
+/// process returns: a crash may leave a deliberately stuck authorization, but
+/// it can never cause the same permit to launch the command twice.
+pub fn consume_attuned_tool_authorization<E: Engine>(
+    store: &E,
+    root: &Path,
+    tool_sha256: &str,
+    now: u64,
+    actor: &str,
+) -> Result<ProjectAttunementReceipt, Box<dyn std::error::Error>> {
+    let root = canonical_root(root)?;
+    let root_sha256 = digest::sha256_hex(root.to_string_lossy().as_bytes());
+    let key = receipt_key(&root_sha256);
+    let expected = store
+        .control_record(&key)?
+        .ok_or("tool execution has no durable project-attunement receipt")?;
+    let mut receipt: ProjectAttunementReceipt = serde_json::from_slice(&expected)?;
+    if receipt.format != RECEIPT_FORMAT || !receipt.verify() {
+        return Err("project-attunement receipt failed format or digest verification".into());
+    }
+    if receipt.authorized_tool_sha256.as_deref() != Some(tool_sha256) {
+        return Err("tool request does not match the outstanding exact-tool authorization".into());
+    }
+    if receipt.authorized_tool_started_at.is_some() {
+        return Err("exact-tool authorization was already consumed before execution".into());
+    }
+    receipt.authorized_tool_started_at = Some(now);
+    receipt.seal();
+    commit_receipt(
+        store,
+        key,
+        Some(expected),
+        &receipt,
+        now,
+        actor,
+        "runtime.attunement.consume",
     )?;
     Ok(receipt)
 }
@@ -198,6 +250,7 @@ pub fn complete_attuned_tool<E: Engine>(
         );
     }
     receipt.authorized_tool_sha256 = None;
+    receipt.authorized_tool_started_at = None;
     receipt.seal();
     commit_receipt(
         store,
@@ -272,6 +325,7 @@ fn derive_receipt<E: Engine>(
         prompt_sha256,
         reasoning_run_id: None,
         authorized_tool_sha256: None,
+        authorized_tool_started_at: None,
         receipt_sha256: String::new(),
     })
 }

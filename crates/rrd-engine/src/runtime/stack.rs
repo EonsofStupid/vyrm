@@ -240,7 +240,19 @@ impl StackProfile {
 /// executed command and receive a canonical event identity when its first
 /// command is an npm-compatible lifecycle run.
 pub fn package_run_event(command: &str) -> Option<PackageRunEvent> {
-    let mut words = command.split_whitespace();
+    package_run_event_words(command.split_whitespace())
+}
+
+/// Resolves package lifecycle identity from an already separated argv vector.
+/// Unlike [`package_run_event`], argument whitespace and shell metacharacters
+/// are ordinary bytes here and can never change token boundaries.
+pub fn package_run_event_argv(argv: &[String]) -> Option<PackageRunEvent> {
+    package_run_event_words(argv.iter().map(String::as_str))
+}
+
+fn package_run_event_words<'a>(
+    mut words: impl Iterator<Item = &'a str>,
+) -> Option<PackageRunEvent> {
     let executable = words.next()?;
     let manager = match executable {
         "bun" | "bunx" => PackageManager::Bun,

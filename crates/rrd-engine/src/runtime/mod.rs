@@ -24,6 +24,7 @@ pub mod data_plane;
 pub mod hook;
 pub mod init;
 pub mod instance;
+pub mod lifecycle;
 pub mod operator_knowledge;
 pub mod policy;
 pub mod preflight;
@@ -39,9 +40,9 @@ pub mod workflow;
 pub mod workplan;
 
 pub use attunement::{
-    authorize_attuned_tool, complete_attuned_tool, load_attunement_receipt,
-    record_attunement_receipt, require_attuned_tool_authorization, require_fresh_attunement,
-    PlanningSourceFingerprint, ProjectAttunementReceipt,
+    authorize_attuned_tool, complete_attuned_tool, consume_attuned_tool_authorization,
+    load_attunement_receipt, record_attunement_receipt, require_attuned_tool_authorization,
+    require_fresh_attunement, PlanningSourceFingerprint, ProjectAttunementReceipt,
 };
 pub use cluster_transfer::{
     execute_traced_artifact_transfer, record_artifact_transfer_observation,
@@ -56,6 +57,13 @@ pub use init::{init, InitReport, STORE_DIR};
 pub use instance::{
     InstanceBinding, InstanceManifest, InstanceMode, ProjectAuthorityBinding, INSTANCE_FILE,
     INSTANCE_FORMAT, PROJECT_AUTHORITY_FORMAT,
+};
+pub use lifecycle::{
+    append_lifecycle_event, load_lifecycle_events, load_lifecycle_session,
+    LifecycleEnforcementLevelV1, LifecycleEventCommandV1, LifecycleEventEnvelopeV1,
+    LifecycleEventTypeV1, LifecyclePayloadV1, LifecyclePhaseV1, LifecycleReadStampV1,
+    LifecycleRiskV1, LifecycleSessionSnapshotV1, LifecycleTaskKindV1, LifecycleTraceContextV1,
+    LifecycleTurnStatusV1, LIFECYCLE_RUNTIME_EVENT_TYPE, LIFECYCLE_RUNTIME_SESSION_TYPE,
 };
 pub use operator_knowledge::{
     execute_traced_operator_search, execute_traced_operator_sync, TracedOperatorSearch,
@@ -72,7 +80,10 @@ pub use reasoning::{
 };
 pub use registry::{Harness, Registry, Verification, VERIFICATION_TTL_MS};
 pub use routing::{ensure_routing_fresh, load_routing, reset_routing, RoutingReady};
-pub use stack::{detect, package_run_event, PackageManager, PackageRunEvent, StackProfile};
+pub use stack::{
+    detect, package_run_event, package_run_event_argv, PackageManager, PackageRunEvent,
+    StackProfile,
+};
 pub use tools::{
     is_runtime_tool, runtime_tool_catalogue, runtime_tool_contract_catalogue,
     runtime_tool_operation, RuntimeToolAttunement, RuntimeToolDefinition, RuntimeToolResult,
@@ -86,8 +97,8 @@ pub use vector_catalog::{
     VectorArtifactPublication,
 };
 pub use workflow::{
-    resolve_package_command, VerificationPolicy, WorkflowAuthorization, WorkflowCatalog,
-    WorkflowDecision, WorkflowDifferential, WorkflowManifest, WorkflowObservation,
+    resolve_package_argv, resolve_package_command, VerificationPolicy, WorkflowAuthorization,
+    WorkflowCatalog, WorkflowDecision, WorkflowDifferential, WorkflowManifest, WorkflowObservation,
     WorkflowPreflight, WorkflowRule, WorkflowStatus, WORKFLOW_FILE, WORKFLOW_FORMAT,
 };
 pub use workplan::{

@@ -7,6 +7,7 @@
 
 mod capability_surface;
 mod diagnostic;
+mod lifecycle;
 mod runtime_tool;
 mod workplan;
 
@@ -23,6 +24,12 @@ pub use diagnostic::{
     DiagnosticSnapshot, DiagnosticSnapshotLease, DiagnosticVectorArtifactCatalogueSnapshot,
     DiagnosticVectorArtifactKind, DiagnosticVectorArtifactSnapshot, ReadDiagnosticSnapshot,
     DIAGNOSTIC_SNAPSHOT_FORMAT_VERSION, MAX_DIAGNOSTIC_AUDIT_RECORDS,
+};
+pub use lifecycle::{
+    LifecycleEnforcementLevelV1, LifecycleEventCommandV1, LifecycleEventEnvelopeV1,
+    LifecycleEventTypeV1, LifecyclePayloadV1, LifecyclePhaseV1, LifecycleReadStampV1,
+    LifecycleRiskV1, LifecycleSessionSnapshotV1, LifecycleTaskKindV1, LifecycleTraceContextV1,
+    LifecycleTurnStatusV1, LIFECYCLE_SPEC_VERSION, MAX_LIFECYCLE_EVENT_BYTES,
 };
 pub use runtime_tool::{
     runtime_tool_arguments_sha256, ListRuntimeTools, RuntimeToolAttunement,

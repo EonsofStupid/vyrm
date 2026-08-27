@@ -11,6 +11,7 @@
 //! must not. The clock is read once, here, and passed inward.
 
 mod command;
+mod command_proxy;
 mod dev;
 mod workplan;
 

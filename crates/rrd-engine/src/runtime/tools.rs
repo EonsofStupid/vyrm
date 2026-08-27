@@ -6,9 +6,9 @@
 
 use super::policy::tool_request_digest;
 use super::{
-    active_reasoning_run, ensure_routing_fresh, execute_traced_query, handle, load_routing,
-    preflight, query_parameters_from_json, reasoning_run, record_reasoning,
-    require_attuned_tool_authorization, require_fresh_attunement, ExecutionBudget, HookContext,
+    active_reasoning_run, consume_attuned_tool_authorization, ensure_routing_fresh,
+    execute_traced_query, handle, load_routing, preflight, query_parameters_from_json,
+    reasoning_run, record_reasoning, require_fresh_attunement, ExecutionBudget, HookContext,
     HookEvent, InstanceBinding, REASONING_SCOPE,
 };
 use crate::{
@@ -384,11 +384,13 @@ impl RrdEngine {
                 .map_err(|error| ServiceError::Runtime(error.to_string()))?;
             require_fresh_attunement(&self.storage, root, &ready)
                 .map_err(|error| ServiceError::Runtime(error.to_string()))?;
-            require_attuned_tool_authorization(
+            consume_attuned_tool_authorization(
                 &self.storage,
                 root,
                 &tool_request_digest(&lifecycle_input)
                     .map_err(|error| ServiceError::Runtime(error.to_string()))?,
+                at,
+                "agent:mcp",
             )
             .map_err(|error| ServiceError::Runtime(error.to_string()))?;
         }

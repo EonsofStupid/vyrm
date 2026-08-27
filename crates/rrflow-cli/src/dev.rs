@@ -10,6 +10,30 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 const REPORT_VERSION: u16 = 3;
+const CANONICAL_WORKSPACE_PACKAGES: [&str; 22] = [
+    "connectome-ui",
+    "rrd-client",
+    "rrd-cluster",
+    "rrd-contract",
+    "rrd-core",
+    "rrd-engine",
+    "rrd-estate",
+    "rrd-graph",
+    "rrd-inference",
+    "rrd-kubernetes",
+    "rrd-lsm",
+    "rrd-maintenance",
+    "rrd-operator-knowledge",
+    "rrd-query",
+    "rrd-security",
+    "rrd-server",
+    "rrd-store",
+    "rrd-vector",
+    "rrflow-cli",
+    "rrflow-edge",
+    "rrflow-eval",
+    "rrflow-mcp",
+];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -74,19 +98,20 @@ pub fn doctor(root: &Path) -> Result<DevDoctorReport, Box<dyn std::error::Error>
     let workspace_manifest = read_manifest(&root.join("Cargo.toml"))?;
     let members = workspace_members(&workspace_manifest)?;
     let packages = package_inventory(&root, &members)?;
+    let package_names = packages
+        .iter()
+        .map(|package| package.name.as_str())
+        .collect::<BTreeSet<_>>();
+    let canonical_packages = CANONICAL_WORKSPACE_PACKAGES
+        .into_iter()
+        .collect::<BTreeSet<_>>();
     let mut checks = vec![
         check(
             "workspace.identity",
-            !packages
-                .iter()
-                .any(|package| package.name.starts_with("rrflow-")),
+            package_names == canonical_packages,
             "workspace packages use RRFlow/RRD identities",
-            packages
-                .iter()
-                .map(|package| package.name.as_str())
-                .collect::<Vec<_>>()
-                .join(", "),
-            "finish the controlled pre-release package rename before adding dev orchestration",
+            package_names.into_iter().collect::<Vec<_>>().join(", "),
+            "make workspace package membership match the canonical RRFlow/RRD rename ledger",
         ),
         surface_boundary(
             &packages,
@@ -263,11 +288,15 @@ pub fn doctor(root: &Path) -> Result<DevDoctorReport, Box<dyn std::error::Error>
     ));
 
     let command_source = std::fs::read_to_string(root.join("crates/rrflow-cli/src/command.rs"))?;
+    let has_exec = command_source.contains("Exec {");
+    let has_exact_argv = command_source.contains("exact_argv");
     checks.push(check(
         "enforcement.command-proxy",
-        command_source.contains("Exec {") && command_source.contains("exact_argv"),
+        has_exec && has_exact_argv,
         "provider-neutral mutations cross an exact-argv RRFlow command boundary",
-        if command_source.contains("Exec {") {
+        if has_exec && has_exact_argv {
+            "crates/rrflow-cli/src/command.rs and command_proxy.rs bind an exact argv vector"
+        } else if has_exec {
             "an exec command exists but exact argv binding was not detected"
         } else {
             "rrflow exec is absent"
@@ -500,6 +529,9 @@ mod tests {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
         let report = doctor(&root).unwrap();
         assert!(!report.ready);
+        assert!(report.checks.iter().any(|check| {
+            check.id == "workspace.identity" && check.status == CheckStatus::Passed
+        }));
         assert!(report.checks.iter().any(|check| {
             check.id == "surface.connectome-client-only"
                 && check.status == CheckStatus::Blocked

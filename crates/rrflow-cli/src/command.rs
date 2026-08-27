@@ -235,6 +235,27 @@ pub enum Command {
         #[arg(long, default_value_t = 256)]
         max_batch_rows: usize,
     },
+    /// Execute one exact argv vector through RRFlow's durable lifecycle gate.
+    /// No shell parses, expands, redirects, or composes this command.
+    Exec {
+        /// Project root whose attunement, work plan, and instance bind this run.
+        #[arg(long, default_value = ".")]
+        root: std::path::PathBuf,
+        /// Working directory, relative to the project root unless absolute.
+        #[arg(long)]
+        cwd: Option<std::path::PathBuf>,
+        /// Maximum child runtime before RRFlow kills it.
+        #[arg(long, default_value_t = 15 * 60 * 1_000)]
+        timeout_ms: u64,
+        /// Maximum bytes retained from each output stream. Both streams are
+        /// fully drained and hashed even when their displayed prefix truncates.
+        #[arg(long, default_value_t = 1024 * 1024)]
+        max_output_bytes: usize,
+        /// Executable followed by its exact arguments. The `--` separator is
+        /// mandatory so RRFlow flags cannot be confused with child flags.
+        #[arg(last = true, required = true, num_args = 1.., allow_hyphen_values = true)]
+        exact_argv: Vec<String>,
+    },
     /// Record or inspect the typed operational reasoning contract.
     Reasoning {
         #[command(subcommand)]
@@ -370,6 +391,7 @@ impl Command {
             Command::Hook { .. } => "hook",
             Command::Init { .. } => "init",
             Command::Query { .. } => "query",
+            Command::Exec { .. } => "exec",
             Command::Reasoning {
                 action: ReasoningAction::Record { .. },
             } => "reasoning-record",
@@ -556,6 +578,28 @@ impl Command {
                 format!("max_rows={max_rows}"),
                 format!("max_output_bytes={max_output_bytes}"),
                 format!("max_batch_rows={max_batch_rows}"),
+            ],
+            Command::Exec {
+                root,
+                cwd,
+                timeout_ms,
+                max_output_bytes,
+                exact_argv,
+            } => vec![
+                format!("root={}", root.display()),
+                format!(
+                    "cwd={}",
+                    cwd.as_deref()
+                        .unwrap_or_else(|| std::path::Path::new("."))
+                        .display()
+                ),
+                format!("timeout_ms={timeout_ms}"),
+                format!("max_output_bytes={max_output_bytes}"),
+                format!("argc={}", exact_argv.len()),
+                format!(
+                    "exact_argv_sha256={}",
+                    digest::sha256_hex(&serde_json::to_vec(exact_argv).unwrap_or_default())
+                ),
             ],
             Command::Reasoning {
                 action:
@@ -825,6 +869,28 @@ pub fn execute(
     match command {
         Command::WorkPlan { action } => {
             return crate::workplan::execute(store, action, reader, now, json);
+        }
+        Command::Exec {
+            root,
+            cwd,
+            timeout_ms,
+            max_output_bytes,
+            exact_argv,
+        } => {
+            verify_instance_store(store, root)?;
+            return crate::command_proxy::execute(
+                store,
+                crate::command_proxy::ExactCommandRequest {
+                    root,
+                    requested_cwd: cwd.as_deref(),
+                    exact_argv,
+                    timeout_ms: *timeout_ms,
+                    max_output_bytes: *max_output_bytes,
+                },
+                reader,
+                now,
+                json,
+            );
         }
         Command::Recall {
             subjects,
@@ -1099,6 +1165,7 @@ pub fn execute(
             | Command::Preflight { .. }
             | Command::Hook { .. }
             | Command::Query { .. }
+            | Command::Exec { .. }
             | Command::Dev { .. }
             | Command::WorkPlan { .. }
             | Command::Storage { .. } => {
@@ -1512,7 +1579,14 @@ pub fn outcome_of(
     result: &Result<Execution, Box<dyn std::error::Error>>,
 ) -> (Outcome, Option<String>) {
     match result {
-        Ok(_) => (Outcome::Ok, None),
+        Ok(execution) if execution.success => (Outcome::Ok, None),
+        Ok(execution) => (
+            Outcome::Error,
+            execution
+                .detail
+                .clone()
+                .or_else(|| Some("command reported an unsuccessful outcome".into())),
+        ),
         Err(error) => (Outcome::Error, Some(error.to_string())),
     }
 }

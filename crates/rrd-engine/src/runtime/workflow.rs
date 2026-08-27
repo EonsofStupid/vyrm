@@ -7,7 +7,7 @@
 //! named `test`, `deploy`, or `build` is safe or meaningful on its own.
 
 use super::routing::{RoutingReady, ROUTING_PROJECTION};
-use super::stack::package_run_event;
+use super::stack::{package_run_event, package_run_event_argv};
 use super::InstanceBinding;
 use rrd_core::{digest, ReadStamp, ScopeId};
 use serde::{Deserialize, Serialize};
@@ -134,6 +134,47 @@ impl WorkflowObservation {
         exit_code: Option<i64>,
         at: u64,
     ) -> Result<Self, Box<dyn std::error::Error>> {
+        let actual_words = direct_words(command).map_err(|reason| {
+            format!("post-tool workflow command is no longer a direct command: {reason}")
+        })?;
+        Self::capture_exact(
+            authorization,
+            &actual_words,
+            digest::sha256_hex(command.as_bytes()),
+            response,
+            exit_code,
+            at,
+        )
+    }
+
+    pub fn capture_argv(
+        authorization: &WorkflowAuthorization,
+        argv: &[String],
+        response: &serde_json::Value,
+        exit_code: Option<i64>,
+        at: u64,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
+        if argv.is_empty() || argv.iter().any(|argument| argument.contains('\0')) {
+            return Err("post-tool workflow argv is empty or contains NUL".into());
+        }
+        Self::capture_exact(
+            authorization,
+            argv,
+            digest::sha256_hex(&serde_json::to_vec(argv)?),
+            response,
+            exit_code,
+            at,
+        )
+    }
+
+    fn capture_exact(
+        authorization: &WorkflowAuthorization,
+        actual_words: &[String],
+        command_digest: String,
+        response: &serde_json::Value,
+        exit_code: Option<i64>,
+        at: u64,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
         let status = match authorization.verification {
             VerificationPolicy::ExitZero => match exit_code {
                 Some(0) => WorkflowStatus::Passed,
@@ -142,9 +183,6 @@ impl WorkflowObservation {
             },
             VerificationPolicy::Observe => WorkflowStatus::Observed,
         };
-        let actual_words = direct_words(command).map_err(|reason| {
-            format!("post-tool workflow command is no longer a direct command: {reason}")
-        })?;
         Ok(Self {
             contract_version: WORKFLOW_FORMAT,
             event: authorization.event.clone(),
@@ -153,7 +191,7 @@ impl WorkflowObservation {
             arguments_supplied: actual_words
                 .len()
                 .saturating_sub(authorization.command.len()),
-            command_digest: digest::sha256_hex(command.as_bytes()),
+            command_digest,
             response_digest: digest::sha256_hex(&serde_json::to_vec(response)?),
             exit_code,
             status,
@@ -293,6 +331,42 @@ impl WorkflowCatalog {
                 }))
             }
         };
+        self.resolve_exact(binding, event_name, actual, command.into())
+    }
+
+    /// Resolves a command that is already represented as exact argv. Shell
+    /// syntax is deliberately irrelevant here; no argument is re-tokenized.
+    pub fn resolve_argv(
+        &self,
+        binding: &InstanceBinding,
+        argv: &[String],
+    ) -> Result<WorkflowDecision, Box<dyn std::error::Error>> {
+        let Some(event) = package_run_event_argv(argv) else {
+            return Ok(WorkflowDecision::NotPackage);
+        };
+        if argv.is_empty() || argv.iter().any(|argument| argument.contains('\0')) {
+            return Ok(WorkflowDecision::Deny(WorkflowDifferential {
+                event: Some(event.canonical_subject()),
+                actual_command: serde_json::to_string(argv)?,
+                expected: vec!["one non-empty exact argv vector without NUL bytes".into()],
+                differences: vec!["argv is empty or contains NUL".into()],
+            }));
+        }
+        self.resolve_exact(
+            binding,
+            event.canonical_subject(),
+            argv.to_vec(),
+            serde_json::to_string(argv)?,
+        )
+    }
+
+    fn resolve_exact(
+        &self,
+        binding: &InstanceBinding,
+        event_name: String,
+        actual: Vec<String>,
+        actual_command: String,
+    ) -> Result<WorkflowDecision, Box<dyn std::error::Error>> {
         let Some(rule) = self
             .manifest
             .workflows
@@ -301,7 +375,7 @@ impl WorkflowCatalog {
         else {
             return Ok(WorkflowDecision::Deny(WorkflowDifferential {
                 event: Some(event_name),
-                actual_command: command.into(),
+                actual_command,
                 expected: self
                     .manifest
                     .workflows
@@ -319,7 +393,7 @@ impl WorkflowCatalog {
         if !command_matches {
             return Ok(WorkflowDecision::Deny(WorkflowDifferential {
                 event: Some(event_name),
-                actual_command: command.into(),
+                actual_command,
                 expected: vec![render_rule_command(rule)],
                 differences: vec!["actual argv does not match the declared command matcher".into()],
             }));
@@ -327,7 +401,7 @@ impl WorkflowCatalog {
         if rule.scope != binding.manifest.id {
             return Ok(WorkflowDecision::Deny(WorkflowDifferential {
                 event: Some(event_name),
-                actual_command: command.into(),
+                actual_command,
                 expected: vec![format!("scope={}", binding.manifest.id)],
                 differences: vec![format!(
                     "declared scope {:?} is not the bound instance {:?}",
@@ -388,6 +462,25 @@ pub fn resolve_package_command(
         None => Ok(WorkflowDecision::Deny(WorkflowDifferential {
             event: Some(event.canonical_subject()),
             actual_command: command.into(),
+            expected: vec![format!("a valid project-owned {WORKFLOW_FILE}")],
+            differences: vec!["package workflow manifest is absent".into()],
+        })),
+    }
+}
+
+pub fn resolve_package_argv(
+    root: &Path,
+    binding: &InstanceBinding,
+    argv: &[String],
+) -> Result<WorkflowDecision, Box<dyn std::error::Error>> {
+    let Some(event) = package_run_event_argv(argv) else {
+        return Ok(WorkflowDecision::NotPackage);
+    };
+    match WorkflowCatalog::load(root)? {
+        Some(catalog) => catalog.resolve_argv(binding, argv),
+        None => Ok(WorkflowDecision::Deny(WorkflowDifferential {
+            event: Some(event.canonical_subject()),
+            actual_command: serde_json::to_string(argv)?,
             expected: vec![format!("a valid project-owned {WORKFLOW_FILE}")],
             differences: vec!["package workflow manifest is absent".into()],
         })),
@@ -482,6 +575,22 @@ verification = "exit_zero"
         assert_eq!(authorization.event, "package:pnpm:run:typecheck");
         assert_eq!(authorization.scope.as_str(), "app");
         assert_eq!(authorization.verification, VerificationPolicy::ExitZero);
+
+        let exact = catalog
+            .resolve_argv(
+                &binding(root.path(), "app"),
+                &[
+                    "pnpm".into(),
+                    "run".into(),
+                    "typecheck".into(),
+                    "argument with spaces; and shell syntax".into(),
+                ],
+            )
+            .unwrap();
+        let WorkflowDecision::Allow(exact) = exact else {
+            panic!("already separated argv must not be reinterpreted as shell syntax")
+        };
+        assert_eq!(exact.event, "package:pnpm:run:typecheck");
     }
 
     #[test]

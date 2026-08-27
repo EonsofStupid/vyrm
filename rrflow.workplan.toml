@@ -170,23 +170,23 @@ acceptance = ["valid-time and known-at reads are stable", "rollback creates a ne
 [[item]]
 id = "G02-W06"
 gate = "G02"
-title = "Qualify object storage and tiered persistence"
+title = "Qualify object storage, low-memory IO, and tiered persistence"
 depends_on = ["G02-W02", "G02-W03"]
-acceptance = ["S3-compatible archive/artifact operations are authenticated and resumable", "local loss and remote retry/corruption scenarios pass"]
+acceptance = ["S3-compatible archive/artifact operations are authenticated and resumable", "mmap, io_uring where supported, bounded fallback IO, and storage-compute separation have measured behavior", "local loss and remote retry/corruption scenarios pass"]
 
 [[item]]
 id = "G03-W01"
 gate = "G03"
 title = "Freeze one schema and catalogue for every logical model"
 depends_on = []
-acceptance = ["document, relational, graph, vector, event, time-series, geo, reasoning, and lifecycle identities share one revisioned catalogue", "cross-model schema changes are transactional"]
+acceptance = ["document, relational, graph, key-value, vector, event, time-series, geo, reasoning, and lifecycle identities share one revisioned catalogue", "strict schemas and explicitly schemaless namespaces are both first-class and cannot be confused", "cross-model schema changes are transactional"]
 
 [[item]]
 id = "G03-W02"
 gate = "G03"
 title = "Complete concurrent multi-model CRUD and transactions"
 depends_on = ["G03-W01"]
-acceptance = ["create/read/update/retire for documents, records, relations, native edges, events, series, geo, vectors, and objects", "mixed-model commit and reopen produce identical reads"]
+acceptance = ["create/read/update/retire for documents, key-value entries, records, relations, native edges, events, series, geo, vectors, and objects", "multi-row and multi-model ACID commits retain one read stamp, audit identity, and all-or-nothing recovery", "mixed-model commit and reopen produce identical reads"]
 
 [[item]]
 id = "G03-W03"
@@ -205,23 +205,23 @@ acceptance = ["typed stamped batches preserve RRD semantics", "pushdown, streami
 [[item]]
 id = "G03-W05"
 gate = "G03"
-title = "Complete scalar, compound, unique, count, geo, and full-text indexes"
+title = "Complete indexes, full-text search, and materialized analytics"
 depends_on = ["G03-W03"]
-acceptance = ["incremental lifecycle and freshness are durable", "full-text analyzers and BM25 replacement pass fixed correctness/relevance corpora", "stale artifacts fail closed to authoritative execution"]
+acceptance = ["scalar, compound, unique, count, geo, full-text, materialized-view, and incremental-aggregation lifecycles are durable", "configurable analyzers, tokenizers, BM25 scoring, relevance evidence, and offset highlighting pass fixed correctness/relevance corpora", "incremental maintenance is non-blocking and stale artifacts fail closed to authoritative execution"]
 
 [[item]]
 id = "G03-W06"
 gate = "G03"
 title = "Complete push live queries and retained changefeeds"
 depends_on = ["G03-W02", "G03-W03"]
-acceptance = ["commit-ordered subscriptions support resume, backpressure, bounded retention, and reconnect", "permissions, restart, and distributed ordering tests pass"]
+acceptance = ["commit-ordered CDC and live-query subscriptions support WebSocket push, resume, backpressure, bounded retention, and reconnect", "permissions, restart, and distributed ordering tests pass"]
 
 [[item]]
 id = "G03-W07"
 gate = "G03"
 title = "Add governed triggers and functions"
 depends_on = ["G03-W05", "G03-W06", "G05-W04"]
-acceptance = ["capability sandbox, deterministic limits, security, audit, retry, and failure semantics pass"]
+acceptance = ["embedded JavaScript and portable function runtimes have explicit versioned contracts", "capability sandbox, deterministic limits, security, audit, retry, and failure semantics pass"]
 
 [[item]]
 id = "G04-W01"
@@ -235,21 +235,21 @@ id = "G04-W02"
 gate = "G04"
 title = "Serve persistent HNSW with one-stage filtering"
 depends_on = ["G04-W01"]
-acceptance = ["collection-bound mutable HNSW survives reopen", "filter predicates participate during traversal", "exact-oracle recall passes fixed selectivity corpora"]
+acceptance = ["collection-bound mutable HNSW supports cosine, dot-product, Euclidean, and Manhattan metrics and survives reopen", "filter predicates participate during traversal without pre-filter or post-filter correctness gaps", "ingested vectors are immediately searchable while online index maintenance avoids blocking and full rebuilds", "SIMD and scalar differentials plus exact-oracle recall pass fixed selectivity corpora"]
 
 [[item]]
 id = "G04-W03"
 gate = "G04"
 title = "Complete sparse, hybrid, multivector, and late-interaction retrieval"
 depends_on = ["G03-W05", "G04-W01", "G04-W02"]
-acceptance = ["dense+sparse fusion, prefetch/multistage, and ColBERT MaxSim require no application middleware", "query algebra covers nearest, recommend, discover, context, group, facet, and matrix"]
+acceptance = ["dense+sparse+keyword RRF, prefetch/multistage, multiple vectors per object, multimodal retrieval, and ColBERT MaxSim require no application middleware", "score boosting, exact and model late reranking, and MMR diversity reranking are governed query stages", "query algebra covers nearest, recommend, discover, context, group, facet, and matrix"]
 
 [[item]]
 id = "G04-W04"
 gate = "G04"
-title = "Promote TurboQuant to a production artifact lifecycle"
+title = "Complete scalar, product, binary, and TurboQuant artifact lifecycles"
 depends_on = ["G04-W01", "G04-W02"]
-acceptance = ["public build/list/activate/retire operations are authenticated", "SIMD, mmap, corruption, update, recovery, bias, recall, memory, and latency matrices pass", "exact reranking remains available"]
+acceptance = ["public build/list/activate/retire operations for scalar, product, binary, and TurboQuant methods are authenticated", "SIMD, mmap, corruption, update, recovery, bias, recall, memory, compression ratio up to the supported 64x bound, and latency matrices pass", "exact reranking remains available"]
 
 [[item]]
 id = "G04-W05"
@@ -277,7 +277,7 @@ id = "G05-W01"
 gate = "G05"
 title = "Complete embedded, local-daemon, and remote RRD behavior parity"
 depends_on = []
-acceptance = ["same logical conformance corpus passes all modes", "one process owns each persistent root"]
+acceptance = ["the same logical conformance corpus passes in-memory, in-process embedded, standalone daemon, edge, and remote modes", "one process owns each persistent root and no mode introduces an external service dependency"]
 
 [[item]]
 id = "G05-W02"
@@ -291,7 +291,7 @@ id = "G05-W03"
 gate = "G05"
 title = "Complete identity, credentials, TLS, and deny-by-default authorization"
 depends_on = ["G05-W01", "G05-W02"]
-acceptance = ["users, service principals, scoped grants, capability policy, rotation, and revocation persist", "non-loopback transport requires authenticated TLS"]
+acceptance = ["users, service principals, roles, JWT issuance, OIDC/third-party identity bindings, scoped grants, capability policy, rotation, and revocation persist", "tenant, row-level, and field-level permissions fail closed and share the same audit authority", "non-loopback transport requires authenticated TLS"]
 
 [[item]]
 id = "G05-W04"
@@ -305,7 +305,7 @@ id = "G06-W01"
 gate = "G06"
 title = "Generate API, MCP, CLI, SDK, and Connectome dispositions from one catalogue"
 depends_on = []
-acceptance = ["no surface owns a handwritten capability list", "generation and executable-dispatch parity fail CI on drift"]
+acceptance = ["SQL-like RRFlowQL, GraphQL, REST/HTTP, WebSocket, gRPC, MCP, CLI, SDK, and Connectome operations all have explicit generated dispositions", "no surface owns a handwritten capability list", "generation and executable-dispatch parity fail CI on drift"]
 
 [[item]]
 id = "G06-W02"
@@ -361,7 +361,7 @@ id = "G07-W04"
 gate = "G07"
 title = "Implement planning permits and exact-argv command proxy"
 depends_on = ["G00-W03", "G07-W02", "G07-W03"]
-acceptance = ["patch, shell, generated-code, and external mutations fail closed without the full permit chain", "Cargo and JavaScript commands pass through one cross-platform proxy", "observation, invalidation, refresh, and verification are durable"]
+acceptance = ["patch, shell, generated-code, and external mutations fail closed without the full permit chain", "Cargo and JavaScript commands pass through one cross-platform proxy without shell re-tokenization", "authorization binds executable bytes, exact argv, project-contained cwd, inherited-environment digest, repository revision/worktree digest, timeout, and output bound", "authorization is atomically consumed before spawn and retry cannot start a second process", "bounded output plus complete stdout/stderr identities, exit/signal/timeout, changed paths, observation, invalidation, refresh, and verification are durable"]
 
 [[item]]
 id = "G07-W05"
@@ -382,7 +382,7 @@ id = "G08-W02"
 gate = "G08"
 title = "Integrate RRD data plane with distributed consensus"
 depends_on = ["G08-W01"]
-acceptance = ["shard/replica operations, consistency modes, transfer, rebalance, reshard, snapshot, and leader failure use the public RRD authority", "independent-host fault tests pass"]
+acceptance = ["automatic sharding, partition-free logical tables, tenant placement, read replicas, multi-region replication, consistency modes, transfer, rebalance, reshard, snapshot, and leader failure use the public RRD authority", "independent-host partition, replica-loss, region-loss, and recovery tests pass"]
 
 [[item]]
 id = "G08-W03"

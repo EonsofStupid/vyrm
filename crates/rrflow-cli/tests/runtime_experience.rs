@@ -596,6 +596,67 @@ fn routing_is_refreshed_before_mutation_and_corruption_has_an_explicit_recovery(
 }
 
 #[test]
+fn exact_argv_exec_is_authorized_observed_and_cannot_reuse_the_attempt() {
+    let root = scratch("exact-argv-project");
+    let db = root.join(".rrflow/rrd");
+    std::fs::write(root.join("lib.rs"), "pub fn exact_argv() {}\n").unwrap();
+    std::fs::write(root.join(".gitignore"), ".rrflow/rrd/\n").unwrap();
+    for arguments in [
+        vec!["init", "--quiet"],
+        vec!["config", "user.email", "rrflow@example.invalid"],
+        vec!["config", "user.name", "RRFlow Test"],
+        vec!["add", "."],
+        vec!["commit", "--quiet", "-m", "fixture"],
+    ] {
+        let status = Command::new("git")
+            .arg("-C")
+            .arg(&root)
+            .args(arguments)
+            .status()
+            .unwrap();
+        assert!(status.success());
+    }
+
+    declare_attempt(&db, "exact-argv", "RRFlowExec");
+    let root_str = root.to_str().unwrap();
+    let (ok, _, err) = rrflow(&db, &["preflight", "--root", root_str], None);
+    assert!(ok, "preflight failed: {err}");
+
+    let exact = [
+        "exec", "--root", root_str, "--", "git", "-C", root_str, "status", "--short",
+    ];
+    let (ok, out, err) = rrflow(&db, &exact, None);
+    assert!(ok, "exact argv execution failed: stdout={out} stderr={err}");
+
+    let (ok, _, err) = rrflow(&db, &exact, None);
+    assert!(
+        !ok,
+        "one reasoning attempt executed the exact command twice"
+    );
+    assert!(
+        err.contains("NeedsDecision") || err.contains("record a continue"),
+        "retry did not fail at the lifecycle state gate: {err}"
+    );
+
+    let store = PersistentEngine::open(&db).unwrap();
+    let exec = store
+        .invocations_since(0)
+        .unwrap()
+        .into_iter()
+        .find(|invocation| {
+            invocation.command == "exec" && matches!(invocation.outcome, rrd_store::Outcome::Ok)
+        })
+        .expect("successful exec invocation");
+    assert!(
+        exec.arguments
+            .iter()
+            .any(|argument| argument.starts_with("exact_argv_sha256=")),
+        "exec invocation did not retain its bounded argv identity: {:?}",
+        exec.arguments
+    );
+}
+
+#[test]
 fn init_writes_real_wiring_idempotently_and_refuses_a_dead_harness() {
     let root = scratch("init-project");
     let db = root.join(".rrflow/rrd");

@@ -2187,3 +2187,75 @@ index.
 - Publication truth: this cutover is uncommitted and unpushed in the current
   worktree. Remote Linux, macOS/ARM, and Windows CI has not run and is not
   claimed.
+
+## 2026-08-26 — lifecycle authority, capability truth, and exact-argv boundary
+
+- Lifecycle authority: the provider-neutral lifecycle contract is now a strict
+  hash-chained RRD runtime aggregate with derived session state. Invalid
+  transitions, identity substitution, forged semantic events, compaction
+  recovery errors, and stale projection closure fail before advancing the
+  global cursor. Memory, native reopen, and Fjall compatibility replay produce
+  identical state in the focused differential suite.
+- Command boundary: `rrflow exec -- <exact argv>` now crosses the same durable
+  reasoning, attunement, work-plan, workflow, trace, and observation gates as
+  other governed mutations. It resolves and hashes the executable, binds argv
+  boundaries, project-contained cwd, inherited-environment identity,
+  repository/worktree identity, timeout, and output bounds, then atomically
+  consumes the authorization before spawn. Captured streams are fully hashed
+  while only bounded prefixes are retained. Exit, signal, timeout, repository
+  state, and observation evidence close even for unsuccessful child commands.
+- Work-list correction: all requested database capability families now have
+  explicit acceptance criteria in `rrflow.workplan.toml`. The interim
+  source-and-test matrix in `docs/rrd-engine-capability-coverage.md` labels
+  incomplete or absent features as partial/missing instead of treating roadmap
+  text as implementation evidence.
+- Comparison evidence: fresh standard and embedding metadata-fanout fixtures
+  both pass their pinned native-vs-Fjall promotion policies. These are bounded
+  workload wins, not a universal claim; the earlier losing native write-p95
+  read-heavy cell remains disclosed.
+- Local gates: RRD engine tests, RRFlow CLI all-target tests, locked metadata,
+  formatting, and targeted Clippy with `-D warnings` pass. `rrflow dev doctor`
+  improves from 13/6 to 15/4. Remaining blockers are Connectome's physical
+  crate bypass, the CLI's residual core/store bypass, the missing supervisor,
+  and the dependency-ordered full-topology CI smoke job.
+
+### G00-W02 canonical lifecycle acceptance checkpoint
+
+- Contract boundary: the reviewed V1 vocabulary now has 34 canonical event
+  types, strict event-specific payloads, stable session/turn/reasoning/attempt/
+  tool coordinates, bounded envelopes, SHA-256 payload/event seals, trace and
+  read-stamp coordinates, and a checked-in golden command fixture. Unknown
+  fields, unknown event names, mismatched payloads, oversized values, invalid
+  coordinates, and digest tampering fail closed.
+- One-engine persistence: lifecycle schema, sealed event, and materialized
+  session state commit atomically through RRD's existing `commit_runtime`
+  authority. There is no lifecycle database, crate, catalogue, transaction
+  coordinator, or adapter-owned state. Replay verifies runtime-change digests,
+  subject/scope binding, event order, causation, previous-event digest, and
+  previous-state digest before deriving the aggregate.
+- State-machine enforcement: reasoning-run and tool-attempt substitution is
+  denied; tool results that change project state require invalidation and a
+  fresh projection; a successful outcome must agree with passing verification;
+  and compaction binds the exact pre-compaction state and requires successful
+  re-attunement before close or another turn.
+- Persistent evidence: six lifecycle contract tests and sixteen lifecycle
+  engine tests pass. The engine matrix includes canonical session-to-outcome,
+  forged-event denial, stale-compaction denial, native close/reopen, native
+  reopen during compaction, reference/native equality, and compatibility-
+  backend reopen. The complete all-feature `rrd-contract` plus `rrd-engine`
+  all-target suite passed locally, as did strict all-target Clippy with
+  `-D warnings`, formatting, and the lifecycle-scoped diff check.
+- W03 authority progress: `planning.authorized`, `plan.recorded`, and every
+  mutating `tool.proposed` event now re-read RRD's authoritative work-plan
+  aggregate before commit. Plan ID, revision, active item, plan payload,
+  source-tree digest, and verification-command digest must match. The lifecycle
+  aggregate retains that binding, refuses expired permits, consumes one exact
+  attempt/request at `tool.started`, and refuses substituted results or a
+  second start. These primitives are proven, but W03 is not crossed until the
+  provider-neutral supervisor replaces direct provider-shaped authorization
+  calls on every mutation surface.
+- Status boundary: this satisfies G00-W02's executable acceptance criteria on
+  the current Linux tree. It does not close G00. G00-W03 remains open because
+  the existing provider-shaped hook/work-plan path does not yet emit and bind
+  every planning or mutation decision through this canonical lifecycle. The
+  remote Linux, macOS/ARM, and Windows matrix is also unclaimed.

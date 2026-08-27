@@ -13,7 +13,9 @@ use super::preflight::{preflight, Preflight};
 use super::reasoning::active_reasoning_run;
 use super::routing::ensure_routing_fresh;
 use super::stack;
-use super::workflow::{resolve_package_command, WorkflowDecision, WorkflowObservation};
+use super::workflow::{
+    resolve_package_argv, resolve_package_command, WorkflowDecision, WorkflowObservation,
+};
 use super::{
     authorize_attuned_tool, complete_attuned_tool, record_attunement_receipt,
     require_fresh_attunement,
@@ -380,14 +382,22 @@ fn handle_inner<E: Engine>(
                 }
             };
 
-            let workflow_evidence = if input.get("tool_name").and_then(Value::as_str)
-                == Some("Bash")
-            {
-                let command = input
-                    .pointer("/tool_input/command")
-                    .and_then(Value::as_str)
-                    .unwrap_or("");
-                match resolve_package_command(root, binding, command) {
+            let workflow_decision = match input.get("tool_name").and_then(Value::as_str) {
+                Some("Bash") => {
+                    let command = input
+                        .pointer("/tool_input/command")
+                        .and_then(Value::as_str)
+                        .unwrap_or("");
+                    Some(resolve_package_command(root, binding, command))
+                }
+                Some("RRFlowExec") => {
+                    let argv = exact_exec_argv(input)?;
+                    Some(resolve_package_argv(root, binding, &argv))
+                }
+                _ => None,
+            };
+            let workflow_evidence = match workflow_decision {
+                Some(decision) => match decision {
                     Ok(WorkflowDecision::NotPackage) => None,
                     Ok(WorkflowDecision::Allow(authorization)) => {
                         match authorization.establish_freshness(&ready) {
@@ -416,9 +426,8 @@ fn handle_inner<E: Engine>(
                             "denied: workflow manifest unavailable",
                         ));
                     }
-                }
-            } else {
-                None
+                },
+                None => None,
             };
             let tool_sha256 = tool_request_digest(input)?;
             let work_plan_item = match sync_project_work_plan(
@@ -606,26 +615,48 @@ fn handle_inner<E: Engine>(
             // The application journal: a run's outcome becomes a claim, and
             // the next run of the same kind supersedes it. Retirement by
             // supersession, exactly as every other claim.
-            if tool != "Bash" {
+            if !matches!(tool, "Bash" | "RRFlowExec") {
                 return Ok(HookResponse {
                     detail: (!details.is_empty()).then(|| details.join("; ")),
                     ..HookResponse::default()
                 });
             }
-            let command = input
-                .pointer("/tool_input/command")
-                .and_then(Value::as_str)
-                .unwrap_or("");
-            match resolve_package_command(root, binding, command)? {
+            let exact_argv = (tool == "RRFlowExec")
+                .then(|| exact_exec_argv(input))
+                .transpose()?;
+            let command = exact_argv.as_ref().map_or_else(
+                || {
+                    input
+                        .pointer("/tool_input/command")
+                        .and_then(Value::as_str)
+                        .unwrap_or("")
+                        .to_owned()
+                },
+                |argv| argv.join(" "),
+            );
+            let workflow_decision = match exact_argv.as_ref() {
+                Some(argv) => resolve_package_argv(root, binding, argv)?,
+                None => resolve_package_command(root, binding, &command)?,
+            };
+            match workflow_decision {
                 WorkflowDecision::Allow(authorization) => {
                     let response = input.get("tool_response").unwrap_or(&Value::Null);
-                    let observation = WorkflowObservation::capture(
-                        &authorization,
-                        command,
-                        response,
-                        run_exit_code(input),
-                        now,
-                    )?;
+                    let observation = match exact_argv.as_ref() {
+                        Some(argv) => WorkflowObservation::capture_argv(
+                            &authorization,
+                            argv,
+                            response,
+                            run_exit_code(input),
+                            now,
+                        )?,
+                        None => WorkflowObservation::capture(
+                            &authorization,
+                            &command,
+                            response,
+                            run_exit_code(input),
+                            now,
+                        )?,
+                    };
                     let claim = Claim::new(
                         Subject::new(authorization.event.clone())?,
                         Predicate::new("status")?,
@@ -680,7 +711,7 @@ fn handle_inner<E: Engine>(
             }
             let Some((subject, stack_name)) = stack::detect(root)
                 .iter()
-                .find_map(|s| s.run_subject(command).map(|subj| (subj, s.name)))
+                .find_map(|s| s.run_subject(&command).map(|subj| (subj, s.name)))
             else {
                 return Ok(HookResponse {
                     detail: (!details.is_empty()).then(|| details.join("; ")),
@@ -688,11 +719,11 @@ fn handle_inner<E: Engine>(
                 });
             };
             let object = match run_exit_code(input) {
-                Some(0) => format!("passing: {}", first_line(command)),
-                Some(code) => format!("failing (exit {code}): {}", first_line(command)),
+                Some(0) => format!("passing: {}", first_line(&command)),
+                Some(code) => format!("failing (exit {code}): {}", first_line(&command)),
                 None => format!(
                     "ran (outcome unreported by harness): {}",
-                    first_line(command)
+                    first_line(&command)
                 ),
             };
             let claim = Claim::new(
@@ -786,9 +817,30 @@ fn tool_source(input: &Value) -> String {
         .pointer("/tool_input/file_path")
         .or_else(|| input.pointer("/tool_input/notebook_path"))
         .or_else(|| input.pointer("/tool_input/command"))
+        .or_else(|| input.pointer("/tool_input/exact_argv/0"))
         .and_then(Value::as_str)
         .unwrap_or("unreported target");
     format!("{tool}:{target}")
+}
+
+fn exact_exec_argv(input: &Value) -> Result<Vec<String>, Box<dyn std::error::Error>> {
+    let argv = input
+        .pointer("/tool_input/exact_argv")
+        .and_then(Value::as_array)
+        .ok_or("RRFlowExec input has no exact_argv array")?;
+    let argv = argv
+        .iter()
+        .map(|argument| {
+            argument
+                .as_str()
+                .map(str::to_owned)
+                .ok_or_else(|| "RRFlowExec argv contains a non-string argument".into())
+        })
+        .collect::<Result<Vec<_>, Box<dyn std::error::Error>>>()?;
+    if argv.is_empty() || argv.iter().any(|argument| argument.contains('\0')) {
+        return Err("RRFlowExec argv is empty or contains NUL".into());
+    }
+    Ok(argv)
 }
 
 /// Subjects whose name appears in the prompt as a whole word
