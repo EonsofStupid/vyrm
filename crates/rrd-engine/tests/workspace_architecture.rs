@@ -272,8 +272,8 @@ fn outward_cli_owns_product_executables_while_physical_crates_own_none() {
     let canonical_fixture = "cargo build -p rrflow-cli --bin rrd-estate-controller --locked";
     assert_eq!(
         workflow.matches(canonical_fixture).count(),
-        1,
-        "the process matrix must build the controller fixture from its product owner exactly once"
+        2,
+        "the process and isolated server matrices must build the fixture from its product owner"
     );
     assert!(
         !workflow.contains("cargo build -p rrd-estate --bin rrd-estate-controller"),
@@ -437,6 +437,13 @@ fn ci_is_one_bounded_reusable_chain_with_safe_runner_routing() {
                 "cargo clippy -p ${{ matrix.package }} --all-targets --locked -- -D warnings"
             ),
         "every default-feature package must receive exact test and Clippy qualification"
+    );
+    assert!(
+        default_job.contains("if: ${{ matrix.package == 'rrd-server' }}")
+            && default_job.contains(
+                "cargo build -p rrflow-cli --bin rrd-estate-controller --locked"
+            ),
+        "the isolated rrd-server tests must declare their cross-package process fixture"
     );
 
     let feature_packages = metadata

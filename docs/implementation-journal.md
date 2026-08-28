@@ -2926,3 +2926,14 @@ index.
   metadata, so a new or omitted package fails the policy job. The policy and
   evidence verifier no longer emits the workspace's test binaries. G02-W02
   remains active.
+- Eighth remote candidate evidence: correction commit
+  `a044738f6ae0f49ec0e1936200a1c2254bc63a38` produced run `33174362335`.
+  Thirty of thirty-one substantive jobs passed: policy/evidence, topology,
+  macOS, Windows, all optional features, pgvector, and 21 isolated default-
+  feature packages. The `rrd-server` package test alone failed because its
+  real-process fixture requires the product-owned `rrd-estate-controller`
+  binary, which the monolithic workspace target had supplied through implicit
+  build order. The isolated server matrix now declares and builds that exact
+  cross-package fixture before testing. An architecture invariant binds the
+  conditional fixture to `rrd-server`; no physical-crate executable or hidden
+  workspace ordering is reintroduced. G02-W02 remains active.
