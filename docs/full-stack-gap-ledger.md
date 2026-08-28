@@ -275,8 +275,19 @@ ledger resumes export/import/verify/two-rename cutover, preserves all 18
 keyspaces, retains the predecessor and archive, rejects a source modified after
 export, and is idempotent after completion. Fault injection covers every
 durable and rename boundary. The first cross-version matrix also proves logical
-archive recovery from TextV1 into a fresh current-format root. Broader released
-binary-version rows and object-complete backup closure remain before F1 exits.
+archive recovery from TextV1 into a fresh current-format root. At that point,
+reverse recovery, broader released-version evidence, and object-complete backup
+closure remained open.
+
+**G02-W04 candidate 2026-08-28:** the native application-format matrix is now
+explicitly closed to TextV1 → TagV2 plus logical TextV1 archive recovery into an
+absent TagV2 root. Native rollback verifies the visible successor and retained
+predecessor against the authenticated cutover evidence, retains TagV2, restores
+TextV1, and resumes across both reverse rename windows. Successor divergence,
+unknown/skipped versions, and ambiguous layouts fail closed. New released
+binary-version rows require a separately reviewed exact-successor transition;
+they are not implied by a generic numeric upgrader. Object-complete backup
+closure landed in G02-W02/G02-W03.
 
 **Deliverables**
 

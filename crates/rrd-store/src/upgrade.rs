@@ -26,6 +26,8 @@ pub enum FormatMigrationPhase {
     SourceMoved,
     Cutover,
     Complete,
+    RollbackTargetMoved,
+    RolledBack,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -37,7 +39,29 @@ pub enum FormatMigrationFault {
     AfterSourceMove,
     AfterCutoverRename,
     AfterCutover,
+    AfterRollbackTargetRename,
+    AfterRollbackTargetMove,
+    AfterRollbackSourceRename,
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum NativeApplicationFormat {
+    TextV1,
+    TagV2,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FormatMigrationEdge {
+    pub source: NativeApplicationFormat,
+    pub target: NativeApplicationFormat,
+}
+
+pub const SUPPORTED_NATIVE_FORMAT_MIGRATIONS: [FormatMigrationEdge; 1] = [FormatMigrationEdge {
+    source: NativeApplicationFormat::TextV1,
+    target: NativeApplicationFormat::TagV2,
+}];
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -64,6 +88,7 @@ struct Artifacts {
     archive: PathBuf,
     staging: PathBuf,
     backup: PathBuf,
+    retired: PathBuf,
 }
 
 impl Artifacts {
@@ -78,6 +103,7 @@ impl Artifacts {
             archive: parent.join(format!(".{name}.native-format-archive.bin")),
             staging: parent.join(format!(".{name}.native-format-staging")),
             backup: parent.join(format!(".{name}.native-format-v1-backup")),
+            retired: parent.join(format!(".{name}.native-format-v2-retired")),
         })
     }
 }
@@ -99,6 +125,29 @@ pub fn native_format_migration_status(source: &Path) -> Result<Option<FormatMigr
     read_ledger(&Artifacts::for_source(source)?.marker)
 }
 
+pub fn native_format_migration_edge(ledger: &FormatMigrationLedger) -> Result<FormatMigrationEdge> {
+    if ledger.source_application_format.is_none()
+        && ledger.target_application_format == keyspaces::NATIVE_KEYSPACE_TAG_FORMAT_V2
+    {
+        return Ok(SUPPORTED_NATIVE_FORMAT_MIGRATIONS[0]);
+    }
+    Err(Error::Migration(
+        "native format ledger does not describe a supported exact successor".into(),
+    ))
+}
+
+pub fn rollback_native_format(source: &Path) -> Result<FormatMigrationLedger> {
+    rollback_inner(source, None)
+}
+
+#[doc(hidden)]
+pub fn rollback_native_format_with_fault(
+    source: &Path,
+    fault: FormatMigrationFault,
+) -> Result<FormatMigrationLedger> {
+    rollback_inner(source, Some(fault))
+}
+
 fn migrate_inner(
     source: &Path,
     at: u64,
@@ -110,15 +159,12 @@ fn migrate_inner(
         None => begin(source, &artifacts)?,
     };
     inject(fault, FormatMigrationFault::AfterExport)?;
-    if ledger.ledger_version != LEDGER_VERSION
-        || ledger.source_application_format.is_some()
-        || ledger.target_application_format != keyspaces::NATIVE_KEYSPACE_TAG_FORMAT_V2
-    {
+    if ledger.ledger_version != LEDGER_VERSION {
         return Err(Error::Migration(
-            "native format ledger does not describe the supported exact successor TextV1 -> TagV2"
-                .into(),
+            "unsupported native format ledger version".into(),
         ));
     }
+    native_format_migration_edge(&ledger)?;
     reconcile(source, &artifacts, &mut ledger)?;
     loop {
         match ledger.phase {
@@ -176,12 +222,79 @@ fn migrate_inner(
                 verify_visible(source, &artifacts, &ledger)?;
                 return Ok(ledger);
             }
+            FormatMigrationPhase::RollbackTargetMoved | FormatMigrationPhase::RolledBack => {
+                return Err(Error::Migration(
+                    "native format migration is in rollback state; resume rollback instead".into(),
+                ));
+            }
         }
     }
 }
 
+fn rollback_inner(
+    source: &Path,
+    fault: Option<FormatMigrationFault>,
+) -> Result<FormatMigrationLedger> {
+    let artifacts = Artifacts::for_source(source)?;
+    let mut ledger = read_ledger(&artifacts.marker)?
+        .ok_or_else(|| Error::Migration("no native format migration ledger exists".into()))?;
+    if ledger.ledger_version != LEDGER_VERSION {
+        return Err(Error::Migration(
+            "unsupported native format ledger version".into(),
+        ));
+    }
+    native_format_migration_edge(&ledger)?;
+    reconcile_rollback(source, &artifacts, &mut ledger)?;
+
+    if ledger.phase == FormatMigrationPhase::RolledBack {
+        verify_rolled_back(source, &artifacts, &ledger)?;
+        return Ok(ledger);
+    }
+
+    if ledger.phase == FormatMigrationPhase::RollbackTargetMoved {
+        if source.exists() || !artifacts.retired.is_dir() || !artifacts.backup.is_dir() {
+            return Err(Error::Migration(
+                "native format rollback filesystem state is incomplete or ambiguous".into(),
+            ));
+        }
+    } else {
+        if !matches!(
+            ledger.phase,
+            FormatMigrationPhase::Cutover | FormatMigrationPhase::Complete
+        ) {
+            return Err(Error::Migration(
+                "native format rollback is available only after cutover".into(),
+            ));
+        }
+        verify_visible(source, &artifacts, &ledger)?;
+        if artifacts.retired.exists() {
+            return Err(Error::Migration(
+                "retired TagV2 target already exists; refusing to overwrite evidence".into(),
+            ));
+        }
+        durable_rename(source, &artifacts.retired)?;
+        inject(fault, FormatMigrationFault::AfterRollbackTargetRename)?;
+        ledger.phase = FormatMigrationPhase::RollbackTargetMoved;
+        write_ledger(&artifacts.marker, &ledger)?;
+        inject(fault, FormatMigrationFault::AfterRollbackTargetMove)?;
+    }
+
+    verify_legacy_source(&artifacts.backup, &ledger.inventory)?;
+    durable_rename(&artifacts.backup, source)?;
+    inject(fault, FormatMigrationFault::AfterRollbackSourceRename)?;
+    verify_rolled_back(source, &artifacts, &ledger)?;
+    ledger.phase = FormatMigrationPhase::RolledBack;
+    write_ledger(&artifacts.marker, &ledger)?;
+    Ok(ledger)
+}
+
 fn begin(source: &Path, artifacts: &Artifacts) -> Result<FormatMigrationLedger> {
-    for artifact in [&artifacts.archive, &artifacts.staging, &artifacts.backup] {
+    for artifact in [
+        &artifacts.archive,
+        &artifacts.staging,
+        &artifacts.backup,
+        &artifacts.retired,
+    ] {
         if artifact.exists() {
             return Err(Error::Migration(format!(
                 "native format artifact exists without an authenticated ledger: {}",
@@ -359,6 +472,38 @@ fn verify_visible(
     Ok(())
 }
 
+fn verify_retired_target(
+    path: &Path,
+    archive: &Path,
+    ledger: &FormatMigrationLedger,
+) -> Result<()> {
+    verify_target(path, archive, &ledger.inventory)?;
+    if ledger.target_manifest.as_deref() != Some(target_manifest(path)?.as_str()) {
+        return Err(Error::Migration(
+            "retired TagV2 target diverged from the cutover identity".into(),
+        ));
+    }
+    Ok(())
+}
+
+fn verify_rolled_back(
+    source: &Path,
+    artifacts: &Artifacts,
+    ledger: &FormatMigrationLedger,
+) -> Result<()> {
+    if !source.is_dir()
+        || !artifacts.retired.is_dir()
+        || artifacts.backup.exists()
+        || !artifacts.archive.is_file()
+    {
+        return Err(Error::Migration(
+            "completed native format rollback is missing retained evidence".into(),
+        ));
+    }
+    verify_legacy_source(source, &ledger.inventory)?;
+    verify_retired_target(&artifacts.retired, &artifacts.archive, ledger)
+}
+
 fn verify_legacy_source(path: &Path, expected: &MigrationInventory) -> Result<()> {
     let database = Database::open(path)?;
     if database.manifest().application_format.is_some() {
@@ -404,6 +549,41 @@ fn reconcile(
     {
         ledger.target_manifest = Some(target_manifest(source)?);
         ledger.phase = FormatMigrationPhase::Cutover;
+        write_ledger(&artifacts.marker, ledger)?;
+    }
+    Ok(())
+}
+
+fn reconcile_rollback(
+    source: &Path,
+    artifacts: &Artifacts,
+    ledger: &mut FormatMigrationLedger,
+) -> Result<()> {
+    let source_is_text_v1 = source.join("CURRENT").is_file()
+        && Database::open(source)?
+            .manifest()
+            .application_format
+            .is_none();
+    if matches!(
+        ledger.phase,
+        FormatMigrationPhase::Cutover | FormatMigrationPhase::Complete
+    ) && !source.exists()
+        && artifacts.retired.is_dir()
+        && artifacts.backup.is_dir()
+    {
+        ledger.phase = FormatMigrationPhase::RollbackTargetMoved;
+        write_ledger(&artifacts.marker, ledger)?;
+    } else if matches!(
+        ledger.phase,
+        FormatMigrationPhase::Cutover
+            | FormatMigrationPhase::Complete
+            | FormatMigrationPhase::RollbackTargetMoved
+    ) && source_is_text_v1
+        && artifacts.retired.is_dir()
+        && !artifacts.backup.exists()
+    {
+        verify_rolled_back(source, artifacts, ledger)?;
+        ledger.phase = FormatMigrationPhase::RolledBack;
         write_ledger(&artifacts.marker, ledger)?;
     }
     Ok(())

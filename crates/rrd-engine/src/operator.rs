@@ -17,10 +17,10 @@ pub use rrd_core::{
     RecallSet, ScopeId, Subject,
 };
 pub use rrd_store::{
-    BackupCatalogue, BackupEntry, Effectiveness, FormatMigrationLedger, GroundingReport,
-    Invocation as OperatorInvocation, InvocationInput as OperatorInvocationInput,
-    LogicalArchiveInventory, LogicalRestoreReport, MigrationReport, Outcome, RecallOutcome,
-    RemovalReport, Trigger,
+    BackupCatalogue, BackupEntry, Effectiveness, FormatMigrationEdge, FormatMigrationLedger,
+    GroundingReport, Invocation as OperatorInvocation, InvocationInput as OperatorInvocationInput,
+    LogicalArchiveInventory, LogicalRestoreReport, MigrationReport, NativeApplicationFormat,
+    Outcome, RecallOutcome, RemovalReport, Trigger,
 };
 
 pub type CoreResult<T> = rrd_core::Result<T>;
@@ -414,6 +414,14 @@ impl RrdEngine {
 
     pub fn migrate_native_format(db: &Path, now: Millis) -> OperatorResult<FormatMigrationLedger> {
         Ok(rrd_store::migrate_native_format(db, now)?)
+    }
+
+    pub fn supported_native_format_migrations() -> &'static [FormatMigrationEdge] {
+        &rrd_store::SUPPORTED_NATIVE_FORMAT_MIGRATIONS
+    }
+
+    pub fn rollback_native_format(db: &Path) -> OperatorResult<FormatMigrationLedger> {
+        Ok(rrd_store::rollback_native_format(db)?)
     }
 
     pub fn native_format_migration_status(

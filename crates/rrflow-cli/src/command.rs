@@ -401,6 +401,8 @@ pub enum StorageAction {
     },
     /// Start or resume the exact-successor native application-format upgrade.
     FormatUpgrade,
+    /// Restore the retained predecessor if the visible successor has not diverged.
+    FormatRollback,
     /// Inspect the authenticated native application-format migration ledger.
     FormatStatus,
 }
@@ -485,6 +487,9 @@ impl Command {
             Command::Storage {
                 action: StorageAction::FormatUpgrade,
             } => "storage-format-upgrade",
+            Command::Storage {
+                action: StorageAction::FormatRollback,
+            } => "storage-format-rollback",
             Command::Storage {
                 action: StorageAction::FormatStatus,
             } => "storage-format-status",
@@ -988,6 +993,22 @@ pub fn execute_offline(
             } else {
                 format!(
                     "native format migration {:?}: {:?} -> {} / {} entries / sha256 {}",
+                    ledger.phase,
+                    ledger.source_application_format,
+                    ledger.target_application_format,
+                    ledger.inventory.entries,
+                    ledger.inventory.archive_sha256
+                )
+            };
+            Ok(text.into())
+        }
+        StorageAction::FormatRollback => {
+            let ledger = RrdEngine::rollback_native_format(db)?;
+            let text = if json {
+                serde_json::to_string_pretty(&ledger)?
+            } else {
+                format!(
+                    "native format rollback {:?}: {:?} <- {} / {} entries / sha256 {}",
                     ledger.phase,
                     ledger.source_application_format,
                     ledger.target_application_format,

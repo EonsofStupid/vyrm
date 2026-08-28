@@ -68,6 +68,28 @@ TagV2 result, and retain an independently openable TextV1 source. A separate
 logical-recovery row exports an RRD archive from TextV1 and restores it into a
 new current-format root.
 
+The supported native application-format matrix is deliberately closed:
+
+| Source fixture | Operation | Published target |
+| --- | --- | --- |
+| Native TextV1 root | `storage format-upgrade` | Native TagV2 root |
+| Logical archive exported from Native TextV1 | `storage archive-restore` into an absent root | Native TagV2 root |
+
+There is no generic numeric-version upgrader and no skipped-version route.
+TagV2, unknown application-format values, unregistered keyspaces, and any
+source/target pair not listed above are denied. A future row requires a new
+reviewed exact-successor implementation and recovery fixture.
+
+`storage format-rollback` is the reverse recovery operation, not another
+forward matrix edge. It is available only after cutover or completion. Before
+moving anything it verifies the visible TagV2 root against the authenticated
+archive and recorded cutover manifest, and verifies the retained TextV1 root
+against the same complete inventory. It then moves TagV2 to a retained sibling
+and restores TextV1. Both reverse rename windows reconcile on retry. The
+archive, restored TextV1 root, and displaced TagV2 root are all retained; no
+rollback phase deletes evidence. Any successor write or ambiguous filesystem
+state denies rollback.
+
 ## Durable phases
 
 Each phase is recorded through a synced temporary JSON marker, rename, and
@@ -81,6 +103,11 @@ parent-directory sync:
 5. `cutover` — staging was renamed to the requested database path and its
    native state token was recorded.
 6. `complete` — a final native reopen and semantic status read succeeded.
+
+Rollback adds two authenticated states: `rollback_target_moved` after the
+unchanged TagV2 root is durably retained, and `rolled_back` after the TextV1
+predecessor is durably republished and both roots reopen with their expected
+formats and inventory.
 
 Filesystem state is authoritative when a crash lands between a rename and its
 marker update. Resume recognizes those states and advances rather than
@@ -100,14 +127,17 @@ during the cutover window.
   for diagnosis.
 - Unknown, ambiguous, divergent, or corrupt states are denied and require an
   operator decision. Migration never guesses.
+- After rollback, forward migration does not silently reuse the old ledger.
+  The retained three-part evidence set remains authoritative for diagnosis.
 
 ## Evidence gate
 
 The compatibility backend is removable only after tests prove complete
 multi-keyspace migration, corrupt/truncated archive refusal, unknown-keyspace
 refusal, restart at every phase boundary, idempotent resume, rollback before
-native divergence, rollback refusal after divergence, and stable backend
-selection. A separate deterministic put/update/delete/reopen/compaction soak
+native divergence, rollback refusal after divergence, reverse-rename recovery,
+every admitted source row reopening on TagV2, and stable backend selection. A
+separate deterministic put/update/delete/reopen/compaction soak
 must compare RRD LSM and Fjall against an independent ordered-map model.
 
 This design follows the operational invariants—not code—of RocksDB checkpoints

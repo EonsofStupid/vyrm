@@ -13,7 +13,8 @@ use rrd_contract::{
 use rrd_core::{digest, Claim, Predicate, Producer, Subject};
 use rrd_engine::{
     EstateAdminAction, EstateAdminResult, InstanceBinding, InstanceManifest, Invocation,
-    InvocationCredential, RrdEngine, RrdOperation, SecurityBootstrapOutcome, ServiceError,
+    InvocationCredential, NativeApplicationFormat, RrdEngine, RrdOperation,
+    SecurityBootstrapOutcome, ServiceError,
 };
 use rrd_estate::{
     DesiredPhase, DesiredTarget, EstateRepository, LeaseRequest, LocalEstatePermission,
@@ -69,6 +70,14 @@ fn diagnostic_request(scope: &str) -> ReadDiagnosticSnapshot {
         audit_after_sequence: 0,
         audit_limit: 64,
     }
+}
+
+#[test]
+fn engine_exposes_only_the_reviewed_native_format_successor() {
+    let matrix = RrdEngine::supported_native_format_migrations();
+    assert_eq!(matrix.len(), 1);
+    assert_eq!(matrix[0].source, NativeApplicationFormat::TextV1);
+    assert_eq!(matrix[0].target, NativeApplicationFormat::TagV2);
 }
 
 #[test]

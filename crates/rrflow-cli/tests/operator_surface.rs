@@ -147,6 +147,30 @@ fn native_format_upgrade_cli_resumes_and_reports_the_ledger() {
             .unwrap(),
         Some(b"preserved".to_vec())
     );
+
+    let (ok, out, err) = rrflow(&db, &["storage", "format-rollback", "--json"]);
+    assert!(ok, "native format rollback failed: {err}");
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&out).unwrap()["phase"],
+        "rolled_back"
+    );
+    let (ok, out, err) = rrflow(&db, &["storage", "format-status", "--json"]);
+    assert!(ok, "native format rollback status failed: {err}");
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&out).unwrap()["phase"],
+        "rolled_back"
+    );
+    assert_eq!(
+        NativeEngine::open(&db)
+            .unwrap()
+            .get_projection("cli-format")
+            .unwrap(),
+        Some(b"preserved".to_vec())
+    );
+    assert!(root
+        .path()
+        .join(".native-format-upgrade.native-format-v2-retired")
+        .is_dir());
 }
 
 #[test]

@@ -3024,5 +3024,25 @@ index.
 - Extended the existing authorized estate admin and added the thin
   `rrd-recovery-controller` adapter. Focused estate, store, engine, CLI, reopen,
   shared-artifact, stale/corrupt partition, fencing, replay, and RPO/RTO tests
-  pass locally. Exact unchanged-tree matrix and remote candidate qualification
-  remain required before G02-W03 can be verified.
+  pass locally. Commit `b079151164d87873230aa24c7ff0a25d3515d96e` passed all
+  fourteen remote partitions and `pipeline / ci-gate` in run `33217251152`;
+  RRFlow verified G02-W03 with evidence
+  `73bce44ed49f581b40227a2f8db789f87bd4ac564938aeb0f05dd89705d82956`.
+
+## 2026-08-28 — G02-W04 exact-successor and reverse-recovery candidate
+
+- Froze the supported native application-format edge to TextV1 → TagV2. The
+  matrix is public and bounded; it does not advertise a generic numeric or
+  skipped-version upgrader.
+- Added fail-closed native-format rollback after cutover. Rollback verifies the
+  visible TagV2 successor and retained TextV1 predecessor against the
+  authenticated archive and recorded cutover manifest, retains the successor,
+  and republishes the predecessor through durable sibling renames.
+- Added authenticated `rollback_target_moved` and `rolled_back` phases plus
+  reconciliation at both reverse rename windows. Retry is idempotent, forward
+  reuse after rollback is denied, and no phase deletes the predecessor,
+  successor, archive, or ledger.
+- Added the engine-owned `storage format-rollback` operator path. Focused tests
+  cover every forward and reverse durability boundary, successor divergence,
+  exact-edge refusal, direct TextV1 migration, logical TextV1 archive recovery
+  into a fresh TagV2 root, CLI status, and reopening both retained roots.

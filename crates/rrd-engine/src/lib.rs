@@ -28,10 +28,11 @@ pub use engine::{
 #[cfg(feature = "full")]
 pub use operator::{
     digest, BackupCatalogue, BackupEntry, Claim, ClaimReader, CoreResult, Effectiveness,
-    FormatMigrationLedger, GroundingReport, LogicalArchiveInventory, LogicalRestoreReport,
-    MigrationReport, Millis, OperatorInvocation, OperatorInvocationInput, OperatorResult, Outcome,
-    Predicate, Producer, Reader, ReasoningPayload, RecallOutcome, RecallQuery, RecallSet,
-    RemovalReport, RuntimeHookRequest, ScopeId, Subject, Trigger,
+    FormatMigrationEdge, FormatMigrationLedger, GroundingReport, LogicalArchiveInventory,
+    LogicalRestoreReport, MigrationReport, Millis, NativeApplicationFormat, OperatorInvocation,
+    OperatorInvocationInput, OperatorResult, Outcome, Predicate, Producer, Reader,
+    ReasoningPayload, RecallOutcome, RecallQuery, RecallSet, RemovalReport, RuntimeHookRequest,
+    ScopeId, Subject, Trigger,
 };
 #[cfg(feature = "full")]
 pub use runtime::*;

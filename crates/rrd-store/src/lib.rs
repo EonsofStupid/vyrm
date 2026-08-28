@@ -93,7 +93,9 @@ pub use rrd_lsm::{
 pub use s3::{ConditionalPut, S3CompatibleObjectStore, S3ObjectClient, S3ObjectMetadata};
 pub use store::{AppendOutcome, IdempotentAppendOutcome, Store};
 pub use upgrade::{
-    migrate_native_format, migrate_native_format_with_fault, native_format_migration_status,
-    FormatMigrationFault, FormatMigrationLedger, FormatMigrationPhase,
+    migrate_native_format, migrate_native_format_with_fault, native_format_migration_edge,
+    native_format_migration_status, rollback_native_format, rollback_native_format_with_fault,
+    FormatMigrationEdge, FormatMigrationFault, FormatMigrationLedger, FormatMigrationPhase,
+    NativeApplicationFormat, SUPPORTED_NATIVE_FORMAT_MIGRATIONS,
 };
 pub use writer::{Writer, WriterConfig, WriterStats};

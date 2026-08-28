@@ -161,8 +161,11 @@ Kubernetes operation, and authoritative Connectome management.
   TextV1→TagV2 transition across all 18 keyspaces with invisible staging,
   retained predecessor/archive evidence, source-drift denial, restart resume
   across every durable/rename boundary, CLI status, and idempotent completion.
-  The initial cross-version recovery row also restores a legacy-format logical
-  archive into a fresh current-format root.
+  Reverse recovery now verifies an unchanged TagV2 successor, retains it,
+  durably republishes TextV1, and resumes across both rollback rename windows;
+  divergent successors fail closed. The closed supported-source matrix also
+  restores a TextV1 logical archive into a fresh TagV2 root. No unimplemented
+  or skipped numeric-version edge is advertised.
 - F2 implementation has started at the durable boundary: public session and
   claim-transaction payloads are frozen, and client idempotency bindings are
   now committed atomically with claim batches in Memory, Fjall compatibility,
