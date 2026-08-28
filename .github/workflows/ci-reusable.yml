@@ -88,6 +88,13 @@ jobs:
     name: verify
     runs-on: ${{ fromJSON(inputs.linux-heavy-runner) }}
     timeout-minutes: 30
+    env:
+      # The hosted Linux fallback must not launch multiple large DataFusion/
+      # inference test linkers concurrently. rust-lld itself is also bounded so
+      # candidate verification remains deterministic on the smallest admitted
+      # runner instead of relying on transient memory headroom.
+      CARGO_BUILD_JOBS: "1"
+      RUSTFLAGS: "-C link-arg=-Wl,--threads=1"
     services:
       pgvector:
         image: pgvector/pgvector@sha256:1d50c689b0a6511b9ea0a15615281c81a59fd04a08eb35057ec8646fb3a2118a

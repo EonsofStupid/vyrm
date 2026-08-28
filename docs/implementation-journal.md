@@ -2814,3 +2814,11 @@ index.
   require Linux, macOS ARM, and Windows success for that commit, journal the
   source identity and remote runs, execute the RRD verifier on the unchanged
   published tree, and only then allow RRD to cross off G02-W02.
+- First remote candidate evidence: commit `54ab71111942345486a6c4646b2384bc40d6457e`
+  produced run `33151716794`. macOS, Windows, and supervised RRD + Connectome
+  topology passed. Linux workspace verification failed before tests ran because
+  two concurrent `rust-lld` processes crashed with `SIGBUS` inside LLVM
+  `parallelFor` while linking separate `rrd-engine` test binaries. The Linux-
+  heavy job now serializes Cargo build jobs and bounds rust-lld to one thread;
+  an architecture test freezes both resource limits. This failed attempt is
+  retained as evidence and G02-W02 remains active pending a complete green run.

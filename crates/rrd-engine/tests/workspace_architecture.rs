@@ -343,6 +343,18 @@ fn ci_is_one_bounded_reusable_chain_with_safe_runner_routing() {
         4,
         "every CI job, including the gate, must have a bounded runtime"
     );
+    assert_eq!(
+        workflow.matches("CARGO_BUILD_JOBS: \"1\"").count(),
+        1,
+        "the Linux-heavy verifier must serialize large workspace links"
+    );
+    assert_eq!(
+        workflow
+            .matches("RUSTFLAGS: \"-C link-arg=-Wl,--threads=1\"")
+            .count(),
+        1,
+        "the Linux-heavy verifier must bound rust-lld parallelism"
+    );
     assert!(
         caller.contains("permissions:\n  contents: read")
             && workflow.contains("permissions:\n  contents: read"),
