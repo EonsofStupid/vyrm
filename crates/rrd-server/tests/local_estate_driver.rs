@@ -2,8 +2,8 @@ use rrd_contract::CanonicalId;
 use rrd_estate::{
     DesiredInstance, DesiredPhase, DesiredTarget, DriverErrorKind, DriverRequest, EstateDriver,
     EstateRepository, LocalArgument, LocalDeployment, LocalDeploymentCatalog, LocalProcessDriver,
-    LocalShutdown, MutationContext, OperationKind, OperationState, ReconcileBoundary,
-    ReconcileOutcome, Reconciler, SetDesired, LOCAL_DEPLOYMENT_FORMAT,
+    LocalReadiness, LocalShutdown, MutationContext, OperationKind, OperationState,
+    ReconcileBoundary, ReconcileOutcome, Reconciler, SetDesired, LOCAL_DEPLOYMENT_FORMAT,
 };
 use rrd_store::PersistentEngine;
 use sha2::{Digest, Sha256};
@@ -109,12 +109,18 @@ fn catalog() -> LocalDeploymentCatalog {
                             LocalArgument::InstanceRoot,
                             LocalArgument::Literal("--bind".into()),
                             LocalArgument::Literal("127.0.0.1:0".into()),
+                            LocalArgument::Literal("--ready-file".into()),
+                            LocalArgument::InstancePath(PathBuf::from("RRD.READY")),
                             LocalArgument::Literal("--shutdown-request-file".into()),
                             LocalArgument::InstancePath(PathBuf::from("SHUTDOWN.REQUEST")),
                             LocalArgument::Literal("--shutdown-complete-file".into()),
                             LocalArgument::InstancePath(PathBuf::from("SHUTDOWN.COMPLETE")),
                         ],
                         environment: BTreeMap::new(),
+                        readiness: LocalReadiness::File {
+                            path: PathBuf::from("RRD.READY"),
+                            timeout_ms: 90_000,
+                        },
                         shutdown: LocalShutdown::RequestFile {
                             request: PathBuf::from("SHUTDOWN.REQUEST"),
                             complete: PathBuf::from("SHUTDOWN.COMPLETE"),
@@ -357,6 +363,14 @@ fn real_rrd_child_survives_controller_reopen_and_stops_without_data_deletion() {
     assert_eq!(process_pid(&state_root), Some(started_pid));
     let instance_root = state_root.join("instances/project-a");
     assert!(instance_root.join("RRD.PROCESS.STDOUT.LOG").is_file());
+    let readiness: serde_json::Value = serde_json::from_slice(
+        &std::fs::read(instance_root.join("RRD.READY")).expect("driver waits for readiness"),
+    )
+    .unwrap();
+    assert_eq!(readiness["status"], "ready");
+    assert!(readiness["url"]
+        .as_str()
+        .is_some_and(|url| url.starts_with("http://127.0.0.1:")));
     assert!(
         wait_for_file_text(
             &instance_root.join("RRD.PROCESS.STDERR.LOG"),

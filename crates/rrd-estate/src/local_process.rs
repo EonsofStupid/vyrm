@@ -47,6 +47,17 @@ pub enum LocalShutdown {
     },
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case", tag = "strategy")]
+pub enum LocalReadiness {
+    #[default]
+    ProcessStable,
+    File {
+        path: PathBuf,
+        timeout_ms: u64,
+    },
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct LocalDeployment {
@@ -59,6 +70,8 @@ pub struct LocalDeployment {
     pub arguments: Vec<LocalArgument>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub environment: BTreeMap<String, String>,
+    #[serde(default)]
+    pub readiness: LocalReadiness,
     #[serde(default)]
     pub shutdown: LocalShutdown,
 }
@@ -88,10 +101,20 @@ impl LocalDeployment {
             preparation_arguments,
             arguments,
             environment,
+            readiness: LocalReadiness::default(),
             shutdown,
         };
         LocalDeploymentCatalog::single(deployment.clone())?;
         Ok(deployment)
+    }
+
+    pub fn with_readiness(
+        mut self,
+        readiness: LocalReadiness,
+    ) -> std::result::Result<Self, String> {
+        self.readiness = readiness;
+        LocalDeploymentCatalog::single(self.clone())?;
+        Ok(self)
     }
 }
 
@@ -209,6 +232,22 @@ impl LocalDeploymentCatalog {
                     return Err(format!(
                         "deployment {key} graceful shutdown contract is invalid"
                     ));
+                }
+            }
+            if let LocalReadiness::File { path, timeout_ms } = &deployment.readiness {
+                validate_control_filename(path)?;
+                if !(100..=120_000).contains(timeout_ms) {
+                    return Err(format!("deployment {key} readiness contract is invalid"));
+                }
+                if let LocalShutdown::RequestFile {
+                    request, complete, ..
+                } = &deployment.shutdown
+                {
+                    if path == request || path == complete {
+                        return Err(format!(
+                            "deployment {key} readiness and shutdown files must be distinct"
+                        ));
+                    }
                 }
             }
         }
@@ -402,6 +441,12 @@ impl LocalProcessDriver {
                 format!("cannot prepare graceful shutdown artifacts: {error}"),
             )
         })?;
+        prepare_readiness_artifact(&instance_root, &deployment.readiness).map_err(|error| {
+            retryable(
+                request,
+                format!("cannot prepare readiness artifact: {error}"),
+            )
+        })?;
         let arguments = deployment
             .arguments
             .iter()
@@ -492,6 +537,13 @@ impl LocalProcessDriver {
             thread::sleep(Duration::from_millis(10));
         };
         debug_assert!(same_executable_file(&executable, &deployment.executable));
+        wait_for_readiness(
+            request,
+            deployment,
+            &instance_root,
+            &stderr_path,
+            &mut child,
+        )?;
         let record = ProcessRecord {
             format: PROCESS_RECORD_FORMAT,
             instance_id: request.instance_id.clone(),
@@ -845,7 +897,7 @@ fn validate_relative_path(path: &Path) -> std::result::Result<(), String> {
 fn validate_control_filename(path: &Path) -> std::result::Result<(), String> {
     let mut components = path.components();
     if !matches!(components.next(), Some(Component::Normal(_))) || components.next().is_some() {
-        return Err("graceful shutdown paths must be direct instance filenames".into());
+        return Err("process control paths must be direct instance filenames".into());
     }
     Ok(())
 }
@@ -917,15 +969,21 @@ fn configure_platform_environment(
 }
 
 fn spawned_exit_message(status: std::process::ExitStatus, stderr_path: &Path) -> String {
-    let stderr = std::fs::read(stderr_path)
+    format!(
+        "spawned process exited during startup ({status}): {}",
+        diagnostic_stderr(stderr_path)
+    )
+}
+
+fn diagnostic_stderr(stderr_path: &Path) -> String {
+    std::fs::read(stderr_path)
         .ok()
         .map(|bytes| {
             let start = bytes.len().saturating_sub(4_096);
             String::from_utf8_lossy(&bytes[start..]).trim().to_owned()
         })
         .filter(|stderr| !stderr.is_empty())
-        .unwrap_or_else(|| "managed process emitted no stderr".into());
-    format!("spawned process exited during startup ({status}): {stderr}")
+        .unwrap_or_else(|| "managed process emitted no stderr".into())
 }
 
 fn system_for(pid: u32) -> System {
@@ -959,6 +1017,80 @@ fn prepare_shutdown_artifacts(
         }
     }
     Ok(())
+}
+
+fn prepare_readiness_artifact(
+    instance_root: &Path,
+    readiness: &LocalReadiness,
+) -> std::io::Result<()> {
+    let LocalReadiness::File { path, .. } = readiness else {
+        return Ok(());
+    };
+    let path = instance_root.join(path);
+    match std::fs::remove_file(&path) {
+        Ok(()) => sync_parent(&path),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error),
+    }
+}
+
+fn wait_for_readiness(
+    request: &DriverRequest,
+    deployment: &LocalDeployment,
+    instance_root: &Path,
+    stderr_path: &Path,
+    child: &mut std::process::Child,
+) -> std::result::Result<(), DriverError> {
+    let LocalReadiness::File { path, timeout_ms } = &deployment.readiness else {
+        return Ok(());
+    };
+    let path = instance_root.join(path);
+    let deadline = Instant::now() + Duration::from_millis(*timeout_ms);
+    loop {
+        match std::fs::symlink_metadata(&path) {
+            Ok(metadata) if metadata.file_type().is_file() => return Ok(()),
+            Ok(_) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(permanent(
+                    request,
+                    "managed process readiness artifact is not a direct file",
+                ));
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(retryable(
+                    request,
+                    format!("cannot inspect managed process readiness: {error}"),
+                ));
+            }
+        }
+        if let Some(status) = child.try_wait().map_err(|error| {
+            retryable(
+                request,
+                format!("cannot inspect process before readiness: {error}"),
+            )
+        })? {
+            return Err(retryable(
+                request,
+                spawned_exit_message(status, stderr_path),
+            ));
+        }
+        if Instant::now() >= deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(retryable(
+                request,
+                format!(
+                    "managed process did not publish readiness within {timeout_ms} ms: {}",
+                    diagnostic_stderr(stderr_path)
+                ),
+            ));
+        }
+        thread::sleep(Duration::from_millis(10));
+    }
 }
 
 fn write_shutdown_request(

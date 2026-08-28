@@ -26,8 +26,8 @@ pub use local_authorization::{
     LOCAL_OPERATOR_POLICY_FORMAT,
 };
 pub use local_process::{
-    LocalArgument, LocalDeployment, LocalDeploymentCatalog, LocalProcessDriver, LocalShutdown,
-    LOCAL_DEPLOYMENT_FORMAT,
+    LocalArgument, LocalDeployment, LocalDeploymentCatalog, LocalProcessDriver, LocalReadiness,
+    LocalShutdown, LOCAL_DEPLOYMENT_FORMAT,
 };
 pub use reconcile::{
     DriverEffect, DriverError, DriverErrorKind, DriverObservation, DriverRequest, EstateDriver,

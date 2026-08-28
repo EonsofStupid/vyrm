@@ -1,4 +1,4 @@
-use rrd_estate::{LocalArgument, LocalDeploymentCatalog, LocalShutdown};
+use rrd_estate::{LocalArgument, LocalDeploymentCatalog, LocalReadiness, LocalShutdown};
 use std::process::Command;
 
 #[test]
@@ -36,6 +36,13 @@ fn generator_authenticates_an_explicit_executable_and_refuses_overwrite() {
                 LocalArgument::InstanceRoot,
             ]
     }));
+    assert!(matches!(
+        deployment.readiness,
+        LocalReadiness::File {
+            timeout_ms: 90_000,
+            ..
+        }
+    ));
     assert!(matches!(
         deployment.shutdown,
         LocalShutdown::RequestFile {

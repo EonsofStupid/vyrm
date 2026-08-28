@@ -15,6 +15,7 @@ struct Args {
     root: PathBuf,
     bind: SocketAddr,
     token_key_file: Option<PathBuf>,
+    ready_file: Option<PathBuf>,
     shutdown_request_file: Option<PathBuf>,
     shutdown_complete_file: Option<PathBuf>,
     tls_certificate_file: Option<PathBuf>,
@@ -81,6 +82,13 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         if server.is_tls() { "https" } else { "http" },
         server.local_addr()
     );
+    if let Some(path) = &args.ready_file {
+        write_readiness(
+            path,
+            if server.is_tls() { "https" } else { "http" },
+            server.local_addr(),
+        )?;
+    }
     let shutdown_request_file = args.shutdown_request_file;
     let shutdown_complete_file = args.shutdown_complete_file;
     server
@@ -146,10 +154,33 @@ fn write_shutdown_completion(path: &Path) -> io::Result<()> {
     Ok(())
 }
 
+fn write_readiness(path: &Path, scheme: &str, address: SocketAddr) -> io::Result<()> {
+    use std::io::Write;
+
+    let bytes = serde_json::to_vec(&serde_json::json!({
+        "format": 1,
+        "status": "ready",
+        "url": format!("{scheme}://{address}"),
+    }))?;
+    let temporary = path.with_extension("ready.new");
+    let _ = std::fs::remove_file(&temporary);
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&temporary)?;
+    file.write_all(&bytes)?;
+    file.sync_all()?;
+    std::fs::rename(&temporary, path)?;
+    #[cfg(unix)]
+    std::fs::File::open(path.parent().expect("readiness marker has a parent"))?.sync_all()?;
+    Ok(())
+}
+
 fn parse_args(arguments: impl Iterator<Item = String>) -> Result<Args, String> {
     let mut root = None;
     let mut bind = "127.0.0.1:9477".parse().expect("static bind address");
     let mut token_key_file = None;
+    let mut ready_file = None;
     let mut shutdown_request_file = None;
     let mut shutdown_complete_file = None;
     let mut tls_certificate_file = None;
@@ -171,6 +202,12 @@ fn parse_args(arguments: impl Iterator<Item = String>) -> Result<Args, String> {
                 token_key_file = Some(PathBuf::from(required_value(
                     &mut arguments,
                     "--token-key-file",
+                )?));
+            }
+            "--ready-file" => {
+                ready_file = Some(PathBuf::from(required_value(
+                    &mut arguments,
+                    "--ready-file",
                 )?));
             }
             "--shutdown-request-file" => {
@@ -228,10 +265,21 @@ fn parse_args(arguments: impl Iterator<Item = String>) -> Result<Args, String> {
             return Err("shutdown control files must be distinct absolute paths".into());
         }
     }
+    if let Some(ready) = &ready_file {
+        if !ready.is_absolute()
+            || shutdown_request_file.as_ref() == Some(ready)
+            || shutdown_complete_file.as_ref() == Some(ready)
+        {
+            return Err(
+                "readiness file must be absolute and distinct from shutdown control files".into(),
+            );
+        }
+    }
     Ok(Args {
         root: root.ok_or_else(|| format!("--root is required\n{}", usage()))?,
         bind,
         token_key_file,
+        ready_file,
         shutdown_request_file,
         shutdown_complete_file,
         tls_certificate_file,
@@ -322,7 +370,7 @@ fn required_value(
 }
 
 fn usage() -> &'static str {
-    "usage: rrd-server --root PROJECT [--bind 127.0.0.1:9477] [--token-key-file PATH] [--tls-cert PATH --tls-key PATH --tls-client-ca PATH] [--shutdown-request-file PATH --shutdown-complete-file PATH]\n       rrd-server initialize --root PROJECT --instance ID"
+    "usage: rrd-server --root PROJECT [--bind 127.0.0.1:9477] [--token-key-file PATH] [--ready-file PATH] [--tls-cert PATH --tls-key PATH --tls-client-ca PATH] [--shutdown-request-file PATH --shutdown-complete-file PATH]\n       rrd-server initialize --root PROJECT --instance ID"
 }
 
 fn initialize_usage() -> &'static str {
@@ -397,6 +445,44 @@ mod tests {
         ];
         let args = parse_args(arguments.into_iter()).unwrap();
         assert_eq!(args.shutdown_complete_file, Some(complete));
+    }
+
+    #[test]
+    fn readiness_file_is_absolute_and_distinct_from_shutdown_controls() {
+        let root = std::env::current_dir().unwrap();
+        let ready = root.join("rrd.ready");
+        let arguments = vec![
+            "--root".into(),
+            "project".into(),
+            "--ready-file".into(),
+            ready.to_string_lossy().into_owned(),
+        ];
+        let args = parse_args(arguments.into_iter()).unwrap();
+        assert_eq!(args.ready_file, Some(ready.clone()));
+        assert!(parse_args(
+            [
+                "--root".into(),
+                "project".into(),
+                "--ready-file".into(),
+                "relative.ready".into(),
+            ]
+            .into_iter()
+        )
+        .is_err());
+
+        let shutdown = vec![
+            "--root".into(),
+            "project".into(),
+            "--ready-file".into(),
+            ready.to_string_lossy().into_owned(),
+            "--shutdown-request-file".into(),
+            ready.to_string_lossy().into_owned(),
+            "--shutdown-complete-file".into(),
+            root.join("shutdown.complete")
+                .to_string_lossy()
+                .into_owned(),
+        ];
+        assert!(parse_args(shutdown.into_iter()).is_err());
     }
 
     #[test]

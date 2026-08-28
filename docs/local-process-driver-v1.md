@@ -34,6 +34,14 @@ only the host `SystemRoot` after clearing the environment because Winsock cannot
 initialize its installed providers without that platform location; catalogue
 variables remain the only other inherited launch state.
 
+The catalogue also declares a bounded readiness strategy. The RRD deployment
+uses a direct instance-local `RRD.READY` file: `rrd-server` publishes its bound
+URL there with file and parent durability only after the listener exists. The
+driver removes stale readiness evidence before spawn, continuously checks for
+early child exit, and kills the child if the declared deadline expires. A PID
+and executable that are merely stable are not a completed start; the durable
+process record is published only after readiness succeeds.
+
 `rrd-deployment-catalog --output PATH` resolves the installed sibling
 `rrd-server` by default, canonicalizes and hashes the executable, and emits the
 validated RRD argument and graceful-shutdown template. `--server` and
@@ -51,9 +59,10 @@ waits for F3 retention/backup jobs and F4 authorization.
 
 ## Restart identity and signals
 
-After spawn, the driver must discover the process executable and start time and
-survive a bounded startup-stability interval, then durably replace an
-owner-private process record before returning success. Per-instance stdout and
+After spawn, the driver must discover the process executable and start time,
+survive a bounded startup-stability interval, and satisfy the deployment's
+readiness strategy before durably replacing an owner-private process record.
+Per-instance stdout and
 stderr files retain startup evidence; an early exit includes the bounded tail
 of stderr in the retryable error. If discovery or record persistence fails, the
 still-owned child is killed and waited before an error is returned.
@@ -93,7 +102,8 @@ The `rrd-server` integration test uses the real built server executable. It:
 
 1. persists desired running state;
 2. drops/reopens the engine and driver between lease, prepared and applied;
-3. starts the RRD child and authenticates its process record;
+3. starts the RRD child, waits for its durable listener-ready record, and then
+   authenticates its process record;
 4. recreates the driver and replays the same operation without changing PID;
 5. reopens through observed and completed;
 6. writes a second desired stopped generation;

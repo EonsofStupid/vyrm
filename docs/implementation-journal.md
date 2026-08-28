@@ -2978,3 +2978,19 @@ index.
   and diff validation. The real two-test consensus shutdown/reopen target also
   passed thirty consecutive executions (sixty consensus tests) without a
   writer-lock race.
+- The replacement candidate at `05bb55aff0186bca257eff4ac4160a5959e96734`
+  produced run `33182150466`. Every Linux subsystem and optional-feature lane,
+  macOS estate process qualification, topology, and verification passed. The
+  Windows estate process lane exposed a separate lifecycle gap: the process
+  driver persisted an applied start after PID/executable stability while the
+  RRD listener could still be initializing, and the fixture eventually timed
+  out waiting for the incidental stderr startup line. The aggregate gate
+  correctly failed; this run is not completion evidence.
+- Process start completion now has an explicit catalogue-owned readiness
+  contract. The RRD deployment passes a direct `RRD.READY` path; `rrd-server`
+  durably publishes its bound URL only after listener creation; and the driver
+  removes stale evidence, monitors early exit, enforces the declared deadline,
+  kills on failure, and persists the process record only after readiness. The
+  estate suite and the exact four-test real child/controller recovery target
+  pass locally with the corrected boundary. Remote Windows and aggregate
+  qualification remain required.

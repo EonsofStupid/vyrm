@@ -1,5 +1,7 @@
 use rrd_contract::CanonicalId;
-use rrd_estate::{LocalArgument, LocalDeployment, LocalDeploymentCatalog, LocalShutdown};
+use rrd_estate::{
+    LocalArgument, LocalDeployment, LocalDeploymentCatalog, LocalReadiness, LocalShutdown,
+};
 use std::collections::BTreeMap;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
@@ -37,6 +39,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             LocalArgument::InstanceRoot,
             LocalArgument::Literal("--bind".into()),
             LocalArgument::Literal("127.0.0.1:0".into()),
+            LocalArgument::Literal("--ready-file".into()),
+            LocalArgument::InstancePath(PathBuf::from("RRD.READY")),
             LocalArgument::Literal("--shutdown-request-file".into()),
             LocalArgument::InstancePath(PathBuf::from("SHUTDOWN.REQUEST")),
             LocalArgument::Literal("--shutdown-complete-file".into()),
@@ -48,7 +52,11 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             complete: PathBuf::from("SHUTDOWN.COMPLETE"),
             timeout_ms: 5_000,
         },
-    )?;
+    )?
+    .with_readiness(LocalReadiness::File {
+        path: PathBuf::from("RRD.READY"),
+        timeout_ms: 90_000,
+    })?;
     let catalog = LocalDeploymentCatalog::single(deployment)?;
     let mut bytes = serde_json::to_vec_pretty(&catalog)?;
     bytes.push(b'\n');
