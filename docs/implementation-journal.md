@@ -2869,3 +2869,36 @@ index.
   target then built in 2m59s, linked without a signal, and passed. This retains
   the resource guard while removing the proven whole-build serialization
   bottleneck. Remote qualification remains required.
+- Fifth remote candidate evidence: correction commit
+  `92e7317c7b21b05f19ecac230623b8ef56659d7b` produced run `33164751681`.
+  macOS and supervised topology passed. Linux honored two compile jobs,
+  one-thread linkers, and stripped test debuginfo, but the globally unified
+  all-features workspace still filled the target filesystem: `rustc` reported
+  `No space left on device` and concurrent test outputs then ended in a linker
+  bus error. Windows independently exposed nondeterministic fixture readiness:
+  one process test exceeded its 15-second startup-log wait and the effect-gap
+  stop used its bounded kill fallback before the server's request-file watcher
+  was proven ready. These are not archive assertion failures. The correction is
+  structural: test the complete default-feature workspace once, qualify each
+  package's optional features in isolated target directories, isolate the
+  pgvector service to its feature job, and make real-process fixtures observe
+  server readiness before asserting graceful shutdown. G02-W02 remains active.
+- Local structural-correction evidence: Cargo metadata identifies exactly five
+  workspace packages with non-default features. The reusable CI contract now
+  tests the complete default-feature workspace once, qualifies `rrd-cluster`,
+  `rrd-engine`, `rrd-inference`, and `rrd-vector` in isolated all-feature
+  matrix jobs, and qualifies `rrd-operator-knowledge` with its own disposable
+  pgvector service. The architecture gate derives that set from metadata and
+  rejects an omitted package, a global all-features workspace test, a shared
+  heavy cache, an unbounded job, or a gate that ignores either new partition.
+- Exact local evidence for that partition passes: default workspace test and
+  warning-denying Clippy; all-feature test and warning-denying Clippy for each
+  of the five optional-feature packages; 16/16 workspace architecture tests;
+  and the concurrent four-test local estate-driver target after the process
+  fixture was changed to observe the real RRD HTTP-ready diagnostic before
+  requesting graceful shutdown. The first local pgvector attempt correctly
+  failed closed because its database name was outside the required
+  `rrd_operator_knowledge_test*` disposable namespace; the rerun used an
+  isolated contract-compliant database and passed every live, golden, sync,
+  unit, and Clippy check. This remains candidate evidence until the exact
+  committed tree passes the complete remote platform matrix.

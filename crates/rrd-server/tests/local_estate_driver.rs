@@ -15,7 +15,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
 
-const DIAGNOSTIC_STARTUP_TIMEOUT: Duration = Duration::from_secs(15);
+const DIAGNOSTIC_STARTUP_TIMEOUT: Duration = Duration::from_secs(60);
 
 fn id(value: &str) -> CanonicalId {
     CanonicalId::new(value).unwrap()
@@ -600,6 +600,13 @@ fn controller_process_kill_matrix_converges_across_start_and_stop_effect_gaps() 
     assert_eq!(
         operation_state(&database, "start-project-a"),
         (OperationState::Succeeded, 7)
+    );
+    assert!(
+        wait_for_file_text(
+            &state_root.join("instances/project-a/RRD.PROCESS.STDERR.LOG"),
+            "rrd-server: http://127.0.0.1:"
+        ),
+        "the effect-gap fixture must observe server readiness before requesting shutdown"
     );
 
     {

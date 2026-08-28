@@ -87,14 +87,99 @@ jobs:
   verify:
     name: verify
     runs-on: ${{ fromJSON(inputs.linux-heavy-runner) }}
-    # A cold hosted fallback compiles the complete all-features workspace twice:
-    # once for tests and once for warning-denying Clippy. Keep the gate bounded,
-    # but admit the measured cold path instead of cancelling valid verification.
+    # Default-feature workspace qualification remains one complete graph. Each
+    # package's optional features are qualified in isolated target directories
+    # below so Cargo feature unification cannot exhaust the hosted fallback.
     timeout-minutes: 60
     env:
       # Use both hosted cores for compilation, but keep each large DataFusion/
       # inference link single-threaded. Test debuginfo is not consumed by this
       # gate and otherwise exhausts the admitted runner's disk.
+      CARGO_BUILD_JOBS: "2"
+      CARGO_PROFILE_TEST_DEBUG: "0"
+      RUSTFLAGS: "-C link-arg=-Wl,--threads=1"
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@f8be11a05b1d4f3fcebe6410cc16743212b999b0 # 1.98.0
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          shared-key: linux-verify-default-test-debug0-lld1
+          cache-on-failure: false
+      - name: Enforce owner-controlled release version
+        run: python3 scripts/check_version.py
+      - name: Enforce RRFlow engine ownership and CI architecture
+        run: cargo test -p rrd-engine --test workspace_architecture --locked
+      - name: Build cross-package controller fixture
+        run: cargo build -p rrflow-cli --bin rrd-estate-controller --locked
+      - name: Record pre-test build capacity
+        run: df -h "$GITHUB_WORKSPACE"
+      - name: Test default-feature workspace
+        run: cargo test --workspace --locked
+      - name: Record post-test build capacity
+        run: df -h "$GITHUB_WORKSPACE"
+      - name: Deny default-feature workspace warnings
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - name: Verify controlled evaluation evidence
+        run: cargo run --locked -p rrflow-eval -- verify eval/results/2026-08-18-summary.json
+      - name: Enforce kernel dependency boundary
+        run: |
+          tree="$(cargo tree --locked -p rrd-core --edges normal --depth 1)"
+          printf '%s\n' "$tree"
+          test "$(printf '%s\n' "$tree" | tail -n +2 | wc -l)" -eq 1
+          printf '%s\n' "$tree" | tail -n 1 | grep -q 'serde v'
+      - name: Enforce offline edge dependency and binary budgets
+        run: |
+          tree="$(cargo tree --locked -p rrflow-edge --edges normal)"
+          printf '%s\n' "$tree"
+          ! printf '%s\n' "$tree" | grep -Eiq 'reqwest|hyper|tokio|rustls|openssl|ureq|curl|quinn|tonic'
+          local_model_tree="$(cargo tree --locked -p rrd-inference --features fastembed-local --edges normal)"
+          printf '%s\n' "$local_model_tree"
+          ! printf '%s\n' "$local_model_tree" | grep -Eiq 'reqwest|hyper|tokio|rustls|openssl|ureq|curl|quinn|tonic|hf-hub'
+          cargo build --locked --release -p rrflow-edge
+          binary="${CARGO_TARGET_DIR:-target}/release/rrflow-edge"
+          test "$(stat -c '%s' "$binary")" -le 2097152
+
+  optional-features:
+    name: optional feature (${{ matrix.package }})
+    runs-on: ${{ fromJSON(inputs.linux-heavy-runner) }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        package:
+          - rrd-cluster
+          - rrd-engine
+          - rrd-inference
+          - rrd-vector
+    env:
+      CARGO_BUILD_JOBS: "2"
+      CARGO_PROFILE_TEST_DEBUG: "0"
+      RUSTFLAGS: "-C link-arg=-Wl,--threads=1"
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@f8be11a05b1d4f3fcebe6410cc16743212b999b0 # 1.98.0
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          shared-key: linux-feature-${{ matrix.package }}-test-debug0-lld1
+          cache-on-failure: false
+      - name: Test package optional features
+        run: cargo test -p ${{ matrix.package }} --all-targets --all-features --locked
+      - name: Deny package optional-feature warnings
+        run: cargo clippy -p ${{ matrix.package }} --all-targets --all-features --locked -- -D warnings
+
+  pgvector-feature:
+    name: optional feature (rrd-operator-knowledge)
+    runs-on: ${{ fromJSON(inputs.linux-heavy-runner) }}
+    timeout-minutes: 30
+    env:
       CARGO_BUILD_JOBS: "2"
       CARGO_PROFILE_TEST_DEBUG: "0"
       RUSTFLAGS: "-C link-arg=-Wl,--threads=1"
@@ -121,44 +206,15 @@ jobs:
           components: clippy
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
-          shared-key: linux-verify-jobs2-test-debug0-lld1
+          shared-key: linux-feature-rrd-operator-knowledge-test-debug0-lld1
           cache-on-failure: false
-      - name: Enforce owner-controlled release version
-        run: python3 scripts/check_version.py
-      - name: Enforce RRFlow engine ownership and CI architecture
-        run: cargo test -p rrd-engine --test workspace_architecture --locked
-      - name: Build cross-package controller fixture
-        run: cargo build -p rrflow-cli --bin rrd-estate-controller --locked
-      - name: Record pre-test build capacity
-        run: df -h "$GITHUB_WORKSPACE"
-      - name: Test workspace
+      - name: Test PostgreSQL operator-knowledge feature
         env:
           RRFLOW_PGVECTOR_TEST_URL: postgresql://rrflow_test:rrflow_test_password@127.0.0.1:5432/rrd_operator_knowledge_test?sslmode=disable
           RRFLOW_PGVECTOR_TEST_DISPOSABLE: "1"
-        run: cargo test --workspace --all-features --locked
-      - name: Record post-test build capacity
-        run: df -h "$GITHUB_WORKSPACE"
-      - name: Deny warnings
-        run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
-      - name: Verify controlled evaluation evidence
-        run: cargo run --locked -p rrflow-eval -- verify eval/results/2026-08-18-summary.json
-      - name: Enforce kernel dependency boundary
-        run: |
-          tree="$(cargo tree --locked -p rrd-core --edges normal --depth 1)"
-          printf '%s\n' "$tree"
-          test "$(printf '%s\n' "$tree" | tail -n +2 | wc -l)" -eq 1
-          printf '%s\n' "$tree" | tail -n 1 | grep -q 'serde v'
-      - name: Enforce offline edge dependency and binary budgets
-        run: |
-          tree="$(cargo tree --locked -p rrflow-edge --edges normal)"
-          printf '%s\n' "$tree"
-          ! printf '%s\n' "$tree" | grep -Eiq 'reqwest|hyper|tokio|rustls|openssl|ureq|curl|quinn|tonic'
-          local_model_tree="$(cargo tree --locked -p rrd-inference --features fastembed-local --edges normal)"
-          printf '%s\n' "$local_model_tree"
-          ! printf '%s\n' "$local_model_tree" | grep -Eiq 'reqwest|hyper|tokio|rustls|openssl|ureq|curl|quinn|tonic|hf-hub'
-          cargo build --locked --release -p rrflow-edge
-          binary="${CARGO_TARGET_DIR:-target}/release/rrflow-edge"
-          test "$(stat -c '%s' "$binary")" -le 2097152
+        run: cargo test -p rrd-operator-knowledge --all-targets --all-features --locked
+      - name: Deny PostgreSQL operator-knowledge warnings
+        run: cargo clippy -p rrd-operator-knowledge --all-targets --all-features --locked -- -D warnings
 
   ci-gate:
     name: ci-gate
@@ -167,6 +223,8 @@ jobs:
       - topology-smoke
       - estate-portability
       - verify
+      - optional-features
+      - pgvector-feature
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -175,7 +233,11 @@ jobs:
           TOPOLOGY_RESULT: ${{ needs.topology-smoke.result }}
           PORTABILITY_RESULT: ${{ needs.estate-portability.result }}
           VERIFY_RESULT: ${{ needs.verify.result }}
+          OPTIONAL_FEATURES_RESULT: ${{ needs.optional-features.result }}
+          PGVECTOR_FEATURE_RESULT: ${{ needs.pgvector-feature.result }}
         run: |
           test "$TOPOLOGY_RESULT" = success
           test "$PORTABILITY_RESULT" = success
           test "$VERIFY_RESULT" = success
+          test "$OPTIONAL_FEATURES_RESULT" = success
+          test "$PGVECTOR_FEATURE_RESULT" = success

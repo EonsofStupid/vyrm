@@ -15,6 +15,7 @@ struct PackageDependencies {
     workspace: BTreeSet<String>,
     all: BTreeSet<String>,
     targets: BTreeSet<String>,
+    features: BTreeSet<String>,
 }
 
 #[test]
@@ -335,12 +336,14 @@ fn ci_is_one_bounded_reusable_chain_with_safe_runner_routing() {
             && workflow.contains("if: ${{ always() }}")
             && workflow.contains("TOPOLOGY_RESULT")
             && workflow.contains("PORTABILITY_RESULT")
-            && workflow.contains("VERIFY_RESULT"),
+            && workflow.contains("VERIFY_RESULT")
+            && workflow.contains("OPTIONAL_FEATURES_RESULT")
+            && workflow.contains("PGVECTOR_FEATURE_RESULT"),
         "one stable gate must reduce every CI partition"
     );
     assert_eq!(
         workflow.matches("timeout-minutes:").count(),
-        4,
+        6,
         "every CI job, including the gate, must have a bounded runtime"
     );
     assert_eq!(
@@ -350,32 +353,82 @@ fn ci_is_one_bounded_reusable_chain_with_safe_runner_routing() {
     );
     assert_eq!(
         workflow.matches("CARGO_BUILD_JOBS: \"2\"").count(),
-        1,
-        "the Linux-heavy verifier must use both hosted compile cores"
+        3,
+        "every Linux-heavy partition must use both hosted compile cores"
     );
     assert_eq!(
         workflow.matches("CARGO_PROFILE_TEST_DEBUG: \"0\"").count(),
-        1,
-        "the Linux-heavy verifier must omit unused test debuginfo"
+        3,
+        "every Linux-heavy partition must omit unused test debuginfo"
     );
     assert_eq!(
         workflow
             .matches("RUSTFLAGS: \"-C link-arg=-Wl,--threads=1\"")
             .count(),
-        1,
-        "the Linux-heavy verifier must bound each rust-lld invocation"
+        3,
+        "every Linux-heavy partition must bound each rust-lld invocation"
     );
     assert_eq!(
         workflow
-            .matches("shared-key: linux-verify-jobs2-test-debug0-lld1")
+            .matches("shared-key: linux-verify-default-test-debug0-lld1")
             .count(),
         1,
-        "the bounded compiler/linker profile must not restore incompatible artifacts"
+        "default workspace verification must have a compatible isolated cache"
+    );
+    assert_eq!(
+        workflow
+            .matches("shared-key: linux-feature-${{ matrix.package }}-test-debug0-lld1")
+            .count(),
+        1,
+        "each optional-feature matrix package must have an isolated cache"
+    );
+    assert_eq!(
+        workflow
+            .matches("shared-key: linux-feature-rrd-operator-knowledge-test-debug0-lld1")
+            .count(),
+        1,
+        "the PostgreSQL feature must have an isolated cache"
     );
     assert_eq!(
         workflow.matches("cache-on-failure: false").count(),
-        1,
-        "failed Linux-heavy artifacts must not be published as the next candidate cache"
+        3,
+        "failed Linux-heavy artifacts must never become candidate caches"
+    );
+    assert!(
+        workflow.contains("cargo test --workspace --locked")
+            && !workflow.contains("cargo test --workspace --all-features"),
+        "the complete default workspace must be tested without global optional-feature unification"
+    );
+
+    let feature_packages = metadata
+        .packages
+        .iter()
+        .filter(|(_, package)| package.features.iter().any(|feature| feature != "default"))
+        .map(|(name, _)| name.clone())
+        .collect::<BTreeSet<_>>();
+    let routed_feature_packages = names(&[
+        "rrd-cluster",
+        "rrd-engine",
+        "rrd-inference",
+        "rrd-operator-knowledge",
+        "rrd-vector",
+    ]);
+    assert_eq!(
+        feature_packages, routed_feature_packages,
+        "every package with optional features must have an explicit isolated CI disposition"
+    );
+    for package in ["rrd-cluster", "rrd-engine", "rrd-inference", "rrd-vector"] {
+        assert!(
+            workflow
+                .lines()
+                .any(|line| line.trim() == format!("- {package}")),
+            "optional-feature matrix is missing {package}"
+        );
+    }
+    assert!(
+        workflow.contains("cargo test -p rrd-operator-knowledge --all-targets --all-features --locked")
+            && workflow.contains("cargo clippy -p rrd-operator-knowledge --all-targets --all-features --locked -- -D warnings"),
+        "the PostgreSQL feature package must receive isolated test and Clippy qualification"
     );
     assert!(
         caller.contains("permissions:\n  contents: read")
@@ -704,6 +757,12 @@ fn workspace_metadata() -> WorkspaceMetadata {
                     .to_owned()
             })
             .collect();
+        let features = package["features"]
+            .as_object()
+            .expect("package features must be an object")
+            .keys()
+            .cloned()
+            .collect();
         for dependency in package["dependencies"]
             .as_array()
             .expect("package dependencies must be an array")
@@ -733,6 +792,7 @@ fn workspace_metadata() -> WorkspaceMetadata {
                         workspace,
                         all,
                         targets,
+                        features,
                     },
                 )
                 .is_none(),
