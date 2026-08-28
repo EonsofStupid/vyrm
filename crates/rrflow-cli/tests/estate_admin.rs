@@ -91,6 +91,7 @@ fn authorized_admin_mutations_replay_reopen_and_journal_exact_identity() {
             "estate-a".into(),
             BTreeSet::from([
                 LocalEstatePermission::Create,
+                LocalEstatePermission::ManageRecoveryPolicy,
                 LocalEstatePermission::ScheduleBackup,
                 LocalEstatePermission::SetDesired,
             ]),
@@ -210,6 +211,39 @@ fn authorized_admin_mutations_replay_reopen_and_journal_exact_identity() {
         .unwrap();
     drop(engine);
 
+    let mut recovery_policy = arguments(
+        "set-recovery-policy",
+        &database,
+        &policy_path,
+        &key_path,
+        "estate-a",
+        85,
+        "recovery-policy-request",
+        "recovery-policy-operation",
+    );
+    recovery_policy.extend(
+        [
+            "--instance",
+            "project-a",
+            "--idempotency",
+            "recovery-policy-v1",
+            "--max-rpo-ms",
+            "86400000",
+            "--max-rto-ms",
+            "3600000",
+            "--minimum-recovery-points",
+            "2",
+            "--retention-ms",
+            "604800000",
+        ]
+        .into_iter()
+        .map(str::to_owned),
+    );
+    let policy_result = value(&invoke(recovery_policy.clone()));
+    assert_eq!(policy_result["idempotent_replay"], false);
+    assert_eq!(policy_result["recovery"]["policies"][0]["revision"], 1);
+    assert_eq!(value(&invoke(recovery_policy))["idempotent_replay"], true);
+
     let mut backup = arguments(
         "schedule-backup",
         &database,
@@ -235,18 +269,20 @@ fn authorized_admin_mutations_replay_reopen_and_journal_exact_identity() {
     let accepted = value(&invoke(backup.clone()));
     assert_eq!(accepted["idempotent_replay"], false);
     assert_eq!(accepted["job"]["state"], "pending");
+    assert_eq!(accepted["job"]["recovery_policy"]["revision"], 1);
     assert_eq!(value(&invoke(backup))["idempotent_replay"], true);
 
     let engine = PersistentEngine::open(&database).unwrap();
     let repository = EstateRepository::new(&engine, CanonicalId::new("estate-a").unwrap());
     let document = repository.load().unwrap().unwrap();
-    assert_eq!(document.revision, 8);
+    assert_eq!(document.revision, 9);
     assert_eq!(document.instances.len(), 1);
     assert_eq!(document.backup_jobs.len(), 1);
     let journal = engine.control_journal_since(0, 16).unwrap();
-    assert_eq!(journal.len(), 8);
+    assert_eq!(journal.len(), 9);
     assert_eq!(journal[0].action, "estate.create");
     assert_eq!(journal[1].action, "estate.desired.set");
-    assert_eq!(journal[7].action, "estate.backup.schedule");
-    assert_eq!(journal[7].actor, "operator-one");
+    assert_eq!(journal[7].action, "estate.recovery.policy.set");
+    assert_eq!(journal[8].action, "estate.backup.schedule");
+    assert_eq!(journal[8].actor, "operator-one");
 }

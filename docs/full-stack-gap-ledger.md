@@ -251,10 +251,23 @@ payload closure, and vector/index catalogue manifest. Focused tests cover more
 than ten persistent scenarios, multi-page logs, all canonical runtime families,
 exact audit/read stamps, all three export durability boundaries, both restore
 receipt boundaries, tampering, source drift, reopen, object bytes, and catalogue
-state. The complete local 13-command candidate matrix is green. Publication and
-platform verification are still pending, so G02-W02 remains active. Retention/
-RPO/RTO, general cross-version migration, producer signing/encryption, and S3
-qualification remain in their later gates.
+state. The complete local 13-command matrix and exact cross-platform CI run
+`33184505371` are green; G02-W02 is verified.
+
+**G02-W03 candidate 2026-08-28:** the estate now owns revisioned RPO/RTO and
+retention policy, policy-bound backup jobs, authenticated recovery-point
+identity, policy/explicit pins, deterministic retention decisions, fenced
+prune intents, non-deleting prune history, and measured restore evidence.
+`rrd-store` requires a complete disjoint retained/candidate partition and the
+exact current catalogue digest, embeds bounded replay receipts in the
+authenticated successor catalogue, and reclaims only archives, manifests, and
+object payloads no retained entry references. `RrdEngine` is the sole
+composition root: it produces application-complete estate backups, fences
+backup/policy/hold/restore changes during prune, restores only to the fixed
+absent per-instance restore hierarchy, verifies reopened watermarks and the
+immutable closure, then records RPO/RTO results. Signer/key custody, remote
+object transfer, active deployment cutover, and Multi-AZ claims remain in their
+later gates.
 
 **Native migration ledger landed 2026-08-23:** the only admitted application
 format edge is the exact successor TextV1 → `RRDSK002` TagV2. Its authenticated
@@ -381,10 +394,10 @@ authenticated catalogues, generated per-instance roots, durable idempotent
 operation records, restore-to-absent-root, reopen verification, and explicit
 partial-coverage declarations. Real-socket tests prove authentication and
 scope denial, collision denial, create/list/restore, watermark preservation,
-and restart replay. Public callers cannot supply filesystem paths. Object
-payload closure, retention/RPO policy, active deployment switch, and exact
-process-kill qualification at the filesystem-effect/control-record gap remain
-open.
+and restart replay. Public callers cannot supply filesystem paths.
+Estate-managed local recovery now adds application-complete closure,
+retention/RPO policy, fixed-root restore evidence, and effect-gap replay;
+remote transfer and active deployment switch remain open.
 
 **Deliverables**
 

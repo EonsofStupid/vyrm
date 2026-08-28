@@ -51,9 +51,10 @@ pub use archive::{
 };
 pub use backup::{
     create_application_backup, create_logical_backup, load_backup_catalogue,
-    restore_catalogued_backup, verify_backup_catalogue, verify_restored_backup_objects,
-    BackupCatalogue, BackupCoverage, BackupEntry, CatalogueManifestInventory,
-    ObjectPayloadManifestInventory, BACKUP_CATALOGUE_VERSION,
+    prune_backup_catalogue, restore_catalogued_backup, verify_backup_catalogue,
+    verify_restored_backup_objects, BackupCatalogue, BackupCoverage, BackupEntry,
+    BackupPruneOutcome, BackupPrunePlan, BackupPruneReceipt, CatalogueManifestInventory,
+    ObjectPayloadManifestInventory, BACKUP_CATALOGUE_VERSION, MAX_BACKUP_PRUNE_RECEIPTS,
 };
 pub use control::{ControlJournalEntry, ControlTransition};
 pub use ds::{DataRuntime, DataRuntimeAccess, DataRuntimeRef, DataRuntimeStep};

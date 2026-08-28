@@ -1,7 +1,8 @@
 # RRD local estate authorization v1
 
 Status: F3 local-only alpha boundary. It authorizes explicit local estate
-creation, desired-state mutation, and quiesced backup scheduling; it does not
+creation, desired-state mutation, quiesced backup scheduling, and local
+recovery policy/hold/prune/restore operations; it does not
 authorize a remote listener or replace F4 identity, RBAC/ABAC, credential
 rotation, or comprehensive audit.
 
@@ -14,8 +15,9 @@ rotation, or comprehensive audit.
 - the SHA-256 of one exact 32-byte operator key;
 - an inclusive `not_before_unix_ms` and exclusive `expires_at_unix_ms` window;
 - at most 1,024 exact canonical estate IDs; and
-- an explicit set of `create`, `set_desired`, and/or `schedule_backup`
-  permissions per estate.
+- an explicit set of `create`, `set_desired`, `schedule_backup`,
+  `manage_recovery_policy`, `manage_recovery_holds`, `prune_recovery`, and/or
+  `restore_recovery` permissions per estate.
 
 There is no wildcard estate or action. Unknown JSON fields, empty grants,
 non-canonical IDs, malformed digests, invalid windows, wrong key bytes, wrong
@@ -26,12 +28,15 @@ ACL-owner inspection remains an F4 hardening item.
 
 ## Local admin process
 
-`rrd-estate-admin` has three explicit actions:
+`rrd-estate-admin` has six explicit actions:
 
 ```text
 rrd-estate-admin create ...
 rrd-estate-admin set-desired ...
 rrd-estate-admin schedule-backup ...
+rrd-estate-admin set-recovery-policy ...
+rrd-estate-admin pin-recovery-point ...
+rrd-estate-admin release-recovery-pin ...
 ```
 
 All actions require database, an explicit estate-control authority instance,
@@ -45,6 +50,17 @@ generation with no process ID. No shell string, secret value, implicit current
 account, wildcard target, or remote session credential enters the estate
 document.
 
+Recovery policy mutation binds exact RPO, RTO, minimum-point, and retention
+values to a revision. Hold commands target only known, unpruned recovery-point
+identities. `rrd-recovery-controller` is the thin outward adapter for physical
+prune and restore. Prune accepts no caller file list: `RrdEngine` derives the
+complete retained/pruned partition from the estate, persists a fencing intent,
+requires the exact authenticated catalogue digest, publishes the successor,
+and records pruned history. Restore accepts identities rather than paths and
+can publish only below the fixed `restores/<instance>/<restore-id>` hierarchy;
+it holds the point through closure/watermark verification and records measured
+RPO/RTO evidence before releasing the hold.
+
 The executable is an outward adapter in `rrflow-cli`. Authorization, repository
 construction, local authority opening, and mutation execution are one typed
 `RrdEngine` operation; `rrd-estate` owns state-machine contracts but no longer
@@ -52,7 +68,8 @@ owns or opens an admin executable.
 
 Authorization supplies the journal actor; callers cannot override it. Accepted
 mutations return the frozen `rrd-contract::EstateMutationResult`, or the
-separate `EstateBackupMutationResult`. Both contain the public estate
+separate `EstateBackupMutationResult`, or `EstateRecoveryMutationResult`. They
+contain the public estate
 projection and an `idempotent_replay` flag; the backup result also carries its
 strict job projection.
 

@@ -10,12 +10,17 @@ use rrd_contract::{
     TransactionMutation, VectorMemoryTier, VectorSearchMetric, VectorValueKind,
     RUNTIME_TOOL_CATALOGUE_VERSION,
 };
-use rrd_core::digest;
+use rrd_core::{digest, Claim, Predicate, Producer, Subject};
 use rrd_engine::{
     EstateAdminAction, EstateAdminResult, InstanceBinding, InstanceManifest, Invocation,
     InvocationCredential, RrdEngine, RrdOperation, SecurityBootstrapOutcome, ServiceError,
 };
-use rrd_estate::{LocalEstatePermission, LocalOperatorPolicy, LOCAL_OPERATOR_POLICY_FORMAT};
+use rrd_estate::{
+    DesiredPhase, DesiredTarget, EstateRepository, LeaseRequest, LocalEstatePermission,
+    LocalOperatorPolicy, MutationContext, ObservationRequest, ObservedPhase, ReceiptBoundary,
+    ReceiptRequest, ScheduleBackup, SetDesired, SetRecoveryPolicy, LOCAL_OPERATOR_POLICY_FORMAT,
+};
+use rrd_store::Engine;
 use serde_json::json;
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
@@ -580,4 +585,337 @@ fn public_admin_phase_type_does_not_reintroduce_a_physical_estate_dependency() {
         configuration_sha256: "a".repeat(64),
     };
     assert!(matches!(action, EstateAdminAction::SetDesired { .. }));
+}
+
+#[test]
+fn estate_recovery_prune_and_restore_are_one_fenced_engine_workflow() {
+    let temporary = tempfile::tempdir().unwrap();
+    let database = temporary.path().join("estate-authority");
+    let state_root = temporary.path().join("state");
+    for path in [
+        state_root.clone(),
+        state_root.join("instances"),
+        state_root.join("processes"),
+    ] {
+        fs::create_dir(&path).unwrap();
+    }
+    let state_root = fs::canonicalize(state_root).unwrap();
+    let source = state_root.join("instances/instance-a/.rrflow/rrd");
+    drop(rrd_store::PersistentEngine::open(&source).unwrap());
+
+    let key_path = temporary.path().join("operator.key");
+    let policy_path = temporary.path().join("operator.json");
+    let key = [23_u8; 32];
+    fs::write(&key_path, key).unwrap();
+    private(&key_path);
+    let policy = LocalOperatorPolicy {
+        format: LOCAL_OPERATOR_POLICY_FORMAT,
+        operator_id: canonical("operator-one"),
+        key_sha256: Sha256::digest(key)
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect(),
+        not_before_unix_ms: 1,
+        expires_at_unix_ms: 10_000,
+        estates: BTreeMap::from([(
+            "estate-a".into(),
+            BTreeSet::from([
+                LocalEstatePermission::PruneRecovery,
+                LocalEstatePermission::RestoreRecovery,
+            ]),
+        )]),
+    };
+    fs::write(&policy_path, serde_json::to_vec(&policy).unwrap()).unwrap();
+    private(&policy_path);
+
+    let authority = rrd_store::PersistentEngine::open(&database).unwrap();
+    let repository = EstateRepository::new(&authority, canonical("estate-a"));
+    let estate_context = |at, request: &str, operation: &str| MutationContext {
+        at,
+        actor: "operator-one".into(),
+        request_id: request.into(),
+        operation_id: canonical(operation),
+    };
+    repository
+        .create(&estate_context(10, "create-estate", "create-estate"))
+        .unwrap();
+    repository
+        .set_desired(&SetDesired {
+            context: estate_context(20, "stop-instance", "stop-instance"),
+            instance_id: canonical("instance-a"),
+            idempotency_key: "stop-instance".into(),
+            target: DesiredTarget {
+                phase: DesiredPhase::Stopped,
+                deployment_ref: canonical("rrd-server"),
+                version: "0.1.0".into(),
+                configuration_sha256: "a".repeat(64),
+            },
+        })
+        .unwrap();
+    repository
+        .acquire_lease(&LeaseRequest {
+            context: estate_context(30, "lease-stop", "stop-instance"),
+            worker: canonical("estate-worker"),
+            lease_ms: 1_000,
+        })
+        .unwrap();
+    for (at, request, boundary, evidence) in [
+        (40, "prepare-stop", ReceiptBoundary::Prepared, "b"),
+        (50, "apply-stop", ReceiptBoundary::Applied, "c"),
+    ] {
+        repository
+            .record_receipt(&ReceiptRequest {
+                context: estate_context(at, request, "stop-instance"),
+                worker: canonical("estate-worker"),
+                lease_epoch: 1,
+                boundary,
+                evidence_sha256: evidence.repeat(64),
+                error: None,
+            })
+            .unwrap();
+    }
+    repository
+        .record_observation(&ObservationRequest {
+            context: estate_context(60, "observe-stop", "stop-instance"),
+            worker: canonical("estate-worker"),
+            lease_epoch: 1,
+            phase: ObservedPhase::Stopped,
+            version: None,
+            process_id: None,
+            evidence_sha256: "d".repeat(64),
+            error: None,
+        })
+        .unwrap();
+    repository
+        .record_receipt(&ReceiptRequest {
+            context: estate_context(70, "complete-stop", "stop-instance"),
+            worker: canonical("estate-worker"),
+            lease_epoch: 1,
+            boundary: ReceiptBoundary::Completed,
+            evidence_sha256: "e".repeat(64),
+            error: None,
+        })
+        .unwrap();
+    repository
+        .set_recovery_policy(&SetRecoveryPolicy {
+            context: estate_context(75, "set-policy", "set-policy"),
+            instance_id: canonical("instance-a"),
+            idempotency_key: "set-policy".into(),
+            max_rpo_ms: 1_000,
+            max_rto_ms: 2_000,
+            minimum_recovery_points: 1,
+            retention_ms: 3_000,
+        })
+        .unwrap();
+    drop(authority);
+
+    for (job, scheduled_at) in [("backup-one", 100), ("backup-two", 200)] {
+        let authority = rrd_store::PersistentEngine::open(&database).unwrap();
+        EstateRepository::new(&authority, canonical("estate-a"))
+            .schedule_backup(&ScheduleBackup {
+                context: estate_context(scheduled_at, job, job),
+                instance_id: canonical("instance-a"),
+                idempotency_key: job.into(),
+                label: job.into(),
+            })
+            .unwrap();
+        drop(authority);
+        for at in [scheduled_at + 10, scheduled_at + 20, scheduled_at + 30] {
+            RrdEngine::reconcile_estate_backup_store(
+                &database,
+                canonical("estate-control-instance"),
+                &state_root,
+                canonical("estate-a"),
+                canonical("backup-worker"),
+                1_000,
+                at,
+                None,
+            )
+            .unwrap();
+        }
+    }
+    let before =
+        rrd_store::verify_backup_catalogue(&state_root.join("backups/instance-a")).unwrap();
+    assert_eq!(before.backups.len(), 2);
+    let first_id = before.backups[0].backup_id.clone();
+    let second_id = before.backups[1].backup_id.clone();
+
+    let pruned = RrdEngine::prune_estate_backups_store(
+        &database,
+        canonical("estate-control-instance"),
+        &state_root,
+        &policy_path,
+        &key_path,
+        canonical("estate-a"),
+        canonical("instance-a"),
+        4_000,
+        4_000,
+        "prune-request".into(),
+        canonical("prune-operation"),
+        "prune-daily".into(),
+    )
+    .unwrap();
+    assert!(!pruned.idempotent_replay);
+    assert_eq!(pruned.pruned_backup_ids, vec![first_id.clone()]);
+    assert_eq!(
+        pruned
+            .recovery
+            .recovery_points
+            .iter()
+            .find(|point| point.backup_sha256 == first_id)
+            .unwrap()
+            .pruned_at_unix_ms,
+        Some(4_000)
+    );
+    assert!(pruned.recovery.prune_intents.is_empty());
+    let physical =
+        rrd_store::verify_backup_catalogue(&state_root.join("backups/instance-a")).unwrap();
+    assert_eq!(physical.backups.len(), 1);
+    assert_eq!(physical.backups[0].backup_id, second_id);
+    let prune_replay = RrdEngine::prune_estate_backups_store(
+        &database,
+        canonical("estate-control-instance"),
+        &state_root,
+        &policy_path,
+        &key_path,
+        canonical("estate-a"),
+        canonical("instance-a"),
+        4_000,
+        4_000,
+        "prune-request".into(),
+        canonical("prune-operation"),
+        "prune-daily".into(),
+    )
+    .unwrap();
+    assert!(prune_replay.idempotent_replay);
+
+    let restored = RrdEngine::restore_estate_backup_store(
+        &database,
+        canonical("estate-control-instance"),
+        &state_root,
+        &policy_path,
+        &key_path,
+        canonical("estate-a"),
+        canonical("instance-a"),
+        second_id.clone(),
+        canonical("restore-one"),
+        4_100,
+        4_200,
+        "restore-request".into(),
+        canonical("restore-operation"),
+        "restore-daily".into(),
+    )
+    .unwrap();
+    assert!(!restored.idempotent_replay);
+    assert!(restored.reopened);
+    let evidence = restored
+        .recovery
+        .restore_evidence
+        .iter()
+        .find(|evidence| evidence.restore_id.as_str() == "restore-one")
+        .unwrap();
+    assert!(!evidence.rpo_within_objective);
+    assert!(evidence.rto_within_objective);
+    assert!(state_root
+        .join("restores/instance-a/restore-one/CURRENT")
+        .is_file());
+    assert!(state_root
+        .join("instances/instance-a/.rrflow/rrd/CURRENT")
+        .is_file());
+
+    let pruned_restore = RrdEngine::restore_estate_backup_store(
+        &database,
+        canonical("estate-control-instance"),
+        &state_root,
+        &policy_path,
+        &key_path,
+        canonical("estate-a"),
+        canonical("instance-a"),
+        first_id,
+        canonical("restore-pruned"),
+        4_205,
+        4_210,
+        "restore-pruned-request".into(),
+        canonical("restore-pruned-operation"),
+        "restore-pruned".into(),
+    )
+    .unwrap_err();
+    assert!(pruned_restore.to_string().contains("unavailable"));
+
+    let restore_replay = RrdEngine::restore_estate_backup_store(
+        &database,
+        canonical("estate-control-instance"),
+        &state_root,
+        &policy_path,
+        &key_path,
+        canonical("estate-a"),
+        canonical("instance-a"),
+        second_id.clone(),
+        canonical("restore-one"),
+        4_100,
+        4_200,
+        "restore-request".into(),
+        canonical("restore-operation"),
+        "restore-daily".into(),
+    )
+    .unwrap();
+    assert!(restore_replay.idempotent_replay);
+
+    let catalogue_root = state_root.join("backups/instance-a");
+    let gap_target = state_root.join("restores/instance-a/restore-gap");
+    rrd_store::restore_catalogued_backup(&catalogue_root, &second_id, &gap_target, 4_250).unwrap();
+    let recovered_gap = RrdEngine::restore_estate_backup_store(
+        &database,
+        canonical("estate-control-instance"),
+        &state_root,
+        &policy_path,
+        &key_path,
+        canonical("estate-a"),
+        canonical("instance-a"),
+        second_id.clone(),
+        canonical("restore-gap"),
+        4_250,
+        4_300,
+        "restore-gap-request".into(),
+        canonical("restore-gap-operation"),
+        "restore-gap".into(),
+    )
+    .unwrap();
+    assert!(recovered_gap.idempotent_replay);
+
+    let divergent_target = state_root.join("restores/instance-a/restore-divergent");
+    let divergent = rrd_store::PersistentEngine::open(&divergent_target).unwrap();
+    divergent
+        .append_batch(&[Claim::new(
+            Subject::new("restore:divergent").unwrap(),
+            Predicate::new("status").unwrap(),
+            "different",
+            4_350,
+            4_350,
+            Producer {
+                actor: "test:recovery".into(),
+                on_behalf_of: None,
+                session: None,
+            },
+        )])
+        .unwrap();
+    drop(divergent);
+    let divergent_error = RrdEngine::restore_estate_backup_store(
+        &database,
+        canonical("estate-control-instance"),
+        &state_root,
+        &policy_path,
+        &key_path,
+        canonical("estate-a"),
+        canonical("instance-a"),
+        second_id,
+        canonical("restore-divergent"),
+        4_350,
+        4_400,
+        "restore-divergent-request".into(),
+        canonical("restore-divergent-operation"),
+        "restore-divergent".into(),
+    )
+    .unwrap_err();
+    assert!(divergent_error.to_string().contains("watermarks differ"));
 }

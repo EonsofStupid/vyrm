@@ -273,6 +273,7 @@ fn estate_backup_jobs_are_a_separate_strict_public_resource() {
             attempts: 0,
             created_at_unix_ms: 80,
             updated_at_unix_ms: 80,
+            recovery_policy: None,
             lease: None,
             receipts: Vec::new(),
             backup_id: None,
@@ -304,6 +305,34 @@ fn estate_backup_jobs_are_a_separate_strict_public_resource() {
     let mut unknown = expected;
     unknown["jobs"][0]["unknown"] = serde_json::json!(true);
     assert!(serde_json::from_value::<EstateBackupJobsSnapshot>(unknown).is_err());
+}
+
+#[test]
+fn estate_recovery_posture_is_strict_bounded_by_identity_and_path_free() {
+    let recovery = serde_json::json!({
+        "estate_id": "estate-a",
+        "estate_revision": 12,
+        "policies": [{
+            "instance_id": "instance-a",
+            "revision": 1,
+            "max_rpo_ms": 86400000,
+            "max_rto_ms": 3600000,
+            "minimum_recovery_points": 2,
+            "retention_ms": 604800000,
+            "updated_at_unix_ms": 80
+        }],
+        "recovery_points": [],
+        "retention_pins": [],
+        "restore_evidence": [],
+        "prune_intents": []
+    });
+    let decoded: rrd_contract::EstateRecoverySnapshot =
+        serde_json::from_value(recovery.clone()).unwrap();
+    assert_eq!(decoded.policies[0].revision, 1);
+    assert!(!serde_json::to_string(&decoded).unwrap().contains("path"));
+    let mut unknown = recovery;
+    unknown["policies"][0]["target_path"] = serde_json::json!("/tmp/escape");
+    assert!(serde_json::from_value::<rrd_contract::EstateRecoverySnapshot>(unknown).is_err());
 }
 
 #[test]

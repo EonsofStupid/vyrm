@@ -2994,3 +2994,35 @@ index.
   estate suite and the exact four-test real child/controller recovery target
   pass locally with the corrected boundary. Remote Windows and aggregate
   qualification remain required.
+
+## 2026-08-28 — G02-W03 estate-owned retention and verified recovery candidate
+
+- Added one estate recovery authority: revisioned per-instance RPO/RTO,
+  minimum-point and retention policy; exact policy snapshots in backup request
+  identity; authenticated recovery points; expiring policy pins; explicit
+  holds; deterministic retention decisions; bounded restore evidence; and
+  path-free public snapshots. Legacy estate/backup JSON remains decodable.
+- Backup completion and recovery-point/policy-pin creation share one estate
+  CAS transition. Estate backup creation now retains the application-complete
+  archive, immutable-object closure, and catalogue closure rather than
+  promoting a logical-only archive into managed recovery posture.
+- Added authenticated catalogue prune with exact digest and complete disjoint
+  retained/candidate partition checks. Its successor carries bounded replay
+  evidence; publication precedes reclamation; shared archives, manifests, and
+  objects survive; stale, unknown, corrupt, overlapping, or resurrected
+  identities fail closed.
+- `RrdEngine` persists an estate prune intent before the physical effect. The
+  intent fences backup completion, policy, hold, and restore changes; exact
+  replay completes the storage effect and then records pruned history without
+  deleting recovery evidence. No second catalogue or transaction authority was
+  added.
+- Estate restore accepts identities only, places data under the fixed
+  `restores/<instance>/<restore-id>` hierarchy, refuses symlink/divergent
+  targets, holds the selected point during work, verifies archive/object/
+  catalogue closure and reopened watermarks, records measured RPO/RTO, and
+  releases the hold. The active instance root is never renamed or overwritten.
+- Extended the existing authorized estate admin and added the thin
+  `rrd-recovery-controller` adapter. Focused estate, store, engine, CLI, reopen,
+  shared-artifact, stale/corrupt partition, fencing, replay, and RPO/RTO tests
+  pass locally. Exact unchanged-tree matrix and remote candidate qualification
+  remain required before G02-W03 can be verified.

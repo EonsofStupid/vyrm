@@ -5,8 +5,8 @@ use rrd_core::{
 };
 use rrd_store::{
     create_application_backup, create_logical_backup, load_backup_catalogue,
-    restore_catalogued_backup, verify_backup_catalogue, BackupCoverage, ControlTransition,
-    DataRuntime, Engine, LocalObjectStore, NativeEngine,
+    prune_backup_catalogue, restore_catalogued_backup, verify_backup_catalogue, BackupCoverage,
+    BackupPrunePlan, ControlTransition, DataRuntime, Engine, LocalObjectStore, NativeEngine,
 };
 use std::fs::OpenOptions;
 use std::io::{Seek, SeekFrom, Write};
@@ -65,6 +65,103 @@ fn repeated_identical_backup_is_idempotent() {
     let catalogue = load_backup_catalogue(&catalogue_root).unwrap();
     assert_eq!(catalogue.revision, 1);
     assert_eq!(catalogue.backups.len(), 1);
+}
+
+#[test]
+fn authenticated_prune_is_partition_bound_replayable_and_preserves_shared_artifacts() {
+    let root = tempfile::tempdir().unwrap();
+    let engine = NativeEngine::open(&root.path().join("source")).unwrap();
+    let objects = LocalObjectStore::open(root.path().join("source-objects")).unwrap();
+    let catalogue_root = root.path().join("catalogue");
+    let first =
+        create_application_backup(&engine, &objects, &catalogue_root, "first", 100).unwrap();
+    let second =
+        create_application_backup(&engine, &objects, &catalogue_root, "second", 200).unwrap();
+    assert_eq!(first.archive_file, second.archive_file);
+    assert_eq!(first.object_manifest_file, second.object_manifest_file);
+    assert_eq!(
+        first.catalogue_manifest_file,
+        second.catalogue_manifest_file
+    );
+    let before = verify_backup_catalogue(&catalogue_root).unwrap();
+    let plan = BackupPrunePlan {
+        expected_catalogue_sha256: before.catalogue_sha256.clone(),
+        retained_backup_ids: vec![second.backup_id.clone()],
+        prune_candidate_backup_ids: vec![first.backup_id.clone()],
+    };
+
+    let pruned = prune_backup_catalogue(&catalogue_root, &plan).unwrap();
+    assert!(!pruned.idempotent_replay);
+    assert_eq!(pruned.pruned_backup_ids, vec![first.backup_id.clone()]);
+    assert_eq!(pruned.catalogue.revision, 3);
+    assert_eq!(pruned.catalogue.backups, vec![second.clone()]);
+    assert!(catalogue_root.join(&second.archive_file).is_file());
+    assert!(catalogue_root
+        .join(second.object_manifest_file.as_ref().unwrap())
+        .is_file());
+    assert!(catalogue_root
+        .join(second.catalogue_manifest_file.as_ref().unwrap())
+        .is_file());
+
+    let replay = prune_backup_catalogue(&catalogue_root, &plan).unwrap();
+    assert!(replay.idempotent_replay);
+    assert_eq!(
+        replay.catalogue.catalogue_sha256,
+        pruned.catalogue.catalogue_sha256
+    );
+    let stale = BackupPrunePlan {
+        expected_catalogue_sha256: before.catalogue_sha256,
+        retained_backup_ids: vec![second.backup_id],
+        prune_candidate_backup_ids: vec!["f".repeat(64)],
+    };
+    assert!(prune_backup_catalogue(&catalogue_root, &stale)
+        .unwrap_err()
+        .to_string()
+        .contains("stale"));
+    assert!(
+        create_application_backup(&engine, &objects, &catalogue_root, "first", 100)
+            .unwrap_err()
+            .to_string()
+            .contains("cannot be resurrected")
+    );
+}
+
+#[test]
+fn prune_rejects_incomplete_or_corrupt_inventory_before_publication() {
+    let root = tempfile::tempdir().unwrap();
+    let engine = NativeEngine::open(&root.path().join("source")).unwrap();
+    let catalogue_root = root.path().join("catalogue");
+    engine.append_batch(&[claim("one", 10)]).unwrap();
+    let first = create_logical_backup(&engine, &catalogue_root, "first", 100).unwrap();
+    engine.append_batch(&[claim("two", 20)]).unwrap();
+    let second = create_logical_backup(&engine, &catalogue_root, "second", 200).unwrap();
+    let before = verify_backup_catalogue(&catalogue_root).unwrap();
+    let incomplete = BackupPrunePlan {
+        expected_catalogue_sha256: before.catalogue_sha256.clone(),
+        retained_backup_ids: Vec::new(),
+        prune_candidate_backup_ids: vec![first.backup_id.clone()],
+    };
+    assert!(prune_backup_catalogue(&catalogue_root, &incomplete)
+        .unwrap_err()
+        .to_string()
+        .contains("complete disjoint"));
+
+    let catalogue_bytes = std::fs::read(catalogue_root.join("catalogue.json")).unwrap();
+    let archive = catalogue_root.join(&first.archive_file);
+    let mut file = OpenOptions::new().write(true).open(&archive).unwrap();
+    file.seek(SeekFrom::End(-1)).unwrap();
+    file.write_all(&[0x7f]).unwrap();
+    file.sync_all().unwrap();
+    let valid_partition = BackupPrunePlan {
+        expected_catalogue_sha256: before.catalogue_sha256,
+        retained_backup_ids: vec![second.backup_id],
+        prune_candidate_backup_ids: vec![first.backup_id],
+    };
+    assert!(prune_backup_catalogue(&catalogue_root, &valid_partition).is_err());
+    assert_eq!(
+        std::fs::read(catalogue_root.join("catalogue.json")).unwrap(),
+        catalogue_bytes
+    );
 }
 
 #[test]

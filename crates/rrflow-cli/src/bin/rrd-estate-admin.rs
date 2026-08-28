@@ -56,6 +56,13 @@ fn parse_args(mut arguments: impl Iterator<Item = String>) -> Result<Args, Strin
     let mut version = None;
     let mut configuration_sha256 = None;
     let mut label = None;
+    let mut max_rpo_ms = None;
+    let mut max_rto_ms = None;
+    let mut minimum_recovery_points = None;
+    let mut retention_ms = None;
+    let mut backup_sha256 = None;
+    let mut expires_at_unix_ms = None;
+    let mut pin_id = None;
     while let Some(argument) = arguments.next() {
         let value = required(&mut arguments, &argument)?;
         match argument.as_str() {
@@ -76,6 +83,27 @@ fn parse_args(mut arguments: impl Iterator<Item = String>) -> Result<Args, Strin
             "--version" => version = Some(value),
             "--configuration-sha256" => configuration_sha256 = Some(value),
             "--label" => label = Some(value),
+            "--max-rpo-ms" => {
+                max_rpo_ms = Some(value.parse().map_err(|_| "--max-rpo-ms must be u64")?)
+            }
+            "--max-rto-ms" => {
+                max_rto_ms = Some(value.parse().map_err(|_| "--max-rto-ms must be u64")?)
+            }
+            "--minimum-recovery-points" => {
+                minimum_recovery_points = Some(
+                    value
+                        .parse()
+                        .map_err(|_| "--minimum-recovery-points must be u16")?,
+                )
+            }
+            "--retention-ms" => {
+                retention_ms = Some(value.parse().map_err(|_| "--retention-ms must be u64")?)
+            }
+            "--backup-sha256" => backup_sha256 = Some(value),
+            "--expires-at" => {
+                expires_at_unix_ms = Some(value.parse().map_err(|_| "--expires-at must be u64")?)
+            }
+            "--pin" => pin_id = Some(canonical(value, "--pin")?),
             _ => return Err(format!("unknown option {argument:?}\n{}", usage())),
         }
     }
@@ -88,14 +116,29 @@ fn parse_args(mut arguments: impl Iterator<Item = String>) -> Result<Args, Strin
                 || version.is_some()
                 || configuration_sha256.is_some()
                 || label.is_some()
+                || max_rpo_ms.is_some()
+                || max_rto_ms.is_some()
+                || minimum_recovery_points.is_some()
+                || retention_ms.is_some()
+                || backup_sha256.is_some()
+                || expires_at_unix_ms.is_some()
+                || pin_id.is_some()
             {
                 return Err("create does not accept desired-state options".into());
             }
             EstateAdminAction::Create
         }
         "set-desired" => {
-            if label.is_some() {
-                return Err("set-desired does not accept --label".into());
+            if label.is_some()
+                || max_rpo_ms.is_some()
+                || max_rto_ms.is_some()
+                || minimum_recovery_points.is_some()
+                || retention_ms.is_some()
+                || backup_sha256.is_some()
+                || expires_at_unix_ms.is_some()
+                || pin_id.is_some()
+            {
+                return Err("set-desired received an unrelated option".into());
             }
             EstateAdminAction::SetDesired {
                 instance: instance.ok_or("--instance is required")?,
@@ -112,6 +155,13 @@ fn parse_args(mut arguments: impl Iterator<Item = String>) -> Result<Args, Strin
                 || deployment.is_some()
                 || version.is_some()
                 || configuration_sha256.is_some()
+                || max_rpo_ms.is_some()
+                || max_rto_ms.is_some()
+                || minimum_recovery_points.is_some()
+                || retention_ms.is_some()
+                || backup_sha256.is_some()
+                || expires_at_unix_ms.is_some()
+                || pin_id.is_some()
             {
                 return Err("schedule-backup does not accept desired-state options".into());
             }
@@ -119,6 +169,70 @@ fn parse_args(mut arguments: impl Iterator<Item = String>) -> Result<Args, Strin
                 instance: instance.ok_or("--instance is required")?,
                 idempotency_key: idempotency_key.ok_or("--idempotency is required")?,
                 label: label.ok_or("--label is required")?,
+            }
+        }
+        "set-recovery-policy" => {
+            if phase.is_some()
+                || deployment.is_some()
+                || version.is_some()
+                || configuration_sha256.is_some()
+                || label.is_some()
+                || backup_sha256.is_some()
+                || expires_at_unix_ms.is_some()
+                || pin_id.is_some()
+            {
+                return Err("set-recovery-policy received an unrelated option".into());
+            }
+            EstateAdminAction::SetRecoveryPolicy {
+                instance: instance.ok_or("--instance is required")?,
+                idempotency_key: idempotency_key.ok_or("--idempotency is required")?,
+                max_rpo_ms: max_rpo_ms.ok_or("--max-rpo-ms is required")?,
+                max_rto_ms: max_rto_ms.ok_or("--max-rto-ms is required")?,
+                minimum_recovery_points: minimum_recovery_points
+                    .ok_or("--minimum-recovery-points is required")?,
+                retention_ms: retention_ms.ok_or("--retention-ms is required")?,
+            }
+        }
+        "pin-recovery-point" => {
+            if instance.is_some()
+                || phase.is_some()
+                || deployment.is_some()
+                || version.is_some()
+                || configuration_sha256.is_some()
+                || label.is_some()
+                || max_rpo_ms.is_some()
+                || max_rto_ms.is_some()
+                || minimum_recovery_points.is_some()
+                || retention_ms.is_some()
+                || pin_id.is_some()
+            {
+                return Err("pin-recovery-point received an unrelated option".into());
+            }
+            EstateAdminAction::PinRecoveryPoint {
+                idempotency_key: idempotency_key.ok_or("--idempotency is required")?,
+                backup_sha256: backup_sha256.ok_or("--backup-sha256 is required")?,
+                expires_at_unix_ms,
+            }
+        }
+        "release-recovery-pin" => {
+            if instance.is_some()
+                || phase.is_some()
+                || deployment.is_some()
+                || version.is_some()
+                || configuration_sha256.is_some()
+                || label.is_some()
+                || max_rpo_ms.is_some()
+                || max_rto_ms.is_some()
+                || minimum_recovery_points.is_some()
+                || retention_ms.is_some()
+                || backup_sha256.is_some()
+                || expires_at_unix_ms.is_some()
+            {
+                return Err("release-recovery-pin received an unrelated option".into());
+            }
+            EstateAdminAction::ReleaseRecoveryPin {
+                idempotency_key: idempotency_key.ok_or("--idempotency is required")?,
+                pin_id: pin_id.ok_or("--pin is required")?,
             }
         }
         _ => return Err(usage().into()),
@@ -156,7 +270,7 @@ fn parse_phase(value: &str) -> Result<EstateDesiredPhase, String> {
 }
 
 fn usage() -> &'static str {
-    "usage: rrd-estate-admin <create|set-desired|schedule-backup> --db PATH --authority-instance ID --policy PATH --key PATH --estate ID --at UNIX_MS --request ID --operation ID [--instance ID --idempotency KEY] [--phase running|stopped|absent --deployment ID --version VERSION --configuration-sha256 SHA256] [--label LABEL]"
+    "usage: rrd-estate-admin <create|set-desired|schedule-backup|set-recovery-policy|pin-recovery-point|release-recovery-pin> --db PATH --authority-instance ID --policy PATH --key PATH --estate ID --at UNIX_MS --request ID --operation ID [--instance ID --idempotency KEY] [--phase running|stopped|absent --deployment ID --version VERSION --configuration-sha256 SHA256] [--label LABEL] [--max-rpo-ms MS --max-rto-ms MS --minimum-recovery-points COUNT --retention-ms MS] [--backup-sha256 SHA256 --expires-at UNIX_MS] [--pin ID]"
 }
 
 #[cfg(test)]

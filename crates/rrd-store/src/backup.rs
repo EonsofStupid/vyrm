@@ -9,6 +9,7 @@ use crate::{
 use rrd_core::digest;
 use rrd_core::{ObjectReference, RuntimeMutation, ScopeId};
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeSet;
 use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::{Component, Path, PathBuf};
@@ -26,6 +27,7 @@ const CATALOGUE_MANIFEST_VERSION: u16 = 1;
 const MAX_ARCHIVE_OBJECTS: usize = 1_000_000;
 const MAX_ARCHIVE_CATALOGUE_RECORDS: usize = 1_000_000;
 const MAX_ARCHIVE_MANIFEST_BYTES: u64 = 256 * 1024 * 1024;
+pub const MAX_BACKUP_PRUNE_RECEIPTS: usize = 4_096;
 static BACKUP_TEMP_ID: AtomicU64 = AtomicU64::new(1);
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -142,6 +144,32 @@ pub struct BackupCatalogue {
     pub revision: u64,
     pub catalogue_sha256: String,
     pub backups: Vec<BackupEntry>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub prune_receipts: Vec<BackupPruneReceipt>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BackupPrunePlan {
+    pub expected_catalogue_sha256: String,
+    pub retained_backup_ids: Vec<String>,
+    pub prune_candidate_backup_ids: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BackupPruneReceipt {
+    pub request_sha256: String,
+    pub expected_catalogue_sha256: String,
+    pub retained_backup_ids: Vec<String>,
+    pub removed_backups: Vec<BackupEntry>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BackupPruneOutcome {
+    pub catalogue: BackupCatalogue,
+    pub pruned_backup_ids: Vec<String>,
+    pub idempotent_replay: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -150,6 +178,8 @@ struct CataloguePayload {
     format_version: u16,
     revision: u64,
     backups: Vec<BackupEntry>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    prune_receipts: Vec<BackupPruneReceipt>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -216,6 +246,7 @@ pub fn create_logical_backup<E: Engine>(
     };
 
     let mut catalogue = load_backup_catalogue(catalogue_root)?;
+    deny_pruned_identity_reuse(&catalogue, &entry.backup_id)?;
     if let Some(existing) = catalogue
         .backups
         .iter()
@@ -325,6 +356,7 @@ pub fn load_backup_catalogue(catalogue_root: &Path) -> Result<BackupCatalogue> {
             format_version: BACKUP_CATALOGUE_VERSION,
             revision: 0,
             backups: Vec::new(),
+            prune_receipts: Vec::new(),
         });
     }
     let bytes = fs::read(&path).map_err(backup_io)?;
@@ -342,11 +374,13 @@ pub fn load_backup_catalogue(catalogue_root: &Path) -> Result<BackupCatalogue> {
         ));
     }
     validate_entries(&stored.payload.backups)?;
+    validate_prune_receipts(&stored.payload.prune_receipts)?;
     Ok(BackupCatalogue {
         format_version: stored.payload.format_version,
         revision: stored.payload.revision,
         catalogue_sha256: actual,
         backups: stored.payload.backups,
+        prune_receipts: stored.payload.prune_receipts,
     })
 }
 
@@ -368,6 +402,101 @@ pub fn verify_backup_catalogue(catalogue_root: &Path) -> Result<BackupCatalogue>
         }
     }
     Ok(catalogue)
+}
+
+/// Publishes one authenticated successor catalogue for a complete retention
+/// partition, then reclaims only artifacts that no retained entry references.
+/// Exact replay is recovered from the bounded receipt embedded in the
+/// authenticated catalogue.
+pub fn prune_backup_catalogue(
+    catalogue_root: &Path,
+    plan: &BackupPrunePlan,
+) -> Result<BackupPruneOutcome> {
+    validate_prune_plan(plan)?;
+    let request_sha256 = digest::sha256_hex(&serde_json::to_vec(plan)?);
+    let mut catalogue = verify_backup_catalogue(catalogue_root)?;
+    if let Some(receipt) = catalogue
+        .prune_receipts
+        .iter()
+        .find(|receipt| receipt.request_sha256 == request_sha256)
+        .cloned()
+    {
+        cleanup_pruned_artifacts(catalogue_root, &receipt.removed_backups, &catalogue.backups)?;
+        return Ok(BackupPruneOutcome {
+            catalogue,
+            pruned_backup_ids: sorted_backup_ids(
+                receipt
+                    .removed_backups
+                    .iter()
+                    .map(|entry| entry.backup_id.clone())
+                    .collect(),
+            ),
+            idempotent_replay: true,
+        });
+    }
+    if catalogue.catalogue_sha256 != plan.expected_catalogue_sha256 {
+        return Err(Error::Archive(
+            "backup prune expected catalogue digest is stale".into(),
+        ));
+    }
+    if catalogue.prune_receipts.len() == MAX_BACKUP_PRUNE_RECEIPTS {
+        return Err(Error::Archive(
+            "backup prune receipt history is at its v1 bound".into(),
+        ));
+    }
+    let current = catalogue
+        .backups
+        .iter()
+        .map(|entry| entry.backup_id.clone())
+        .collect::<BTreeSet<_>>();
+    let retained = plan
+        .retained_backup_ids
+        .iter()
+        .cloned()
+        .collect::<BTreeSet<_>>();
+    let candidates = plan
+        .prune_candidate_backup_ids
+        .iter()
+        .cloned()
+        .collect::<BTreeSet<_>>();
+    if !retained.is_disjoint(&candidates)
+        || retained
+            .union(&candidates)
+            .cloned()
+            .collect::<BTreeSet<_>>()
+            != current
+    {
+        return Err(Error::Archive(
+            "backup prune plan is not a complete disjoint catalogue partition".into(),
+        ));
+    }
+    let removed_backups = catalogue
+        .backups
+        .iter()
+        .filter(|entry| candidates.contains(&entry.backup_id))
+        .cloned()
+        .collect::<Vec<_>>();
+    catalogue
+        .backups
+        .retain(|entry| retained.contains(&entry.backup_id));
+    catalogue.revision = catalogue
+        .revision
+        .checked_add(1)
+        .ok_or_else(|| Error::Archive("backup catalogue revision overflow".into()))?;
+    catalogue.prune_receipts.push(BackupPruneReceipt {
+        request_sha256,
+        expected_catalogue_sha256: plan.expected_catalogue_sha256.clone(),
+        retained_backup_ids: plan.retained_backup_ids.clone(),
+        removed_backups: removed_backups.clone(),
+    });
+    write_catalogue(catalogue_root, catalogue)?;
+    let catalogue = verify_backup_catalogue(catalogue_root)?;
+    cleanup_pruned_artifacts(catalogue_root, &removed_backups, &catalogue.backups)?;
+    Ok(BackupPruneOutcome {
+        catalogue,
+        pruned_backup_ids: plan.prune_candidate_backup_ids.clone(),
+        idempotent_replay: false,
+    })
 }
 
 pub fn restore_catalogued_backup(
@@ -453,6 +582,7 @@ fn retain_content_addressed_file(
 
 fn retain_catalogue_entry(catalogue_root: &Path, entry: BackupEntry) -> Result<BackupEntry> {
     let mut catalogue = load_backup_catalogue(catalogue_root)?;
+    deny_pruned_identity_reuse(&catalogue, &entry.backup_id)?;
     if let Some(existing) = catalogue
         .backups
         .iter()
@@ -1057,6 +1187,7 @@ fn catalogue_from_payload(payload: CataloguePayload) -> Result<BackupCatalogue> 
         revision: payload.revision,
         catalogue_sha256: payload_digest(&payload)?,
         backups: payload.backups,
+        prune_receipts: payload.prune_receipts,
     })
 }
 
@@ -1065,8 +1196,10 @@ fn write_catalogue(root: &Path, catalogue: BackupCatalogue) -> Result<()> {
         format_version: BACKUP_CATALOGUE_VERSION,
         revision: catalogue.revision,
         backups: catalogue.backups,
+        prune_receipts: catalogue.prune_receipts,
     };
     validate_entries(&payload.backups)?;
+    validate_prune_receipts(&payload.prune_receipts)?;
     let stored = StoredCatalogue {
         payload_sha256: payload_digest(&payload)?,
         payload,
@@ -1094,6 +1227,182 @@ fn write_catalogue(root: &Path, catalogue: BackupCatalogue) -> Result<()> {
 
 fn payload_digest(payload: &CataloguePayload) -> Result<String> {
     Ok(digest::sha256_hex(&serde_json::to_vec(payload)?))
+}
+
+fn validate_prune_plan(plan: &BackupPrunePlan) -> Result<()> {
+    validate_sha256_text(
+        &plan.expected_catalogue_sha256,
+        "backup prune expected catalogue",
+    )?;
+    if plan.prune_candidate_backup_ids.is_empty() {
+        return Err(Error::Archive(
+            "backup prune requires at least one candidate".into(),
+        ));
+    }
+    validate_ordered_backup_ids(&plan.retained_backup_ids, "retained backup")?;
+    validate_ordered_backup_ids(&plan.prune_candidate_backup_ids, "backup prune candidate")
+}
+
+fn validate_prune_receipts(receipts: &[BackupPruneReceipt]) -> Result<()> {
+    if receipts.len() > MAX_BACKUP_PRUNE_RECEIPTS {
+        return Err(Error::Archive(
+            "backup prune receipt history exceeds its v1 bound".into(),
+        ));
+    }
+    let mut requests = BTreeSet::new();
+    let mut removed_identities = BTreeSet::new();
+    for receipt in receipts {
+        validate_sha256_text(&receipt.request_sha256, "backup prune request")?;
+        validate_sha256_text(
+            &receipt.expected_catalogue_sha256,
+            "backup prune expected catalogue",
+        )?;
+        if !requests.insert(receipt.request_sha256.as_str()) {
+            return Err(Error::Archive(
+                "backup prune receipt request identity is duplicated".into(),
+            ));
+        }
+        validate_ordered_backup_ids(&receipt.retained_backup_ids, "retained backup")?;
+        if receipt.removed_backups.is_empty() {
+            return Err(Error::Archive(
+                "backup prune receipt has no removed backup".into(),
+            ));
+        }
+        validate_entries(&receipt.removed_backups)?;
+        for entry in &receipt.removed_backups {
+            if receipt
+                .retained_backup_ids
+                .binary_search(&entry.backup_id)
+                .is_ok()
+                || !removed_identities.insert(entry.backup_id.as_str())
+            {
+                return Err(Error::Archive(
+                    "backup prune receipt identity is inconsistent".into(),
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn validate_ordered_backup_ids(values: &[String], name: &str) -> Result<()> {
+    let mut previous: Option<&str> = None;
+    for value in values {
+        validate_sha256_text(value, name)?;
+        if previous.is_some_and(|prior| prior >= value.as_str()) {
+            return Err(Error::Archive(format!(
+                "{name} identities are not uniquely ordered"
+            )));
+        }
+        previous = Some(value);
+    }
+    Ok(())
+}
+
+fn validate_sha256_text(value: &str, name: &str) -> Result<()> {
+    if value.len() != 64
+        || !value
+            .bytes()
+            .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+    {
+        return Err(Error::Archive(format!("{name} identity is invalid")));
+    }
+    Ok(())
+}
+
+fn sorted_backup_ids(mut values: Vec<String>) -> Vec<String> {
+    values.sort();
+    values
+}
+
+fn deny_pruned_identity_reuse(catalogue: &BackupCatalogue, backup_id: &str) -> Result<()> {
+    if catalogue.prune_receipts.iter().any(|receipt| {
+        receipt
+            .removed_backups
+            .iter()
+            .any(|entry| entry.backup_id == backup_id)
+    }) {
+        return Err(Error::Archive(
+            "a pruned backup identity cannot be resurrected".into(),
+        ));
+    }
+    Ok(())
+}
+
+fn cleanup_pruned_artifacts(
+    catalogue_root: &Path,
+    removed: &[BackupEntry],
+    retained: &[BackupEntry],
+) -> Result<()> {
+    let mut retained_files = BTreeSet::new();
+    let mut retained_objects = BTreeSet::new();
+    for entry in retained {
+        retained_files.insert(entry.archive_file.clone());
+        if let Some(path) = &entry.object_manifest_file {
+            retained_files.insert(path.clone());
+            retained_objects.extend(
+                load_object_manifest_for_entry(catalogue_root, entry)?
+                    .objects
+                    .into_iter()
+                    .map(|object| object.sha256),
+            );
+        }
+        if let Some(path) = &entry.catalogue_manifest_file {
+            retained_files.insert(path.clone());
+        }
+    }
+    let mut removed_files = BTreeSet::new();
+    let mut removed_objects = BTreeSet::new();
+    for entry in removed {
+        removed_files.insert(entry.archive_file.clone());
+        if let Some(path) = &entry.object_manifest_file {
+            let manifest_path = resolve_object_manifest(catalogue_root, path)?;
+            if manifest_path.exists() {
+                removed_objects.extend(
+                    load_object_manifest_for_entry(catalogue_root, entry)?
+                        .objects
+                        .into_iter()
+                        .map(|object| object.sha256),
+                );
+            }
+            removed_files.insert(path.clone());
+        }
+        if let Some(path) = &entry.catalogue_manifest_file {
+            removed_files.insert(path.clone());
+        }
+    }
+    let unreachable_objects = removed_objects
+        .difference(&retained_objects)
+        .cloned()
+        .collect::<BTreeSet<_>>();
+    LocalObjectStore::open(catalogue_root.join(OBJECT_PAYLOAD_DIRECTORY))?
+        .reclaim_orphans(&unreachable_objects)?;
+    for relative in removed_files.difference(&retained_files) {
+        let path = if relative.starts_with(&format!("{ARCHIVE_DIRECTORY}/")) {
+            resolve_archive(catalogue_root, relative)?
+        } else if relative.starts_with(&format!("{OBJECT_MANIFEST_DIRECTORY}/")) {
+            resolve_object_manifest(catalogue_root, relative)?
+        } else {
+            resolve_catalogue_manifest(catalogue_root, relative)?
+        };
+        match fs::remove_file(&path) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(backup_io(error)),
+        }
+    }
+    for directory in [
+        ARCHIVE_DIRECTORY,
+        OBJECT_MANIFEST_DIRECTORY,
+        CATALOGUE_MANIFEST_DIRECTORY,
+        OBJECT_PAYLOAD_DIRECTORY,
+    ] {
+        let path = catalogue_root.join(directory);
+        if path.is_dir() {
+            rrd_lsm::sync_directory(&path).map_err(backup_io)?;
+        }
+    }
+    Ok(())
 }
 
 fn validate_entries(entries: &[BackupEntry]) -> Result<()> {

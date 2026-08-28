@@ -2572,6 +2572,16 @@ pub struct EstateBackupReceiptSnapshot {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
+pub struct EstateBackupRecoveryPolicySnapshot {
+    pub revision: u64,
+    pub max_rpo_ms: u64,
+    pub max_rto_ms: u64,
+    pub minimum_recovery_points: u16,
+    pub retention_ms: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct EstateBackupJobSnapshot {
     pub id: CanonicalId,
     pub instance_id: CanonicalId,
@@ -2582,6 +2592,8 @@ pub struct EstateBackupJobSnapshot {
     pub attempts: u32,
     pub created_at_unix_ms: u64,
     pub updated_at_unix_ms: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub recovery_policy: Option<EstateBackupRecoveryPolicySnapshot>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub lease: Option<EstateLeaseSnapshot>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -2609,6 +2621,138 @@ pub struct EstateBackupJobsSnapshot {
 pub struct EstateBackupMutationResult {
     pub estate: EstateSnapshot,
     pub job: EstateBackupJobSnapshot,
+    pub idempotent_replay: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct EstateRecoveryPolicySnapshot {
+    pub instance_id: CanonicalId,
+    pub revision: u64,
+    pub max_rpo_ms: u64,
+    pub max_rto_ms: u64,
+    pub minimum_recovery_points: u16,
+    pub retention_ms: u64,
+    pub updated_at_unix_ms: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct EstateRecoveryPointSnapshot {
+    pub backup_sha256: String,
+    pub instance_id: CanonicalId,
+    pub backup_job_id: CanonicalId,
+    pub source_generation: u64,
+    pub archive_sha256: String,
+    pub catalogue_sha256: String,
+    pub source_cut_at_unix_ms: u64,
+    pub completed_at_unix_ms: u64,
+    pub policy_revision: u64,
+    pub max_rpo_ms: u64,
+    pub max_rto_ms: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pruned_at_unix_ms: Option<u64>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum EstateRetentionPinKindSnapshot {
+    Policy,
+    ExplicitHold,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct EstateRetentionPinSnapshot {
+    pub id: CanonicalId,
+    pub backup_sha256: String,
+    pub kind: EstateRetentionPinKindSnapshot,
+    pub created_at_unix_ms: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expires_at_unix_ms: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub released_at_unix_ms: Option<u64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct EstateRestoreEvidenceSnapshot {
+    pub restore_id: CanonicalId,
+    pub instance_id: CanonicalId,
+    pub backup_sha256: String,
+    pub started_at_unix_ms: u64,
+    pub completed_at_unix_ms: u64,
+    pub duration_ms: u64,
+    pub recovery_point_age_ms: u64,
+    pub restored_claim_sequence: u64,
+    pub restored_runtime_cursor: u64,
+    pub closure_sha256: String,
+    pub policy_revision: u64,
+    pub rpo_within_objective: bool,
+    pub rto_within_objective: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct EstateRecoveryPruneIntentSnapshot {
+    pub id: CanonicalId,
+    pub instance_id: CanonicalId,
+    pub based_on_estate_revision: u64,
+    pub evaluated_at_unix_ms: u64,
+    pub expected_catalogue_sha256: String,
+    pub retained_backup_ids: Vec<String>,
+    pub prune_candidate_backup_ids: Vec<String>,
+    pub created_at_unix_ms: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct EstateRecoverySnapshot {
+    pub estate_id: CanonicalId,
+    pub estate_revision: u64,
+    pub policies: Vec<EstateRecoveryPolicySnapshot>,
+    pub recovery_points: Vec<EstateRecoveryPointSnapshot>,
+    pub retention_pins: Vec<EstateRetentionPinSnapshot>,
+    pub restore_evidence: Vec<EstateRestoreEvidenceSnapshot>,
+    pub prune_intents: Vec<EstateRecoveryPruneIntentSnapshot>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct EstateRetentionDecisionSnapshot {
+    pub estate_revision: u64,
+    pub instance_id: CanonicalId,
+    pub evaluated_at_unix_ms: u64,
+    pub retained_backup_ids: Vec<String>,
+    pub prune_candidate_backup_ids: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct EstateRecoveryMutationResult {
+    pub recovery: EstateRecoverySnapshot,
+    pub idempotent_replay: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct EstateRecoveryPruneResult {
+    pub recovery: EstateRecoverySnapshot,
+    pub decision: EstateRetentionDecisionSnapshot,
+    pub catalogue_revision: u64,
+    pub catalogue_sha256: String,
+    pub pruned_backup_ids: Vec<String>,
+    pub idempotent_replay: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct EstateRecoveryRestoreResult {
+    pub recovery: EstateRecoverySnapshot,
+    pub restore_id: CanonicalId,
+    pub backup_sha256: String,
+    pub inventory: LogicalArchiveSnapshot,
+    pub reopened: bool,
     pub idempotent_replay: bool,
 }
 

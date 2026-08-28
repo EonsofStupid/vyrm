@@ -243,6 +243,7 @@ fn outward_cli_owns_product_executables_while_physical_crates_own_none() {
         "rrd-backup-controller",
         "rrd-estate-admin",
         "rrd-estate-controller",
+        "rrd-recovery-controller",
         "rrd-security-bootstrap",
     ]);
     let cli_targets = &metadata.packages["rrflow-cli"].targets;

@@ -355,7 +355,9 @@ fn public_backup_coverage(
     }
 }
 
-fn public_archive(inventory: &rrd_store::LogicalArchiveInventory) -> LogicalArchiveSnapshot {
+pub(super) fn public_archive(
+    inventory: &rrd_store::LogicalArchiveInventory,
+) -> LogicalArchiveSnapshot {
     LogicalArchiveSnapshot {
         format_version: inventory.format_version,
         contract_version: inventory.contract_version,

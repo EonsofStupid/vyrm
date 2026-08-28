@@ -59,6 +59,8 @@ pub struct EstateBackupJob {
     pub created_at: u64,
     pub updated_at: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub recovery_policy: Option<BackupRecoveryPolicySnapshot>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub lease: Option<OperationLease>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub receipts: Vec<BackupJobReceipt>,
@@ -70,6 +72,16 @@ pub struct EstateBackupJob {
     pub catalogue_sha256: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BackupRecoveryPolicySnapshot {
+    pub revision: u64,
+    pub max_rpo_ms: u64,
+    pub max_rto_ms: u64,
+    pub minimum_recovery_points: u16,
+    pub retention_ms: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -151,8 +163,12 @@ impl<'a, E: Engine + ?Sized> EstateRepository<'a, E> {
                 .get(binding.job_id.as_str())
                 .cloned()
                 .ok_or_else(|| Error::Invalid("backup idempotency job is missing".into()))?;
-            let request_sha256 =
-                backup_request_sha256(&request.instance_id, job.source_generation, &request.label);
+            let request_sha256 = backup_request_sha256(
+                &request.instance_id,
+                job.source_generation,
+                &request.label,
+                job.recovery_policy.as_ref(),
+            );
             if binding.request_sha256 != request_sha256
                 || job.request_sha256 != request_sha256
                 || job.id != request.context.operation_id
@@ -180,22 +196,42 @@ impl<'a, E: Engine + ?Sized> EstateRepository<'a, E> {
                 "estate backup job history is at its v1 bound".into(),
             ));
         }
-        let instance = document
-            .instances
-            .get(request.instance_id.as_str())
-            .ok_or_else(|| Error::NotFound(request.instance_id.to_string()))?;
-        if instance.desired.phase != super::DesiredPhase::Stopped
-            || instance.observed.phase != ObservedPhase::Stopped
-            || instance.observed.generation != instance.desired.generation
-            || instance.observed.process_id.is_some()
-        {
-            return Err(Error::Invalid(
-                "local backup requires desired and observed stopped at the same generation".into(),
-            ));
-        }
-        let source_generation = instance.desired.generation;
-        let request_sha256 =
-            backup_request_sha256(&request.instance_id, source_generation, &request.label);
+        let source_generation = {
+            let instance = document
+                .instances
+                .get(request.instance_id.as_str())
+                .ok_or_else(|| Error::NotFound(request.instance_id.to_string()))?;
+            if instance.desired.phase != super::DesiredPhase::Stopped
+                || instance.observed.phase != ObservedPhase::Stopped
+                || instance.observed.generation != instance.desired.generation
+                || instance.observed.process_id.is_some()
+            {
+                return Err(Error::Invalid(
+                    "local backup requires desired and observed stopped at the same generation"
+                        .into(),
+                ));
+            }
+            instance.desired.generation
+        };
+        let policy = super::recovery::ensure_recovery_policy(
+            &mut document,
+            &request.instance_id,
+            request.context.at,
+        )?;
+        super::recovery::deny_active_recovery_prune(&document, &request.instance_id)?;
+        let recovery_policy = BackupRecoveryPolicySnapshot {
+            revision: policy.revision,
+            max_rpo_ms: policy.max_rpo_ms,
+            max_rto_ms: policy.max_rto_ms,
+            minimum_recovery_points: policy.minimum_recovery_points,
+            retention_ms: policy.retention_ms,
+        };
+        let request_sha256 = backup_request_sha256(
+            &request.instance_id,
+            source_generation,
+            &request.label,
+            Some(&recovery_policy),
+        );
         let job = EstateBackupJob {
             id: request.context.operation_id.clone(),
             instance_id: request.instance_id.clone(),
@@ -206,6 +242,7 @@ impl<'a, E: Engine + ?Sized> EstateRepository<'a, E> {
             attempts: 0,
             created_at: request.context.at,
             updated_at: request.context.at,
+            recovery_policy: Some(recovery_policy),
             lease: None,
             receipts: Vec::new(),
             backup_id: None,
@@ -339,6 +376,12 @@ impl<'a, E: Engine + ?Sized> EstateRepository<'a, E> {
         validate_context(&request.context)?;
         validate_backup_result_fields(&request.result)?;
         self.update(&request.context, "estate.backup.completed", |document| {
+            let instance_id = document
+                .backup_jobs
+                .get(request.context.operation_id.as_str())
+                .map(|job| job.instance_id.clone())
+                .ok_or_else(|| Error::NotFound(request.context.operation_id.to_string()))?;
+            super::recovery::deny_active_recovery_prune(document, &instance_id)?;
             let job = backup_job_mut(document, &request.context.operation_id)?;
             if job.state == BackupJobState::Succeeded {
                 if job.backup_id.as_ref() == Some(&request.result.backup_id)
@@ -378,6 +421,12 @@ impl<'a, E: Engine + ?Sized> EstateRepository<'a, E> {
             job.state = BackupJobState::Succeeded;
             job.updated_at = request.context.at;
             job.error = None;
+            let job_id = job.id.clone();
+            super::recovery::record_completed_recovery_point(
+                document,
+                &job_id,
+                request.context.at,
+            )?;
             Ok(())
         })
     }
@@ -507,6 +556,15 @@ pub fn public_backup_job(job: &EstateBackupJob) -> rrd_contract::EstateBackupJob
         archive_sha256: job.archive_sha256.clone(),
         catalogue_sha256: job.catalogue_sha256.clone(),
         error: job.error.clone(),
+        recovery_policy: job.recovery_policy.as_ref().map(|policy| {
+            rrd_contract::EstateBackupRecoveryPolicySnapshot {
+                revision: policy.revision,
+                max_rpo_ms: policy.max_rpo_ms,
+                max_rto_ms: policy.max_rto_ms,
+                minimum_recovery_points: policy.minimum_recovery_points,
+                retention_ms: policy.retention_ms,
+            }
+        }),
     }
 }
 
@@ -529,6 +587,21 @@ pub(crate) fn validate_backup_state(document: &EstateDocument) -> Result<()> {
         {
             return Err(Error::Invalid(format!("backup job {} is invalid", job.id)));
         }
+        if let Some(policy) = &job.recovery_policy {
+            if policy.revision == 0
+                || policy.max_rpo_ms == 0
+                || policy.max_rto_ms == 0
+                || policy.minimum_recovery_points == 0
+                || policy.retention_ms < policy.max_rpo_ms
+            {
+                return Err(Error::Invalid(format!(
+                    "backup job {} recovery policy is invalid",
+                    job.id
+                )));
+            }
+        }
+        // Legacy jobs may predate estate-owned policy bindings. They remain
+        // readable, but completion refuses to promote one into a recovery point.
         if job.receipts.len() > MAX_BACKUP_RECEIPTS_PER_JOB {
             return Err(Error::Invalid("backup receipt limit exceeded".into()));
         }
@@ -716,13 +789,19 @@ fn validate_backup_label(label: &str) -> Result<()> {
     Ok(())
 }
 
-fn backup_request_sha256(instance_id: &CanonicalId, source_generation: u64, label: &str) -> String {
+fn backup_request_sha256(
+    instance_id: &CanonicalId,
+    source_generation: u64,
+    label: &str,
+    recovery_policy: Option<&BackupRecoveryPolicySnapshot>,
+) -> String {
     digest::sha256_hex(
         &serde_json::to_vec(&(
             "rrd-estate-backup-create-v1",
             instance_id,
             source_generation,
             label,
+            recovery_policy,
         ))
         .expect("backup request fields serialize"),
     )

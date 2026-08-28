@@ -9,13 +9,14 @@ mod backup_reconcile;
 mod local_authorization;
 mod local_process;
 mod reconcile;
+mod recovery;
 
 pub use backup_job::{
     public_backup_job, public_backup_jobs, BackupCompleteRequest, BackupFailRequest,
     BackupIdempotencyBinding, BackupJobReceipt, BackupJobState, BackupLeaseRequest,
-    BackupPreparedRequest, BackupReceiptBoundary, BackupResult, BackupScheduleOutcome,
-    EstateBackupJob, ScheduleBackup, MAX_BACKUP_IDEMPOTENCY_BINDINGS, MAX_BACKUP_JOBS,
-    MAX_BACKUP_RECEIPTS_PER_JOB,
+    BackupPreparedRequest, BackupReceiptBoundary, BackupRecoveryPolicySnapshot, BackupResult,
+    BackupScheduleOutcome, EstateBackupJob, ScheduleBackup, MAX_BACKUP_IDEMPOTENCY_BINDINGS,
+    MAX_BACKUP_JOBS, MAX_BACKUP_RECEIPTS_PER_JOB,
 };
 pub use backup_reconcile::{
     BackupDriverRequest, BackupReconcileBoundary, BackupReconcileOutcome, BackupReconciler,
@@ -32,6 +33,15 @@ pub use local_process::{
 pub use reconcile::{
     DriverEffect, DriverError, DriverErrorKind, DriverObservation, DriverRequest, EstateDriver,
     ReconcileBoundary, ReconcileOutcome, Reconciler,
+};
+pub use recovery::{
+    public_recovery_snapshot, public_retention_decision, retention_decision, CompleteRecoveryPrune,
+    EstateRecoveryPoint, EstateRecoveryPolicy, EstateRecoveryPruneIntent, EstateRestoreEvidence,
+    EstateRetentionDecision, EstateRetentionPin, EstateRetentionPinKind, PinRecoveryPoint,
+    PrepareRecoveryPrune, RecordRestoreEvidence, RecoveryIdempotencyBinding,
+    RecoveryMutationOutcome, ReleaseRecoveryPin, SetRecoveryPolicy,
+    MAX_RECOVERY_IDEMPOTENCY_BINDINGS, MAX_RECOVERY_PINS, MAX_RECOVERY_POINTS,
+    MAX_RECOVERY_POLICIES, MAX_RECOVERY_PRUNE_INTENTS, MAX_RESTORE_EVIDENCE,
 };
 
 use rrd_contract::CanonicalId;
@@ -316,6 +326,18 @@ pub struct EstateDocument {
     pub backup_jobs: BTreeMap<String, EstateBackupJob>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub backup_idempotency: BTreeMap<String, BackupIdempotencyBinding>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub recovery_policies: BTreeMap<String, EstateRecoveryPolicy>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub recovery_points: BTreeMap<String, EstateRecoveryPoint>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub recovery_pins: BTreeMap<String, EstateRetentionPin>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub restore_evidence: BTreeMap<String, EstateRestoreEvidence>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub recovery_idempotency: BTreeMap<String, RecoveryIdempotencyBinding>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub recovery_prune_intents: BTreeMap<String, EstateRecoveryPruneIntent>,
 }
 
 impl EstateDocument {
@@ -333,6 +355,12 @@ impl EstateDocument {
             idempotency: BTreeMap::new(),
             backup_jobs: backup_job::empty_backup_jobs(),
             backup_idempotency: backup_job::empty_backup_idempotency(),
+            recovery_policies: recovery::empty_recovery_policies(),
+            recovery_points: recovery::empty_recovery_points(),
+            recovery_pins: recovery::empty_recovery_pins(),
+            restore_evidence: recovery::empty_restore_evidence(),
+            recovery_idempotency: recovery::empty_recovery_idempotency(),
+            recovery_prune_intents: recovery::empty_recovery_prune_intents(),
         })
     }
 
@@ -436,6 +464,7 @@ impl EstateDocument {
             }
         }
         backup_job::validate_backup_state(self)?;
+        recovery::validate_recovery_state(self)?;
         Ok(())
     }
 

@@ -15,6 +15,10 @@ pub enum LocalEstatePermission {
     Create,
     SetDesired,
     ScheduleBackup,
+    ManageRecoveryPolicy,
+    ManageRecoveryHolds,
+    PruneRecovery,
+    RestoreRecovery,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
