@@ -349,25 +349,28 @@ fn ci_is_one_bounded_reusable_chain_with_safe_runner_routing() {
         "the Linux-heavy verifier must admit its measured cold all-features path"
     );
     assert_eq!(
-        workflow.matches("CARGO_BUILD_JOBS: \"1\"").count(),
+        workflow.matches("CARGO_BUILD_JOBS: \"2\"").count(),
         1,
-        "the Linux-heavy verifier must serialize large workspace links"
+        "the Linux-heavy verifier must use both hosted compile cores"
     );
     assert_eq!(
         workflow.matches("CARGO_PROFILE_TEST_DEBUG: \"0\"").count(),
         1,
         "the Linux-heavy verifier must omit unused test debuginfo"
     );
-    assert!(
-        !workflow.contains("RUSTFLAGS:"),
-        "the verifier must not fork a second workspace artifact set through global RUSTFLAGS"
+    assert_eq!(
+        workflow
+            .matches("RUSTFLAGS: \"-C link-arg=-Wl,--threads=1\"")
+            .count(),
+        1,
+        "the Linux-heavy verifier must bound each rust-lld invocation"
     );
     assert_eq!(
         workflow
-            .matches("shared-key: linux-verify-test-debug0")
+            .matches("shared-key: linux-verify-jobs2-test-debug0-lld1")
             .count(),
         1,
-        "the bounded test profile must not restore an incompatible oversized cache"
+        "the bounded compiler/linker profile must not restore incompatible artifacts"
     );
     assert_eq!(
         workflow.matches("cache-on-failure: false").count(),

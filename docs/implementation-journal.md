@@ -2852,3 +2852,20 @@ index.
   Failed artifacts were intentionally not cached, so another candidate must
   admit a cold build. The Linux-heavy gate remains bounded but now allows 60
   minutes for the measured cold test-and-Clippy path. G02-W02 remains active.
+- Fourth remote candidate evidence: correction commit
+  `74704e04b34fd631a6f77d59c4cbdb0c736346ff` produced run `33159783047`.
+  macOS, Windows, and supervised RRD + Connectome topology passed. Linux again
+  passed version enforcement, architecture, controller build, and the pre-test
+  capacity probe, but whole-build `CARGO_BUILD_JOBS=1` left the cold workspace
+  test compiling until GitHub cancelled the job at its 60-minute bound. This
+  proves serializing all Rust compilation is not an admissible fallback. The
+  next correction uses both hosted compile cores while bounding each
+  `rust-lld` invocation to one thread, retains stripped test debuginfo, and
+  moves to a fresh cache namespace matching that exact compiler/linker profile.
+  Failed artifacts remain unpublishable and G02-W02 remains active.
+- Local targeted-concurrency evidence: with two Cargo jobs, one thread per
+  `rust-lld`, and stripped test debuginfo, the cold architecture target built in
+  3m58s and passed 16/16; the exact all-features `rrflow-mcp` `stdio_daemon`
+  target then built in 2m59s, linked without a signal, and passed. This retains
+  the resource guard while removing the proven whole-build serialization
+  bottleneck. Remote qualification remains required.

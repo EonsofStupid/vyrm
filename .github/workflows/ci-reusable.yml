@@ -92,12 +92,12 @@ jobs:
     # but admit the measured cold path instead of cancelling valid verification.
     timeout-minutes: 60
     env:
-      # The hosted Linux fallback must not launch multiple large DataFusion/
-      # inference test linkers concurrently. Test debuginfo is disabled because
-      # it is not consumed by this gate and otherwise exhausts the admitted
-      # runner's disk before the complete workspace can be linked.
-      CARGO_BUILD_JOBS: "1"
+      # Use both hosted cores for compilation, but keep each large DataFusion/
+      # inference link single-threaded. Test debuginfo is not consumed by this
+      # gate and otherwise exhausts the admitted runner's disk.
+      CARGO_BUILD_JOBS: "2"
       CARGO_PROFILE_TEST_DEBUG: "0"
+      RUSTFLAGS: "-C link-arg=-Wl,--threads=1"
     services:
       pgvector:
         image: pgvector/pgvector@sha256:1d50c689b0a6511b9ea0a15615281c81a59fd04a08eb35057ec8646fb3a2118a
@@ -121,7 +121,7 @@ jobs:
           components: clippy
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
-          shared-key: linux-verify-test-debug0
+          shared-key: linux-verify-jobs2-test-debug0-lld1
           cache-on-failure: false
       - name: Enforce owner-controlled release version
         run: python3 scripts/check_version.py
