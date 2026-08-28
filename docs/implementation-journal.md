@@ -2962,3 +2962,19 @@ index.
   rebuildable failed-link artifacts and rerunning with `CARGO_INCREMENTAL=0`,
   stripped test debuginfo, two build jobs, and one linker thread passed the
   complete query/retrieval lane.
+- The first remote five-suite candidate at `acdf647` preserved the substantive
+  gates and exposed a real lifecycle race in the unchanged `rrd-cluster`
+  optional-feature lane: OpenRaft joined its core task but its detached
+  state-machine worker could still own `MANIFEST.LOCK` when the consensus test
+  immediately reopened canonical runtime state. The cluster adapter now
+  exposes non-owning release evidence for both physical databases. Test
+  shutdown consumes every Raft handle and waits for that evidence; production
+  node shutdown aborts and joins transport, drops known storage owners, and
+  does not return until both writer locks are released or a bounded error is
+  reported. The native engine continues to fail closed on genuine concurrent
+  writers.
+- Exact local correction evidence passes the complete
+  `rrd-cluster --all-features` test lane, strict all-target Clippy, formatting,
+  and diff validation. The real two-test consensus shutdown/reopen target also
+  passed thirty consecutive executions (sixty consensus tests) without a
+  writer-lock race.

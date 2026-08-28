@@ -43,7 +43,7 @@ use std::ops::{Bound, RangeBounds};
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::{Arc, Mutex, MutexGuard, Weak};
 use std::task::{Context, Poll};
 use tokio::io::{AsyncRead, AsyncSeek, AsyncWrite, ReadBuf};
 
@@ -471,6 +471,27 @@ struct StoredSnapshot {
 }
 
 type SharedDatabase = Arc<Mutex<Database>>;
+
+/// Non-owning evidence that both physical databases opened for one Raft node
+/// have been released.
+///
+/// OpenRaft joins its core task during shutdown, but its state-machine worker
+/// exits after the core drops the worker channel. Callers that may restart a
+/// node in the same process must therefore wait for this boundary before
+/// reopening the storage root.
+#[derive(Clone)]
+pub struct RrdRaftStorageLifecycle {
+    state_database: Weak<Mutex<Database>>,
+    local_database: Weak<Mutex<Database>>,
+}
+
+impl RrdRaftStorageLifecycle {
+    /// Returns true only after every log-store and state-machine owner has
+    /// released both native database writer locks.
+    pub fn is_released(&self) -> bool {
+        self.state_database.strong_count() == 0 && self.local_database.strong_count() == 0
+    }
+}
 
 #[derive(Clone)]
 pub struct RrdRaftLogStore {
@@ -1044,6 +1065,15 @@ impl RaftStateMachine<RrdRaftTypeConfig> for RrdRaftStateMachine {
 }
 
 impl RrdRaftStateMachine {
+    /// Returns a non-owning lifecycle handle for a supervisor that must prove
+    /// storage release before allowing a same-process restart.
+    pub fn storage_lifecycle(&self) -> RrdRaftStorageLifecycle {
+        RrdRaftStorageLifecycle {
+            state_database: Arc::downgrade(&self.state_database),
+            local_database: Arc::downgrade(&self.local_database),
+        }
+    }
+
     pub fn application_objects(&self) -> LocalObjectStore {
         self.application_objects.clone()
     }

@@ -10,7 +10,8 @@ use openraft::raft::{
 use openraft::{Config, Raft, SnapshotPolicy};
 use rrd_cluster::{
     ClusterId, NodeId, PlacementPolicy, ReplicaPlacement, ReplicaRole, RrdRaftCommand, RrdRaftNode,
-    RrdRaftStore, RrdRaftTypeConfig, ShardId, ShardPlacement, ZoneId, CLUSTER_CONTRACT_VERSION,
+    RrdRaftStorageLifecycle, RrdRaftStore, RrdRaftTypeConfig, ShardId, ShardPlacement, ZoneId,
+    CLUSTER_CONTRACT_VERSION,
 };
 use rrd_core::{
     RuntimeCommit, RuntimeMutation, RuntimeRecordSchema, RuntimeSchemaRegistry, RuntimeType,
@@ -139,6 +140,7 @@ struct TestCluster {
     directories: BTreeMap<u64, TempDir>,
     hub: NetworkHub,
     nodes: BTreeMap<u64, RrdRaft>,
+    storage: BTreeMap<u64, RrdRaftStorageLifecycle>,
 }
 
 impl TestCluster {
@@ -146,9 +148,11 @@ impl TestCluster {
         let hub = NetworkHub::default();
         let mut directories = BTreeMap::new();
         let mut nodes = BTreeMap::new();
+        let mut storage = BTreeMap::new();
         for id in ids {
             let directory = tempfile::tempdir().unwrap();
             let (log, state_machine) = RrdRaftStore::open(directory.path(), ShardId(5)).unwrap();
+            storage.insert(*id, state_machine.storage_lifecycle());
             let raft = Raft::new(
                 *id,
                 test_config(),
@@ -169,6 +173,7 @@ impl TestCluster {
             directories,
             hub,
             nodes,
+            storage,
         }
     }
 
@@ -176,14 +181,22 @@ impl TestCluster {
         &self.nodes[&id]
     }
 
-    fn directory(&self, id: u64) -> &std::path::Path {
-        self.directories[&id].path()
-    }
-
-    async fn shutdown(&self) {
+    async fn shutdown(mut self) -> BTreeMap<u64, TempDir> {
         for node in self.nodes.values() {
             node.shutdown().await.unwrap();
         }
+        self.hub.nodes.write().await.clear();
+        self.nodes.clear();
+        for (id, lifecycle) in &self.storage {
+            tokio::time::timeout(consensus_wait(), async {
+                while !lifecycle.is_released() {
+                    tokio::task::yield_now().await;
+                }
+            })
+            .await
+            .unwrap_or_else(|_| panic!("node {id} storage was not released after shutdown"));
+        }
+        self.directories
     }
 }
 
@@ -352,7 +365,7 @@ fn real_consensus_elects_fails_over_installs_snapshot_and_changes_membership() {
             .await
             .unwrap();
         assert!(replacement_probe.data.accepted);
-        cluster.shutdown().await;
+        drop(cluster.shutdown().await);
     });
 }
 
@@ -459,10 +472,10 @@ fn real_consensus_replicates_canonical_runtime_truth_to_every_voter() {
             )
             .await
             .unwrap();
-        cluster.shutdown().await;
+        let directories = cluster.shutdown().await;
 
         for id in [1, 2, 3, 4] {
-            let engine = NativeEngine::open(cluster.directory(id)).unwrap();
+            let engine = NativeEngine::open(directories[&id].path()).unwrap();
             assert_eq!(engine.runtime_cursor().unwrap(), 1, "node {id}");
             assert!(engine
                 .runtime_commit_outcome(&commit.digest())

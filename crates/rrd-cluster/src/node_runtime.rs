@@ -37,6 +37,7 @@ pub const RRFLOW_NODE_CONTROL_VERSION: u16 = 4;
 pub const RRFLOW_NODE_MAX_CONFIG_BYTES: u64 = 1024 * 1024;
 pub const RRFLOW_NODE_MAX_CONTROL_LINE_BYTES: usize = 1024 * 1024;
 const LEARNER_CATCH_UP_TIMEOUT: Duration = Duration::from_secs(10);
+const STORAGE_RELEASE_TIMEOUT: Duration = Duration::from_secs(5);
 const CONSENSUS_TRACE_COMMIT_RETRIES: usize = 16;
 const CONSENSUS_TRACE_ROUTE_RETRIES: usize = 32;
 
@@ -606,6 +607,7 @@ pub async fn run_rrflow_runtime(config: RrdNodeConfig) -> ClusterResult<()> {
     let credentials = RrdTlsReloader::new(binding.clone(), 1, material)?;
     let transport_gate = RrdTransportGate::enabled();
     let (log, state_machine) = RrdRaftStore::open(&config.data_root, config.shard)?;
+    let storage_lifecycle = state_machine.storage_lifecycle();
     let application_objects = state_machine.application_objects();
     let artifact_receiver = ArtifactTransferReceiver::open(application_objects.clone())?;
     let artifact_status = artifact_receiver.clone();
@@ -737,6 +739,36 @@ pub async fn run_rrflow_runtime(config: RrdNodeConfig) -> ClusterResult<()> {
         .await
         .map_err(|error| ClusterError::Unavailable(format!("shutdown Raft: {error}")))?;
     server_task.abort();
+    match server_task.await {
+        Err(error) if error.is_cancelled() => {}
+        Err(error) => {
+            return Err(ClusterError::Unavailable(format!(
+                "join stopped Raft transport: {error}"
+            )))
+        }
+        Ok(Err(error)) => {
+            return Err(ClusterError::Unavailable(format!(
+                "Raft transport stopped with an error: {error}"
+            )))
+        }
+        Ok(Ok(())) => {}
+    }
+    drop(telemetry_sources);
+    drop(state_machine);
+    drop(raft);
+    drop(raft_slot);
+    tokio::time::timeout(STORAGE_RELEASE_TIMEOUT, async {
+        while !storage_lifecycle.is_released() {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .map_err(|_| {
+        ClusterError::Unavailable(format!(
+            "Raft storage writer locks were not released within {} ms",
+            STORAGE_RELEASE_TIMEOUT.as_millis()
+        ))
+    })?;
     Ok(())
 }
 
