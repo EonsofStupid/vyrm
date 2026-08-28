@@ -92,10 +92,11 @@ jobs:
     # below so Cargo feature unification cannot exhaust the hosted fallback.
     timeout-minutes: 60
     env:
-      # Use both hosted cores for compilation, but keep each large DataFusion/
-      # inference link single-threaded. Test debuginfo is not consumed by this
-      # gate and otherwise exhausts the admitted runner's disk.
-      CARGO_BUILD_JOBS: "2"
+      # The default workspace emits every test/example binary. Keep one linker
+      # live at a time on the bounded hosted fallback and omit unused test
+      # debuginfo. Optional-feature packages compile in parallel below because
+      # each has an isolated target directory.
+      CARGO_BUILD_JOBS: "1"
       CARGO_PROFILE_TEST_DEBUG: "0"
       RUSTFLAGS: "-C link-arg=-Wl,--threads=1"
     steps:
@@ -107,7 +108,7 @@ jobs:
           components: clippy
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
-          shared-key: linux-verify-default-test-debug0-lld1
+          shared-key: linux-verify-default-jobs1-test-debug0-lld1
           cache-on-failure: false
       - name: Enforce owner-controlled release version
         run: python3 scripts/check_version.py

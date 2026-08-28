@@ -2902,3 +2902,14 @@ index.
   isolated contract-compliant database and passed every live, golden, sync,
   unit, and Clippy check. This remains candidate evidence until the exact
   committed tree passes the complete remote platform matrix.
+- Sixth remote candidate evidence: correction commit
+  `e7e447571b5ec427cf78a54da0a3e3daebf17cc3` produced run `33170028933`.
+  macOS, Windows, supervised RRD + Connectome topology, pgvector, and all four
+  other isolated optional-feature jobs passed. The default Linux verifier had
+  no restored cache and reported 7.8 GB free before its workspace test, then
+  launched the `rrd-graph` `route_vs_scan` example and `entities` integration
+  test linkers concurrently; both one-thread `rust-lld` processes terminated
+  with `SIGBUS`. No Rust test assertion or optional-feature partition failed.
+  The structural split is retained, while the complete default-workspace
+  verifier now admits only one live Cargo compile/link job and uses another
+  fresh cache identity. G02-W02 remains active.

@@ -353,8 +353,13 @@ fn ci_is_one_bounded_reusable_chain_with_safe_runner_routing() {
     );
     assert_eq!(
         workflow.matches("CARGO_BUILD_JOBS: \"2\"").count(),
-        3,
-        "every Linux-heavy partition must use both hosted compile cores"
+        2,
+        "isolated optional-feature partitions must use both hosted compile cores"
+    );
+    assert_eq!(
+        workflow.matches("CARGO_BUILD_JOBS: \"1\"").count(),
+        1,
+        "the complete default workspace must never run concurrent linkers"
     );
     assert_eq!(
         workflow.matches("CARGO_PROFILE_TEST_DEBUG: \"0\"").count(),
@@ -370,7 +375,7 @@ fn ci_is_one_bounded_reusable_chain_with_safe_runner_routing() {
     );
     assert_eq!(
         workflow
-            .matches("shared-key: linux-verify-default-test-debug0-lld1")
+            .matches("shared-key: linux-verify-default-jobs1-test-debug0-lld1")
             .count(),
         1,
         "default workspace verification must have a compatible isolated cache"
