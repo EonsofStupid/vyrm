@@ -344,6 +344,11 @@ fn ci_is_one_bounded_reusable_chain_with_safe_runner_routing() {
         "every CI job, including the gate, must have a bounded runtime"
     );
     assert_eq!(
+        workflow.matches("timeout-minutes: 60").count(),
+        1,
+        "the Linux-heavy verifier must admit its measured cold all-features path"
+    );
+    assert_eq!(
         workflow.matches("CARGO_BUILD_JOBS: \"1\"").count(),
         1,
         "the Linux-heavy verifier must serialize large workspace links"

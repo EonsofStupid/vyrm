@@ -2842,3 +2842,13 @@ index.
   This proves the corrected settings are accepted by Cargo and preserve the
   failed target's behavior; only a complete remote matrix can qualify the
   candidate.
+- Third remote candidate evidence: correction commit
+  `adb6440c8bfafdf9efa184b7ba32229e23a602d1` produced run `33156754813`.
+  macOS, Windows, and supervised RRD + Connectome topology passed. Linux passed
+  version enforcement, the 16-test architecture gate, its controller build,
+  and the pre-test capacity probe. The unchanged all-features workspace test
+  then remained in its cold build when GitHub cancelled the verifier at the
+  configured 30-minute budget; no test failure or disk warning was reported.
+  Failed artifacts were intentionally not cached, so another candidate must
+  admit a cold build. The Linux-heavy gate remains bounded but now allows 60
+  minutes for the measured cold test-and-Clippy path. G02-W02 remains active.

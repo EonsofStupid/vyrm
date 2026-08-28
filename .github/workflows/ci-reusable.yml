@@ -87,7 +87,10 @@ jobs:
   verify:
     name: verify
     runs-on: ${{ fromJSON(inputs.linux-heavy-runner) }}
-    timeout-minutes: 30
+    # A cold hosted fallback compiles the complete all-features workspace twice:
+    # once for tests and once for warning-denying Clippy. Keep the gate bounded,
+    # but admit the measured cold path instead of cancelling valid verification.
+    timeout-minutes: 60
     env:
       # The hosted Linux fallback must not launch multiple large DataFusion/
       # inference test linkers concurrently. Test debuginfo is disabled because
