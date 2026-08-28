@@ -87,16 +87,11 @@ jobs:
   verify:
     name: verify
     runs-on: ${{ fromJSON(inputs.linux-heavy-runner) }}
-    # Default-feature workspace qualification remains one complete graph. Each
-    # package's optional features are qualified in isolated target directories
-    # below so Cargo feature unification cannot exhaust the hosted fallback.
+    # Repository-wide policy and evidence checks run separately from package
+    # test binaries so their target graph cannot exhaust the hosted fallback.
     timeout-minutes: 60
     env:
-      # The default workspace emits every test/example binary. Keep one linker
-      # live at a time on the bounded hosted fallback and omit unused test
-      # debuginfo. Optional-feature packages compile in parallel below because
-      # each has an isolated target directory.
-      CARGO_BUILD_JOBS: "1"
+      CARGO_BUILD_JOBS: "2"
       CARGO_PROFILE_TEST_DEBUG: "0"
       RUSTFLAGS: "-C link-arg=-Wl,--threads=1"
     steps:
@@ -108,22 +103,12 @@ jobs:
           components: clippy
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
-          shared-key: linux-verify-default-jobs1-test-debug0-lld1
+          shared-key: linux-policy-jobs2-test-debug0-lld1
           cache-on-failure: false
       - name: Enforce owner-controlled release version
         run: python3 scripts/check_version.py
       - name: Enforce RRFlow engine ownership and CI architecture
         run: cargo test -p rrd-engine --test workspace_architecture --locked
-      - name: Build cross-package controller fixture
-        run: cargo build -p rrflow-cli --bin rrd-estate-controller --locked
-      - name: Record pre-test build capacity
-        run: df -h "$GITHUB_WORKSPACE"
-      - name: Test default-feature workspace
-        run: cargo test --workspace --locked
-      - name: Record post-test build capacity
-        run: df -h "$GITHUB_WORKSPACE"
-      - name: Deny default-feature workspace warnings
-        run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - name: Verify controlled evaluation evidence
         run: cargo run --locked -p rrflow-eval -- verify eval/results/2026-08-18-summary.json
       - name: Enforce kernel dependency boundary
@@ -143,6 +128,56 @@ jobs:
           cargo build --locked --release -p rrflow-edge
           binary="${CARGO_TARGET_DIR:-target}/release/rrflow-edge"
           test "$(stat -c '%s' "$binary")" -le 2097152
+
+  default-features:
+    name: default feature (${{ matrix.package }})
+    runs-on: ${{ fromJSON(inputs.linux-heavy-runner) }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        package:
+          - connectome-ui
+          - rrd-client
+          - rrd-cluster
+          - rrd-contract
+          - rrd-core
+          - rrd-engine
+          - rrd-estate
+          - rrd-graph
+          - rrd-inference
+          - rrd-kubernetes
+          - rrd-lsm
+          - rrd-maintenance
+          - rrd-operator-knowledge
+          - rrd-query
+          - rrd-security
+          - rrd-server
+          - rrd-store
+          - rrd-vector
+          - rrflow-cli
+          - rrflow-edge
+          - rrflow-eval
+          - rrflow-mcp
+    env:
+      CARGO_BUILD_JOBS: "2"
+      CARGO_PROFILE_TEST_DEBUG: "0"
+      RUSTFLAGS: "-C link-arg=-Wl,--threads=1"
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@f8be11a05b1d4f3fcebe6410cc16743212b999b0 # 1.98.0
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          shared-key: linux-default-${{ matrix.package }}-test-debug0-lld1
+          cache-on-failure: false
+      - name: Test package default features
+        run: cargo test -p ${{ matrix.package }} --all-targets --locked
+      - name: Deny package default-feature warnings
+        run: cargo clippy -p ${{ matrix.package }} --all-targets --locked -- -D warnings
 
   optional-features:
     name: optional feature (${{ matrix.package }})
@@ -224,6 +259,7 @@ jobs:
       - topology-smoke
       - estate-portability
       - verify
+      - default-features
       - optional-features
       - pgvector-feature
     runs-on: ubuntu-latest
@@ -234,11 +270,13 @@ jobs:
           TOPOLOGY_RESULT: ${{ needs.topology-smoke.result }}
           PORTABILITY_RESULT: ${{ needs.estate-portability.result }}
           VERIFY_RESULT: ${{ needs.verify.result }}
+          DEFAULT_FEATURES_RESULT: ${{ needs.default-features.result }}
           OPTIONAL_FEATURES_RESULT: ${{ needs.optional-features.result }}
           PGVECTOR_FEATURE_RESULT: ${{ needs.pgvector-feature.result }}
         run: |
           test "$TOPOLOGY_RESULT" = success
           test "$PORTABILITY_RESULT" = success
           test "$VERIFY_RESULT" = success
+          test "$DEFAULT_FEATURES_RESULT" = success
           test "$OPTIONAL_FEATURES_RESULT" = success
           test "$PGVECTOR_FEATURE_RESULT" = success

@@ -2913,3 +2913,16 @@ index.
   The structural split is retained, while the complete default-workspace
   verifier now admits only one live Cargo compile/link job and uses another
   fresh cache identity. G02-W02 remains active.
+- Seventh remote candidate evidence: correction commit
+  `339bbc20adb7c83875006a0a5292f759f2503066` produced run `33171814626`.
+  Every non-Linux-default partition passed, including Windows process recovery.
+  Linux used one Cargo job and one linker thread with no restored cache, again
+  reported 7.8 GB free before the default-workspace test, and then a single
+  `rrd-graph` `route_persisted` example linker terminated with `SIGBUS`. This
+  disproves concurrency as the remaining cause and identifies cumulative
+  whole-workspace target size as the boundary. Default-feature qualification
+  is therefore split into one isolated test/Clippy matrix job per Cargo package.
+  The architecture gate derives the complete expected matrix from Cargo
+  metadata, so a new or omitted package fails the policy job. The policy and
+  evidence verifier no longer emits the workspace's test binaries. G02-W02
+  remains active.

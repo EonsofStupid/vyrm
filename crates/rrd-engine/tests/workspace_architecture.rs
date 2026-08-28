@@ -272,8 +272,8 @@ fn outward_cli_owns_product_executables_while_physical_crates_own_none() {
     let canonical_fixture = "cargo build -p rrflow-cli --bin rrd-estate-controller --locked";
     assert_eq!(
         workflow.matches(canonical_fixture).count(),
-        2,
-        "both CI matrices must build the controller fixture from its product owner"
+        1,
+        "the process matrix must build the controller fixture from its product owner exactly once"
     );
     assert!(
         !workflow.contains("cargo build -p rrd-estate --bin rrd-estate-controller"),
@@ -337,48 +337,56 @@ fn ci_is_one_bounded_reusable_chain_with_safe_runner_routing() {
             && workflow.contains("TOPOLOGY_RESULT")
             && workflow.contains("PORTABILITY_RESULT")
             && workflow.contains("VERIFY_RESULT")
+            && workflow.contains("DEFAULT_FEATURES_RESULT")
             && workflow.contains("OPTIONAL_FEATURES_RESULT")
             && workflow.contains("PGVECTOR_FEATURE_RESULT"),
         "one stable gate must reduce every CI partition"
     );
     assert_eq!(
         workflow.matches("timeout-minutes:").count(),
-        6,
+        7,
         "every CI job, including the gate, must have a bounded runtime"
     );
     assert_eq!(
         workflow.matches("timeout-minutes: 60").count(),
         1,
-        "the Linux-heavy verifier must admit its measured cold all-features path"
+        "the repository policy/evidence verifier must admit its measured cold path"
     );
     assert_eq!(
         workflow.matches("CARGO_BUILD_JOBS: \"2\"").count(),
-        2,
-        "isolated optional-feature partitions must use both hosted compile cores"
+        4,
+        "every isolated Linux partition must use both hosted compile cores"
     );
     assert_eq!(
         workflow.matches("CARGO_BUILD_JOBS: \"1\"").count(),
-        1,
-        "the complete default workspace must never run concurrent linkers"
+        0,
+        "package isolation, not whole-workspace serialization, must bound linkers"
     );
     assert_eq!(
         workflow.matches("CARGO_PROFILE_TEST_DEBUG: \"0\"").count(),
-        3,
+        4,
         "every Linux-heavy partition must omit unused test debuginfo"
     );
     assert_eq!(
         workflow
             .matches("RUSTFLAGS: \"-C link-arg=-Wl,--threads=1\"")
             .count(),
-        3,
+        4,
         "every Linux-heavy partition must bound each rust-lld invocation"
     );
     assert_eq!(
         workflow
-            .matches("shared-key: linux-verify-default-jobs1-test-debug0-lld1")
+            .matches("shared-key: linux-policy-jobs2-test-debug0-lld1")
             .count(),
         1,
-        "default workspace verification must have a compatible isolated cache"
+        "repository policy/evidence verification must have an isolated cache"
+    );
+    assert_eq!(
+        workflow
+            .matches("shared-key: linux-default-${{ matrix.package }}-test-debug0-lld1")
+            .count(),
+        1,
+        "each default-feature package must have an isolated cache"
     );
     assert_eq!(
         workflow
@@ -396,13 +404,39 @@ fn ci_is_one_bounded_reusable_chain_with_safe_runner_routing() {
     );
     assert_eq!(
         workflow.matches("cache-on-failure: false").count(),
-        3,
+        4,
         "failed Linux-heavy artifacts must never become candidate caches"
     );
     assert!(
-        workflow.contains("cargo test --workspace --locked")
-            && !workflow.contains("cargo test --workspace --all-features"),
-        "the complete default workspace must be tested without global optional-feature unification"
+        !workflow.contains("cargo test --workspace")
+            && !workflow.contains("cargo clippy --workspace"),
+        "workspace-wide test binaries must not share one bounded runner target"
+    );
+
+    let default_job = workflow
+        .split("\n  default-features:\n")
+        .nth(1)
+        .and_then(|tail| tail.split("\n  optional-features:\n").next())
+        .expect("default-feature job must have an exact boundary");
+    let default_packages = default_job
+        .split("        package:\n")
+        .nth(1)
+        .and_then(|tail| tail.split("\n    env:\n").next())
+        .expect("default-feature matrix must have an exact boundary")
+        .lines()
+        .filter_map(|line| line.trim().strip_prefix("- ").map(str::to_owned))
+        .collect::<BTreeSet<_>>();
+    let workspace_packages = metadata.packages.keys().cloned().collect::<BTreeSet<_>>();
+    assert_eq!(
+        default_packages, workspace_packages,
+        "every workspace package must have an isolated default-feature CI disposition"
+    );
+    assert!(
+        default_job.contains("cargo test -p ${{ matrix.package }} --all-targets --locked")
+            && default_job.contains(
+                "cargo clippy -p ${{ matrix.package }} --all-targets --locked -- -D warnings"
+            ),
+        "every default-feature package must receive exact test and Clippy qualification"
     );
 
     let feature_packages = metadata
@@ -422,14 +456,24 @@ fn ci_is_one_bounded_reusable_chain_with_safe_runner_routing() {
         feature_packages, routed_feature_packages,
         "every package with optional features must have an explicit isolated CI disposition"
     );
-    for package in ["rrd-cluster", "rrd-engine", "rrd-inference", "rrd-vector"] {
-        assert!(
-            workflow
-                .lines()
-                .any(|line| line.trim() == format!("- {package}")),
-            "optional-feature matrix is missing {package}"
-        );
-    }
+    let optional_job = workflow
+        .split("\n  optional-features:\n")
+        .nth(1)
+        .and_then(|tail| tail.split("\n  pgvector-feature:\n").next())
+        .expect("optional-feature job must have an exact boundary");
+    let optional_packages = optional_job
+        .split("        package:\n")
+        .nth(1)
+        .and_then(|tail| tail.split("\n    env:\n").next())
+        .expect("optional-feature matrix must have an exact boundary")
+        .lines()
+        .filter_map(|line| line.trim().strip_prefix("- ").map(str::to_owned))
+        .collect::<BTreeSet<_>>();
+    assert_eq!(
+        optional_packages,
+        names(&["rrd-cluster", "rrd-engine", "rrd-inference", "rrd-vector"]),
+        "every non-PostgreSQL optional-feature package must be isolated exactly once"
+    );
     assert!(
         workflow.contains("cargo test -p rrd-operator-knowledge --all-targets --all-features --locked")
             && workflow.contains("cargo clippy -p rrd-operator-knowledge --all-targets --all-features --locked -- -D warnings"),
