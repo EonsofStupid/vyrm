@@ -90,11 +90,11 @@ jobs:
     timeout-minutes: 30
     env:
       # The hosted Linux fallback must not launch multiple large DataFusion/
-      # inference test linkers concurrently. rust-lld itself is also bounded so
-      # candidate verification remains deterministic on the smallest admitted
-      # runner instead of relying on transient memory headroom.
+      # inference test linkers concurrently. Test debuginfo is disabled because
+      # it is not consumed by this gate and otherwise exhausts the admitted
+      # runner's disk before the complete workspace can be linked.
       CARGO_BUILD_JOBS: "1"
-      RUSTFLAGS: "-C link-arg=-Wl,--threads=1"
+      CARGO_PROFILE_TEST_DEBUG: "0"
     services:
       pgvector:
         image: pgvector/pgvector@sha256:1d50c689b0a6511b9ea0a15615281c81a59fd04a08eb35057ec8646fb3a2118a
@@ -118,19 +118,23 @@ jobs:
           components: clippy
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
-          shared-key: linux-verify
-          cache-on-failure: true
+          shared-key: linux-verify-test-debug0
+          cache-on-failure: false
       - name: Enforce owner-controlled release version
         run: python3 scripts/check_version.py
       - name: Enforce RRFlow engine ownership and CI architecture
         run: cargo test -p rrd-engine --test workspace_architecture --locked
       - name: Build cross-package controller fixture
         run: cargo build -p rrflow-cli --bin rrd-estate-controller --locked
+      - name: Record pre-test build capacity
+        run: df -h "$GITHUB_WORKSPACE"
       - name: Test workspace
         env:
           RRFLOW_PGVECTOR_TEST_URL: postgresql://rrflow_test:rrflow_test_password@127.0.0.1:5432/rrd_operator_knowledge_test?sslmode=disable
           RRFLOW_PGVECTOR_TEST_DISPOSABLE: "1"
         run: cargo test --workspace --all-features --locked
+      - name: Record post-test build capacity
+        run: df -h "$GITHUB_WORKSPACE"
       - name: Deny warnings
         run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
       - name: Verify controlled evaluation evidence

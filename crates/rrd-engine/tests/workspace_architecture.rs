@@ -349,11 +349,25 @@ fn ci_is_one_bounded_reusable_chain_with_safe_runner_routing() {
         "the Linux-heavy verifier must serialize large workspace links"
     );
     assert_eq!(
+        workflow.matches("CARGO_PROFILE_TEST_DEBUG: \"0\"").count(),
+        1,
+        "the Linux-heavy verifier must omit unused test debuginfo"
+    );
+    assert!(
+        !workflow.contains("RUSTFLAGS:"),
+        "the verifier must not fork a second workspace artifact set through global RUSTFLAGS"
+    );
+    assert_eq!(
         workflow
-            .matches("RUSTFLAGS: \"-C link-arg=-Wl,--threads=1\"")
+            .matches("shared-key: linux-verify-test-debug0")
             .count(),
         1,
-        "the Linux-heavy verifier must bound rust-lld parallelism"
+        "the bounded test profile must not restore an incompatible oversized cache"
+    );
+    assert_eq!(
+        workflow.matches("cache-on-failure: false").count(),
+        1,
+        "failed Linux-heavy artifacts must not be published as the next candidate cache"
     );
     assert!(
         caller.contains("permissions:\n  contents: read")

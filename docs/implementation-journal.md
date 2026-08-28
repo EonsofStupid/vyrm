@@ -2822,3 +2822,23 @@ index.
   heavy job now serializes Cargo build jobs and bounds rust-lld to one thread;
   an architecture test freezes both resource limits. This failed attempt is
   retained as evidence and G02-W02 remains active pending a complete green run.
+- Second remote candidate evidence: correction commit
+  `d1cba992b0b75555f1414427e0fa0260fffb721b` produced run `33153581325`.
+  macOS, Windows, and supervised RRD + Connectome topology passed again. The
+  Linux verifier honored serialized Cargo jobs and the one-thread linker flag,
+  then reported only 49 MB of free runner disk immediately before `rust-lld`
+  received `SIGBUS` while linking `rrflow-mcp`'s `stdio_daemon` test. This was
+  runner disk exhaustion, not a test assertion or an unbounded linker. Global
+  `RUSTFLAGS` had also invalidated the restored Rust artifact set and forced a
+  second full workspace build. The next correction therefore retains one Cargo
+  build job, disables unused test debuginfo through the Cargo profile variable,
+  uses a fresh matching cache namespace, refuses to cache failed verifier
+  artifacts, and records disk capacity around the unchanged full-workspace test.
+  G02-W02 remains active; neither failed remote run is completion evidence.
+- Local correction evidence: with `CARGO_BUILD_JOBS=1` and
+  `CARGO_PROFILE_TEST_DEBUG=0`, the 16-test workspace architecture gate passed
+  from a cold profile build, then the exact previously failing all-features
+  `rrflow-mcp` `stdio_daemon` integration target compiled, linked, and passed.
+  This proves the corrected settings are accepted by Cargo and preserve the
+  failed target's behavior; only a complete remote matrix can qualify the
+  candidate.
