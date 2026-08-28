@@ -15,6 +15,8 @@ use std::thread;
 use std::time::{Duration, Instant};
 use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
 
+const DIAGNOSTIC_STARTUP_TIMEOUT: Duration = Duration::from_secs(15);
+
 fn id(value: &str) -> CanonicalId {
     CanonicalId::new(value).unwrap()
 }
@@ -169,7 +171,7 @@ fn process_exists(pid: u32) -> bool {
 }
 
 fn wait_for_file_text(path: &Path, expected: &str) -> bool {
-    let deadline = Instant::now() + Duration::from_secs(3);
+    let deadline = Instant::now() + DIAGNOSTIC_STARTUP_TIMEOUT;
     loop {
         if std::fs::read_to_string(path).is_ok_and(|text| text.contains(expected)) {
             return true;

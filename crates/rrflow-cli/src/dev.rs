@@ -273,22 +273,47 @@ pub fn doctor(root: &Path) -> Result<DevDoctorReport, Box<dyn std::error::Error>
         "generate and commit the workspace Cargo.lock",
     ));
 
-    let ci_source = std::fs::read_to_string(root.join(".github/workflows/ci.yml"))?;
-    let pinned_action = pinned_channel
-        .map(|channel| format!("dtolnay/rust-toolchain@{channel}"))
-        .unwrap_or_default();
+    let ci_caller = std::fs::read_to_string(root.join(".github/workflows/ci.yml"))?;
+    let ci_reusable = std::fs::read_to_string(root.join(".github/workflows/ci-reusable.yml"))?;
+    let ci_source = format!("{ci_caller}\n{ci_reusable}");
+    let ci_toolchain_lines = ci_source
+        .lines()
+        .filter(|line| line.contains("uses: dtolnay/rust-toolchain@"))
+        .collect::<Vec<_>>();
+    let ci_toolchain_pinned = pinned_channel.is_some_and(|channel| {
+        !ci_toolchain_lines.is_empty()
+            && ci_toolchain_lines.iter().all(|line| {
+                let Some((_, suffix)) = line.split_once("dtolnay/rust-toolchain@") else {
+                    return false;
+                };
+                let reference = suffix.split_whitespace().next().unwrap_or_default();
+                reference.len() == 40
+                    && reference.bytes().all(|byte| byte.is_ascii_hexdigit())
+                    && line
+                        .split_once('#')
+                        .is_some_and(|(_, annotation)| annotation.trim() == channel)
+            })
+    });
     checks.push(check(
         "reproducibility.ci-toolchain",
-        !pinned_action.is_empty()
-            && ci_source.contains(&pinned_action)
-            && !ci_source.contains("dtolnay/rust-toolchain@stable"),
+        ci_toolchain_pinned,
         "CI uses the same exact Rust release as local development",
-        if pinned_action.is_empty() {
+        if pinned_channel.is_none() {
             "no pinned local channel".into()
+        } else if ci_toolchain_pinned {
+            format!(
+                "{} immutable dtolnay/rust-toolchain references annotated {}",
+                ci_toolchain_lines.len(),
+                pinned_channel.unwrap_or_default()
+            )
         } else {
-            pinned_action
+            format!(
+                "expected full commit SHAs annotated {}; observed {}",
+                pinned_channel.unwrap_or_default(),
+                ci_toolchain_lines.join(" | ")
+            )
         },
-        "replace floating CI toolchains with the rust-toolchain.toml channel",
+        "pin every CI toolchain action by full commit SHA and annotate it with the rust-toolchain.toml channel",
     ));
 
     checks.push(command_check(

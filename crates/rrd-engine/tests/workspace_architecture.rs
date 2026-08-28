@@ -266,8 +266,8 @@ fn outward_cli_owns_product_executables_while_physical_crates_own_none() {
         );
     }
 
-    let workflow = fs::read_to_string(metadata.root.join(".github/workflows/ci.yml"))
-        .expect("CI workflow must be readable");
+    let workflow = fs::read_to_string(metadata.root.join(".github/workflows/ci-reusable.yml"))
+        .expect("reusable CI workflow must be readable");
     let canonical_fixture = "cargo build -p rrflow-cli --bin rrd-estate-controller --locked";
     assert_eq!(
         workflow.matches(canonical_fixture).count(),
@@ -277,6 +277,154 @@ fn outward_cli_owns_product_executables_while_physical_crates_own_none() {
     assert!(
         !workflow.contains("cargo build -p rrd-estate --bin rrd-estate-controller"),
         "CI must not revive the retired physical-crate executable owner"
+    );
+}
+
+#[test]
+fn ci_is_one_bounded_reusable_chain_with_safe_runner_routing() {
+    let metadata = workspace_metadata();
+    let caller = fs::read_to_string(metadata.root.join(".github/workflows/ci.yml"))
+        .expect("CI caller must be readable");
+    let workflow = fs::read_to_string(metadata.root.join(".github/workflows/ci-reusable.yml"))
+        .expect("reusable CI workflow must be readable");
+
+    assert!(
+        !caller
+            .lines()
+            .any(|line| line.trim_start().starts_with("push:")),
+        "candidate CI must not execute once for push and again for pull_request"
+    );
+    for trigger in ["pull_request:", "merge_group:", "workflow_dispatch:"] {
+        assert!(
+            caller.lines().any(|line| line.trim() == trigger),
+            "CI caller must include {trigger}"
+        );
+    }
+    assert!(
+        !caller.contains("pull_request_target"),
+        "CI must never execute proposed code through pull_request_target"
+    );
+    assert_eq!(
+        caller
+            .matches("uses: ./.github/workflows/ci-reusable.yml")
+            .count(),
+        1,
+        "the candidate caller must delegate to exactly one reusable chain"
+    );
+    assert!(
+        caller.contains("cancel-in-progress: true"),
+        "stale candidate runs must be cancelled"
+    );
+    assert!(
+        caller.contains("github.event.pull_request.head.repo.full_name == github.repository")
+            && caller.contains("vars.CI_SELF_HOSTED_ENABLED == 'true'"),
+        "fork pull requests must have an explicit trust boundary"
+    );
+    assert_eq!(
+        caller.matches("'[\"ubuntu-latest\"]'").count(),
+        4,
+        "both runner classes must fall back to hosted Linux for forks and unset repository variables"
+    );
+    assert!(
+        workflow.contains("fromJSON(inputs.linux-standard-runner)")
+            && workflow.contains("fromJSON(inputs.linux-heavy-runner)"),
+        "trusted Linux runner routing must remain data-driven"
+    );
+    assert!(
+        workflow.contains("name: ci-gate")
+            && workflow.contains("if: ${{ always() }}")
+            && workflow.contains("TOPOLOGY_RESULT")
+            && workflow.contains("PORTABILITY_RESULT")
+            && workflow.contains("VERIFY_RESULT"),
+        "one stable gate must reduce every CI partition"
+    );
+    assert_eq!(
+        workflow.matches("timeout-minutes:").count(),
+        4,
+        "every CI job, including the gate, must have a bounded runtime"
+    );
+    assert!(
+        caller.contains("permissions:\n  contents: read")
+            && workflow.contains("permissions:\n  contents: read"),
+        "caller and reusable workflow must default to read-only contents"
+    );
+
+    for line in workflow.lines().map(str::trim) {
+        let Some(action) = line.strip_prefix("- uses: ") else {
+            continue;
+        };
+        if action.starts_with("./") {
+            continue;
+        }
+        let (repository, reference) = action
+            .split_once('@')
+            .unwrap_or_else(|| panic!("external action is missing a reference: {action}"));
+        let reference = reference
+            .split_whitespace()
+            .next()
+            .expect("action reference must not be empty");
+        assert!(
+            repository.contains('/')
+                && reference.len() == 40
+                && reference.bytes().all(|byte| byte.is_ascii_hexdigit()),
+            "external action must be pinned by a full immutable commit SHA: {action}"
+        );
+    }
+}
+
+#[test]
+fn arc_scale_sets_fit_the_physical_host_and_are_ephemeral() {
+    let metadata = workspace_metadata();
+    let deployment = metadata.root.join("deploy/ci/github-actions/arc");
+    let controller = fs::read_to_string(deployment.join("controller-values.yaml"))
+        .expect("ARC controller values must be readable");
+    let standard = fs::read_to_string(deployment.join("rrflow-standard.values.yaml"))
+        .expect("standard ARC scale-set values must be readable");
+    let heavy = fs::read_to_string(deployment.join("rrflow-heavy.values.yaml"))
+        .expect("heavy ARC scale-set values must be readable");
+    let installer = fs::read_to_string(metadata.root.join("scripts/ci/install-arc.sh"))
+        .expect("ARC installer must be readable");
+
+    assert!(
+        controller.contains("0.14.2@sha256:"),
+        "ARC controller image must be release- and digest-pinned"
+    );
+    assert!(
+        installer.contains("repository_visibility")
+            && installer.contains("!= \"PRIVATE\"")
+            && installer.contains("refusing to register self-hosted runners"),
+        "self-hosted pool registration must fail closed for public repositories"
+    );
+    for (name, values, maximum) in [
+        ("standard", standard.as_str(), "maxRunners: 2"),
+        ("heavy", heavy.as_str(), "maxRunners: 1"),
+    ] {
+        assert!(
+            values.contains("minRunners: 0") && values.contains(maximum),
+            "{name} scale set must scale from zero to its physical capacity"
+        );
+        assert!(
+            values.contains("githubConfigSecret: rrflow-arc-github"),
+            "{name} scale set must use the pre-created Kubernetes secret"
+        );
+        assert!(
+            values.contains("@sha256:") && !values.contains(":latest"),
+            "{name} runner images must be immutable"
+        );
+    }
+    assert!(
+        standard.contains("runnerScaleSetName: rrflow-standard")
+            && standard.contains("cpu: \"16\"")
+            && standard.contains("memory: 20Gi"),
+        "two standard runners must each consume 16 CPUs and 20 GiB"
+    );
+    assert!(
+        heavy.contains("runnerScaleSetName: rrflow-heavy")
+            && heavy.contains("cpu: \"46\"")
+            && heavy.contains("memory: 60Gi")
+            && heavy.contains("cpu: \"2\"")
+            && heavy.contains("memory: 4Gi"),
+        "the heavy runner and its Docker sidecar must total 48 CPUs and 64 GiB"
     );
 }
 
