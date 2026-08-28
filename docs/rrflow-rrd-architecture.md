@@ -437,9 +437,11 @@ The enforced 65-item RRFlow board is the implementation order for this flow:
 | Reproducible SurrealDB/Qdrant/Fjall differentials and evidence-backed reports | G11-W01 through G11-W05 |
 | Repository/platform quality, packaging, upgrade/rollback, and firm-alpha declaration | G12-W01 through G12-W04 |
 
-The work plan is complete as a target map, not as implementation. Only six of
-65 items are verified as of 2026-08-27; no unchecked row may be described as a
-finished capability.
+The work plan is complete as a target map, not as implementation. Its persisted
+RRD state is the only completion authority; run
+`rrflow --db .rrflow/rrd work-plan status` for the current verified and active
+items. No unchecked row may be described as a finished capability, and this
+architecture map intentionally carries no fixed verified-count snapshot.
 
 ## Current implementation truth
 

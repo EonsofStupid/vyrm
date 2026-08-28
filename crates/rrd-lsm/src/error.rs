@@ -30,6 +30,12 @@ pub enum Error {
     TornTail {
         offset: u64,
     },
+    DatabaseWriterLock {
+        path: PathBuf,
+    },
+    RecoveryRequired {
+        boundary: &'static str,
+    },
     PoisonedWriter,
     InjectedFailure {
         mode: &'static str,
@@ -69,6 +75,15 @@ impl fmt::Display for Error {
             Self::TornTail { offset } => write!(
                 formatter,
                 "WAL has an incomplete tail at byte {offset}; explicit repair is required"
+            ),
+            Self::DatabaseWriterLock { path } => write!(
+                formatter,
+                "RRD LSM database already has an active writer: {}",
+                path.display()
+            ),
+            Self::RecoveryRequired { boundary } => write!(
+                formatter,
+                "RRD LSM writer crossed {boundary} without applying its durable WAL frame; reopen is required"
             ),
             Self::PoisonedWriter => write!(
                 formatter,

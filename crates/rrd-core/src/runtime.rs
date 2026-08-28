@@ -1120,6 +1120,16 @@ impl AuditEnvelope {
         outcome_cursor: u64,
         previous_digest: Option<String>,
     ) -> Result<Self> {
+        Self::accepted_commit_at_read(commit, None, commit_id, outcome_cursor, previous_digest)
+    }
+
+    pub fn accepted_commit_at_read(
+        commit: &RuntimeCommit,
+        read: Option<&ReadStamp>,
+        commit_id: &str,
+        outcome_cursor: u64,
+        previous_digest: Option<String>,
+    ) -> Result<Self> {
         Self {
             contract_version: DATA_RUNTIME_CONTRACT_VERSION,
             request_id: commit_id.to_owned(),
@@ -1129,7 +1139,7 @@ impl AuditEnvelope {
             scope: commit.scope.clone(),
             operation: "runtime.commit".into(),
             resource: format!("transaction:{commit_id}"),
-            read: None,
+            read: read.cloned(),
             decision: AuditDecision::Allow,
             outcome_cursor: Some(outcome_cursor),
             duration_ms: 0,

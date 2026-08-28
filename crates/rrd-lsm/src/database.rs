@@ -183,6 +183,21 @@ pub enum FailureMode {
     StorageFull,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WriteBoundary {
+    BeforeWalAppend,
+    WalSynced,
+}
+
+impl WriteBoundary {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::BeforeWalAppend => "write.before_wal_append",
+            Self::WalSynced => "write.wal_synced",
+        }
+    }
+}
+
 impl FailureMode {
     fn as_str(self) -> &'static str {
         match self {
@@ -258,6 +273,7 @@ pub struct Database {
     compaction: CompactionPolicy,
     maintenance_stats: MaintenanceStats,
     wal_payload_bytes: usize,
+    writer_requires_reopen: Option<&'static str>,
 }
 
 impl Database {
@@ -328,6 +344,7 @@ impl Database {
             compaction: options.compaction,
             maintenance_stats: MaintenanceStats::default(),
             wal_payload_bytes: 0,
+            writer_requires_reopen: None,
         })
     }
 
@@ -396,6 +413,7 @@ impl Database {
             compaction: options.compaction,
             maintenance_stats,
             wal_payload_bytes,
+            writer_requires_reopen: None,
         })
     }
 
@@ -414,11 +432,33 @@ impl Database {
     }
 
     pub fn write(&mut self, batch: &WriteBatch, durability: Durability) -> Result<AppendReceipt> {
+        self.write_inner(batch, durability, None)
+    }
+
+    pub fn write_with_failure(
+        &mut self,
+        batch: &WriteBatch,
+        durability: Durability,
+        boundary: WriteBoundary,
+        mode: FailureMode,
+    ) -> Result<AppendReceipt> {
+        self.write_inner(batch, durability, Some((boundary, mode)))
+    }
+
+    fn write_inner(
+        &mut self,
+        batch: &WriteBatch,
+        durability: Durability,
+        failure: Option<(WriteBoundary, FailureMode)>,
+    ) -> Result<AppendReceipt> {
+        self.ensure_writer_ready()?;
         let payload = batch.encode()?;
+        inject_write_failure(failure, WriteBoundary::BeforeWalAppend)?;
         self.prepare_write(batch, payload.len())?;
         let receipt = self
             .wal
             .append_encoded_write_batch(batch, &payload, durability)?;
+        self.inject_post_wal_failure(failure, &receipt)?;
         self.memtable
             .apply_write_batch(batch, receipt.first_sequence, receipt.last_sequence)?;
         self.wal_payload_bytes = self.wal_payload_bytes.saturating_add(payload.len());
@@ -434,11 +474,33 @@ impl Database {
         batch: WriteBatch,
         durability: Durability,
     ) -> Result<AppendReceipt> {
+        self.write_owned_inner(batch, durability, None)
+    }
+
+    pub fn write_owned_with_failure(
+        &mut self,
+        batch: WriteBatch,
+        durability: Durability,
+        boundary: WriteBoundary,
+        mode: FailureMode,
+    ) -> Result<AppendReceipt> {
+        self.write_owned_inner(batch, durability, Some((boundary, mode)))
+    }
+
+    fn write_owned_inner(
+        &mut self,
+        batch: WriteBatch,
+        durability: Durability,
+        failure: Option<(WriteBoundary, FailureMode)>,
+    ) -> Result<AppendReceipt> {
+        self.ensure_writer_ready()?;
         let payload = batch.encode()?;
+        inject_write_failure(failure, WriteBoundary::BeforeWalAppend)?;
         self.prepare_write(&batch, payload.len())?;
         let receipt = self
             .wal
             .append_encoded_write_batch(&batch, &payload, durability)?;
+        self.inject_post_wal_failure(failure, &receipt)?;
         self.memtable.apply_owned_write_batch(
             batch,
             receipt.first_sequence,
@@ -447,6 +509,32 @@ impl Database {
         self.wal_payload_bytes = self.wal_payload_bytes.saturating_add(payload.len());
         self.record_memtable_peak();
         Ok(receipt)
+    }
+
+    fn inject_post_wal_failure(
+        &mut self,
+        failure: Option<(WriteBoundary, FailureMode)>,
+        receipt: &AppendReceipt,
+    ) -> Result<()> {
+        let Some((WriteBoundary::WalSynced, mode)) = failure else {
+            return Ok(());
+        };
+        if !receipt.durable {
+            self.wal.sync()?;
+        }
+        let boundary = WriteBoundary::WalSynced.as_str();
+        self.writer_requires_reopen = Some(boundary);
+        Err(Error::InjectedFailure {
+            mode: mode.as_str(),
+            boundary,
+        })
+    }
+
+    fn ensure_writer_ready(&self) -> Result<()> {
+        match self.writer_requires_reopen {
+            Some(boundary) => Err(Error::RecoveryRequired { boundary }),
+            None => Ok(()),
+        }
     }
 
     fn prepare_write(&mut self, batch: &WriteBatch, payload_bytes: usize) -> Result<()> {
@@ -519,6 +607,7 @@ impl Database {
     }
 
     pub fn sync(&mut self) -> Result<u64> {
+        self.ensure_writer_ready()?;
         self.wal.sync()
     }
 
@@ -546,6 +635,7 @@ impl Database {
         at: u64,
         failure: Option<(FlushBoundary, FailureMode)>,
     ) -> Result<Option<Manifest>> {
+        self.ensure_writer_ready()?;
         if self.memtable.version_count() == 0 {
             self.wal.sync()?;
             return Ok(None);
@@ -1546,6 +1636,19 @@ fn version_group_bytes(key: &[u8], versions: &[VersionedValue]) -> usize {
 fn inject_failure(
     configured: Option<(FlushBoundary, FailureMode)>,
     reached: FlushBoundary,
+) -> Result<()> {
+    if let Some((boundary, mode)) = configured.filter(|(boundary, _)| *boundary == reached) {
+        return Err(Error::InjectedFailure {
+            mode: mode.as_str(),
+            boundary: boundary.as_str(),
+        });
+    }
+    Ok(())
+}
+
+fn inject_write_failure(
+    configured: Option<(WriteBoundary, FailureMode)>,
+    reached: WriteBoundary,
 ) -> Result<()> {
     if let Some((boundary, mode)) = configured.filter(|(boundary, _)| *boundary == reached) {
         return Err(Error::InjectedFailure {

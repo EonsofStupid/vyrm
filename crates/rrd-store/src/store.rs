@@ -449,12 +449,29 @@ impl Store {
     /// their endpoint records do not exist in the commit's scope.
     #[tracing::instrument(level = "debug", skip_all, fields(mutations = commit.mutations.len()))]
     pub fn commit_runtime(&self, commit: &RuntimeCommit) -> Result<RuntimeCommitOutcome> {
+        self.commit_runtime_at_read(commit, None)
+    }
+
+    pub(crate) fn commit_runtime_at_read(
+        &self,
+        commit: &RuntimeCommit,
+        read: Option<&ReadStamp>,
+    ) -> Result<RuntimeCommitOutcome> {
         commit.validate()?;
         let commit_id = commit.digest();
         let mut tx = self
             .db
             .write_tx()
             .durability(Durability::Authoritative.persist_mode());
+        if let Some(read) = read {
+            validate_read_stamp_with(
+                &tx,
+                &self.meta,
+                &self.runtime_changes,
+                &self.runtime_schemas,
+                read,
+            )?;
+        }
 
         let start = decode_optional_sequence(tx.get(&self.meta, keyspaces::RUNTIME_CURSOR)?)?;
         if start != commit.expected_cursor {
@@ -723,8 +740,13 @@ impl Store {
             keyspaces::RUNTIME_ACCUMULATOR_STATE,
             serde_json::to_vec(&accumulator)?,
         );
-        let audit =
-            AuditEnvelope::accepted_commit(commit, &commit_id, cursor, previous_audit_digest)?;
+        let audit = AuditEnvelope::accepted_commit_at_read(
+            commit,
+            read,
+            &commit_id,
+            cursor,
+            previous_audit_digest,
+        )?;
         tx.insert(
             &self.runtime_audit,
             commit_id.as_bytes(),

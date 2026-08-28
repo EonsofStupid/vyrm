@@ -2692,9 +2692,11 @@ index.
 
 ## 2026-08-27 — G01-W04 authoritative product capability catalogue
 
-- Board status: G01-W04 remains active until the frozen local verifier and both
-  publication matrices pass. This entry records implemented behavior and
-  targeted evidence; it does not mark the work item verified.
+- Board closure: G01-W04 is persisted as verified under digest
+  `19c16b4442e5a46f9d820ef9e2edcc6616462dc4a5184375001998902b23f8d2`.
+  The exact source commit is
+  `b21e8408c9fd2170f40383da7b86f9dd868fc160`; GitHub push run
+  `33126648937` and PR run `33126651843` both completed successfully.
 - Contract: the RRD V1 product surface state is now exactly `available`,
   `planned`, `denied`, or `unavailable`. Available bindings carry one or more
   sorted, unique canonical entrypoints and no reason. Non-executable bindings
@@ -2719,8 +2721,53 @@ index.
   hardcoded runtime-tool definitions in either outward source, and require both
   CI matrices to build `rrd-estate-controller` from its actual `rrflow-cli`
   product owner rather than the retired physical crate.
-- Targeted evidence: capability catalogue and workspace architecture tests,
-  all RRD contract targets, TypeScript generation/lint/type/test checks, and the
-  server/client/MCP/Connectome target suites pass. Full workspace, strict
-  Clippy, exact work-plan verification, publication, and remote matrices remain
-  the closing gates.
+- Closing evidence: capability catalogue and workspace architecture tests,
+  all RRD contract targets, TypeScript generation/lint/type/test checks, the
+  server/client/MCP/Connectome target suites, full workspace, strict Clippy,
+  exact work-plan verification, publication, and both remote matrices passed
+  for the recorded source identity.
+
+## 2026-08-27 — G02-W01 native WAL/MVCC/LSM recovery foundation
+
+- Board boundary: G02-W01 is active, not verified. Its reviewed plan freezes an
+  eleven-command verifier over `rrd-lsm`, `rrd-store`, `rrd-engine`,
+  `rrd-cluster`, the estate controller, `rrd-server`, formatting, complete
+  workspace check/test, warning-denying Clippy, and staged diff validation.
+  Publication and both remote CI runs remain required before board verification.
+- One native writer: the manifest lock is held for the database lifetime and
+  acquired with a non-blocking exclusive lock. A second in-process or
+  cross-process writer fails promptly with an explicit active-writer error;
+  reopening succeeds after ordinary drop or SIGKILL owner death. There is no
+  second engine, lock authority, or outward storage-opening surface.
+- Ordinary WAL boundary contract: borrowed and owned atomic batches expose
+  deterministic `before_wal_append` and `wal_synced` failure points under
+  crash and storage-full modes. Pre-WAL failure publishes none and remains
+  usable; post-sync failure forces reopen, then recovers the complete batch.
+  Existing torn-header, torn-payload, checksum-corruption, flush, compaction,
+  snapshot, and reopen matrices remain authoritative for their boundaries.
+- Exact stamped audit: `DataTransaction.read` now reaches the backend's
+  atomic commit primitive. Memory, Fjall compatibility, and native storage
+  persist the exact read stamp in the same batch as changes, outbox work,
+  receipt, cursor, and audit; unstamped `commit_runtime` remains explicitly
+  unstamped. Idempotent replay retains the first accepted audit unchanged.
+- Multi-family recovery proof: one schema + record + event + claim transaction
+  is injected at all four crash/storage-full and pre-WAL/WAL-synced
+  combinations. Reopen proves all-or-none schema, record, event log, claim,
+  cursor, outbox, outcome, commit ID, and stamped audit state, then accepts a
+  successor write.
+- Process and engine proof: the existing test-only durability child now commits
+  one nine-mutation transaction spanning schema, records, relation, event,
+  vector, time-series, geospatial, and claim families, reports readiness, and
+  is terminated with SIGKILL. Reopen recovers all nine changes as one commit,
+  one claim, the exact actor/read/audit identity, and the commit outcome.
+  A separate child holds the native writer lock to prove prompt contention
+  denial and owner-death recovery. An internal `RrdEngine` regression proves
+  the session read stamp, canonical commit ID, audit request ID, outcome cursor,
+  idempotent replay, and reopen identity all agree through the sole engine
+  authority.
+- Focused evidence passed: `rrd-store` all-target compilation; the injected
+  native transaction matrix; all seven real process durability tests; the
+  focused `RrdEngine` transaction-stamp test; snapshot and unified-data
+  stamped-audit tests; and rustfmt. G02-W01 must remain active until the final
+  exact eleven-command tree, publication SHA, both remote runs, and work-plan
+  verifier all pass.

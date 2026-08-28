@@ -200,6 +200,7 @@ fn exercise_unified_commit<E: Engine>(engine: E) {
         .unwrap();
     audit.validate().unwrap();
     assert_eq!(audit.outcome_cursor, Some(outcome.last_cursor));
+    assert_eq!(audit.read.as_ref(), Some(&transaction.read));
 
     // An acknowledgement lost after durability is safe to retry by content id.
     let retried = runtime.commit(&transaction).unwrap();
@@ -371,9 +372,10 @@ fn native_unified_evidence_survives_reopen_and_retry() {
             .len(),
         7
     );
-    assert!(reopened
+    let reopened_audit = reopened
         .engine()
         .runtime_audit(&outcome.commit_id)
         .unwrap()
-        .is_some());
+        .unwrap();
+    assert_eq!(reopened_audit.read.as_ref(), Some(&transaction.read));
 }

@@ -134,7 +134,13 @@ inputs to that validation, not permission to pre-check the board.
 RRD has **real local alpha persistence**, not a wrapper: its native `rrd-lsm`
 path provides WAL and recovery, MVCC, authenticated manifests/segments, atomic
 multi-family runtime commits, snapshots/checkpoints, compaction/GC, crash
-injection, reopen tests, and a staged Fjall migration.
+injection, reopen tests, and a staged Fjall migration. Native writer ownership
+is non-blocking and fails closed when another process owns the root. Ordinary
+WAL publication is qualified immediately before append and immediately after
+durable sync for crash and storage-full outcomes; a post-sync in-process handle
+must reopen before doing more work. Read-stamped transactions persist the exact
+`ReadStamp` inside the same atomic audit-bearing batch on native RRD, the Fjall
+compatibility oracle, and the in-memory conformance engine.
 
 The single-node process boundary is now project-bound locally: an explicit
 provisioning action creates or verifies one immutable instance identity,

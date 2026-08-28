@@ -892,9 +892,13 @@ impl Engine for NativeEngine {
         Ok(page)
     }
 
-    fn commit_runtime(&self, commit: &RuntimeCommit) -> Result<RuntimeCommitOutcome> {
+    fn commit_runtime_at_read(
+        &self,
+        commit: &RuntimeCommit,
+        read: Option<&ReadStamp>,
+    ) -> Result<RuntimeCommitOutcome> {
         let mut database = self.lock()?;
-        let plan = prepare_native_runtime_commit(&database, commit)?;
+        let plan = prepare_native_runtime_commit_at_read(&database, commit, read)?;
         let (outcome, operations) = plan.into_parts();
         write(&mut database, operations, Durability::Authoritative)?;
         Ok(outcome)
@@ -1049,8 +1053,19 @@ pub fn prepare_native_runtime_commit(
     database: &Database,
     commit: &RuntimeCommit,
 ) -> Result<NativeRuntimeCommitPlan> {
+    prepare_native_runtime_commit_at_read(database, commit, None)
+}
+
+fn prepare_native_runtime_commit_at_read(
+    database: &Database,
+    commit: &RuntimeCommit,
+    read: Option<&ReadStamp>,
+) -> Result<NativeRuntimeCommitPlan> {
     commit.validate()?;
     let snapshot = database.snapshot();
+    if let Some(read) = read {
+        validate_native_read_stamp(database, snapshot, read)?;
+    }
     let commit_id = commit.digest();
     let start = read_sequence(database, snapshot, keyspaces::RUNTIME_CURSOR)?;
     if start != commit.expected_cursor {
@@ -1345,7 +1360,13 @@ pub fn prepare_native_runtime_commit(
         keyspaces::RUNTIME_ACCUMULATOR_STATE,
         serde_json::to_vec(&accumulator)?,
     );
-    let audit = AuditEnvelope::accepted_commit(commit, &commit_id, cursor, previous_audit_digest)?;
+    let audit = AuditEnvelope::accepted_commit_at_read(
+        commit,
+        read,
+        &commit_id,
+        cursor,
+        previous_audit_digest,
+    )?;
     put(
         &mut operations,
         keyspaces::RUNTIME_AUDIT,
@@ -2313,7 +2334,11 @@ fn prefix_end(prefix: &[u8]) -> Option<Vec<u8>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rrd_core::{ObjectReceipt, Producer};
+    use rrd_core::{
+        DataTransaction, ObjectReceipt, Producer, RuntimeEvent, RuntimeEventSchema,
+        RuntimeProperties, RuntimeRecordSchema, RuntimeType,
+    };
+    use rrd_lsm::{FailureMode, WriteBoundary};
 
     fn claim() -> Claim {
         Claim::new(
@@ -2328,6 +2353,192 @@ mod tests {
                 session: None,
             },
         )
+    }
+
+    fn failure_transaction(database: &Database) -> DataTransaction {
+        let scope = ScopeId::new("instance:native-failure").unwrap();
+        let read = native_read_stamp(database, database.snapshot(), &scope).unwrap();
+        let item_kind = RuntimeType::new("item").unwrap();
+        let item = RuntimeRef::new("item", "one").unwrap();
+        let mut registry = RuntimeSchemaRegistry::empty(1, "native failure matrix");
+        registry
+            .records
+            .insert(item_kind.clone(), RuntimeRecordSchema::default());
+        registry.events.insert(
+            RuntimeType::new("pulse").unwrap(),
+            RuntimeEventSchema {
+                subject_required: true,
+                subject_types: BTreeSet::from([item_kind]),
+                properties: BTreeMap::new(),
+                allow_additional_properties: false,
+            },
+        );
+        DataTransaction::new(
+            read,
+            RuntimeCommit {
+                scope,
+                at: 100,
+                actor: "agent:native-failure".into(),
+                expected_cursor: 0,
+                mutations: vec![
+                    RuntimeMutation::Schema { registry },
+                    RuntimeMutation::Record {
+                        record: RuntimeRecord {
+                            reference: item.clone(),
+                            valid_from: 100,
+                            valid_to: None,
+                            properties: RuntimeProperties::new(),
+                        },
+                    },
+                    RuntimeMutation::Event {
+                        event: RuntimeEvent {
+                            kind: RuntimeType::new("pulse").unwrap(),
+                            subject: Some(item),
+                            properties: RuntimeProperties::new(),
+                        },
+                    },
+                    RuntimeMutation::Claim {
+                        claim: Claim::new(
+                            Subject::new("item:one").unwrap(),
+                            Predicate::new("status").unwrap(),
+                            "ready",
+                            100,
+                            100,
+                            Producer {
+                                actor: "agent:native-failure".into(),
+                                on_behalf_of: None,
+                                session: Some("native-failure".into()),
+                            },
+                        ),
+                    },
+                ],
+            },
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn native_multi_family_transaction_recovers_all_or_none_at_every_wal_boundary() {
+        for mode in [FailureMode::Crash, FailureMode::StorageFull] {
+            for boundary in [WriteBoundary::BeforeWalAppend, WriteBoundary::WalSynced] {
+                let directory = tempfile::tempdir().unwrap();
+                let root = directory.path().join("native-failure");
+                let mut database = Database::create_with_application_format(
+                    &root,
+                    DatabaseOptions::default(),
+                    keyspaces::NATIVE_KEYSPACE_TAG_FORMAT_V2,
+                )
+                .unwrap();
+                let transaction = failure_transaction(&database);
+                let plan = prepare_native_runtime_commit_at_read(
+                    &database,
+                    &transaction.commit,
+                    Some(&transaction.read),
+                )
+                .unwrap();
+                let expected = plan.outcome().clone();
+                let (_, mut operations) = plan.into_parts();
+                transcode_operations(&database, &mut operations).unwrap();
+                let error = database
+                    .write_owned_with_failure(
+                        WriteBatch::new(operations).unwrap(),
+                        rrd_lsm::Durability::Authoritative,
+                        boundary,
+                        mode,
+                    )
+                    .unwrap_err();
+                assert!(matches!(error, rrd_lsm::Error::InjectedFailure { .. }));
+                drop(database);
+
+                let mut recovered = Database::open(&root).unwrap();
+                let snapshot = recovered.snapshot();
+                let published = boundary == WriteBoundary::WalSynced;
+                let expected_runtime_cursor = if published { 4 } else { 0 };
+                let expected_claim_sequence = if published { 1 } else { 0 };
+                assert_eq!(
+                    read_sequence(&recovered, snapshot, keyspaces::RUNTIME_CURSOR).unwrap(),
+                    expected_runtime_cursor,
+                    "mode={mode:?} boundary={boundary:?}"
+                );
+                assert_eq!(
+                    read_sequence(&recovered, snapshot, keyspaces::SEQUENCE_WATERMARK).unwrap(),
+                    expected_claim_sequence,
+                    "mode={mode:?} boundary={boundary:?}"
+                );
+                assert_eq!(
+                    scan_space(&recovered, snapshot, keyspaces::RUNTIME_CHANGES, &[])
+                        .unwrap()
+                        .len(),
+                    expected_runtime_cursor as usize
+                );
+                assert_eq!(
+                    scan_space(&recovered, snapshot, keyspaces::RUNTIME_OUTBOX, &[])
+                        .unwrap()
+                        .len(),
+                    if published { 2 } else { 0 }
+                );
+                assert_eq!(
+                    scan_space(&recovered, snapshot, keyspaces::CLAIMS, &[])
+                        .unwrap()
+                        .len(),
+                    expected_claim_sequence as usize
+                );
+
+                let outcome: Option<RuntimeCommitOutcome> = get_json(
+                    &recovered,
+                    snapshot,
+                    keyspaces::RUNTIME_COMMITS,
+                    expected.commit_id.as_bytes(),
+                )
+                .unwrap();
+                assert_eq!(outcome.as_ref(), published.then_some(&expected));
+                let audit: Option<AuditEnvelope> = get_json(
+                    &recovered,
+                    snapshot,
+                    keyspaces::RUNTIME_AUDIT,
+                    expected.commit_id.as_bytes(),
+                )
+                .unwrap();
+                assert_eq!(
+                    audit.as_ref().and_then(|value| value.read.as_ref()),
+                    published.then_some(&transaction.read)
+                );
+                assert_eq!(
+                    audit.as_ref().and_then(|value| value.outcome_cursor),
+                    published.then_some(4)
+                );
+                let schema: Option<RuntimeSchemaRegistry> = get_json(
+                    &recovered,
+                    snapshot,
+                    keyspaces::RUNTIME_SCHEMAS,
+                    transaction.commit.scope.as_str().as_bytes(),
+                )
+                .unwrap();
+                assert_eq!(schema.is_some(), published);
+                let record: Option<RuntimeRecord> = get_json(
+                    &recovered,
+                    snapshot,
+                    keyspaces::RUNTIME_RECORDS,
+                    &runtime_identity_key(
+                        &transaction.commit.scope,
+                        &RuntimeRef::new("item", "one").unwrap(),
+                    ),
+                )
+                .unwrap();
+                assert_eq!(record.is_some(), published);
+
+                recovered
+                    .write_owned(
+                        WriteBatch::new(vec![Mutation::Put {
+                            key: b"post-reopen".to_vec(),
+                            value: b"accepted".to_vec(),
+                        }])
+                        .unwrap(),
+                        rrd_lsm::Durability::Authoritative,
+                    )
+                    .unwrap();
+            }
+        }
     }
 
     #[test]

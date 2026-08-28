@@ -259,9 +259,22 @@ pub trait Engine: ClaimSource<Error = Error> {
         limit: usize,
     ) -> Result<RuntimeChangePage>;
 
+    /// Backend primitive that atomically commits typed runtime mutations and,
+    /// for a data transaction, persists the exact validated read stamp in the
+    /// accepted audit envelope. Callers use commit_runtime or
+    /// commit_data_transaction.
+    #[doc(hidden)]
+    fn commit_runtime_at_read(
+        &self,
+        commit: &RuntimeCommit,
+        read: Option<&ReadStamp>,
+    ) -> Result<RuntimeCommitOutcome>;
+
     /// Atomically commits typed runtime mutations with exact-cursor conflict
     /// detection. Embedded claims join the same storage transaction.
-    fn commit_runtime(&self, commit: &RuntimeCommit) -> Result<RuntimeCommitOutcome>;
+    fn commit_runtime(&self, commit: &RuntimeCommit) -> Result<RuntimeCommitOutcome> {
+        self.commit_runtime_at_read(commit, None)
+    }
 
     /// Reads a bounded, resumable page of runtime changes.
     fn runtime_changes_since(
@@ -294,8 +307,7 @@ pub trait Engine: ClaimSource<Error = Error> {
         transaction: &DataTransaction,
     ) -> Result<RuntimeCommitOutcome> {
         transaction.validate()?;
-        self.runtime_read_changes(&transaction.read, transaction.read.commit_cursor, 1)?;
-        self.commit_runtime(&transaction.commit)
+        self.commit_runtime_at_read(&transaction.commit, Some(&transaction.read))
     }
 
     /// Reconstructs the stamped base graph and overlays pending writes. The
@@ -565,6 +577,13 @@ impl Engine for Store {
     }
     fn commit_runtime(&self, commit: &RuntimeCommit) -> Result<RuntimeCommitOutcome> {
         Store::commit_runtime(self, commit)
+    }
+    fn commit_runtime_at_read(
+        &self,
+        commit: &RuntimeCommit,
+        read: Option<&ReadStamp>,
+    ) -> Result<RuntimeCommitOutcome> {
+        Store::commit_runtime_at_read(self, commit, read)
     }
     fn runtime_changes_since(
         &self,
@@ -1011,9 +1030,16 @@ impl Engine for MemoryEngine {
         Ok(page)
     }
 
-    fn commit_runtime(&self, commit: &RuntimeCommit) -> Result<RuntimeCommitOutcome> {
+    fn commit_runtime_at_read(
+        &self,
+        commit: &RuntimeCommit,
+        read: Option<&ReadStamp>,
+    ) -> Result<RuntimeCommitOutcome> {
         commit.validate()?;
         let mut inner = self.inner.lock().expect("engine mutex");
+        if let Some(read) = read {
+            memory_validate_read_stamp(&inner, read)?;
+        }
         let commit_id = commit.digest();
         let start = inner.runtime_changes.len() as u64;
         if start != commit.expected_cursor {
@@ -1159,8 +1185,9 @@ impl Engine for MemoryEngine {
             committed.push(change);
         }
         let last_cursor = start + commit.mutations.len() as u64;
-        let audit = AuditEnvelope::accepted_commit(
+        let audit = AuditEnvelope::accepted_commit_at_read(
             commit,
+            read,
             &commit_id,
             last_cursor,
             inner.runtime_last_audit_digest.clone(),

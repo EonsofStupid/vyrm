@@ -271,6 +271,8 @@ fn assert_data_transaction_contract(engine: &dyn Engine) {
     assert_eq!(digest.len(), 64);
     let outcome = engine.commit_data_transaction(&transaction).unwrap();
     assert_eq!(outcome.last_cursor, 1);
+    let audit = engine.runtime_audit(&outcome.commit_id).unwrap().unwrap();
+    assert_eq!(audit.read.as_ref(), Some(&transaction.read));
 
     let stale = DataTransaction::new(read, bootstrap(&scope, 0)).unwrap();
     assert!(matches!(
@@ -291,7 +293,9 @@ fn assert_data_transaction_contract(engine: &dyn Engine) {
     assert_eq!(view.events().count(), 1);
     assert_eq!(engine.runtime_cursor().unwrap(), 1);
 
-    engine.commit_data_transaction(&pending).unwrap();
+    let outcome = engine.commit_data_transaction(&pending).unwrap();
+    let audit = engine.runtime_audit(&outcome.commit_id).unwrap().unwrap();
+    assert_eq!(audit.read.as_ref(), Some(&pending.read));
     let committed = engine
         .runtime_read_changes(&engine.runtime_read_stamp(&scope).unwrap(), 0, 10)
         .unwrap();

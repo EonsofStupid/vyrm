@@ -1,6 +1,6 @@
 use rrd_lsm::{
     CompactionBoundary, Database, Durability, Error, FailureMode, FlushBoundary, Mutation,
-    WriteBatch,
+    WriteBatch, WriteBoundary,
 };
 
 fn put(key: &str, value: &str) -> WriteBatch {
@@ -9,6 +9,111 @@ fn put(key: &str, value: &str) -> WriteBatch {
         value: value.as_bytes().to_vec(),
     }])
     .unwrap()
+}
+
+fn pair() -> WriteBatch {
+    WriteBatch::new(vec![
+        Mutation::Put {
+            key: b"alpha".to_vec(),
+            value: b"one".to_vec(),
+        },
+        Mutation::Put {
+            key: b"beta".to_vec(),
+            value: b"two".to_vec(),
+        },
+    ])
+    .unwrap()
+}
+
+#[test]
+fn a_second_native_writer_fails_fast_and_the_root_reopens_after_release() {
+    let directory = tempfile::tempdir().unwrap();
+    let root = directory.path().join("database");
+    let owner = Database::create(&root).unwrap();
+
+    let error = match Database::open(&root) {
+        Ok(_) => panic!("a second writer unexpectedly opened the database"),
+        Err(error) => error,
+    };
+    assert!(matches!(
+        error,
+        Error::DatabaseWriterLock { ref path } if path.ends_with("MANIFEST.LOCK")
+    ));
+
+    drop(owner);
+    Database::open(&root).unwrap();
+}
+
+#[test]
+fn ordinary_write_boundaries_recover_atomic_borrowed_and_owned_batches() {
+    for owned in [false, true] {
+        for durability in [Durability::Buffered, Durability::Authoritative] {
+            for mode in [FailureMode::Crash, FailureMode::StorageFull] {
+                for boundary in [WriteBoundary::BeforeWalAppend, WriteBoundary::WalSynced] {
+                    let directory = tempfile::tempdir().unwrap();
+                    let root = directory.path().join("database");
+                    let mut database = Database::create(&root).unwrap();
+                    let batch = pair();
+                    let error = if owned {
+                        database
+                            .write_owned_with_failure(batch, durability, boundary, mode)
+                            .unwrap_err()
+                    } else {
+                        database
+                            .write_with_failure(&batch, durability, boundary, mode)
+                            .unwrap_err()
+                    };
+                    assert!(matches!(error, Error::InjectedFailure { .. }));
+
+                    match boundary {
+                        WriteBoundary::BeforeWalAppend => {
+                            database
+                                .write(&put("replacement", "accepted"), Durability::Authoritative)
+                                .unwrap();
+                            database.sync().unwrap();
+                        }
+                        WriteBoundary::WalSynced => {
+                            assert!(matches!(
+                                database
+                                    .write(&put("forbidden", "write"), Durability::Authoritative),
+                                Err(Error::RecoveryRequired { .. })
+                            ));
+                            assert!(matches!(
+                                database.sync(),
+                                Err(Error::RecoveryRequired { .. })
+                            ));
+                            assert!(matches!(
+                                database.flush_memtable(10),
+                                Err(Error::RecoveryRequired { .. })
+                            ));
+                        }
+                    }
+                    drop(database);
+
+                    let mut recovered = Database::open(&root).unwrap();
+                    let snapshot = recovered.snapshot();
+                    let batch_published = boundary == WriteBoundary::WalSynced;
+                    assert_eq!(
+                        recovered.get(b"alpha", snapshot).unwrap().is_some(),
+                        batch_published,
+                        "owned={owned} durability={durability:?} mode={mode:?} boundary={boundary:?}"
+                    );
+                    assert_eq!(
+                        recovered.get(b"beta", snapshot).unwrap().is_some(),
+                        batch_published,
+                        "owned={owned} durability={durability:?} mode={mode:?} boundary={boundary:?}"
+                    );
+                    assert_eq!(
+                        recovered.get(b"replacement", snapshot).unwrap().is_some(),
+                        !batch_published
+                    );
+                    recovered
+                        .write(&put("after", "reopen"), Durability::Authoritative)
+                        .unwrap();
+                }
+            }
+        }
+    }
 }
 
 #[test]

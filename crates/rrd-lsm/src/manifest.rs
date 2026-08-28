@@ -437,8 +437,15 @@ impl ManifestStore {
             .truncate(false)
             .open(&lock_path)
             .map_err(|error| Error::io("opening manifest lock", &lock_path, error))?;
-        lock.lock()
-            .map_err(|error| Error::io("acquiring manifest lock", &lock_path, error))?;
+        match lock.try_lock() {
+            Ok(()) => {}
+            Err(std::fs::TryLockError::WouldBlock) => {
+                return Err(Error::DatabaseWriterLock { path: lock_path });
+            }
+            Err(std::fs::TryLockError::Error(error)) => {
+                return Err(Error::io("acquiring manifest lock", &lock_path, error));
+            }
+        }
         Ok(Self {
             root: root.to_owned(),
             _lock: lock,
