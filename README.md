@@ -615,14 +615,15 @@ effectiveness ledger now match Fjall and survive reopen, so the default does not
 drop trigger-optimization evidence.
 
 F1 now also has a backend-independent RRD logical archive and local backup
-catalogue. `storage archive-export|archive-inspect|archive-restore` preserves
-claim sequence, runtime cursor, original runtime commits, and the runtime hash
-chain while restoring only into an absent root through hidden staging and a
-verified reopen. `storage backup-create|backup-list|backup-restore` adds an
-authenticated catalogue and content-addressed archive retention. Catalogue v1
-states its boundary directly: claims and typed runtime are included, object
-payloads are references only, projections require rebuild, and the backup is
-not yet application-complete. See
+catalogue. `storage archive-export|archive-inspect|archive-restore` streams
+bounded claim/runtime pages, preserves original commits and transaction audit
+envelopes, resumes from checksummed action receipts, and restores only into an
+absent root through verified hidden staging. `storage
+backup-create|backup-list|backup-restore` adds an authenticated catalogue and
+content-addressed retention. A logical-only backup declares object payloads as
+references; the engine's application-complete backup binds exact immutable
+object bytes and vector/index catalogue state to the archive identity while
+leaving projections rebuild-required. See
 [`docs/rrd-logical-archive.md`](docs/rrd-logical-archive.md).
 `storage format-upgrade|format-status` separately operates the authenticated,
 resumable exact-successor TextV1→TagV2 migration across all 18 physical logical

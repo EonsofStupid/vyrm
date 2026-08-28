@@ -240,19 +240,21 @@ format, migration, crash, corruption, disk-full, soak, and lint gate. Logical
 archive v1 consistency, integrity, and restore invariants are frozen in
 [`rrd-logical-archive.md`](rrd-logical-archive.md).
 
-**Landed 2026-08-23:** backend-independent logical export reconstructs and
-validates original runtime commits, correlates their claim mutations with the
-independent claim sequence, rejects unstable source watermarks, and writes a
-content-authenticated framed archive. Restore validates before mutation,
-replays through production Engine paths into hidden staging, compares both
-watermarks, flushes, reopens, verifies again, and only then publishes an absent
-target. An authenticated catalogue retains content-addressed archives and
-declares claims/runtime included, objects referenced-only, projections
-rebuild-required, telemetry/leases excluded, and application completeness
-false. Library and CLI corruption, truncation, retry, exact-replay, catalogue,
-and selected-backup restore tests pass. Object closure, retention policy,
-signing/encryption, streaming source spill, and general cross-version migration
-remain before the F1 exit gate.
+**G02-W02 candidate 2026-08-27:** backend-independent logical export now walks
+fixed claim/runtime pages without whole-log materialization, preserves original
+transaction audit envelopes and audit heads, and resumes export/restore through
+checksummed receipts that reconcile the durable-action/receipt crash window.
+Export also resumes after the authenticated footer is durable but before final
+publication by validating and publishing the complete private archive.
+The application-complete backup identity binds the archive, immutable object
+payload closure, and vector/index catalogue manifest. Focused tests cover more
+than ten persistent scenarios, multi-page logs, all canonical runtime families,
+exact audit/read stamps, all three export durability boundaries, both restore
+receipt boundaries, tampering, source drift, reopen, object bytes, and catalogue
+state. The complete local 13-command candidate matrix is green. Publication and
+platform verification are still pending, so G02-W02 remains active. Retention/
+RPO/RTO, general cross-version migration, producer signing/encryption, and S3
+qualification remain in their later gates.
 
 **Native migration ledger landed 2026-08-23:** the only admitted application
 format edge is the exact successor TextV1 → `RRDSK002` TagV2. Its authenticated

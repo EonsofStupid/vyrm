@@ -2729,11 +2729,13 @@ index.
 
 ## 2026-08-27 — G02-W01 native WAL/MVCC/LSM recovery foundation
 
-- Board boundary: G02-W01 is active, not verified. Its reviewed plan freezes an
-  eleven-command verifier over `rrd-lsm`, `rrd-store`, `rrd-engine`,
+- Board closure: G02-W01 is verified under digest
+  `1e17ab3441eef467442984df3389e2206b253f287b2f93b51fad54a31f1025bd`.
+  Its eleven-command verifier covers `rrd-lsm`, `rrd-store`, `rrd-engine`,
   `rrd-cluster`, the estate controller, `rrd-server`, formatting, complete
   workspace check/test, warning-denying Clippy, and staged diff validation.
-  Publication and both remote CI runs remain required before board verification.
+  Candidate run `33142404999` passed Linux, macOS, Windows, topology, and the
+  stable `ci-gate` for commit `e017e33a6c7cad85597189d50918bc2884b373c3`.
 - One native writer: the manifest lock is held for the database lifetime and
   acquired with a non-blocking exclusive lock. A second in-process or
   cross-process writer fails promptly with an explicit active-writer error;
@@ -2768,6 +2770,47 @@ index.
 - Focused evidence passed: `rrd-store` all-target compilation; the injected
   native transaction matrix; all seven real process durability tests; the
   focused `RrdEngine` transaction-stamp test; snapshot and unified-data
-  stamped-audit tests; and rustfmt. G02-W01 must remain active until the final
-  exact eleven-command tree, publication SHA, both remote runs, and work-plan
-  verifier all pass.
+  stamped-audit tests; and rustfmt. The final exact eleven-command tree,
+  publication SHA, remote platform matrix, and work-plan verifier then passed
+  before G02-W02 was activated.
+
+## 2026-08-27 — G02-W02 bounded resumable logical archive candidate
+
+- Runtime-enforced scope: RRD has G02-W02 active with the reviewed plan and an
+  exact 13-command verifier. The board remains 10/65 verified; this entry does
+  not mark G02-W02 complete.
+- Proven defect: the pre-existing restore regenerated transaction audits via
+  unstamped `commit_runtime`, changing `AuditEnvelope.read` from the original
+  `ReadStamp` to `None` and therefore changing the audit digest. A regression
+  test failed on that exact difference before implementation.
+- Atomic correction: each V1 runtime action now carries its original audit
+  envelope. A crate-private native restore path runs ordinary commit planning,
+  validates the archived envelope against commit identity, cursor, previous
+  audit head, and historical read stamp, and writes it in the same atomic batch.
+  No public Engine/HTTP/MCP/SDK mutation bypass was added.
+- Bounded stream: `rrd-store::archive` is split into facade, export, format,
+  receipt, and restore modules. Export uses two fixed-page passes, retains one
+  page plus one bounded action, and never builds whole claim/change/commit/
+  action vectors. Object and catalogue manifests have explicit V1 count/byte
+  bounds; object bytes already move through verified streaming IO.
+- Resume contract: deterministic private partial/staging paths and
+  content-authenticated receipts retain fixed watermarks, action ordinal,
+  claim/runtime coordinates, audit head, prefix bytes, and prefix digest.
+  Export and restore both reconcile a durable action whose receipt was not yet
+  published. Source advancement invalidates an unfinished export; receipt,
+  partial, archive, staging, object, and catalogue divergence fail closed.
+- Focused evidence: the new resilience target passes 12/12 tests. Together
+  with 4/4 logical archive and 5/5 backup catalogue tests, it covers multi-page
+  claims, split commits, all typed families, original transaction audits, both
+  action/receipt boundaries plus the finalized-footer/publication boundary,
+  receipt tampering, source drift, corruption, truncation, object/catalogue/
+  audit closure, and reopen.
+- Local candidate evidence: all 13 reviewed commands pass, including focused
+  archive/catalogue suites, all `rrd-store`, `rrd-engine`, CLI, and server
+  targets, formatting, complete workspace all-target check and test, warning-
+  denying workspace Clippy, and diff validation. This is local candidate
+  evidence only; it does not cross off G02-W02.
+- Pending before board verification: commit/push this exact implementation,
+  require Linux, macOS ARM, and Windows success for that commit, journal the
+  source identity and remote runs, execute the RRD verifier on the unchanged
+  published tree, and only then allow RRD to cross off G02-W02.

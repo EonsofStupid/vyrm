@@ -23,6 +23,9 @@ const OBJECT_PAYLOAD_DIRECTORY: &str = "payloads";
 const OBJECT_MANIFEST_VERSION: u16 = 1;
 const PAGE_SIZE: usize = 1_024;
 const CATALOGUE_MANIFEST_VERSION: u16 = 1;
+const MAX_ARCHIVE_OBJECTS: usize = 1_000_000;
+const MAX_ARCHIVE_CATALOGUE_RECORDS: usize = 1_000_000;
+const MAX_ARCHIVE_MANIFEST_BYTES: u64 = 256 * 1024 * 1024;
 static BACKUP_TEMP_ID: AtomicU64 = AtomicU64::new(1);
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -500,6 +503,11 @@ fn object_references_at(engine: &impl Engine, head: u64) -> Result<Vec<ObjectRef
                     )));
                 }
             } else {
+                if objects.len() == MAX_ARCHIVE_OBJECTS {
+                    return Err(Error::Archive(
+                        "backup object closure exceeds the v1 entry bound".into(),
+                    ));
+                }
                 objects.insert(object.sha256.clone(), object);
             }
         }
@@ -537,6 +545,13 @@ fn retain_catalogues(
             scopes.insert(scope.clone());
             match entry.replacement {
                 Some(value) => {
+                    if !records.contains_key(&entry.key)
+                        && records.len() == MAX_ARCHIVE_CATALOGUE_RECORDS
+                    {
+                        return Err(Error::Archive(
+                            "backup catalogue closure exceeds the v1 entry bound".into(),
+                        ));
+                    }
                     records.insert(
                         entry.key.clone(),
                         CatalogueRecordSnapshot {
@@ -646,6 +661,11 @@ fn load_catalogue_manifest_for_entry(
 }
 
 fn load_catalogue_manifest(path: &Path) -> Result<CatalogueManifest> {
+    if fs::metadata(path).map_err(backup_io)?.len() > MAX_ARCHIVE_MANIFEST_BYTES {
+        return Err(Error::Archive(
+            "catalogue manifest exceeds the v1 byte bound".into(),
+        ));
+    }
     let bytes = fs::read(path).map_err(backup_io)?;
     let stored: StoredCatalogueManifest = serde_json::from_slice(&bytes)?;
     validate_catalogue_manifest(&stored.payload)?;
@@ -697,6 +717,11 @@ fn validate_catalogue_manifest(manifest: &CatalogueManifest) -> Result<()> {
             "catalogue manifest entries are not uniquely ordered".into(),
         ));
     }
+    if manifest.records.len() > MAX_ARCHIVE_CATALOGUE_RECORDS {
+        return Err(Error::Archive(
+            "backup catalogue closure exceeds the v1 entry bound".into(),
+        ));
+    }
     let scope_revisions = manifest
         .scopes
         .iter()
@@ -733,39 +758,61 @@ fn validate_catalogue_manifest(manifest: &CatalogueManifest) -> Result<()> {
 fn restore_catalogues(manifest: &CatalogueManifest, staging_root: &Path) -> Result<()> {
     validate_catalogue_manifest(manifest)?;
     let engine = NativeEngine::open(staging_root)?;
-    let mut applied = std::collections::BTreeMap::<ScopeId, u64>::new();
-    for record in &manifest.records {
-        engine.commit_catalog_transition(
-            &record.scope,
-            &ControlTransition {
-                key: record.key.clone(),
-                expected: None,
-                replacement: Some(record.value.clone()),
-                at: 1,
-                actor: "rrd-restore".into(),
-                action: "catalogue.restored".into(),
-                request_id: "rrd-restore".into(),
-                operation_id: "rrd-restore".into(),
-            },
-        )?;
-        *applied.entry(record.scope.clone()).or_default() += 1;
-    }
     for scope in &manifest.scopes {
-        let record = manifest
+        let records = manifest
             .records
             .iter()
-            .find(|record| record.scope == scope.scope)
-            .ok_or_else(|| {
-                Error::Archive("catalogue revision has no materialized restore record".into())
-            })?;
-        let count = applied.entry(scope.scope.clone()).or_default();
-        while *count < scope.revision {
+            .filter(|record| record.scope == scope.scope)
+            .collect::<Vec<_>>();
+        let first = records.first().ok_or_else(|| {
+            Error::Archive("catalogue revision has no materialized restore record".into())
+        })?;
+        let mut revision = engine.runtime_read_stamp(&scope.scope)?.catalog_revision;
+        if revision > scope.revision {
+            return Err(Error::Archive(format!(
+                "restored catalogue revision {revision} exceeds {} for {}",
+                scope.revision, scope.scope
+            )));
+        }
+        for (ordinal, record) in records.iter().enumerate() {
+            let existing = engine.control_record(&record.key)?;
+            if (ordinal as u64) < revision {
+                if existing.as_deref() != Some(record.value.as_slice()) {
+                    return Err(Error::Archive(format!(
+                        "partially restored catalogue record {} differs",
+                        record.key
+                    )));
+                }
+                continue;
+            }
+            if existing.is_some() {
+                return Err(Error::Archive(format!(
+                    "catalogue record {} exists ahead of its revision",
+                    record.key
+                )));
+            }
             engine.commit_catalog_transition(
                 &scope.scope,
                 &ControlTransition {
                     key: record.key.clone(),
-                    expected: Some(record.value.clone()),
+                    expected: None,
                     replacement: Some(record.value.clone()),
+                    at: 1,
+                    actor: "rrd-restore".into(),
+                    action: "catalogue.restored".into(),
+                    request_id: "rrd-restore".into(),
+                    operation_id: "rrd-restore".into(),
+                },
+            )?;
+            revision += 1;
+        }
+        while revision < scope.revision {
+            engine.commit_catalog_transition(
+                &scope.scope,
+                &ControlTransition {
+                    key: first.key.clone(),
+                    expected: Some(first.value.clone()),
+                    replacement: Some(first.value.clone()),
                     at: 1,
                     actor: "rrd-restore".into(),
                     action: "catalogue.revision_restored".into(),
@@ -773,7 +820,7 @@ fn restore_catalogues(manifest: &CatalogueManifest, staging_root: &Path) -> Resu
                     operation_id: "rrd-restore".into(),
                 },
             )?;
-            *count += 1;
+            revision += 1;
         }
     }
     drop(engine);
@@ -807,6 +854,11 @@ fn retain_object_payloads(
     catalogue_root: &Path,
     references: &[ObjectReference],
 ) -> Result<(String, ObjectPayloadManifestInventory)> {
+    if references.len() > MAX_ARCHIVE_OBJECTS {
+        return Err(Error::Archive(
+            "backup object closure exceeds the v1 entry bound".into(),
+        ));
+    }
     let retained = LocalObjectStore::open(catalogue_root.join(OBJECT_PAYLOAD_DIRECTORY))?;
     let mut entries = Vec::with_capacity(references.len());
     let mut payload_bytes = 0u64;
@@ -940,6 +992,11 @@ fn load_object_manifest_for_entry(
 }
 
 fn load_object_manifest(path: &Path) -> Result<ObjectPayloadManifest> {
+    if fs::metadata(path).map_err(backup_io)?.len() > MAX_ARCHIVE_MANIFEST_BYTES {
+        return Err(Error::Archive(
+            "object manifest exceeds the v1 byte bound".into(),
+        ));
+    }
     let bytes = fs::read(path).map_err(backup_io)?;
     let stored: StoredObjectPayloadManifest = serde_json::from_slice(&bytes)?;
     validate_object_manifest(&stored.payload)?;
@@ -975,6 +1032,11 @@ fn validate_object_manifest(manifest: &ObjectPayloadManifest) -> Result<()> {
             "unsupported object manifest version {}",
             manifest.format_version
         )));
+    }
+    if manifest.objects.len() > MAX_ARCHIVE_OBJECTS {
+        return Err(Error::Archive(
+            "backup object closure exceeds the v1 entry bound".into(),
+        ));
     }
     let mut previous: Option<&str> = None;
     for object in &manifest.objects {
@@ -1079,7 +1141,7 @@ fn validate_entries(entries: &[BackupEntry]) -> Result<()> {
             && entry.catalogue_manifest.is_some();
         if !common_coverage || (!logical_only && !application_complete) {
             return Err(Error::Archive(
-                "backup v2 coverage declaration is not canonical".into(),
+                "backup v1 coverage declaration is not canonical".into(),
             ));
         }
         if let (Some(file), Some(inventory)) = (&entry.object_manifest_file, &entry.object_manifest)

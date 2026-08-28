@@ -5,8 +5,8 @@ use rrd_core::{
 };
 use rrd_store::{
     create_application_backup, create_logical_backup, load_backup_catalogue,
-    restore_catalogued_backup, verify_backup_catalogue, BackupCoverage, DataRuntime, Engine,
-    LocalObjectStore, NativeEngine,
+    restore_catalogued_backup, verify_backup_catalogue, BackupCoverage, ControlTransition,
+    DataRuntime, Engine, LocalObjectStore, NativeEngine,
 };
 use std::fs::OpenOptions;
 use std::io::{Seek, SeekFrom, Write};
@@ -174,4 +174,134 @@ fn application_backup_payload_corruption_fails_before_restore_publication() {
     let target = root.path().join("must-not-publish");
     assert!(restore_catalogued_backup(&catalogue_root, &entry.backup_id, &target, 200).is_err());
     assert!(!target.exists());
+}
+
+#[test]
+fn application_backup_restores_object_catalogue_and_audit_closure() {
+    let root = tempfile::tempdir().unwrap();
+    let runtime = DataRuntime::new(
+        NativeEngine::open(&root.path().join("source")).unwrap(),
+        LocalObjectStore::open(root.path().join("source-objects")).unwrap(),
+    );
+    let scope = ScopeId::new("instance:closure").unwrap();
+    let mut schema = RuntimeSchemaRegistry::empty(1, "backup closure schema");
+    schema.records.insert(
+        RuntimeType::new("document").unwrap(),
+        RuntimeRecordSchema::default(),
+    );
+    let bootstrap = runtime
+        .engine()
+        .commit_runtime(&RuntimeCommit {
+            scope: scope.clone(),
+            at: 10,
+            actor: "backup-closure".into(),
+            expected_cursor: 0,
+            mutations: vec![
+                RuntimeMutation::Schema { registry: schema },
+                RuntimeMutation::Record {
+                    record: RuntimeRecord {
+                        reference: RuntimeRef::new("document", "one").unwrap(),
+                        valid_from: 10,
+                        valid_to: None,
+                        properties: RuntimeProperties::new(),
+                    },
+                },
+            ],
+        })
+        .unwrap();
+    let object = runtime
+        .stage_object(
+            "document-one-payload",
+            Some(RuntimeRef::new("document", "one").unwrap()),
+            "text/plain",
+            b"portable object closure",
+        )
+        .unwrap();
+    let read = runtime.engine().runtime_read_stamp(&scope).unwrap();
+    let object_commit = runtime
+        .commit(
+            &DataTransaction::new(
+                read,
+                RuntimeCommit {
+                    scope: scope.clone(),
+                    at: 20,
+                    actor: "backup-closure".into(),
+                    expected_cursor: bootstrap.last_cursor,
+                    mutations: vec![RuntimeMutation::Object {
+                        object: object.clone(),
+                    }],
+                },
+            )
+            .unwrap(),
+        )
+        .unwrap();
+    let catalogue_key = format!(
+        "server/state/vector-collection-catalogue/{}",
+        scope.as_str()
+    );
+    let catalogue_value = br#"{"collection":"documents","vector":"body"}"#.to_vec();
+    runtime
+        .engine()
+        .commit_catalog_transition(
+            &scope,
+            &ControlTransition {
+                key: catalogue_key.clone(),
+                expected: None,
+                replacement: Some(catalogue_value.clone()),
+                at: 30,
+                actor: "backup-closure".into(),
+                action: "vector_catalogue.created".into(),
+                request_id: "backup-closure-request".into(),
+                operation_id: "backup-closure-operation".into(),
+            },
+        )
+        .unwrap();
+
+    let catalogue_root = root.path().join("catalogue");
+    let entry = create_application_backup(
+        runtime.engine(),
+        runtime.objects(),
+        &catalogue_root,
+        "closure",
+        100,
+    )
+    .unwrap();
+    assert_eq!(
+        entry.archive.runtime_audit_sha256.as_deref(),
+        runtime
+            .engine()
+            .runtime_audit(&object_commit.commit_id)
+            .unwrap()
+            .as_ref()
+            .map(|audit| audit.digest.as_str())
+    );
+    assert_eq!(entry.object_manifest.as_ref().unwrap().object_count, 1);
+    assert_eq!(entry.catalogue_manifest.as_ref().unwrap().record_count, 1);
+
+    let target = root.path().join("restored");
+    restore_catalogued_backup(&catalogue_root, &entry.backup_id, &target, 200).unwrap();
+    let restored = NativeEngine::open(&target).unwrap();
+    assert_eq!(
+        restored.control_record(&catalogue_key).unwrap(),
+        Some(catalogue_value)
+    );
+    assert_eq!(
+        restored
+            .runtime_read_stamp(&scope)
+            .unwrap()
+            .catalog_revision,
+        1
+    );
+    assert_eq!(
+        restored.runtime_audit(&object_commit.commit_id).unwrap(),
+        runtime
+            .engine()
+            .runtime_audit(&object_commit.commit_id)
+            .unwrap()
+    );
+    let restored_objects = LocalObjectStore::open(target.join("immutable")).unwrap();
+    assert_eq!(
+        restored_objects.get(&object).unwrap(),
+        b"portable object closure"
+    );
 }

@@ -43,8 +43,10 @@ mod upgrade;
 mod writer;
 
 pub use archive::{
-    export_logical_archive, inspect_logical_archive, restore_logical_archive_to_new_root,
-    restore_logical_archive_to_new_root_with, LogicalArchiveInventory, LogicalRestoreReport,
+    export_logical_archive, export_logical_archive_with_progress, inspect_logical_archive,
+    restore_logical_archive_to_new_root, restore_logical_archive_to_new_root_with,
+    restore_logical_archive_to_new_root_with_progress, LogicalArchiveCheckpoint,
+    LogicalArchiveInventory, LogicalArchiveOperation, LogicalArchiveProgress, LogicalRestoreReport,
     LOGICAL_ARCHIVE_VERSION,
 };
 pub use backup::{

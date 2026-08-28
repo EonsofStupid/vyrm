@@ -1,4 +1,6 @@
-use rrd_core::{Claim, Predicate, Producer, RuntimeCommit, RuntimeMutation, ScopeId, Subject};
+use rrd_core::{
+    Claim, DataTransaction, Predicate, Producer, RuntimeCommit, RuntimeMutation, ScopeId, Subject,
+};
 use rrd_core::{RuntimeEventSchema, RuntimeSchemaRegistry, RuntimeType};
 use rrd_store::{
     export_logical_archive, inspect_logical_archive, restore_logical_archive_to_new_root, Engine,
@@ -144,4 +146,41 @@ fn truncated_archive_and_existing_restore_root_fail_closed() {
     let bytes = std::fs::read(&archive).unwrap();
     std::fs::write(&truncated, &bytes[..bytes.len() - 17]).unwrap();
     assert!(inspect_logical_archive(&truncated).is_err());
+}
+
+#[test]
+fn restore_preserves_the_original_transaction_audit_envelope() {
+    let root = tempfile::tempdir().unwrap();
+    let source_root = root.path().join("source");
+    let archive = root.path().join("audit.rrd-archive");
+    let target = root.path().join("restored");
+    let source = source(&source_root);
+    let scope = ScopeId::new("instance:archive-test").unwrap();
+    let read = source.runtime_read_stamp(&scope).unwrap();
+    let transaction = DataTransaction::new(
+        read,
+        RuntimeCommit {
+            scope,
+            at: 60,
+            actor: "agent:archive-transaction".into(),
+            expected_cursor: 3,
+            mutations: vec![RuntimeMutation::Claim {
+                claim: claim("transactional", 60),
+            }],
+        },
+    )
+    .unwrap();
+    let outcome = source.commit_data_transaction(&transaction).unwrap();
+    let expected_audit = source.runtime_audit(&outcome.commit_id).unwrap().unwrap();
+    assert_eq!(expected_audit.read.as_ref(), Some(&transaction.read));
+
+    export_logical_archive(&source, &archive).unwrap();
+    restore_logical_archive_to_new_root(&archive, &target, 100).unwrap();
+
+    let restored = NativeEngine::open(&target).unwrap();
+    assert_eq!(
+        restored.runtime_audit(&outcome.commit_id).unwrap(),
+        Some(expected_audit),
+        "logical recovery must retain the transaction's exact read and audit chain"
+    );
 }

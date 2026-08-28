@@ -57,7 +57,7 @@ use std::fmt;
 pub const PROTOCOL: &str = "rrd";
 pub const PROTOCOL_VERSION: u16 = 1;
 pub const OPENAPI_DOCUMENT_SHA256: &str =
-    "08bfbc99be430b7a9defe00c1e2342706925e1e525d47f976c2325903d5648a4";
+    "ba610071afaec5e6e1726cd331a023264db6e28ccc89403bc384b010331ae446";
 pub const MAX_ID_BYTES: usize = 128;
 pub const MAX_MESSAGE_BYTES: usize = 4_096;
 pub const MAX_CAPABILITIES: usize = 512;
@@ -1331,6 +1331,8 @@ pub struct LogicalArchiveSnapshot {
     pub payload_bytes: u64,
     pub claim_sequence: u64,
     pub runtime_cursor: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runtime_audit_sha256: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]

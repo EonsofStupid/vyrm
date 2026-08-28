@@ -149,13 +149,14 @@ Kubernetes operation, and authoritative Connectome management.
 
 - F0 freezes the first public `rrd-contract` resource, envelope,
   idempotency, capability-negotiation, and error vocabulary independently of
-  private RRFlow types. F1 now provides a content-authenticated logical archive,
-  exact claim/runtime replay, restore-to-absent-root with hidden staging and
-  reopen verification, an authenticated content-addressed backup catalogue,
-  corruption/retry tests, and CLI operations. Catalogue coverage deliberately
-  reports object payloads as referenced-only and the backup as not yet
-  application-complete; object closure, signatures/encryption, retention
-  policy, and a broader released-version matrix remain open.
+  private RRFlow types. F1 now provides a bounded streaming,
+  content-authenticated logical archive with exact claim/runtime/audit replay,
+  checksummed resumable export/restore receipts, restore-to-absent-root through
+  verified staging, and a content-addressed backup catalogue. Logical-only
+  backups report object references; application-complete backups bind exact
+  object bytes and vector/index catalogue records. Producer signatures/
+  encryption, retention/RPO/RTO policy, S3 qualification, and the broader
+  released-version matrix remain open.
 - The authenticated native-format ledger implements the exact-successor
   TextV1→TagV2 transition across all 18 keyspaces with invisible staging,
   retained predecessor/archive evidence, source-drift denial, restart resume

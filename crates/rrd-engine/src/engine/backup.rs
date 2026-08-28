@@ -367,5 +367,6 @@ fn public_archive(inventory: &rrd_store::LogicalArchiveInventory) -> LogicalArch
         payload_bytes: inventory.payload_bytes,
         claim_sequence: inventory.claim_sequence,
         runtime_cursor: inventory.runtime_cursor,
+        runtime_audit_sha256: inventory.runtime_audit_sha256.clone(),
     }
 }

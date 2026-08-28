@@ -276,6 +276,22 @@ impl NativeEngine {
         )
     }
 
+    /// Replays one already-authenticated logical-archive commit while
+    /// preserving its original audit envelope. This is deliberately crate
+    /// private: ordinary callers must use the live Engine transaction path,
+    /// which validates a read stamp against the current database state.
+    pub(crate) fn restore_runtime_commit(
+        &self,
+        commit: &RuntimeCommit,
+        audit: &AuditEnvelope,
+    ) -> Result<RuntimeCommitOutcome> {
+        let mut database = self.lock()?;
+        let plan = prepare_native_runtime_commit_at_read(&database, commit, None, Some(audit))?;
+        let (outcome, operations) = plan.into_parts();
+        write(&mut database, operations, Durability::Authoritative)?;
+        Ok(outcome)
+    }
+
     fn lock(&self) -> Result<MutexGuard<'_, Database>> {
         self.database
             .lock()
@@ -898,7 +914,7 @@ impl Engine for NativeEngine {
         read: Option<&ReadStamp>,
     ) -> Result<RuntimeCommitOutcome> {
         let mut database = self.lock()?;
-        let plan = prepare_native_runtime_commit_at_read(&database, commit, read)?;
+        let plan = prepare_native_runtime_commit_at_read(&database, commit, read, None)?;
         let (outcome, operations) = plan.into_parts();
         write(&mut database, operations, Durability::Authoritative)?;
         Ok(outcome)
@@ -1053,17 +1069,28 @@ pub fn prepare_native_runtime_commit(
     database: &Database,
     commit: &RuntimeCommit,
 ) -> Result<NativeRuntimeCommitPlan> {
-    prepare_native_runtime_commit_at_read(database, commit, None)
+    prepare_native_runtime_commit_at_read(database, commit, None, None)
 }
 
 fn prepare_native_runtime_commit_at_read(
     database: &Database,
     commit: &RuntimeCommit,
     read: Option<&ReadStamp>,
+    archived_audit: Option<&AuditEnvelope>,
 ) -> Result<NativeRuntimeCommitPlan> {
     commit.validate()?;
     let snapshot = database.snapshot();
-    if let Some(read) = read {
+    if read.is_some() && archived_audit.is_some() {
+        return Err(Error::Archive(
+            "archive replay cannot also supply a live read stamp".into(),
+        ));
+    }
+    if let Some(audit) = archived_audit {
+        audit.validate()?;
+        if let Some(read) = &audit.read {
+            read.validate()?;
+        }
+    } else if let Some(read) = read {
         validate_native_read_stamp(database, snapshot, read)?;
     }
     let commit_id = commit.digest();
@@ -1360,13 +1387,21 @@ fn prepare_native_runtime_commit_at_read(
         keyspaces::RUNTIME_ACCUMULATOR_STATE,
         serde_json::to_vec(&accumulator)?,
     );
+    let audit_read = archived_audit
+        .and_then(|audit| audit.read.as_ref())
+        .or(read);
     let audit = AuditEnvelope::accepted_commit_at_read(
         commit,
-        read,
+        audit_read,
         &commit_id,
         cursor,
         previous_audit_digest,
     )?;
+    if archived_audit.is_some_and(|expected| expected != &audit) {
+        return Err(Error::Archive(format!(
+            "runtime commit {commit_id} audit envelope differs from its archive"
+        )));
+    }
     put(
         &mut operations,
         keyspaces::RUNTIME_AUDIT,
@@ -2434,6 +2469,7 @@ mod tests {
                     &database,
                     &transaction.commit,
                     Some(&transaction.read),
+                    None,
                 )
                 .unwrap();
                 let expected = plan.outcome().clone();
