@@ -105,9 +105,13 @@ jobs:
         with:
           shared-key: linux-policy-jobs2-test-debug0-lld1
           cache-on-failure: false
+      - name: Check Rust formatting
+        run: cargo fmt --all -- --check
       - name: Enforce owner-controlled release version
         run: python3 scripts/check_version.py
-      - name: Enforce RRFlow engine ownership and CI architecture
+      - name: Enforce repository CI policy
+        run: python3 scripts/ci/check_workflow.py
+      - name: Enforce RRFlow engine ownership
         run: cargo test -p rrd-engine --test workspace_architecture --locked
       - name: Verify controlled evaluation evidence
         run: cargo run --locked -p rrflow-eval -- verify eval/results/2026-08-18-summary.json
@@ -129,39 +133,28 @@ jobs:
           binary="${CARGO_TARGET_DIR:-target}/release/rrflow-edge"
           test "$(stat -c '%s' "$binary")" -le 2097152
 
-  default-features:
-    name: default feature (${{ matrix.package }})
+  engine-suites:
+    name: engine suite (${{ matrix.name }})
     runs-on: ${{ fromJSON(inputs.linux-heavy-runner) }}
-    timeout-minutes: 30
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
-        package:
-          - connectome-ui
-          - rrd-client
-          - rrd-cluster
-          - rrd-contract
-          - rrd-core
-          - rrd-engine
-          - rrd-estate
-          - rrd-graph
-          - rrd-inference
-          - rrd-kubernetes
-          - rrd-lsm
-          - rrd-maintenance
-          - rrd-operator-knowledge
-          - rrd-query
-          - rrd-security
-          - rrd-server
-          - rrd-store
-          - rrd-vector
-          - rrflow-cli
-          - rrflow-edge
-          - rrflow-eval
-          - rrflow-mcp
+        include:
+          - name: kernel-storage
+            packages: "-p rrd-core -p rrd-lsm -p rrd-store -p rrd-maintenance"
+          - name: query-retrieval
+            packages: "-p rrd-query -p rrd-graph -p rrd-vector -p rrd-inference -p rrd-operator-knowledge"
+          - name: engine-authority
+            packages: "-p rrd-contract -p rrd-cluster -p rrd-engine -p rrd-estate -p rrd-security"
+          - name: service-protocol
+            packages: "-p rrd-server -p rrd-client -p rrflow-mcp -p rrflow-cli"
+          - name: product-operations
+            packages: "-p connectome-ui -p rrd-kubernetes -p rrflow-edge -p rrflow-eval"
     env:
       CARGO_BUILD_JOBS: "2"
       CARGO_PROFILE_TEST_DEBUG: "0"
+      PACKAGE_SELECTION: ${{ matrix.packages }}
       RUSTFLAGS: "-C link-arg=-Wl,--threads=1"
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
@@ -172,15 +165,15 @@ jobs:
           components: clippy
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
-          shared-key: linux-default-${{ matrix.package }}-test-debug0-lld1
+          shared-key: linux-engine-${{ matrix.name }}-test-debug0-lld1
           cache-on-failure: false
       - name: Build cross-package controller fixture
-        if: ${{ matrix.package == 'rrd-server' }}
+        if: ${{ matrix.name == 'service-protocol' }}
         run: cargo build -p rrflow-cli --bin rrd-estate-controller --locked
-      - name: Test package default features
-        run: cargo test -p ${{ matrix.package }} --all-targets --locked
-      - name: Deny package default-feature warnings
-        run: cargo clippy -p ${{ matrix.package }} --all-targets --locked -- -D warnings
+      - name: Test cohesive engine subsystem
+        run: cargo test $PACKAGE_SELECTION --all-targets --locked
+      - name: Deny cohesive engine subsystem warnings
+        run: cargo clippy $PACKAGE_SELECTION --all-targets --locked -- -D warnings
 
   optional-features:
     name: optional feature (${{ matrix.package }})
@@ -262,7 +255,7 @@ jobs:
       - topology-smoke
       - estate-portability
       - verify
-      - default-features
+      - engine-suites
       - optional-features
       - pgvector-feature
     runs-on: ubuntu-latest
@@ -273,13 +266,13 @@ jobs:
           TOPOLOGY_RESULT: ${{ needs.topology-smoke.result }}
           PORTABILITY_RESULT: ${{ needs.estate-portability.result }}
           VERIFY_RESULT: ${{ needs.verify.result }}
-          DEFAULT_FEATURES_RESULT: ${{ needs.default-features.result }}
+          ENGINE_SUITES_RESULT: ${{ needs.engine-suites.result }}
           OPTIONAL_FEATURES_RESULT: ${{ needs.optional-features.result }}
           PGVECTOR_FEATURE_RESULT: ${{ needs.pgvector-feature.result }}
         run: |
           test "$TOPOLOGY_RESULT" = success
           test "$PORTABILITY_RESULT" = success
           test "$VERIFY_RESULT" = success
-          test "$DEFAULT_FEATURES_RESULT" = success
+          test "$ENGINE_SUITES_RESULT" = success
           test "$OPTIONAL_FEATURES_RESULT" = success
           test "$PGVECTOR_FEATURE_RESULT" = success

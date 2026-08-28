@@ -9,11 +9,24 @@ dispatches. Its concurrency key cancels stale executions for the same pull
 request or ref. The reusable workflow reduces every partition into one stable
 `ci-gate` check for branch protection:
 
-- topology smoke on the standard Linux runner;
-- the full Linux workspace, Clippy, evidence, dependency, and binary gates on
-  the heavy Linux runner;
+- supervised RRD and Connectome topology smoke on the standard Linux runner;
+- repository policy, formatting, architecture, evaluation, dependency, and
+  binary-budget gates on a heavy Linux runner;
+- five default-feature engine suites on isolated heavy Linux runners:
+  `kernel-storage`, `query-retrieval`, `engine-authority`, `service-protocol`,
+  and `product-operations`;
+- isolated optional-feature qualification plus a real PostgreSQL/pgvector
+  integration;
 - daemon portability on GitHub-hosted Windows and macOS runners; and
 - one always-evaluated gate which fails unless every partition succeeded.
+
+The five engine suites cover every workspace package exactly once, but package
+names do not define CI ownership. A failure is reported against the subsystem
+whose behavior is being qualified. This keeps the hosted fallback below its
+measured link/disk ceiling without turning all 22 implementation crates into
+separate product checks. `scripts/ci/check_workflow.py` enforces complete suite
+and optional-feature coverage, immutable dependencies, bounded jobs, safe
+runner routing, and exact gate reduction.
 
 Every job has a timeout. Every external action and service image is pinned by
 an immutable digest or commit. Checkout credentials are not persisted.
@@ -98,6 +111,9 @@ After the first physical proof succeeds, protect `main` with these invariants:
 - force pushes and deletion are denied; and
 - Actions must require immutable full-SHA references.
 
-The workspace architecture test rejects trigger duplication, unsafe fork
-routing, unpinned actions or runner images, missing timeouts, missing gate
-reduction, or a runner layout which exceeds the documented host allocation.
+The repository CI-policy check rejects trigger duplication, unsafe fork
+routing, unpinned actions or runner images, missing timeouts, incomplete suite
+or feature coverage, missing gate reduction, or a runner layout which exceeds
+the documented host allocation. The Rust workspace architecture test remains
+focused on engine ownership, dependency direction, and storage-opening
+authority rather than GitHub Actions implementation details.

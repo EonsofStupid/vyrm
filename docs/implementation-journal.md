@@ -2937,3 +2937,28 @@ index.
   cross-package fixture before testing. An architecture invariant binds the
   conditional fixture to `rrd-server`; no physical-crate executable or hidden
   workspace ordering is reintroduced. G02-W02 remains active.
+- Ninth remote candidate evidence: correction commit
+  `2eceb038fa850e248a609cab75c324364d4b3dc6` produced run `33176084700`.
+  All thirty-one substantive partitions and the stable `pipeline / ci-gate`
+  passed on the same commit, including the formerly failing real-process server
+  fixture. This closes the remote CI failure sequence as infrastructure/test
+  ownership work rather than an archive defect.
+- CI cohesion correction: default-feature qualification is now expressed as
+  five product-subsystem suites (`kernel-storage`, `query-retrieval`,
+  `engine-authority`, `service-protocol`, and `product-operations`) instead of
+  twenty-two package-named checks. Every workspace package is still tested and
+  strictly linted exactly once, while the bounded compiler/linker profile and
+  isolated caches retain the hosted-runner disk boundary. CI-specific policy
+  moved from the Rust engine architecture test into
+  `scripts/ci/check_workflow.py`; engine architecture now enforces only product
+  composition, dependency direction, executable ownership, storage opening,
+  and outward-surface invariants.
+- Exact local evidence for the five-suite candidate passes under the same
+  bounded profile used remotely: all five suite test commands, all five strict
+  Clippy commands, 14/14 engine architecture tests, formatting, workflow YAML
+  parsing, CI policy coverage for 22 default-feature and five optional-feature
+  packages, and `git diff --check`. An initial unbounded local query build filled
+  the pre-existing shared Cargo cache and failed during linking; removing only
+  rebuildable failed-link artifacts and rerunning with `CARGO_INCREMENTAL=0`,
+  stripped test debuginfo, two build jobs, and one linker thread passed the
+  complete query/retrieval lane.
