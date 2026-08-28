@@ -440,9 +440,8 @@ fn ci_is_one_bounded_reusable_chain_with_safe_runner_routing() {
     );
     assert!(
         default_job.contains("if: ${{ matrix.package == 'rrd-server' }}")
-            && default_job.contains(
-                "cargo build -p rrflow-cli --bin rrd-estate-controller --locked"
-            ),
+            && default_job
+                .contains("cargo build -p rrflow-cli --bin rrd-estate-controller --locked"),
         "the isolated rrd-server tests must declare their cross-package process fixture"
     );
 
