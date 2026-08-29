@@ -187,7 +187,7 @@ pub(crate) fn validate_candidate_versions<'a>(
     Ok(())
 }
 
-pub(crate) fn score_query(
+pub fn score_query(
     query: &VectorQuery,
     candidate: &VectorValue,
     metric: ScoreMetric,

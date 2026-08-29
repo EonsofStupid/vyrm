@@ -1,6 +1,6 @@
-# RRD vector/search and online HNSW contract
+# RRD vector/search, online HNSW, and unified retrieval contract
 
-Status: G04-W02 executable engine gate, 2026-08-29.
+Status: G04-W03 executable engine candidate, 2026-08-29.
 
 `rrd-vector` is the rebuildable search layer over canonical `RuntimeVector`
 versions. The data-runtime commit log remains truth. An index may accelerate a
@@ -71,6 +71,28 @@ request order, and explicitly returns missing references. It has an independent
 authorization action and does not infer absence from an omitted result.
 Point deletion is the ordinary batched `retire_data` mutation. Collection
 deletion remains fail-closed while points or active approximate artifacts exist.
+
+## Unified multimodal retrieval
+
+`RrdEngine::execute_retrieval_query` is the engine-owned recursive query path
+for nearest, keyword, recommendation, discovery, context, fusion, reranking,
+grouping, faceting, and matrix operations. It captures one read stamp and one
+collection catalogue for the complete program. Dense, sparse, keyword, image,
+and multi-dense late-interaction representations therefore compose inside RRD
+instead of application middleware.
+
+Bounded nested prefetch supports weighted reciprocal-rank fusion and ordered
+score-boost, exact, model-pinned MaxSim, and MMR stages. Every payload-dependent
+stage requires an active typed payload index. The result publishes a complete
+query-plan digest, ordered input/output/exactness evidence for every stage, and
+per-hit rank/score contributions. Group/facet results operate over the bounded
+query candidate universe; multi-dense matrices are directed because MaxSim is
+not generally symmetric.
+
+The exact semantics, amplification limits, security boundary, evidence model,
+and honest remaining gaps are frozen in
+[`rrd-unified-retrieval-v1.md`](rrd-unified-retrieval-v1.md). Generated outward
+bindings remain G06 work.
 
 ## Rebuildable projections
 

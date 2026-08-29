@@ -97,7 +97,7 @@ and [files](https://surrealdb.com/docs/learn/schema-management/files/working-wit
 | Multiple named vectors per logical object | **Verified locally** — revisioned collection administration persists named dense, sparse, and multi-dense contracts; point batches, payload indexes, retrieve/scroll, valid-time deletion, and guarded collection deletion share the RRD engine authority |
 | Multivectors | **Verified locally** for exact storage/oracle |
 | Full-text documents and analyzers | **Verified locally** — content-addressed BM25 v2 artifacts retain analyzer, positions, offsets, relevance, and highlighting evidence |
-| Hybrid full-text/vector retrieval and rank fusion | **Partial** — one-stamp BM25 plus dense/sparse vector RRF executes in the engine; broader multistage/reranking algebra remains G04-W03 |
+| Hybrid full-text/vector retrieval and rank fusion | **Verified in the engine** — one-stamp bounded keyword+dense+sparse RRF composes with governed boost, exact/model MaxSim, and MMR reranking; generated public bindings remain open |
 | Key-value access patterns | **Verified internally**; not a supported public KV API |
 | First-class file pointers and buckets | **Partial** — content-addressed object references/stores exist; file namespace and full operations do not |
 | Memory/filesystem bucket backends | **Partial** — local immutable objects only |
@@ -170,9 +170,9 @@ Sources: [hybrid search](https://surrealdb.com/docs/learn/data-models/vector-sea
 | Vector distances/similarities including cosine, dot, Euclidean and Manhattan | **Verified locally** |
 | Exact reranking after ANN | **Verified locally** |
 | Metadata-filter-aware ANN | **Core verified** — typed-index-governed in-traversal admission plus exact rerank; bitmap prefilter fusion remains absent |
-| Full-text inverted indexes and BM25 scoring | **Absent** |
-| Configurable analyzers/tokenizers/filters, highlighting and score functions | **Absent** |
-| Reciprocal-rank-fusion hybrid search | **Absent** |
+| Full-text inverted indexes and BM25 scoring | **Verified in the engine** with content-addressed BM25 v2 artifacts |
+| Configurable analyzers/tokenizers/filters, highlighting and score functions | **Partial** — bounded analyzer configuration, deterministic highlighting, and governed retrieval boosts exist; broad language analyzers and general formulas do not |
+| Reciprocal-rank-fusion hybrid search | **Verified in the engine** for one-stamp bounded keyword+dense+sparse branches |
 | B-tree/unique/compound/count indexes | **Absent** |
 | Geospatial indexes | **Absent** |
 | Query-time index hints and forced iterator selection | **Absent** |

@@ -112,29 +112,7 @@ impl RrdEngine {
         let data = rrd_store::DataRuntimeRef::new(&self.storage, &self.objects);
         let runtime = crate::reopen_vector_runtime(&data, &scope, candidates)
             .map_err(|error| ServiceError::Vector(error.to_string()))?;
-        let query = match &request.query {
-            VectorSearchQuery::Dense { values } => rrd_vector::VectorQuery::Dense {
-                values: values.clone(),
-            },
-            VectorSearchQuery::Sparse {
-                dimensions,
-                indices,
-                values,
-            } => rrd_vector::VectorQuery::Sparse {
-                dimensions: *dimensions,
-                indices: indices.clone(),
-                values: values.clone(),
-            },
-            VectorSearchQuery::MultiDense {
-                dimensions,
-                vectors,
-                comparator: _,
-            } => rrd_vector::VectorQuery::MultiDense {
-                dimensions: *dimensions,
-                vectors: vectors.clone(),
-                comparator: rrd_vector::MultiVectorComparator::MaxSim,
-            },
-        };
+        let query = internal_vector_query(&request.query);
         let (mode, ef_search) = match request.mode {
             VectorSearchMode::Exact => (rrd_vector::SearchMode::Exact, 1),
             VectorSearchMode::AllowApproximate {
@@ -215,6 +193,34 @@ impl RrdEngine {
                 })
                 .collect::<Result<_>>()?,
         })
+    }
+}
+
+pub(in crate::engine) fn internal_vector_query(
+    query: &VectorSearchQuery,
+) -> rrd_vector::VectorQuery {
+    match query {
+        VectorSearchQuery::Dense { values } => rrd_vector::VectorQuery::Dense {
+            values: values.clone(),
+        },
+        VectorSearchQuery::Sparse {
+            dimensions,
+            indices,
+            values,
+        } => rrd_vector::VectorQuery::Sparse {
+            dimensions: *dimensions,
+            indices: indices.clone(),
+            values: values.clone(),
+        },
+        VectorSearchQuery::MultiDense {
+            dimensions,
+            vectors,
+            comparator: _,
+        } => rrd_vector::VectorQuery::MultiDense {
+            dimensions: *dimensions,
+            vectors: vectors.clone(),
+            comparator: rrd_vector::MultiVectorComparator::MaxSim,
+        },
     }
 }
 

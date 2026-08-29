@@ -3482,3 +3482,44 @@ index.
   remains `bbf2f27f80e47091a56df67b3383b965cbd0aabdcf5a60af1a4f66fb4aa753ed`
   because index administration is still an engine-only G06 binding; the Rust
   snapshot now exposes maintenance provenance.
+
+## 2026-08-29 — G04-W03 unified multimodal retrieval candidate
+
+- Added one strict recursive `ExecuteRetrievalQuery` contract with bounded
+  depth, nodes, prefetch branches, examples, rerank stages, candidates, scanned
+  changes, and total candidate-stage work. Unknown fields and dimensional,
+  vector-shape, weight, factor, or amplification drift fail before execution.
+- Added one `RrdEngine::execute_retrieval_query` authority. It requires both
+  query and vector permissions, captures one immutable read stamp and one
+  collection catalogue, reads canonical changes once, and requires every
+  filter, boost, group, and facet property to be an active typed payload index.
+- Added nearest dense/sparse/multi-dense, keyword BM25, average/best-score
+  recommendation, target discovery, and context-only sources. Stored examples
+  resolve exact named vector references; duplicate active vectors or conflicting
+  multimodal payloads fail closed.
+- Added bounded nested prefetch, fixed-point weighted reciprocal-rank fusion,
+  payload-conditioned add/multiply boost, exact named-vector reranking,
+  embedding-model-digest-pinned multi-dense MaxSim reranking, and deterministic
+  greedy MMR. Every stage publishes ordinal, input/output count, exactness, plan
+  digest, and per-hit rank/score contributions.
+- Added point, typed-payload group, typed-payload facet, and directed similarity
+  matrix results. Groups and facets deliberately describe the bounded final
+  candidate universe; matrices remain directed because MaxSim is asymmetric.
+- Added one persistent three-subject/four-vector corpus covering
+  keyword+dense+sparse RRF, exact image reranking, model-pinned ColBERT-style
+  MaxSim, boost, MMR, both recommendation strategies, discovery, context,
+  groups, facets, six directed matrix cells, and exact result equality after
+  database reopen. Permission evidence separately denies a principal missing
+  query execution and one missing vector search.
+- Focused contract, engine scenario, permission, and capability-catalogue gates
+  pass. Formatting and strict all-feature Clippy pass across contract, vector,
+  security, store, and engine. The same five-crate all-target locked test matrix
+  passes serially, including 63 engine tests, 28 public-contract tests, every
+  store target, and all vector exact/HNSW/reopen gates. TypeScript generation
+  drift, lint, typecheck, and tests pass; the CI workflow policy reports six
+  substantive jobs, five cohesive engine suites, 22 default-feature packages,
+  and five optional-feature packages.
+- The public OpenAPI digest remains
+  `bbf2f27f80e47091a56df67b3383b965cbd0aabdcf5a60af1a4f66fb4aa753ed`
+  because generated HTTP/MCP/CLI/SDK exposure is G06 work. RRFlow publication
+  follows this candidate entry.

@@ -7,15 +7,16 @@ use rrd_contract::{
     EnsureVectorCollection, EnsureVectorIndex, EnsureVectorPayloadIndex, ErrorBody, ErrorCode,
     EstateActivityPolicySnapshot, EstateBackupJobSnapshot, EstateBackupJobState,
     EstateBackupJobsSnapshot, EstateMutationResult, EstateSnapshot, ExecuteQuery,
-    ExecuteQueryTransaction, FollowChangefeed, ForwardRollbackCounts, ForwardRollbackRequest,
-    HybridFusion, IdempotencyBinding, ListQueryIndexes, ListVectorCollections,
-    ListVectorPayloadIndexes, Liveness, NamedVectorDefinition, PollLiveQuery, PreviewTransaction,
-    ProductCapability, ProductCapabilityCatalogue, ProductSurface, QueryBudget,
-    QueryExecutionAnalysisSnapshot, QueryExecutionSnapshot, QueryIndexKind, QueryPlanCandidate,
-    QueryPlanSnapshot, QueryResult, QueryRowSnapshot, QueryValue, ReadAudit, ReadChangefeed,
-    ReadDataSnapshot, ReadEstate, Readiness, RenewSession, RequestContext, RequestEnvelope,
-    ResourceId, ResourceKind, ResourcePath, ResponseEnvelope, ResponseOutcome,
-    RestoreInstanceBackup, SearchHybrid, SearchVectors, ServiceCapabilities, SessionEndState,
+    ExecuteQueryTransaction, ExecuteRetrievalQuery, FollowChangefeed, ForwardRollbackCounts,
+    ForwardRollbackRequest, HybridFusion, IdempotencyBinding, ListQueryIndexes,
+    ListVectorCollections, ListVectorPayloadIndexes, Liveness, NamedVectorDefinition,
+    PollLiveQuery, PreviewTransaction, ProductCapability, ProductCapabilityCatalogue,
+    ProductSurface, QueryBudget, QueryExecutionAnalysisSnapshot, QueryExecutionSnapshot,
+    QueryIndexKind, QueryPlanCandidate, QueryPlanSnapshot, QueryResult, QueryRowSnapshot,
+    QueryValue, ReadAudit, ReadChangefeed, ReadDataSnapshot, ReadEstate, Readiness, RenewSession,
+    RequestContext, RequestEnvelope, ResourceId, ResourceKind, ResourcePath, ResponseEnvelope,
+    ResponseOutcome, RestoreInstanceBackup, RetrievalFusion, RetrievalPrefetch, RetrievalQuery,
+    RetrievalResultShape, SearchHybrid, SearchVectors, ServiceCapabilities, SessionEndState,
     SessionLease, SessionLimits, SessionTermination, SurfaceBinding, SurfaceDisposition,
     TransactionMutation, TransactionPreview, TransactionState, VectorIndexConfiguration,
     VectorMemoryTier, VectorPayloadCondition, VectorPayloadFilter, VectorPayloadIndexKind,
@@ -1470,4 +1471,84 @@ fn data_retirement_targets_are_model_typed_and_event_cursor_addressed() {
     }
     .validate()
     .is_err());
+}
+
+#[test]
+fn recursive_retrieval_contract_is_strict_bounded_and_multimodal() {
+    let nearest = |using: &str, query: VectorSearchQuery| RetrievalQuery::Nearest {
+        using: CanonicalId::new(using).unwrap(),
+        query,
+        filter: None,
+        mode: VectorSearchMode::Exact,
+    };
+    let request = ExecuteRetrievalQuery {
+        scope: "instance:alpha".into(),
+        valid_at: 10,
+        collection_id: CanonicalId::new("documents").unwrap(),
+        query: RetrievalQuery::Fusion {
+            prefetch: vec![
+                RetrievalPrefetch {
+                    query: Box::new(nearest(
+                        "dense",
+                        VectorSearchQuery::Dense {
+                            values: vec![1.0, 0.0],
+                        },
+                    )),
+                    limit: 4,
+                },
+                RetrievalPrefetch {
+                    query: Box::new(nearest(
+                        "sparse",
+                        VectorSearchQuery::Sparse {
+                            dimensions: 8,
+                            indices: vec![1, 6],
+                            values: vec![0.5, 0.75],
+                        },
+                    )),
+                    limit: 4,
+                },
+            ],
+            fusion: RetrievalFusion::ReciprocalRank {
+                rank_constant: 60,
+                weights_millionths: vec![1_000_000, 750_000],
+            },
+        },
+        result_shape: RetrievalResultShape::Groups {
+            property: CanonicalId::new("category").unwrap(),
+            max_groups: 2,
+            hits_per_group: 2,
+        },
+        limit: 2,
+        candidate_limit: 4,
+        max_scanned_changes: 10_000,
+    };
+    request.validate().unwrap();
+    let encoded = serde_json::to_value(&request).unwrap();
+    assert_eq!(
+        serde_json::from_value::<ExecuteRetrievalQuery>(encoded.clone()).unwrap(),
+        request
+    );
+    let mut unknown = encoded;
+    unknown
+        .as_object_mut()
+        .unwrap()
+        .insert("middleware".into(), serde_json::json!(true));
+    assert!(serde_json::from_value::<ExecuteRetrievalQuery>(unknown).is_err());
+
+    let mut wrong_weights = request.clone();
+    let RetrievalQuery::Fusion { fusion, .. } = &mut wrong_weights.query else {
+        unreachable!()
+    };
+    let RetrievalFusion::ReciprocalRank {
+        weights_millionths, ..
+    } = fusion;
+    weights_millionths.pop();
+    assert!(wrong_weights.validate().is_err());
+
+    let mut oversized_prefetch = request;
+    let RetrievalQuery::Fusion { prefetch, .. } = &mut oversized_prefetch.query else {
+        unreachable!()
+    };
+    prefetch[0].limit = 5;
+    assert!(oversized_prefetch.validate().is_err());
 }

@@ -71,34 +71,34 @@ Sources: [similarity search](https://qdrant.tech/documentation/search/search/),
 
 | Qdrant capability | RRFlow disposition |
 |---|---|
-| Unified Query API | **Absent** as public API; `SearchRequest` is an internal alpha contract |
+| Unified Query API | **Verified in the engine, absent as a public API** — one bounded recursive `ExecuteRetrievalQuery` contract owns sources, prefetch, fusion, reranking, and result shapes; generated bindings remain G06 |
 | Nearest-neighbor search by raw vector | **Verified locally** |
-| Search by an existing point ID/vector | **Absent** as direct operator |
+| Search by an existing point ID/vector | **Partial** — stored vector references are exact recommendation/discovery/context examples, but nearest-by-ID is not a dedicated operator |
 | Exact full-scan search | **Verified locally** |
 | Approximate HNSW search with query-time `ef` | **Verified locally** for dense vectors |
 | `indexed_only` eventual/partial-result option | **Absent** |
-| Score threshold, limit, offset and result vector/payload selectors | **Partial** — top-k/filter only |
-| Positive/negative-example recommendation queries | **Absent** |
-| Average-vector and best-score recommendation strategies | **Absent** |
-| Discovery search using positive/negative context pairs plus target | **Absent** |
-| Context-only search that partitions vector space | **Absent** |
+| Score threshold, limit, offset and result vector/payload selectors | **Partial** — bounded limit/candidate limit and named-vector evidence exist; threshold, offset, and arbitrary selectors do not |
+| Positive/negative-example recommendation queries | **Verified in the engine** for raw or exact stored vector references |
+| Average-vector and best-score recommendation strategies | **Verified in the engine** for dense, sparse, and multi-dense values with strict shape checks |
+| Discovery search using positive/negative context pairs plus target | **Verified in the engine** with deterministic zone-first, target-tie scoring |
+| Context-only search that partitions vector space | **Verified in the engine** with deterministic zone/margin scoring |
 | Scroll through all filtered points | **Verified in the engine** — deterministic point-reference pages at one read stamp |
 | Order results by payload field | **Absent** vector API |
-| Group search results by payload value | **Absent** |
+| Group search results by payload value | **Verified in the engine** over a bounded candidate universe and an active typed payload index |
 | Cross-collection lookup for group/detail enrichment | **Absent** |
 | Random sampling | **Absent** |
-| Facet counts over payload values | **Absent** |
-| Distance/similarity matrix sampling | **Absent** |
+| Facet counts over payload values | **Verified in the engine** over a bounded candidate universe and an active typed payload index |
+| Distance/similarity matrix sampling | **Verified in the engine** as bounded directed ordered pairs; directedness preserves asymmetric MaxSim semantics |
 | Point count with exact/approximate modes and filters | **Absent** public API |
 | Batch query endpoint | **Absent** |
-| Nested prefetch queries | **Absent** |
-| Multi-stage retrieval and rescoring | **Partial** — ANN plus exact rerank only |
+| Nested prefetch queries | **Verified in the engine** with depth, node, branch, candidate, and total-work bounds |
+| Multi-stage retrieval and rescoring | **Verified in the engine** for declared boost, exact, model-bound MaxSim, and MMR stages |
 | Matryoshka coarse-to-fine retrieval | **Absent** |
-| Reciprocal Rank Fusion (RRF) | **Absent** |
+| Reciprocal Rank Fusion (RRF) | **Verified in the engine** with one bounded fixed-point weight per branch |
 | Distribution-Based Score Fusion (DBSF) | **Absent** |
-| Formula queries combining scores, payload conditions and numeric/geo boosts | **Absent** |
-| Dense+sparse hybrid search | **Absent** as one query |
-| Multi-representation and branch-aware retrieval patterns | **Absent** as native operators |
+| Formula queries combining scores, payload conditions and numeric/geo boosts | **Partial** — governed payload-conditioned fixed-point add/multiply exists; a general arithmetic/geo formula language does not |
+| Dense+sparse hybrid search | **Verified in the engine** as one recursive query, including keyword branches |
+| Multi-representation and branch-aware retrieval patterns | **Verified in the engine** for bounded named-vector/keyword prefetch and rerank programs |
 | Search relevance tuning/evaluation helpers | **Partial** — deterministic recall gates, no product relevance suite |
 
 ## 4. Filtering and payload indexes
@@ -358,12 +358,15 @@ collections and named vectors; atomic point batches and retirements; typed
 payload-index lifecycle; exact dense/sparse/multivector values; online filtered
 dense HNSW; exact reranking; model-bound provenance; immutable artifacts; mmap
 dense search; WAL-backed persistence; snapshots; offline embedding/search; and
-detailed causal runtime evidence. It does **not** have Qdrant's full vector
+detailed causal runtime evidence. One bounded engine query now composes
+nearest, keyword, recommendation, discovery, context, dense+sparse RRF,
+multimodal reranking, model-pinned ColBERT MaxSim, MMR, groups, facets, and
+directed matrices. It does **not** have Qdrant's full vector
 product stack.
 
 The critical missing blocks are generated collection/point bindings, richer
 payload index families and statistics, ACORN/payload-derived graph edges,
-hybrid/recommend/discover/query algebra, promoted quantizer lifecycles, compact
+DBSF/general formula operators, promoted quantizer lifecycles, compact
 graph storage, memory tiers, physical GPU indexing, server inference, official
 SDK qualification, REST/gRPC breadth, and production distribution.
 

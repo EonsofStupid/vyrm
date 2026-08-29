@@ -295,6 +295,19 @@ pub fn product_capability_catalogue() -> ProductCapabilityCatalogue {
             planned(ENGINE_SURFACE_PLAN_REASON),
         ),
     });
+    capabilities.push(ProductCapability {
+        id: "vector-query-algebra".into(),
+        label: "Vector query algebra".into(),
+        category: "vector".into(),
+        summary: "Execute bounded nested keyword, dense, sparse, multivector, recommendation, discovery, fusion, reranking, diversity, grouping, facet, and matrix stages at one authoritative read stamp.".into(),
+        bindings: bindings(
+            available("rrd-engine:RrdEngine::execute_retrieval_query"),
+            planned(ENGINE_SURFACE_PLAN_REASON),
+            planned(ENGINE_SURFACE_PLAN_REASON),
+            planned(ENGINE_SURFACE_PLAN_REASON),
+            planned(ENGINE_SURFACE_PLAN_REASON),
+        ),
+    });
 
     capabilities.sort_by(|left, right| left.id.cmp(&right.id));
     ProductCapabilityCatalogue {

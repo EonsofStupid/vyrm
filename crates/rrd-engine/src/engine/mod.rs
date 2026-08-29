@@ -24,10 +24,10 @@ use rrd_contract::{
     EnsureQueryIndexResult, EnsureVectorCollection, EnsureVectorCollectionResult,
     EnsureVectorIndex, EnsureVectorIndexResult, EnsureVectorPayloadIndex,
     EnsureVectorPayloadIndexResult, ExecuteFunction, ExecuteQuery, ExecuteQueryTransaction,
-    ExportAudit, FollowChangefeed, ForwardRollbackCounts, ForwardRollbackPlan,
-    ForwardRollbackRequest, FunctionDefinition, FunctionExecutionResult, FunctionRuntime,
-    FunctionTrigger, FunctionTriggerEffect, FunctionTriggerMutation, HybridFusion, HybridSearchHit,
-    HybridSearchResult, InstanceBackupCatalogueSnapshot, InstanceBackupSnapshot,
+    ExecuteRetrievalQuery, ExportAudit, FollowChangefeed, ForwardRollbackCounts,
+    ForwardRollbackPlan, ForwardRollbackRequest, FunctionDefinition, FunctionExecutionResult,
+    FunctionRuntime, FunctionTrigger, FunctionTriggerEffect, FunctionTriggerMutation, HybridFusion,
+    HybridSearchHit, HybridSearchResult, InstanceBackupCatalogueSnapshot, InstanceBackupSnapshot,
     ListInstanceBackups, ListQueryIndexes, ListVectorCollections, ListVectorPayloadIndexes,
     LiveQueryDeltaResult, LiveQueryRowChange, LogicalArchiveSnapshot, NamedVectorDefinition,
     OpenSubscription, OpenSubscriptionResult, PollLiveQuery, PreviewTransaction,
@@ -37,18 +37,21 @@ use rrd_contract::{
     QueryTextAnalyzer, QueryTextStemmer, QueryTextTokenizer, QueryTransactionResult, QueryValue,
     ReadAudit, ReadChangefeed, ReadDataSnapshot, ReadDiagnosticSnapshot, Readiness, RenewSession,
     ReplaceAutomationCatalogue, RequestContext, ResourceId, ResourceKind, ResourcePath,
-    RestoreInstanceBackup, RestoreInstanceBackupResult, RetrieveVectorPoints,
-    RuntimeChangeSnapshot, ScrollVectorPoints, SearchHybrid, SearchVectors, SecurityAction,
-    SessionEndState, SessionLease, SessionLimits, SessionTermination, SubscriptionClientFrame,
-    SubscriptionServerFrame, SubscriptionSnapshot, SubscriptionStatus, SubscriptionStream,
-    TransactionLease, TransactionMutation, TransactionPreview, TransactionState,
-    VectorCollectionCatalogueSnapshot, VectorCollectionSnapshot, VectorEmbeddingModel,
-    VectorIndexConfiguration, VectorIndexMaintenanceMode, VectorIndexMaintenanceSnapshot,
-    VectorIndexSnapshot, VectorMemoryTier, VectorPayloadFilter,
-    VectorPayloadIndexCatalogueSnapshot, VectorPayloadIndexKind, VectorPayloadIndexSnapshot,
-    VectorPayloadOperator, VectorPointBatch, VectorPointPage, VectorPointSnapshot, VectorSearchHit,
-    VectorSearchMetric, VectorSearchMode, VectorSearchQuery, VectorSearchResult, VectorValueKind,
-    DIAGNOSTIC_SNAPSHOT_FORMAT_VERSION,
+    RestoreInstanceBackup, RestoreInstanceBackupResult, RetrievalContextPair,
+    RetrievalContribution, RetrievalFacet, RetrievalFusion, RetrievalGroup, RetrievalHit,
+    RetrievalMatrixCell, RetrievalOutput, RetrievalPrefetch, RetrievalQuery, RetrievalQueryResult,
+    RetrievalRecommendStrategy, RetrievalRerankStage, RetrievalResultShape, RetrievalStageEvidence,
+    RetrievalVectorExample, RetrieveVectorPoints, RuntimeChangeSnapshot, ScrollVectorPoints,
+    SearchHybrid, SearchVectors, SecurityAction, SessionEndState, SessionLease, SessionLimits,
+    SessionTermination, SubscriptionClientFrame, SubscriptionServerFrame, SubscriptionSnapshot,
+    SubscriptionStatus, SubscriptionStream, TransactionLease, TransactionMutation,
+    TransactionPreview, TransactionState, VectorCollectionCatalogueSnapshot,
+    VectorCollectionSnapshot, VectorEmbeddingModel, VectorIndexConfiguration,
+    VectorIndexMaintenanceMode, VectorIndexMaintenanceSnapshot, VectorIndexSnapshot,
+    VectorMemoryTier, VectorPayloadFilter, VectorPayloadIndexCatalogueSnapshot,
+    VectorPayloadIndexKind, VectorPayloadIndexSnapshot, VectorPayloadOperator, VectorPointBatch,
+    VectorPointPage, VectorPointSnapshot, VectorSearchHit, VectorSearchMetric, VectorSearchMode,
+    VectorSearchQuery, VectorSearchResult, VectorValueKind, DIAGNOSTIC_SNAPSHOT_FORMAT_VERSION,
 };
 use rrd_core::{
     digest, Claim, DataTransaction, EmbeddingProvenance, GeoPoint, GeoValue, ObjectReceipt,
@@ -87,6 +90,7 @@ mod model;
 mod query;
 mod query_transaction;
 mod retrieval;
+mod retrieval_query;
 mod rollback;
 mod security;
 mod security_bootstrap;

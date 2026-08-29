@@ -173,6 +173,7 @@ fn required_unimplemented_foundation_is_visible_and_not_falsely_available() {
     for id in [
         "vector-collection-delete",
         "vector-payload-index-administration",
+        "vector-query-algebra",
     ] {
         let capability = catalogue
             .capabilities

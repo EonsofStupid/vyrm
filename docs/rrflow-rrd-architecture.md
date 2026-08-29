@@ -348,17 +348,27 @@ filter, and ordering semantics. Unchanged configurations never rebuild old
 nodes, and one object/catalogue CAS publishes the successor. See
 [`rrd-hnsw-online-v2.md`](rrd-hnsw-online-v2.md).
 
+Unified retrieval is also an RRD plan, not an application-side fan-out layer.
+One bounded recursive request captures one read stamp and collection catalogue,
+then composes nearest, keyword, recommendation, discovery, context, nested
+prefetch, weighted RRF, payload boost, exact/model MaxSim reranking, MMR, and
+point/group/facet/directed-matrix shapes. Both query and vector permissions are
+required, payload-dependent stages require active typed indexes, and every
+transition emits deterministic candidate-count, exactness, contribution, and
+plan-digest evidence. See
+[`rrd-unified-retrieval-v1.md`](rrd-unified-retrieval-v1.md).
+
 ```text
 database catalogue
   → resolve collection or same-kind alias
   → resolve point record + named vector schema + payload schema
   → bind metric, dimensions, strict mode, tenant policy and read stamp
   → plan payload indexes and shard route
-  → choose exact / HNSW / sparse / hybrid / multivector operator
+  → choose exact / HNSW / sparse / keyword / recommendation / context operator
   → choose full-precision or qualified quantized artifact
-  → retrieve an oversampled candidate set
-  → exact-rescore from canonical vectors when policy requires and budget permits
-  → deterministic top-k point records + payload projection
+  → execute bounded nested prefetch and RRF when requested
+  → apply governed boost / exact / model-MaxSim / MMR stages in order
+  → deterministic point / group / facet / directed-matrix output
   → Arrow RecordBatch stream and stamped query evidence
 ```
 

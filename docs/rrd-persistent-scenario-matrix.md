@@ -98,11 +98,18 @@ full workspace and operating-system matrix may be called verified.
 15. **Persistent deny-by-default policy**
     - Invariant: grants persist across reopen, resource scope is exact, and
       ungranted actions remain denied by default.
-    - Test: `rrd-security/security_authority::policy_is_persistent_exact_scope_and_deny_by_default`
+   - Test: `rrd-security/security_authority::policy_is_persistent_exact_scope_and_deny_by_default`
+
+16. **Unified multimodal retrieval and analytical shapes**
+    - Invariant: keyword, dense, sparse, and named multimodal vectors execute at
+      one read stamp through nested RRF, exact/model MaxSim, payload boost, and
+      MMR stages; recommendation, discovery, context, groups, facets, and the
+      directed matrix preserve identical results after database reopen.
+    - Test: `rrd-engine::engine::tests::vector_index::unified_retrieval_algebra_executes_multimodal_late_interaction_and_analytics`
 
 ## Required execution order after this matrix
 
-1. Run all 15 scenarios independently and record exact pass/fail evidence in
+1. Run all 16 scenarios independently and record exact pass/fail evidence in
    `docs/implementation-journal.md`.
 2. Run `cargo fmt --all -- --check`.
 3. Run `cargo test --workspace --all-features --locked` with the disposable

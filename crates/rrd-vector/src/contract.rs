@@ -83,7 +83,7 @@ impl VectorQuery {
         Ok(())
     }
 
-    pub(crate) fn as_value(&self) -> VectorValue {
+    pub fn as_value(&self) -> VectorValue {
         match self {
             Self::Dense { values } => VectorValue::Dense {
                 values: values.clone(),
