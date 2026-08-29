@@ -11,11 +11,15 @@ use std::fmt;
 
 pub const QUERY_CONTRACT_VERSION: u16 = 1;
 pub const MAX_TRAVERSAL_DEPTH: u16 = 32;
+pub const MAX_TRANSACTION_STATEMENTS: usize = 256;
+pub const MAX_TRANSACTION_PROGRAM_BYTES: usize = 64 * 1024;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Query {
     pub contract_version: u16,
     pub source: Source,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub join: Option<Join>,
     pub temporal: TemporalSelector,
     #[serde(default)]
     pub filters: Vec<Filter>,
@@ -31,6 +35,7 @@ impl Query {
         Self {
             contract_version: QUERY_CONTRACT_VERSION,
             source,
+            join: None,
             temporal,
             filters: Vec::new(),
             projection: Projection::All,
@@ -62,6 +67,10 @@ impl Query {
                 format!("traversal depth must be in 1..={MAX_TRAVERSAL_DEPTH}"),
             ));
         }
+        if let Some(join) = &self.join {
+            validate_field(&join.left_field, 0)?;
+            validate_field(&join.right_field, 0)?;
+        }
         if let Projection::Fields(fields) = &self.projection {
             if fields.is_empty() {
                 return Err(ParseError::new(0, "PROJECT requires at least one field"));
@@ -92,7 +101,16 @@ impl Query {
     }
 
     pub fn canonical(&self) -> String {
-        let mut out = format!("FROM {} AT VALID ", self.source.canonical());
+        let mut out = format!("FROM {}", self.source.canonical());
+        if let Some(join) = &self.join {
+            out.push_str(" JOIN ");
+            out.push_str(&join.source.canonical());
+            out.push_str(" ON ");
+            out.push_str(&join.left_field);
+            out.push_str(" = ");
+            out.push_str(&join.right_field);
+        }
+        out.push_str(" AT VALID ");
         out.push_str(&self.temporal.valid_at.canonical());
         out.push_str(" KNOWN ");
         out.push_str(&self.temporal.known_at.canonical());
@@ -122,6 +140,13 @@ impl Query {
         }
         out
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Join {
+    pub source: Source,
+    pub left_field: String,
+    pub right_field: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -315,6 +340,135 @@ impl ValueExpr {
 pub enum Projection {
     All,
     Fields(Vec<String>),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TransactionDisposition {
+    Commit,
+    Cancel,
+}
+
+/// A bounded RRFlowQL transaction program. Mutation payloads remain typed
+/// bindings so the language never invents a second serialization contract for
+/// the canonical transaction mutation vocabulary.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TransactionProgram {
+    pub contract_version: u16,
+    pub mutation_bindings: Vec<String>,
+    pub disposition: TransactionDisposition,
+}
+
+impl TransactionProgram {
+    pub fn validate(&self) -> Result<(), ParseError> {
+        if self.contract_version != QUERY_CONTRACT_VERSION {
+            return Err(ParseError::new(
+                0,
+                format!(
+                    "unsupported transaction-program contract version {}",
+                    self.contract_version
+                ),
+            ));
+        }
+        if self.mutation_bindings.is_empty()
+            || self.mutation_bindings.len() > MAX_TRANSACTION_STATEMENTS
+        {
+            return Err(ParseError::new(
+                0,
+                format!("transaction program requires 1..={MAX_TRANSACTION_STATEMENTS} mutations"),
+            ));
+        }
+        let mut unique = std::collections::BTreeSet::new();
+        for binding in &self.mutation_bindings {
+            validate_field(binding, 0)?;
+            if !unique.insert(binding) {
+                return Err(ParseError::new(
+                    0,
+                    format!("duplicate mutation binding ${binding}"),
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    pub fn canonical(&self) -> String {
+        let mut statements = Vec::with_capacity(self.mutation_bindings.len() + 2);
+        statements.push("BEGIN".to_owned());
+        statements.extend(
+            self.mutation_bindings
+                .iter()
+                .map(|binding| format!("MUTATE ${binding}")),
+        );
+        statements.push(
+            match self.disposition {
+                TransactionDisposition::Commit => "COMMIT",
+                TransactionDisposition::Cancel => "CANCEL",
+            }
+            .to_owned(),
+        );
+        format!("{};", statements.join("; "))
+    }
+}
+
+pub fn parse_transaction_program(input: &str) -> Result<TransactionProgram, ParseError> {
+    if input.is_empty() || input.len() > MAX_TRANSACTION_PROGRAM_BYTES {
+        return Err(ParseError::new(
+            0,
+            format!(
+                "transaction program length must be in 1..={MAX_TRANSACTION_PROGRAM_BYTES} bytes"
+            ),
+        ));
+    }
+    let mut statements = input.split(';').map(str::trim).collect::<Vec<_>>();
+    if statements.last() == Some(&"") {
+        statements.pop();
+    }
+    if statements.iter().any(|statement| statement.is_empty()) || statements.len() < 3 {
+        return Err(ParseError::new(
+            0,
+            "transaction program requires BEGIN, mutation statements, and COMMIT or CANCEL",
+        ));
+    }
+    if !statements[0].eq_ignore_ascii_case("BEGIN") {
+        return Err(ParseError::new(
+            0,
+            "transaction program must start with BEGIN",
+        ));
+    }
+    let disposition = if statements
+        .last()
+        .is_some_and(|statement| statement.eq_ignore_ascii_case("COMMIT"))
+    {
+        TransactionDisposition::Commit
+    } else if statements
+        .last()
+        .is_some_and(|statement| statement.eq_ignore_ascii_case("CANCEL"))
+    {
+        TransactionDisposition::Cancel
+    } else {
+        return Err(ParseError::new(
+            input.len(),
+            "transaction program must end with COMMIT or CANCEL",
+        ));
+    };
+    let mut mutation_bindings = Vec::with_capacity(statements.len() - 2);
+    for statement in &statements[1..statements.len() - 1] {
+        let words = statement.split_whitespace().collect::<Vec<_>>();
+        if words.len() != 2 || !words[0].eq_ignore_ascii_case("MUTATE") {
+            return Err(ParseError::new(
+                input.find(statement).unwrap_or(0),
+                "transaction statements must be MUTATE $binding",
+            ));
+        }
+        mutation_bindings.push(parameter(words[1], input.find(words[1]).unwrap_or(0))?);
+    }
+    let program = TransactionProgram {
+        contract_version: QUERY_CONTRACT_VERSION,
+        mutation_bindings,
+        disposition,
+    };
+    program.validate()?;
+    Ok(program)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -535,12 +689,30 @@ impl Parser {
     fn query(&mut self) -> Result<Query, ParseError> {
         self.keyword("FROM")?;
         let source = self.source()?;
+        let join = if self.peek().is_some_and(|token| token.is_keyword("JOIN")) {
+            self.cursor += 1;
+            let source = self.source()?;
+            self.keyword("ON")?;
+            let left_field = self.word("left join field")?;
+            validate_field(&left_field, self.previous_offset())?;
+            self.punctuation(TokenKind::Equals, "'=' in join condition")?;
+            let right_field = self.word("right join field")?;
+            validate_field(&right_field, self.previous_offset())?;
+            Some(Join {
+                source,
+                left_field,
+                right_field,
+            })
+        } else {
+            None
+        };
         self.keyword("AT")?;
         self.keyword("VALID")?;
         let valid_at = self.time_expr()?;
         self.keyword("KNOWN")?;
         let known_at = self.cursor_expr()?;
         let mut query = Query::new(source, TemporalSelector { valid_at, known_at });
+        query.join = join;
         let mut saw_where = false;
         let mut saw_project = false;
         let mut saw_limit = false;

@@ -482,13 +482,18 @@ As of 2026-08-29:
   resource terms and a persisted, revisioned multi-model table catalogue;
   one runtime transaction and exact-stamp snapshot now cover CRUD and
   history-preserving retirement across document, key-value, relational/graph,
-  event, vector, series, geo, and object models. Mutating RRFlowQL and dedicated
-  protocol administration remain open. Executable multi-project
+  event, vector, series, geo, and object models. Bounded RRFlowQL programs now
+  compose the same typed mutations under explicit begin/commit/cancel semantics,
+  and exact equi-joins reduce both sources from one authenticated read stamp.
+  Dedicated protocol administration and richer mutation expressions remain
+  open. Executable multi-project
   instance topology has been removed while
   an explicit successor-format migration is still required to persist the
   environment identity without invalidating format-1 authority digests;
-- typed Arrow conversion and DataFusion execution are present, but the current
-  bounded `MemTable` path is not the final streaming/pushdown/spill plane;
+- typed Arrow conversion, DataFusion filter/projection/limit execution, and
+  deterministic bounded result batches are present. Joins have a hard
+  intermediate-cardinality budget, but the current bounded `MemTable` path is
+  not the final streaming/pushdown/spill plane;
 - TurboQuant contract variants and an experimental physical artifact path are
   present, but they are not a qualified Qdrant-complete collection lifecycle or
   an automatic memory-pressure policy;

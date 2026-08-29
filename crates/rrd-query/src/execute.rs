@@ -3,7 +3,7 @@ use crate::{
     BoundFilter, Error, IndexArtifact, IndexKind, LogicalOperator, PhysicalOperator, PhysicalPlan,
     Result,
 };
-use crate::{Projection, Source, TraversalDirection};
+use crate::{Join, Projection, Source, TraversalDirection};
 use rrd_core::{
     resolve_as_of, Claim, GeoValue, RuntimeChange, RuntimeGeo, RuntimeGraphSnapshot,
     RuntimeMutation, RuntimeReadValidation, RuntimeValue, SeriesValue,
@@ -99,13 +99,23 @@ pub fn execute<E: Engine>(
             budget.max_scanned_changes
         )));
     }
-    let loaded = access.load(engine, &plan.logical.read, &shape)?;
+    let mut loaded = access.load(engine, &plan.logical.read, &shape)?;
     let stamp_validation_max_changes =
         usize::try_from(loaded.validation.change_reads).map_err(|_| {
             Error::Budget("stamp-validation evidence exceeds this platform's address space".into())
         })?;
     let stamp_validation = loaded.validation.method.clone();
     let stamp_validation_proof_nodes = loaded.validation.proof_nodes;
+    if let Some(join) = &shape.join {
+        let right = loaded.right_rows.take().ok_or_else(|| {
+            Error::Integrity("join plan did not load its right-hand source".into())
+        })?;
+        loaded.rows = exact_join_rows(&loaded.rows, &right, join, budget.max_rows)?;
+    } else if loaded.right_rows.is_some() {
+        return Err(Error::Integrity(
+            "single-source plan unexpectedly loaded join rows".into(),
+        ));
+    }
     // BM25 corpus statistics are calculated from the complete authoritative
     // source snapshot, before relational predicates narrow the result set.
     let bm25_scores = bm25_scores(&loaded.rows, &shape, loaded.bm25)?;
@@ -205,6 +215,7 @@ enum ReadPath {
 
 struct LoadedAccess {
     rows: Vec<QueryRow>,
+    right_rows: Option<Vec<QueryRow>>,
     bm25: Option<Bm25Artifact>,
     validation: RuntimeReadValidation,
 }
@@ -395,6 +406,7 @@ impl ReadPath {
             }
             return Ok(LoadedAccess {
                 rows: artifact.rows,
+                right_rows: None,
                 bm25: artifact.bm25,
                 validation: validation.validation,
             });
@@ -436,8 +448,18 @@ impl ReadPath {
             shape.valid_at,
             shape.known_at_cursor,
         );
+        let right_rows = shape.join.as_ref().map(|join| {
+            rows_for_source(
+                &page.changes,
+                &stamp.scope,
+                &join.source,
+                shape.valid_at,
+                shape.known_at_cursor,
+            )
+        });
         Ok(LoadedAccess {
             rows,
+            right_rows,
             bm25: None,
             validation: page.validation,
         })
@@ -446,6 +468,7 @@ impl ReadPath {
 
 struct PlanShape {
     source: Source,
+    join: Option<Join>,
     valid_at: u64,
     known_at_cursor: u64,
     filters: Vec<BoundFilter>,
@@ -459,6 +482,7 @@ impl PlanShape {
     fn read(plan: &PhysicalPlan) -> Result<Self> {
         let mut source = None;
         let mut temporal = None;
+        let mut join = None;
         let mut filters = Vec::new();
         let mut projection = None;
         let mut limit = None;
@@ -468,6 +492,24 @@ impl PlanShape {
                     if source.replace(value.clone()).is_some() {
                         return Err(Error::Integrity(
                             "logical plan contains more than one scan".into(),
+                        ));
+                    }
+                }
+                LogicalOperator::Join {
+                    source,
+                    left_field,
+                    right_field,
+                } => {
+                    if join
+                        .replace(Join {
+                            source: source.clone(),
+                            left_field: left_field.clone(),
+                            right_field: right_field.clone(),
+                        })
+                        .is_some()
+                    {
+                        return Err(Error::Integrity(
+                            "logical plan contains more than one join".into(),
                         ));
                     }
                 }
@@ -502,6 +544,7 @@ impl PlanShape {
             .ok_or_else(|| Error::Integrity("logical plan has no temporal selector".into()))?;
         Ok(Self {
             source: source.ok_or_else(|| Error::Integrity("logical plan has no scan".into()))?,
+            join,
             valid_at,
             known_at_cursor,
             filters,
@@ -512,6 +555,71 @@ impl PlanShape {
             source_cursor: plan.logical.source_cursor,
         })
     }
+}
+
+fn exact_join_rows(
+    left: &[QueryRow],
+    right: &[QueryRow],
+    join: &Join,
+    max_rows: usize,
+) -> Result<Vec<QueryRow>> {
+    let mut right_by_key = BTreeMap::<String, Vec<&QueryRow>>::new();
+    for row in right {
+        let Some(value) = row.values.get(&join.right_field) else {
+            return Err(Error::Integrity(format!(
+                "right join row {} lacks bound field {:?}",
+                row.identity, join.right_field
+            )));
+        };
+        if !matches!(value, RuntimeValue::Null) {
+            right_by_key
+                .entry(serde_json::to_string(value)?)
+                .or_default()
+                .push(row);
+        }
+    }
+
+    let mut joined = Vec::new();
+    for left_row in left {
+        let Some(value) = left_row.values.get(&join.left_field) else {
+            return Err(Error::Integrity(format!(
+                "left join row {} lacks bound field {:?}",
+                left_row.identity, join.left_field
+            )));
+        };
+        if matches!(value, RuntimeValue::Null) {
+            continue;
+        }
+        let key = serde_json::to_string(value)?;
+        for right_row in right_by_key.get(&key).into_iter().flatten() {
+            if joined.len() == max_rows {
+                return Err(Error::Budget(format!(
+                    "join produces more than the {max_rows}-row execution bound"
+                )));
+            }
+            let values = left_row
+                .values
+                .iter()
+                .map(|(field, value)| (format!("left.{field}"), value.clone()))
+                .chain(
+                    right_row
+                        .values
+                        .iter()
+                        .map(|(field, value)| (format!("right.{field}"), value.clone())),
+                )
+                .collect();
+            joined.push(QueryRow {
+                identity: format!(
+                    "join:{}:{}{}",
+                    left_row.identity.len(),
+                    left_row.identity,
+                    right_row.identity
+                ),
+                values,
+            });
+        }
+    }
+    Ok(joined)
 }
 
 fn rows_for_source(

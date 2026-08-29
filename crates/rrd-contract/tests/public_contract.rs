@@ -5,20 +5,20 @@ use rrd_contract::{
     DataSchemaMode, DataSchemaRegistry, DataTableSchema, DataTarget, DeploymentMode,
     EnsureQueryIndex, EnsureVectorCollection, EnsureVectorIndex, ErrorBody, ErrorCode,
     EstateActivityPolicySnapshot, EstateBackupJobSnapshot, EstateBackupJobState,
-    EstateBackupJobsSnapshot, EstateMutationResult, EstateSnapshot, ExecuteQuery, FollowChangefeed,
-    ForwardRollbackCounts, ForwardRollbackRequest, HybridFusion, IdempotencyBinding,
-    ListQueryIndexes, ListVectorCollections, Liveness, NamedVectorDefinition, PollLiveQuery,
-    PreviewTransaction, ProductCapability, ProductCapabilityCatalogue, ProductSurface, QueryBudget,
-    QueryExecutionSnapshot, QueryIndexKind, QueryPlanCandidate, QueryPlanSnapshot, QueryResult,
-    QueryRowSnapshot, QueryValue, ReadAudit, ReadChangefeed, ReadDataSnapshot, ReadEstate,
-    Readiness, RenewSession, RequestContext, RequestEnvelope, ResourceId, ResourceKind,
-    ResourcePath, ResponseEnvelope, ResponseOutcome, RestoreInstanceBackup, SearchHybrid,
-    SearchVectors, ServiceCapabilities, SessionEndState, SessionLease, SessionLimits,
-    SessionTermination, SurfaceBinding, SurfaceDisposition, TransactionMutation,
-    TransactionPreview, TransactionState, VectorIndexConfiguration, VectorMemoryTier,
-    VectorPayloadCondition, VectorPayloadFilter, VectorPayloadOperator, VectorQuantizationBits,
-    VectorSearchMetric, VectorSearchMode, VectorSearchQuery, VectorValueKind, PROTOCOL,
-    PROTOCOL_VERSION,
+    EstateBackupJobsSnapshot, EstateMutationResult, EstateSnapshot, ExecuteQuery,
+    ExecuteQueryTransaction, FollowChangefeed, ForwardRollbackCounts, ForwardRollbackRequest,
+    HybridFusion, IdempotencyBinding, ListQueryIndexes, ListVectorCollections, Liveness,
+    NamedVectorDefinition, PollLiveQuery, PreviewTransaction, ProductCapability,
+    ProductCapabilityCatalogue, ProductSurface, QueryBudget, QueryExecutionSnapshot,
+    QueryIndexKind, QueryPlanCandidate, QueryPlanSnapshot, QueryResult, QueryRowSnapshot,
+    QueryValue, ReadAudit, ReadChangefeed, ReadDataSnapshot, ReadEstate, Readiness, RenewSession,
+    RequestContext, RequestEnvelope, ResourceId, ResourceKind, ResourcePath, ResponseEnvelope,
+    ResponseOutcome, RestoreInstanceBackup, SearchHybrid, SearchVectors, ServiceCapabilities,
+    SessionEndState, SessionLease, SessionLimits, SessionTermination, SurfaceBinding,
+    SurfaceDisposition, TransactionMutation, TransactionPreview, TransactionState,
+    VectorIndexConfiguration, VectorMemoryTier, VectorPayloadCondition, VectorPayloadFilter,
+    VectorPayloadOperator, VectorQuantizationBits, VectorSearchMetric, VectorSearchMode,
+    VectorSearchQuery, VectorValueKind, PROTOCOL, PROTOCOL_VERSION,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -422,6 +422,38 @@ fn query_contract_is_transport_neutral_bounded_and_strict() {
         .parameters
         .insert("nested".into(), QueryValue::List(Vec::new()));
     assert!(invalid_parameter.validate().is_err());
+}
+
+#[test]
+fn query_transaction_contract_reuses_typed_mutations_and_is_bounded() {
+    let request = ExecuteQueryTransaction {
+        scope: "instance:project-alpha".into(),
+        program: "BEGIN; MUTATE $document; COMMIT;".into(),
+        mutation_bindings: BTreeMap::from([(
+            "document".into(),
+            TransactionMutation::PutRecord {
+                reference: DataReference {
+                    kind: CanonicalId::new("document").unwrap(),
+                    id: CanonicalId::new("alpha").unwrap(),
+                },
+                valid_from: 100,
+                valid_to: None,
+                properties: BTreeMap::from([("title".into(), QueryValue::String("Alpha".into()))]),
+            },
+        )]),
+        timeout_ms: 1_000,
+    };
+    request.validate().unwrap();
+    let mut unknown = serde_json::to_value(&request).unwrap();
+    unknown["autocommit"] = serde_json::json!(true);
+    assert!(serde_json::from_value::<ExecuteQueryTransaction>(unknown).is_err());
+
+    let mut invalid = request.clone();
+    invalid.timeout_ms = 0;
+    assert!(invalid.validate().is_err());
+    let mut invalid = request;
+    invalid.mutation_bindings.clear();
+    assert!(invalid.validate().is_err());
 }
 
 fn request_budget_fixture() -> QueryBudget {

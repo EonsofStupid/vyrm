@@ -1,7 +1,7 @@
 use rrd_core::{RuntimeType, RuntimeValue};
 use rrd_query::{
-    parse, ComparisonOperator, CursorExpr, Filter, Projection, Query, Source, TemporalSelector,
-    TimeExpr, ValueExpr,
+    parse, parse_transaction_program, ComparisonOperator, CursorExpr, Filter, Projection, Query,
+    Source, TemporalSelector, TimeExpr, TransactionDisposition, ValueExpr,
 };
 
 #[test]
@@ -17,6 +17,7 @@ fn parser_corpus_round_trips_to_one_canonical_form() {
         "FROM geo:location AT VALID 1000 KNOWN HEAD PROJECT subject_id, geometry_kind",
         "FROM record:document AT VALID 100 KNOWN HEAD WHERE title MATCH \"frontier runtime\" PROJECT id, title LIMIT 5",
         "FROM traverse:depends_on START document:a DIRECTION OUTGOING DEPTH 4 AT VALID 1000 KNOWN HEAD PROJECT node_id, depth, path",
+        "FROM record:document JOIN relation:depends_on ON id = from_id AT VALID 1000 KNOWN HEAD WHERE right.strength = \"hard\" PROJECT left.id, right.to_id",
     ];
     for source in corpus {
         let first = parse(source).unwrap_or_else(|error| panic!("{source}: {error}"));
@@ -82,10 +83,42 @@ fn malformed_or_ambiguous_queries_fail_with_offsets() {
         "FROM traverse:edge START node:a DIRECTION SIDEWAYS DEPTH 2 AT VALID 1 KNOWN HEAD PROJECT *",
         "FROM traverse:edge START node:a DIRECTION BOTH DEPTH 0 AT VALID 1 KNOWN HEAD PROJECT *",
         "FROM traverse:edge START node:a DIRECTION BOTH DEPTH 33 AT VALID 1 KNOWN HEAD PROJECT *",
+        "FROM record:doc JOIN relation:edge id = from_id AT VALID 1 KNOWN HEAD PROJECT *",
+        "FROM record:doc JOIN relation:edge ON missing AT VALID 1 KNOWN HEAD PROJECT *",
     ] {
         let error = parse(source).expect_err(source);
         assert!(!error.message.is_empty());
         assert!(error.offset <= source.len());
+    }
+}
+
+#[test]
+fn transaction_programs_are_bounded_canonical_and_have_one_disposition() {
+    let committed = parse_transaction_program(
+        " begin ; mutate $schema ; MUTATE $document ; mutate $edge ; commit; ",
+    )
+    .unwrap();
+    assert_eq!(committed.disposition, TransactionDisposition::Commit);
+    assert_eq!(
+        committed.canonical(),
+        "BEGIN; MUTATE $schema; MUTATE $document; MUTATE $edge; COMMIT;"
+    );
+    assert_eq!(
+        parse_transaction_program(&committed.canonical()).unwrap(),
+        committed
+    );
+
+    let canceled = parse_transaction_program("BEGIN; MUTATE $document; CANCEL;").unwrap();
+    assert_eq!(canceled.disposition, TransactionDisposition::Cancel);
+    for invalid in [
+        "MUTATE $document; COMMIT;",
+        "BEGIN; COMMIT;",
+        "BEGIN; MUTATE document; COMMIT;",
+        "BEGIN; MUTATE $document; MUTATE $document; COMMIT;",
+        "BEGIN; MUTATE $document; ROLLBACK;",
+        "BEGIN;; MUTATE $document; COMMIT;",
+    ] {
+        assert!(parse_transaction_program(invalid).is_err(), "{invalid}");
     }
 }
 

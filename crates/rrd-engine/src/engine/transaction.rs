@@ -9,6 +9,21 @@ impl RrdEngine {
         context: &RequestContext,
         now: u64,
     ) -> Result<TransactionLease> {
+        self.begin_transaction_with_intent(session_id, token, request, context, now, None)
+    }
+
+    /// Begin a transaction whose persisted idempotency record is also bound to
+    /// a higher-level canonical intent. Ordinary public transactions pass no
+    /// intent and retain their exact pre-existing operation identity.
+    pub(super) fn begin_transaction_with_intent(
+        &self,
+        session_id: &CorrelationId,
+        token: &CorrelationId,
+        request: &BeginTransaction,
+        context: &RequestContext,
+        now: u64,
+        intent_sha256: Option<&str>,
+    ) -> Result<TransactionLease> {
         context
             .validate(true)
             .map_err(|error| ServiceError::Contract(error.to_string()))?;
@@ -23,7 +38,10 @@ impl RrdEngine {
         }
         let (bytes, mut state) = self.load_authenticated(session_id, token)?;
         self.authorize_session_policy(&state, SecurityAction::TransactionBegin, now)?;
-        let operation_sha256 = operation_digest(request)?;
+        let operation_sha256 = match intent_sha256 {
+            Some(intent_sha256) => operation_digest(&(request, intent_sha256))?,
+            None => operation_digest(request)?,
+        };
         let transaction_id = self.keyed_id(
             "transaction",
             &[session_id.as_str(), idempotency_key.as_str()],

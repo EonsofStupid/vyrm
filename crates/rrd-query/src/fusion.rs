@@ -8,7 +8,7 @@ use datafusion::{
     common::ScalarValue,
     datasource::MemTable,
     logical_expr::Expr,
-    prelude::{col, lit, SessionContext},
+    prelude::{ident, lit, SessionContext},
 };
 use futures::executor::block_on;
 use rrd_core::RuntimeValue;
@@ -66,15 +66,15 @@ async fn execute_snapshot_async(
     }
 
     frame = frame
-        .sort(vec![col(IDENTITY).sort(true, false)])
+        .sort(vec![ident(IDENTITY).sort(true, false)])
         .map_err(datafusion_error)?;
 
     if !defer_projection_and_limit {
         if let Projection::Fields(fields) = projection {
             let mut columns = Vec::with_capacity(fields.len() + 1);
-            columns.push(IDENTITY);
-            columns.extend(fields.iter().map(String::as_str));
-            frame = frame.select_columns(&columns).map_err(datafusion_error)?;
+            columns.push(ident(IDENTITY));
+            columns.extend(fields.iter().cloned().map(ident));
+            frame = frame.select(columns).map_err(datafusion_error)?;
         }
         if let Some(limit) = limit {
             frame = frame.limit(0, Some(limit)).map_err(datafusion_error)?;
@@ -90,7 +90,7 @@ async fn execute_snapshot_async(
 }
 
 fn filter_expression(filter: &BoundFilter) -> Result<Expr> {
-    let actual = col(&filter.field);
+    let actual = ident(&filter.field);
     if matches!(filter.value, RuntimeValue::Null) {
         return match filter.comparison {
             ComparisonOperator::Equal => Ok(actual.is_null()),

@@ -5,7 +5,7 @@
 The foundation is not complete, but progress is now recorded against one
 enforced 65-item board rather than an informal checklist. G00-W01 through
 G00-W05, G01-W01 through G01-W04, G02-W01 through G02-W06, and G03-W01 are
-verified: 16/65. G03-W02 is active. The repository contains substantial executable
+verified together with G03-W02: 17/65. G03-W03 is active. The repository contains substantial executable
 storage, query, vector, reasoning, server, security, SDK, estate, and
 Connectome code under one `RrdEngine` composition root. Connectome is
 client-only, the CLI opens `RrdEngine`, and the security and estate product
@@ -107,7 +107,10 @@ the end-to-end execution/implementation map is owned only by
   catalogue admission for every non-claim mutation, while pre-G03 registries
   remain an exact readable migration form. Cross-model migration failure/retry
   and Memory/Fjall/native/reopen parity tests pass.
-- G03-W02 has a locally green implementation candidate. One typed retirement
+- G03-W02 is locally committed at
+  `54554ca487b9cb2dfee036933d81b5994db5f3e0` and verified as
+  `59e42ca6eccd1c236aa658502d7b710706bd93b0145970f1d95eb4c57cb07846`.
+  One typed retirement
   mutation now covers document, key-value, record, relation/native edge,
   event, series, geo, vector, and object identities without erasing history.
   `RuntimeDataSnapshot` reduces every family at one valid time, authenticated
@@ -115,7 +118,17 @@ the end-to-end execution/implementation map is owned only by
   bounded snapshot and preserves event cursor and named-vector identities.
   Mixed-model create/update/retire/recreate, failed-batch atomicity,
   concurrent-writer fencing, historical visibility, and Fjall/native reopen
-  parity are covered locally. Qualification and commit are still in progress.
+  parity are covered locally.
+- G03-W03 has a locally green implementation candidate. RRFlowQL now parses,
+  canonicalizes, binds, plans, and executes explicit same-stamp equi-joins. A
+  join reduces both sides from one authenticated log page and fails closed when
+  its intermediate row bound would be exceeded. A bounded transaction program
+  uses `BEGIN; MUTATE $binding; ...; COMMIT|CANCEL`; bindings reuse the complete
+  typed `TransactionMutation` contract and `RrdEngine` delegates execution to
+  its existing begin/commit/abort authority. Commit, cancel, invalid binding,
+  failed mutation atomicity, authorization denial, retry, native reopen, and
+  deterministic streaming batches are covered locally. Full qualification and
+  commit are in progress.
 - Development doctor report v3 records 14 passing checks and five blockers. It
   now distinguishes MCP's clean engine dependency boundary from actual daemon
   readiness: MCP's embedded mode opens `RrdEngine`, while its mutually

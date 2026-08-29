@@ -3149,3 +3149,24 @@ index.
 - Protocol review: typed `DataTarget` and `RetireData` intentionally advance
   the generated transaction schema in the OpenAPI digest to
   `394d4bb27669512b6eecafdede793f43c5b7f70ce3a84bd9f97de4601af8dbc0`.
+
+## 2026-08-29 — G03-W03 RRFlowQL transactions and joins candidate
+
+- Added one-stamp equi-joins to the RRFlowQL AST, canonical parser, catalogue
+  binder, logical/physical plans, and executor. Both sides reduce from one
+  authenticated log page; output fields are explicitly left/right-qualified.
+- Join evaluation has a hard intermediate row bound. It fails closed instead
+  of returning an inexact partial join, while accepted results retain the
+  existing deterministic bounded-batch contract.
+- Added a strict bounded `BEGIN; MUTATE $binding; ...; COMMIT|CANCEL` program.
+  Bindings reuse the full transport-neutral `TransactionMutation` vocabulary;
+  no parallel mutation model or transaction coordinator was introduced.
+- `RrdEngine::execute_query_transaction` validates before opening state and
+  delegates to the existing begin/commit/abort authority. Derived operation
+  identities bind the program and mutation payload for exact idempotent replay.
+- Differential join fixtures cover memory, Fjall, native, and native reopen.
+  Transaction fixtures cover commit, cancellation, missing bindings, failed
+  mutation atomicity, authorization denial, retry, and native reopen replay.
+- Public HTTP/MCP routes, generated SDK adapters, richer mutation expressions,
+  outer/costed joins, and the final pushdown/spill execution plane remain their
+  explicit later gates.

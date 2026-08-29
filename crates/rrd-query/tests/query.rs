@@ -202,6 +202,14 @@ fn execute_text<E: Engine>(
     (physical, execution)
 }
 
+fn flattened_rows(execution: &rrd_query::QueryExecution) -> Vec<rrd_query::QueryRow> {
+    execution
+        .batches
+        .iter()
+        .flat_map(|batch| batch.rows.iter().cloned())
+        .collect()
+}
+
 fn seed_historical_corrections<E: Engine>(engine: &E) {
     let first = fixture_commit();
     let head = engine.commit_runtime(&first).unwrap().last_cursor;
@@ -318,6 +326,89 @@ fn memory_fjall_and_native_return_identical_exact_rows() {
         query_ids, direct_ids,
         "query must match the direct graph API"
     );
+}
+
+#[test]
+fn equi_join_uses_one_stamp_matches_the_reference_oracle_and_is_strictly_bounded() {
+    let text = "FROM record:document JOIN relation:depends_on ON id = from_id AT VALID 100 KNOWN HEAD WHERE right.strength != \"cycle\" PROJECT left.id, right.to_id EXPLAIN CONTRACT";
+    let expected = vec![BTreeMap::from([
+        ("left.id".into(), RuntimeValue::String("a".into())),
+        ("right.to_id".into(), RuntimeValue::String("b".into())),
+    ])];
+
+    let memory = MemoryEngine::new();
+    let memory_execution = execute_fixture(&memory, text);
+    assert_eq!(
+        flattened_rows(&memory_execution)
+            .into_iter()
+            .map(|row| row.values)
+            .collect::<Vec<_>>(),
+        expected
+    );
+    assert!(memory_execution
+        .batches
+        .iter()
+        .all(|batch| batch.rows.len() <= ExecutionBudget::default().max_batch_rows));
+
+    let compatibility = tempfile::tempdir().unwrap();
+    let fjall = execute_fixture(&Store::open(compatibility.path()).unwrap(), text);
+    assert_eq!(flattened_rows(&fjall), flattened_rows(&memory_execution));
+
+    let native = tempfile::tempdir().unwrap();
+    let native_path = native.path().join("native");
+    let native_rows = {
+        let engine = NativeEngine::open(&native_path).unwrap();
+        flattened_rows(&execute_fixture(&engine, text))
+    };
+    let reopened = NativeEngine::open(&native_path).unwrap();
+    let (_, reopened_execution) = execute_text(&reopened, text);
+    assert_eq!(flattened_rows(&reopened_execution), native_rows);
+    assert_eq!(native_rows, flattened_rows(&memory_execution));
+
+    let catalog = Catalog::capture(&memory, &ScopeId::new("instance:test").unwrap()).unwrap();
+    let unfiltered = parse(
+        "FROM record:document JOIN relation:depends_on ON id = from_id AT VALID 100 KNOWN HEAD PROJECT left.id, right.to_id",
+    )
+    .unwrap();
+    let physical = plan(&bind(&unfiltered, &Parameters::new(), &catalog).unwrap()).unwrap();
+    let incompatible = parse(
+        "FROM record:document JOIN relation:depends_on ON valid_from = from_id AT VALID 100 KNOWN HEAD PROJECT left.id",
+    )
+    .unwrap();
+    assert!(matches!(
+        bind(&incompatible, &Parameters::new(), &catalog),
+        Err(Error::Binding(reason)) if reason.contains("incompatible types")
+    ));
+    let streamed = execute(
+        &memory,
+        &physical,
+        &ExecutionBudget {
+            max_batch_rows: 1,
+            ..ExecutionBudget::default()
+        },
+    )
+    .unwrap();
+    assert_eq!(streamed.returned_rows, 2);
+    assert!(!streamed.truncated);
+    assert_eq!(streamed.batches.len(), 2);
+    assert_eq!(streamed.batches[0].ordinal, 0);
+    assert!(!streamed.batches[0].done);
+    assert_eq!(streamed.batches[0].rows.len(), 1);
+    assert_eq!(streamed.batches[1].ordinal, 1);
+    assert!(streamed.batches[1].done);
+    assert_eq!(streamed.batches[1].rows.len(), 1);
+    assert_eq!(flattened_rows(&streamed).len(), streamed.returned_rows);
+
+    let error = execute(
+        &memory,
+        &physical,
+        &ExecutionBudget {
+            max_rows: 1,
+            ..ExecutionBudget::default()
+        },
+    )
+    .unwrap_err();
+    assert!(matches!(error, Error::Budget(reason) if reason.contains("join produces more")));
 }
 
 #[test]

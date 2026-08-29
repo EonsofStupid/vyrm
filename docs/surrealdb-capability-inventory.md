@@ -56,7 +56,7 @@ Sources: [deployment/storage matrix](https://surrealdb.com/docs/build/deployment
 | SurrealDB capability | RRFlow disposition |
 |---|---|
 | Multi-record and multi-table ACID transactions | **Verified locally** for one canonical runtime transaction across RRFlow value families |
-| Explicit `BEGIN` / `COMMIT` / `CANCEL` transactions | **Partial** — typed transaction API exists; no equivalent public RRFlowQL/session surface |
+| Explicit `BEGIN` / `COMMIT` / `CANCEL` transactions | **Partial** — bounded RRFlowQL transaction programs execute typed mutation bindings through the canonical engine coordinator; public network/session adapters remain open |
 | Client-owned transactions over RPC/SDKs | **Absent** |
 | Read-your-writes transaction views | **Verified locally** |
 | Optimistic conflict detection and atomic rollback | **Verified locally** |
@@ -137,11 +137,11 @@ Sources: [SurrealQL reference](https://surrealdb.com/docs/reference/query-langua
 
 | SurrealDB capability | RRFlow disposition |
 |---|---|
-| General CRUD: create, insert, upsert, select, update, merge, patch and delete | **Partial** — internal commits support mutations; RRFlowQL is read-only and narrow |
+| General CRUD: create, insert, upsert, select, update, merge, patch and delete | **Partial** — the internal RRFlowQL transaction program can commit the complete typed create/update/retire mutation vocabulary; direct statement expressions and public adapters remain open |
 | Graph relation creation and deletion (`RELATE`) | **Partial** — typed API, no public RRFlowQL mutation statement |
-| Multi-statement transactional scripts | **Absent** from RRFlowQL |
+| Multi-statement transactional scripts | **Partial** — bounded `BEGIN; MUTATE $binding; ...; COMMIT|CANCEL` programs are exact; control flow and general statement expressions are absent |
 | SQL-like projection, filtering, ordering, grouping, pagination, split, omit and fetch | **Partial** — explicit sources, filters and projection only |
-| Joins through record links and graph idioms | **Partial/absent** in RRFlowQL |
+| Joins through record links and graph idioms | **Partial** — exact same-stamp typed equi-joins and bounded graph traversal exist; richer join/path algebra is absent |
 | Subqueries and composable expressions | **Absent** |
 | Aggregates, math, statistics and vector functions | **Partial** — scoring primitives, not a database function library |
 | Control flow, blocks, `IF`, `FOR`, `LET`, `RETURN`, `THROW`, sleep and futures | **Absent** |

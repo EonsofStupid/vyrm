@@ -1,6 +1,6 @@
 use crate::{Catalog, Error, IndexKind, Result};
 use crate::{
-    ComparisonOperator, CursorExpr, Projection, Query, Source, TimeExpr, ValueExpr,
+    ComparisonOperator, CursorExpr, Join, Projection, Query, Source, TimeExpr, ValueExpr,
     QUERY_CONTRACT_VERSION,
 };
 use rrd_core::{
@@ -29,6 +29,8 @@ pub struct BoundQuery {
     pub contract_version: u16,
     pub read: ReadStamp,
     pub source: Source,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub join: Option<Join>,
     pub valid_at: u64,
     pub known_at_cursor: u64,
     pub source_cursor: u64,
@@ -60,11 +62,27 @@ pub struct BoundIndexCandidate {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "operator", rename_all = "snake_case")]
 pub enum LogicalOperator {
-    Scan { source: Source },
-    Temporal { valid_at: u64, known_at_cursor: u64 },
-    Filter { predicates: Vec<BoundFilter> },
-    Project { projection: Projection },
-    Limit { rows: usize },
+    Scan {
+        source: Source,
+    },
+    Join {
+        source: Source,
+        left_field: String,
+        right_field: String,
+    },
+    Temporal {
+        valid_at: u64,
+        known_at_cursor: u64,
+    },
+    Filter {
+        predicates: Vec<BoundFilter>,
+    },
+    Project {
+        projection: Projection,
+    },
+    Limit {
+        rows: usize,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -167,7 +185,23 @@ pub fn bind(query: &Query, parameters: &Parameters, catalog: &Catalog) -> Result
             "no schema was visible at known cursor {known_at_cursor}"
         ))
     })?;
-    let fields = fields_for_source(&query.source, schema)?;
+    let source_fields = fields_for_source(&query.source, schema)?;
+    let fields = if let Some(join) = &query.join {
+        let right_fields = fields_for_source(&join.source, schema)?;
+        let left_types = ensure_field(&join.left_field, &source_fields)?;
+        let right_types = ensure_field(&join.right_field, &right_fields)?;
+        if !left_types.iter().any(|left| {
+            *left != RuntimeValueType::Null && right_types.iter().any(|right| left == right)
+        }) {
+            return Err(Error::Binding(format!(
+                "join fields {:?} and {:?} have incompatible types",
+                join.left_field, join.right_field
+            )));
+        }
+        joined_field_catalog(&source_fields, &right_fields)
+    } else {
+        source_fields
+    };
     for filter in &query.filters {
         let accepted = ensure_field(&filter.field, &fields)?;
         if let ValueExpr::Literal(value) = &filter.value {
@@ -205,47 +239,70 @@ pub fn bind(query: &Query, parameters: &Parameters, catalog: &Catalog) -> Result
             })
         })
         .collect::<Result<Vec<_>>>()?;
+    if query.join.is_some()
+        && query
+            .filters
+            .iter()
+            .any(|filter| filter.comparison.is_match())
+    {
+        return Err(Error::Binding(
+            "MATCH scoring is not defined over joined row identities".into(),
+        ));
+    }
     let filter_fields = query
         .filters
         .iter()
         .map(|filter| filter.field.as_str())
         .collect::<std::collections::BTreeSet<_>>();
-    let index_candidates = catalog
-        .indexes
-        .entries
-        .values()
-        .filter(|entry| entry.definition.source == query.source)
-        .filter_map(|entry| {
-            let matched_prefix = entry
-                .definition
-                .fields
-                .iter()
-                .take_while(|field| filter_fields.contains(field.as_str()))
-                .count();
-            (matched_prefix > 0).then(|| BoundIndexCandidate {
-                id: entry.definition.id.clone(),
-                generation: entry.stamp.generation,
-                source_cursor: entry.stamp.source_cursor,
-                state: entry.stamp.state,
-                config_digest: entry.stamp.config_digest.clone(),
-                artifact_digest: entry.stamp.artifact_digest.clone(),
-                built_valid_at: entry.built_valid_at,
-                artifact_rows: entry.artifact_rows,
-                fields: entry.definition.fields.clone(),
-                matched_prefix,
-                kind: entry.definition.kind.clone(),
+    let index_candidates = if query.join.is_none() {
+        catalog
+            .indexes
+            .entries
+            .values()
+            .filter(|entry| entry.definition.source == query.source)
+            .filter_map(|entry| {
+                let matched_prefix = entry
+                    .definition
+                    .fields
+                    .iter()
+                    .take_while(|field| filter_fields.contains(field.as_str()))
+                    .count();
+                (matched_prefix > 0).then(|| BoundIndexCandidate {
+                    id: entry.definition.id.clone(),
+                    generation: entry.stamp.generation,
+                    source_cursor: entry.stamp.source_cursor,
+                    state: entry.stamp.state,
+                    config_digest: entry.stamp.config_digest.clone(),
+                    artifact_digest: entry.stamp.artifact_digest.clone(),
+                    built_valid_at: entry.built_valid_at,
+                    artifact_rows: entry.artifact_rows,
+                    fields: entry.definition.fields.clone(),
+                    matched_prefix,
+                    kind: entry.definition.kind.clone(),
+                })
             })
-        })
-        .collect();
+            .collect()
+    } else {
+        Vec::new()
+    };
+    let source_cursor = catalog
+        .source_watermarks
+        .for_source_at(&query.source, known_at_cursor);
+    let source_cursor = query.join.as_ref().map_or(source_cursor, |join| {
+        source_cursor.max(
+            catalog
+                .source_watermarks
+                .for_source_at(&join.source, known_at_cursor),
+        )
+    });
     Ok(BoundQuery {
         contract_version: QUERY_CONTRACT_VERSION,
         read: catalog.read.clone(),
         source: query.source.clone(),
+        join: query.join.clone(),
         valid_at,
         known_at_cursor,
-        source_cursor: catalog
-            .source_watermarks
-            .for_source_at(&query.source, known_at_cursor),
+        source_cursor,
         field_types: fields,
         filters,
         projection: query.projection.clone(),
@@ -266,6 +323,13 @@ pub fn plan(bound: &BoundQuery) -> Result<PhysicalPlan> {
             known_at_cursor: bound.known_at_cursor,
         },
     ];
+    if let Some(join) = &bound.join {
+        operators.push(LogicalOperator::Join {
+            source: join.source.clone(),
+            left_field: join.left_field.clone(),
+            right_field: join.right_field.clone(),
+        });
+    }
     if !bound.filters.is_empty() {
         operators.push(LogicalOperator::Filter {
             predicates: bound.filters.clone(),
@@ -542,6 +606,17 @@ fn ensure_field<'a>(field: &str, fields: &'a FieldCatalog) -> Result<&'a [Runtim
             "field {field:?} is not present in the selected source"
         ))
     })
+}
+
+fn joined_field_catalog(left: &FieldCatalog, right: &FieldCatalog) -> FieldCatalog {
+    left.iter()
+        .map(|(field, types)| (format!("left.{field}"), types.clone()))
+        .chain(
+            right
+                .iter()
+                .map(|(field, types)| (format!("right.{field}"), types.clone())),
+        )
+        .collect()
 }
 
 fn ensure_value_type(

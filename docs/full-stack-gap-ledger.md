@@ -166,7 +166,7 @@ claimed from a UI card, type, or isolated physical component:
 
 | Requirement | Current executable truth | Missing gate |
 |---|---|---|
-| Concurrent document, relational, native graph-edge, vector, event, time-series and geo storage | The typed RRD transaction can atomically commit these models; `rrflow_data_commit` exercises that path with exact authorization and reopen replay | Complete public administration, indexes, query/search parity and cross-model transaction qualification |
+| Concurrent document, relational, native graph-edge, vector, event, time-series and geo storage | One typed RRD transaction can atomically create, update, retire and recreate every logical family; bounded RRFlowQL transaction programs bind the same mutations and delegate to that authority | Complete public administration, indexes, query/search parity and cross-model transaction qualification |
 | Real-time live queries and changefeeds | Bounded engine/HTTP/MCP poll, read and follow operations exist | Push/subscription transport, backpressure, retention and distributed ordering qualification |
 | Vector and full-text retrieval | Dense/sparse/multi-dense storage plus MCP collection, point and exact-search paths exist; HNSW/TurboQuant engine artifacts also exist | Collection-bound approximate serving, full-text engine/index implementation, hybrid planner and production recall/latency evidence |
 | Time travel and rollback | RRFlowQL binds schema, source watermarks, claims, index selection and authoritative replay to one valid-time/known-at coordinate across memory, Fjall, native and reopen; `rrflow_data_rollback` appends idempotent record/relation compensations plus immutable evidence through the normal audited transaction | Extend selected-state rollback beyond records/relations without rewriting append-only event, series, object, schema, vector, geo or security-audit history; qualify the complete public-surface matrix |
@@ -682,17 +682,26 @@ candidates. It now builds durable content-addressed exact snapshot artifacts
 and selects them only at the exact source cursor and valid-time after complete
 identity/digest revalidation; stale queries use the authoritative log. See
 [`rrflowql-index-catalogue-v1.md`](rrflowql-index-catalogue-v1.md).
+RRFlowQL now also has exact same-stamp equi-joins and bounded transaction
+programs. Both join inputs are reduced from one authenticated log page at the
+same valid/known coordinate; intermediate join cardinality fails closed rather
+than truncating. `BEGIN; MUTATE $binding; ...; COMMIT|CANCEL` binds the existing
+typed multi-model mutation contract and delegates to the one engine transaction
+coordinator. It is an internal engine contract pending the G06 network/SDK
+adapters, not a second public transaction surface. See
+[`rrflowql-transactions-and-joins-v1.md`](rrflowql-transactions-and-joins-v1.md).
 
 **Deliverables**
 
-- Mutating RRFlowQL and multi-statement transactions.
+- Extend bounded mutating RRFlowQL beyond typed mutation bindings with public
+  network/SDK adapters and richer statement expressions.
 - Dedicated document/key-value/record/edge CRUD and retirement surfaces. The
   engine now has one typed mutation and exact-stamp read contract across all
   catalogue models, including history-preserving retirement, event-cursor
-  correction, mixed-model atomicity, and reopen parity. Mutating RRFlowQL and
-  the dedicated HTTP/MCP administration adapters remain G03-W03 and G06 work;
-  the internal G03-W02 engine contract is an implementation candidate pending
-  qualification.
+  correction, mixed-model atomicity, and reopen parity. Bounded RRFlowQL
+  transaction programs now compose those mutations under explicit
+  begin/commit/cancel semantics. Dedicated HTTP/MCP administration adapters
+  remain G06 work.
 - Relational links, richer graph/path algebra, and spatial operators.
 - Materialized ordinary/compound/unique/count, spatial and full-text indexes;
   exact scalar snapshot artifacts now execute and authenticated ensure/list

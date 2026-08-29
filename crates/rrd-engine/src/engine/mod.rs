@@ -20,23 +20,24 @@ use rrd_contract::{
     DiagnosticSnapshotLease, DiagnosticVectorArtifactCatalogueSnapshot,
     DiagnosticVectorArtifactKind, DiagnosticVectorArtifactSnapshot, EnsureQueryIndex,
     EnsureQueryIndexResult, EnsureVectorCollection, EnsureVectorCollectionResult,
-    EnsureVectorIndex, EnsureVectorIndexResult, ExecuteQuery, FollowChangefeed,
-    ForwardRollbackCounts, ForwardRollbackPlan, ForwardRollbackRequest, HybridFusion,
-    HybridSearchHit, HybridSearchResult, InstanceBackupCatalogueSnapshot, InstanceBackupSnapshot,
-    ListInstanceBackups, ListQueryIndexes, ListVectorCollections, LiveQueryDeltaResult,
-    LiveQueryRowChange, LogicalArchiveSnapshot, NamedVectorDefinition, PollLiveQuery,
-    PreviewTransaction, QueryExecutionSnapshot, QueryIndexCatalogueSnapshot, QueryIndexKind,
-    QueryIndexSnapshot, QueryIndexState, QueryPlanCandidate, QueryPlanSnapshot, QueryResult,
-    QueryRowSnapshot, QueryValue, ReadAudit, ReadChangefeed, ReadDataSnapshot,
-    ReadDiagnosticSnapshot, Readiness, RenewSession, RequestContext, ResourceId, ResourceKind,
-    ResourcePath, RestoreInstanceBackup, RestoreInstanceBackupResult, RetrieveVectorPoints,
-    RuntimeChangeSnapshot, ScrollVectorPoints, SearchHybrid, SearchVectors, SecurityAction,
-    SessionEndState, SessionLease, SessionLimits, SessionTermination, TransactionLease,
-    TransactionMutation, TransactionPreview, TransactionState, VectorCollectionCatalogueSnapshot,
-    VectorCollectionSnapshot, VectorEmbeddingModel, VectorIndexConfiguration, VectorIndexSnapshot,
-    VectorMemoryTier, VectorPayloadFilter, VectorPayloadOperator, VectorPointBatch,
-    VectorPointPage, VectorPointSnapshot, VectorSearchHit, VectorSearchMetric, VectorSearchMode,
-    VectorSearchQuery, VectorSearchResult, VectorValueKind, DIAGNOSTIC_SNAPSHOT_FORMAT_VERSION,
+    EnsureVectorIndex, EnsureVectorIndexResult, ExecuteQuery, ExecuteQueryTransaction,
+    FollowChangefeed, ForwardRollbackCounts, ForwardRollbackPlan, ForwardRollbackRequest,
+    HybridFusion, HybridSearchHit, HybridSearchResult, InstanceBackupCatalogueSnapshot,
+    InstanceBackupSnapshot, ListInstanceBackups, ListQueryIndexes, ListVectorCollections,
+    LiveQueryDeltaResult, LiveQueryRowChange, LogicalArchiveSnapshot, NamedVectorDefinition,
+    PollLiveQuery, PreviewTransaction, QueryExecutionSnapshot, QueryIndexCatalogueSnapshot,
+    QueryIndexKind, QueryIndexSnapshot, QueryIndexState, QueryPlanCandidate, QueryPlanSnapshot,
+    QueryResult, QueryRowSnapshot, QueryTransactionResult, QueryValue, ReadAudit, ReadChangefeed,
+    ReadDataSnapshot, ReadDiagnosticSnapshot, Readiness, RenewSession, RequestContext, ResourceId,
+    ResourceKind, ResourcePath, RestoreInstanceBackup, RestoreInstanceBackupResult,
+    RetrieveVectorPoints, RuntimeChangeSnapshot, ScrollVectorPoints, SearchHybrid, SearchVectors,
+    SecurityAction, SessionEndState, SessionLease, SessionLimits, SessionTermination,
+    TransactionLease, TransactionMutation, TransactionPreview, TransactionState,
+    VectorCollectionCatalogueSnapshot, VectorCollectionSnapshot, VectorEmbeddingModel,
+    VectorIndexConfiguration, VectorIndexSnapshot, VectorMemoryTier, VectorPayloadFilter,
+    VectorPayloadOperator, VectorPointBatch, VectorPointPage, VectorPointSnapshot, VectorSearchHit,
+    VectorSearchMetric, VectorSearchMode, VectorSearchQuery, VectorSearchResult, VectorValueKind,
+    DIAGNOSTIC_SNAPSHOT_FORMAT_VERSION,
 };
 use rrd_core::{
     digest, Claim, DataTransaction, EmbeddingProvenance, GeoPoint, GeoValue, ObjectReceipt,
@@ -69,6 +70,7 @@ mod estate_control;
 mod invocation;
 mod model;
 mod query;
+mod query_transaction;
 mod retrieval;
 mod rollback;
 mod security;

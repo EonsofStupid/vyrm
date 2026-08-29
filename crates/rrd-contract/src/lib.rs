@@ -71,6 +71,8 @@ pub const MAX_QUERY_SCANNED_CHANGES: u64 = 1_000_000;
 pub const MAX_QUERY_ROWS: u64 = 100_000;
 pub const MAX_QUERY_OUTPUT_BYTES: u64 = 768 * 1024;
 pub const MAX_QUERY_BATCH_ROWS: u64 = 1_024;
+pub const MAX_QUERY_TRANSACTION_MUTATIONS: usize = 256;
+pub const MAX_QUERY_TRANSACTION_BINDING_BYTES: usize = 1024 * 1024;
 pub const MAX_LIVE_QUERY_DELTA_ROWS: u64 = 100_000;
 pub const MAX_LIVE_QUERY_WAIT_MS: u64 = 5_000;
 pub const MAX_VECTOR_SEARCH_CHANGES: u64 = 1_000_000;
@@ -191,6 +193,78 @@ impl ExecuteQuery {
         }
         self.budget.validate()
     }
+}
+
+/// A bounded RRFlowQL transaction program plus canonical typed mutation
+/// bindings. The program selects ordering and commit/cancel disposition; the
+/// bindings reuse the one public transaction mutation vocabulary.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ExecuteQueryTransaction {
+    pub scope: String,
+    pub program: String,
+    pub mutation_bindings: BTreeMap<String, TransactionMutation>,
+    pub timeout_ms: u64,
+}
+
+impl ExecuteQueryTransaction {
+    pub fn validate(&self) -> Result<()> {
+        if self.scope.is_empty() || self.scope.len() > MAX_ID_BYTES || self.scope.contains('\0') {
+            return invalid(format!(
+                "query transaction scope length must be in 1..={MAX_ID_BYTES} bytes and contain no NUL"
+            ));
+        }
+        if self.program.trim().is_empty() || self.program.len() > MAX_QUERY_BYTES {
+            return invalid(format!(
+                "query transaction program length must be in 1..={MAX_QUERY_BYTES} bytes"
+            ));
+        }
+        if self.mutation_bindings.is_empty()
+            || self.mutation_bindings.len() > MAX_QUERY_TRANSACTION_MUTATIONS
+        {
+            return invalid(format!(
+                "query transaction binding count must be in 1..={MAX_QUERY_TRANSACTION_MUTATIONS}"
+            ));
+        }
+        if self.mutation_bindings.keys().any(|name| {
+            name.is_empty()
+                || name.len() > MAX_ID_BYTES
+                || !name
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'.'))
+        }) {
+            return invalid("query transaction binding names must be bounded identifiers");
+        }
+        for mutation in self.mutation_bindings.values() {
+            mutation.validate()?;
+        }
+        let bytes = serde_json::to_vec(&self.mutation_bindings)
+            .map_err(|error| ContractError(error.to_string()))?
+            .len();
+        if bytes > MAX_QUERY_TRANSACTION_BINDING_BYTES {
+            return invalid(format!(
+                "query transaction bindings may encode at most {MAX_QUERY_TRANSACTION_BINDING_BYTES} bytes"
+            ));
+        }
+        if !(MIN_LEASE_MS..=MAX_LEASE_MS).contains(&self.timeout_ms) {
+            return invalid(format!(
+                "query transaction timeout_ms must be in {MIN_LEASE_MS}..={MAX_LEASE_MS}"
+            ));
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct QueryTransactionResult {
+    pub canonical_program: String,
+    pub transaction_id: CorrelationId,
+    pub read_cursor: u64,
+    pub state: TransactionState,
+    pub mutation_count: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub commit: Option<CommitReceipt>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
