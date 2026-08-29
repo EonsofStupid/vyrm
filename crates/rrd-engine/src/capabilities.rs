@@ -216,6 +216,15 @@ pub fn product_capability_catalogue() -> ProductCapabilityCatalogue {
             "Administer least-privilege operation and resource capabilities through the one RRD security authority.",
         ),
     ] {
+        if let Some(capability) = capabilities
+            .iter_mut()
+            .find(|capability| capability.id == id)
+        {
+            capability.label = label.into();
+            capability.category = category.into();
+            capability.summary = summary.into();
+            continue;
+        }
         capabilities.push(ProductCapability {
             id: id.into(),
             label: label.into(),

@@ -288,7 +288,7 @@ fn reviewed_a_series_is_fully_generated_and_capability_mapped() {
     let catalogue = rrd_engine::runtime_tool_catalogue();
     assert_eq!(
         catalogue.len(),
-        29 + rrd_engine::WorkPlanOperation::ALL.len()
+        30 + rrd_engine::WorkPlanOperation::ALL.len()
     );
     for (name, capability, lifecycle, mutation, required_fields) in [
         (

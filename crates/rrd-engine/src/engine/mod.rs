@@ -18,7 +18,8 @@ use rrd_contract::{
     DiagnosticSnapshot, DiagnosticSnapshotLease, DiagnosticVectorArtifactCatalogueSnapshot,
     DiagnosticVectorArtifactKind, DiagnosticVectorArtifactSnapshot, EnsureQueryIndex,
     EnsureQueryIndexResult, EnsureVectorCollection, EnsureVectorCollectionResult,
-    EnsureVectorIndex, EnsureVectorIndexResult, ExecuteQuery, FollowChangefeed, HybridFusion,
+    EnsureVectorIndex, EnsureVectorIndexResult, ExecuteQuery, FollowChangefeed,
+    ForwardRollbackCounts, ForwardRollbackPlan, ForwardRollbackRequest, HybridFusion,
     HybridSearchHit, HybridSearchResult, InstanceBackupCatalogueSnapshot, InstanceBackupSnapshot,
     ListInstanceBackups, ListQueryIndexes, ListVectorCollections, LiveQueryDeltaResult,
     LiveQueryRowChange, LogicalArchiveSnapshot, NamedVectorDefinition, PollLiveQuery,
@@ -65,6 +66,7 @@ mod invocation;
 mod model;
 mod query;
 mod retrieval;
+mod rollback;
 mod security;
 mod security_bootstrap;
 mod session;

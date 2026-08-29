@@ -93,7 +93,6 @@ fn required_unimplemented_foundation_is_visible_and_not_falsely_available() {
         "graph-administration",
         "vector-collection-delete",
         "full-text-search",
-        "historical-rollback",
         "deployment-in-memory",
         "deployment-wasm-browser",
         "deployment-mobile-edge",
@@ -118,6 +117,37 @@ fn required_unimplemented_foundation_is_visible_and_not_falsely_available() {
                     .is_some_and(|reason| !reason.is_empty())
         }));
     }
+
+    let rollback = catalogue
+        .capabilities
+        .iter()
+        .find(|capability| capability.id == "historical-rollback")
+        .unwrap();
+    for surface in [
+        ProductSurface::Engine,
+        ProductSurface::RrdHttp,
+        ProductSurface::Mcp,
+        ProductSurface::Connectome,
+    ] {
+        let binding = rollback
+            .bindings
+            .iter()
+            .find(|binding| binding.surface == surface)
+            .unwrap();
+        assert_eq!(binding.disposition, SurfaceDisposition::Available);
+        assert!(!binding.entrypoints.is_empty());
+    }
+    let cli = rollback
+        .bindings
+        .iter()
+        .find(|binding| binding.surface == ProductSurface::Cli)
+        .unwrap();
+    assert_eq!(cli.disposition, SurfaceDisposition::Unavailable);
+    assert!(cli.entrypoints.is_empty());
+    assert!(cli
+        .reason
+        .as_deref()
+        .is_some_and(|reason| !reason.is_empty()));
 }
 
 #[test]

@@ -172,15 +172,17 @@ claimed from a UI card, type, or isolated physical component:
 | Concurrent document, relational, native graph-edge, vector, event, time-series and geo storage | The typed RRD transaction can atomically commit these models; `rrflow_data_commit` exercises that path with exact authorization and reopen replay | Complete public administration, indexes, query/search parity and cross-model transaction qualification |
 | Real-time live queries and changefeeds | Bounded engine/HTTP/MCP poll, read and follow operations exist | Push/subscription transport, backpressure, retention and distributed ordering qualification |
 | Vector and full-text retrieval | Dense/sparse/multi-dense storage plus MCP collection, point and exact-search paths exist; HNSW/TurboQuant engine artifacts also exist | Collection-bound approximate serving, full-text engine/index implementation, hybrid planner and production recall/latency evidence |
-| Time travel and rollback | RRFlowQL exposes valid-time and known-at historical reads | Explicit audited forward rollback/restore semantics; history must never be silently rewritten |
+| Time travel and rollback | RRFlowQL binds schema, source watermarks, claims, index selection and authoritative replay to one valid-time/known-at coordinate across memory, Fjall, native and reopen; `rrflow_data_rollback` appends idempotent record/relation compensations plus immutable evidence through the normal audited transaction | Extend selected-state rollback beyond records/relations without rewriting append-only event, series, object, schema, vector, geo or security-audit history; qualify the complete public-surface matrix |
 | In-memory, embedded, single-node, browser/WASM, mobile/edge and distributed modes | Embedded persistent and single-node daemon paths exist; underlying test/memory and experimental edge/distributed pieces exist | One logical conformance suite and platform-specific durability/security/resource qualification for every advertised mode |
 | Autonomous agent memory | Bitemporal facts, exact recall, context, routing, reasoning events, attunement and lifecycle enforcement exist | Hybrid recall, reflection, ingestion, semantic code search, governed retirement and evaluation evidence under one RRD authority |
 | Managed cloud | Kubernetes and estate foundations exist | Tenant control plane, autoscaling, granular capability administration, secure outbound-network policy, upgrades, recovery and Multi-AZ qualification |
 
-The engine-owned product capability catalogue now records the unfinished
-full-text, rollback, deployment, autonomous-memory, granular-security and
-managed-cloud rows as `planned` across every surface. This prevents MCP,
-Connectome, CLI or documentation from presenting them as executable early.
+The engine-owned product capability catalogue records unfinished full-text,
+deployment, autonomous-memory, granular-security and managed-cloud rows as
+`planned` across every surface. Historical rollback is available through the
+engine-owned runtime tool and its generic HTTP/MCP/Connectome invocation
+surfaces; CLI remains explicitly unavailable rather than receiving a false
+entrypoint.
 
 ### What “estate” means
 

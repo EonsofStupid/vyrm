@@ -16,12 +16,13 @@ use crate::{
 use rrd_contract::{
     endpoint_catalogue, transaction_operation_sha256, AuditDecision, BeginTransaction, CanonicalId,
     CommitTransaction, CorrelationId, CreateInstanceBackup, EnsureQueryIndex,
-    EnsureVectorCollection, FollowChangefeed, LifecycleEventCommandV1, ListInstanceBackups,
-    ListQueryIndexes, ListVectorCollections, PollLiveQuery, ReadAudit, ReadChangefeed,
-    RequestContext, RestoreInstanceBackup, RetrieveVectorPoints, RuntimeToolCatalogue,
-    RuntimeToolDescriptor, RuntimeToolInvocation, RuntimeToolInvocationResult, ScrollVectorPoints,
-    SearchVectors, SecurityAction, TransactionMutation, MAX_LEASE_MS, MIN_LEASE_MS, PROTOCOL,
-    PROTOCOL_VERSION, RUNTIME_TOOL_CATALOGUE_VERSION,
+    EnsureVectorCollection, FollowChangefeed, ForwardRollbackReceipt, ForwardRollbackRequest,
+    LifecycleEventCommandV1, ListInstanceBackups, ListQueryIndexes, ListVectorCollections,
+    PollLiveQuery, ReadAudit, ReadChangefeed, RequestContext, RestoreInstanceBackup,
+    RetrieveVectorPoints, RuntimeToolCatalogue, RuntimeToolDescriptor, RuntimeToolInvocation,
+    RuntimeToolInvocationResult, ScrollVectorPoints, SearchVectors, SecurityAction,
+    TransactionMutation, MAX_LEASE_MS, MIN_LEASE_MS, PROTOCOL, PROTOCOL_VERSION,
+    RUNTIME_TOOL_CATALOGUE_VERSION,
 };
 pub use rrd_contract::{RuntimeToolAuthorization, RuntimeToolLifecyclePolicy};
 use rrd_core::{
@@ -131,6 +132,23 @@ struct DataCommitArguments {
     timeout_ms: Option<u64>,
     /// Logical operation time; defaults to adapter invocation time.
     at: Option<u64>,
+}
+
+#[derive(Debug, Clone, serde::Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct DataRollbackArguments {
+    /// Stable caller identity for retrying this exact rollback.
+    idempotency_key: CorrelationId,
+    /// Modeled valid-time instant whose structural state will be restored.
+    target_valid_at: u64,
+    /// Transaction-time prefix that defined the selected historical state.
+    target_known_at_cursor: u64,
+    /// New valid-time instant at which compensating versions become effective.
+    effective_at: u64,
+    /// Human operator reason; persisted by digest in immutable rollback evidence.
+    reason: String,
+    /// Transaction timeout; defaults to 60 seconds.
+    timeout_ms: Option<u64>,
 }
 
 #[derive(Debug, Clone, serde::Deserialize, JsonSchema)]
@@ -703,6 +721,14 @@ pub fn runtime_tool_catalogue() -> Vec<RuntimeToolDefinition> {
             RuntimeToolAuthorization::Governed,
             RuntimeToolLifecyclePolicy::PlannedMutation,
         ),
+        typed_tool::<DataRollbackArguments>(
+            "rrflow_data_rollback",
+            Some("historical-rollback"),
+            "Restore a retained historical record/relation state by atomically appending compensating versions and immutable rollback audit evidence",
+            true,
+            RuntimeToolAuthorization::Governed,
+            RuntimeToolLifecyclePolicy::PlannedMutation,
+        ),
         typed_tool::<QueryIndexEnsureArguments>(
             "rrflow_query_index_ensure",
             Some("query-index-ensure"),
@@ -931,6 +957,7 @@ fn runtime_tool_action(name: &str) -> SecurityAction {
         "rrflow_route" => SecurityAction::ProjectRoute,
         "rrflow_service_status" => SecurityAction::ServiceInspect,
         "rrflow_data_commit" => SecurityAction::TransactionCommit,
+        "rrflow_data_rollback" => SecurityAction::TransactionCommit,
         "rrflow_query_index_ensure" => SecurityAction::QueryIndexEnsure,
         "rrflow_query_index_list" => SecurityAction::QueryIndexList,
         "rrflow_live_query_poll" => SecurityAction::QueryLivePoll,
@@ -964,6 +991,7 @@ fn execute_runtime_tool(
     let store = &engine.storage;
     match name {
         "rrflow_data_commit" => execute_data_commit(engine, args, invocation_at, caller),
+        "rrflow_data_rollback" => execute_data_rollback(engine, args, invocation_at, caller),
         "rrflow_query_index_ensure" => {
             execute_query_index_ensure(engine, args, invocation_at, caller)
         }
@@ -1379,6 +1407,94 @@ fn execute_data_commit(
         detail: Some(format!(
             "committed {} mutation(s) at runtime cursors {:?}..={:?}",
             receipt.mutation_count, receipt.first_runtime_cursor, receipt.last_runtime_cursor
+        )),
+        text: serde_json::to_string_pretty(&receipt)?,
+        effectiveness: None,
+    })
+}
+
+fn execute_data_rollback(
+    engine: &RrdEngine,
+    args: &Value,
+    _invocation_at: u64,
+    caller: AdapterCaller<'_>,
+) -> Result<ExecutedTool, Box<dyn std::error::Error>> {
+    let arguments: DataRollbackArguments = serde_json::from_value(args.clone())?;
+    let request = ForwardRollbackRequest {
+        target_valid_at: arguments.target_valid_at,
+        target_known_at_cursor: arguments.target_known_at_cursor,
+        effective_at: arguments.effective_at,
+        reason: arguments.reason,
+    };
+    request.validate()?;
+    let timeout_ms = arguments.timeout_ms.unwrap_or(60_000);
+    if !(MIN_LEASE_MS..=MAX_LEASE_MS).contains(&timeout_ms) {
+        return Err(
+            format!("transaction timeout must be in {MIN_LEASE_MS}..={MAX_LEASE_MS}").into(),
+        );
+    }
+    let at = request.effective_at;
+    let session = AdapterSession::open(
+        engine,
+        caller,
+        "data-rollback",
+        &arguments.idempotency_key,
+        at,
+    )?;
+    let identity = digest::sha256_hex(&serde_json::to_vec(&(
+        "data-rollback",
+        arguments.idempotency_key.as_str(),
+    ))?);
+    let begin_key = CorrelationId::new(format!("mcp-rollback-begin-{}", &identity[..32]))?;
+    let deadline_unix_ms = at
+        .checked_add(timeout_ms)
+        .ok_or("rollback transaction deadline overflow")?;
+    let transaction = engine.begin_transaction(
+        &session.session_id,
+        &session.token,
+        &BeginTransaction {
+            scope: CanonicalId::new("data")?,
+            timeout_ms,
+        },
+        &RequestContext {
+            request_id: session.request_id.clone(),
+            operation_id: session.operation_id.clone(),
+            idempotency_key: Some(begin_key),
+            deadline_unix_ms: Some(deadline_unix_ms),
+        },
+        at,
+    )?;
+    let plan = engine.plan_forward_rollback(
+        &request,
+        transaction.read_cursor,
+        &arguments.idempotency_key,
+    )?;
+    let commit = engine.commit_transaction(
+        &session.session_id,
+        &session.token,
+        &transaction.transaction_id,
+        &arguments.idempotency_key,
+        &CommitTransaction {
+            operation_sha256: plan.operation_sha256,
+            mutations: plan.mutations,
+        },
+        at,
+        session.request_id.as_str(),
+        session.operation_id.as_str(),
+    )?;
+    let receipt = ForwardRollbackReceipt {
+        request: plan.request,
+        read_cursor: plan.read_cursor,
+        target_state_sha256: plan.target_state_sha256,
+        counts: plan.counts,
+        commit,
+    };
+    receipt.validate()?;
+    Ok(ExecutedTool {
+        detail: Some(format!(
+            "forward rollback restored {} and retired {} structural version(s)",
+            receipt.counts.restored_records + receipt.counts.restored_relations,
+            receipt.counts.retired_records + receipt.counts.retired_relations,
         )),
         text: serde_json::to_string_pretty(&receipt)?,
         effectiveness: None,

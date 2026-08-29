@@ -3046,3 +3046,29 @@ index.
   cover every forward and reverse durability boundary, successor divergence,
   exact-edge refusal, direct TextV1 migration, logical TextV1 archive recovery
   into a fresh TagV2 root, CLI status, and reopening both retained roots.
+
+## 2026-08-29 — G02-W05 bitemporal reads and forward rollback candidate
+
+- Corrected RRFlowQL historical planning so a literal `KNOWN` cursor bounds
+  source watermarks and exact-index eligibility. A newer artifact can no
+  longer be selected for an older read; authoritative replay remains the
+  fallback.
+- Corrected claim query replay to exclude changes after the known cursor and
+  resolve same-valid-time corrections newest-first by transaction cursor.
+  Cross-engine tests prove identical historical/current results on memory,
+  Fjall, native, and native reopen.
+- Added a transport-neutral forward rollback request, deterministic plan,
+  structural counts, and receipt. `RrdEngine` reconstructs current and target
+  record/relation snapshots from the authenticated log, emits restored or
+  closing versions at the explicit later effective time, and binds the target
+  snapshot by SHA-256.
+- Added the governed `rrflow_data_rollback` runtime tool under the existing
+  transaction-commit security action. Compensation plus a
+  `historical-rollback` evidence claim uses the normal read-stamp CAS,
+  idempotency ledger, runtime hash chain, projection outbox, and atomic accepted
+  audit envelope. Exact retry after native reopen returns the stored commit.
+- The end-to-end fixture proves changed-state restoration, later-record and
+  later-relation retirement, unchanged pre-rollback `KNOWN` reads, evidence
+  queryability, invalid target denial, capability/discovery parity, and reopen
+  replay. Append-only events and other non-structural families are deliberately
+  excluded pending their own restoration semantics.

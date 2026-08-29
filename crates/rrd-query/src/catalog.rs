@@ -31,56 +31,190 @@ pub struct SourceWatermarks {
     pub series: BTreeMap<RuntimeType, u64>,
     pub geo: BTreeMap<RuntimeType, u64>,
     pub claims: BTreeMap<Predicate, u64>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[doc(hidden)]
+    pub schema_history: Vec<u64>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[doc(hidden)]
+    pub any_record_history: Vec<u64>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    #[doc(hidden)]
+    pub record_history: BTreeMap<RuntimeType, Vec<u64>>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    #[doc(hidden)]
+    pub relation_history: BTreeMap<RuntimeType, Vec<u64>>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    #[doc(hidden)]
+    pub event_history: BTreeMap<RuntimeType, Vec<u64>>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    #[doc(hidden)]
+    pub series_history: BTreeMap<RuntimeType, Vec<u64>>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    #[doc(hidden)]
+    pub geo_history: BTreeMap<RuntimeType, Vec<u64>>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    #[doc(hidden)]
+    pub claim_history: BTreeMap<Predicate, Vec<u64>>,
 }
 
 impl SourceWatermarks {
     fn observe(&mut self, cursor: u64, mutation: &RuntimeMutation) {
         match mutation {
-            RuntimeMutation::Schema { .. } => self.schema = cursor,
+            RuntimeMutation::Schema { .. } => {
+                self.schema = cursor;
+                self.schema_history.push(cursor);
+            }
             RuntimeMutation::Record { record } => {
                 self.any_record = cursor;
                 self.records.insert(record.reference.kind.clone(), cursor);
+                self.any_record_history.push(cursor);
+                self.record_history
+                    .entry(record.reference.kind.clone())
+                    .or_default()
+                    .push(cursor);
             }
             RuntimeMutation::Relation { relation } => {
                 self.relations
                     .insert(relation.reference.kind.clone(), cursor);
+                self.relation_history
+                    .entry(relation.reference.kind.clone())
+                    .or_default()
+                    .push(cursor);
             }
             RuntimeMutation::Event { event } => {
                 self.events.insert(event.kind.clone(), cursor);
+                self.event_history
+                    .entry(event.kind.clone())
+                    .or_default()
+                    .push(cursor);
             }
             RuntimeMutation::SeriesSample { sample } => {
                 self.series.insert(sample.series.kind.clone(), cursor);
+                self.series_history
+                    .entry(sample.series.kind.clone())
+                    .or_default()
+                    .push(cursor);
             }
             RuntimeMutation::Geo { geo } => {
                 self.geo.insert(geo.reference.kind.clone(), cursor);
+                self.geo_history
+                    .entry(geo.reference.kind.clone())
+                    .or_default()
+                    .push(cursor);
             }
             RuntimeMutation::Claim { claim } => {
                 self.claims.insert(claim.predicate.clone(), cursor);
+                self.claim_history
+                    .entry(claim.predicate.clone())
+                    .or_default()
+                    .push(cursor);
             }
             RuntimeMutation::Vector { .. } | RuntimeMutation::Object { .. } => {}
         }
     }
 
     pub fn for_source(&self, source: &Source) -> u64 {
+        self.for_source_at(source, u64::MAX)
+    }
+
+    /// Last source or schema change visible at `known_at_cursor`.
+    ///
+    /// A latest-only watermark is not a valid historical coordinate: a source
+    /// may have advanced after the requested cursor. Retaining the cursor
+    /// history keeps `KNOWN n` planning and exact-index selection bounded by
+    /// the same transaction-time prefix as authoritative replay.
+    pub fn for_source_at(&self, source: &Source, known_at_cursor: u64) -> u64 {
         let data = match source {
-            Source::Record { kind } => self.records.get(kind).copied().unwrap_or(0),
-            Source::Relation { kind } => self.relations.get(kind).copied().unwrap_or(0),
-            Source::Event { kind } => self.events.get(kind).copied().unwrap_or(0),
-            Source::Series { kind } => self.series.get(kind).copied().unwrap_or(0),
-            Source::Geo { kind } => self.geo.get(kind).copied().unwrap_or(0),
+            Source::Record { kind } => historical(
+                self.record_history.get(kind),
+                self.records.get(kind).copied(),
+                known_at_cursor,
+            ),
+            Source::Relation { kind } => historical(
+                self.relation_history.get(kind),
+                self.relations.get(kind).copied(),
+                known_at_cursor,
+            ),
+            Source::Event { kind } => historical(
+                self.event_history.get(kind),
+                self.events.get(kind).copied(),
+                known_at_cursor,
+            ),
+            Source::Series { kind } => historical(
+                self.series_history.get(kind),
+                self.series.get(kind).copied(),
+                known_at_cursor,
+            ),
+            Source::Geo { kind } => historical(
+                self.geo_history.get(kind),
+                self.geo.get(kind).copied(),
+                known_at_cursor,
+            ),
             Source::Traversal { relation, .. } => self
-                .relations
+                .relation_history
                 .get(relation)
-                .copied()
-                .unwrap_or(0)
-                .max(self.any_record),
+                .map(|history| latest(history, known_at_cursor))
+                .unwrap_or_else(|| {
+                    self.relations
+                        .get(relation)
+                        .copied()
+                        .filter(|cursor| *cursor <= known_at_cursor)
+                        .unwrap_or(0)
+                })
+                .max(historical(
+                    Some(&self.any_record_history),
+                    Some(self.any_record),
+                    known_at_cursor,
+                )),
             Source::Claim {
                 predicate: Some(predicate),
-            } => self.claims.get(predicate).copied().unwrap_or(0),
-            Source::Claim { predicate: None } => self.claims.values().copied().max().unwrap_or(0),
+            } => historical(
+                self.claim_history.get(predicate),
+                self.claims.get(predicate).copied(),
+                known_at_cursor,
+            ),
+            Source::Claim { predicate: None } => self
+                .claim_history
+                .values()
+                .map(|history| latest(history, known_at_cursor))
+                .max()
+                .unwrap_or_else(|| {
+                    self.claims
+                        .values()
+                        .copied()
+                        .filter(|cursor| *cursor <= known_at_cursor)
+                        .max()
+                        .unwrap_or(0)
+                }),
         };
-        data.max(self.schema)
+        data.max(historical(
+            Some(&self.schema_history),
+            Some(self.schema),
+            known_at_cursor,
+        ))
     }
+}
+
+fn historical(history: Option<&Vec<u64>>, fallback: Option<u64>, known_at_cursor: u64) -> u64 {
+    history
+        .and_then(|history| {
+            let cursor = latest(history, known_at_cursor);
+            (cursor != 0).then_some(cursor)
+        })
+        .unwrap_or_else(|| {
+            fallback
+                .filter(|cursor| *cursor <= known_at_cursor)
+                .unwrap_or(0)
+        })
+}
+
+fn latest(history: &[u64], known_at_cursor: u64) -> u64 {
+    history
+        .iter()
+        .rev()
+        .copied()
+        .find(|cursor| *cursor <= known_at_cursor)
+        .unwrap_or(0)
 }
 
 impl Catalog {

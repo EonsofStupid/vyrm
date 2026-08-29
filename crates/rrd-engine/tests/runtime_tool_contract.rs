@@ -6,7 +6,7 @@ fn executable_catalogue_is_the_valid_public_catalogue_with_exact_actions() {
     let executable = rrd_engine::runtime_tool_catalogue();
     let public = rrd_engine::runtime_tool_contract_catalogue();
     public.validate().unwrap();
-    assert_eq!(public.tools.len(), 29 + WorkPlanOperation::ALL.len());
+    assert_eq!(public.tools.len(), 30 + WorkPlanOperation::ALL.len());
     assert_eq!(public.tools.len(), executable.len());
 
     let expected = [
@@ -17,6 +17,7 @@ fn executable_catalogue_is_the_valid_public_catalogue_with_exact_actions() {
         ("rrflow_changefeed_read", SecurityAction::ChangefeedRead),
         ("rrflow_context", SecurityAction::MemoryContextRead),
         ("rrflow_data_commit", SecurityAction::TransactionCommit),
+        ("rrflow_data_rollback", SecurityAction::TransactionCommit),
         ("rrflow_estate_read", SecurityAction::EstateRead),
         ("rrflow_forget", SecurityAction::MemoryRetire),
         ("rrflow_hook", SecurityAction::LifecycleApply),
@@ -100,6 +101,7 @@ fn executable_catalogue_is_the_valid_public_catalogue_with_exact_actions() {
         [
             "rrflow_backup_create",
             "rrflow_data_commit",
+            "rrflow_data_rollback",
             "rrflow_query_index_ensure",
             "rrflow_restore",
             "rrflow_vector_collection_ensure",

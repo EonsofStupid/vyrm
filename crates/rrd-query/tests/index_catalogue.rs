@@ -208,6 +208,38 @@ fn exercise<E: Engine>(engine: &E) {
         )
         .unwrap();
     assert!(ready.entries[&entry.definition.id].is_usable_at(4, 20));
+    let historical_catalogue = Catalog::capture(engine, &scope()).unwrap();
+    let historical_query = parse(
+        "FROM record:document AT VALID 10 KNOWN 3 WHERE status = \"open\" PROJECT title EXPLAIN CONTRACT",
+    )
+    .unwrap();
+    let historical_plan =
+        plan(&bind(&historical_query, &Parameters::new(), &historical_catalogue).unwrap()).unwrap();
+    assert_eq!(historical_plan.explanation.contract.source_cursor, 3);
+    assert_eq!(
+        historical_plan
+            .explanation
+            .candidates
+            .iter()
+            .find(|candidate| candidate.selected)
+            .unwrap()
+            .name,
+        "authoritative_log_scan"
+    );
+    let newer_index = historical_plan
+        .explanation
+        .candidates
+        .iter()
+        .find(|candidate| candidate.name == "index:document-status-title")
+        .unwrap();
+    assert!(!newer_index.selected);
+    assert!(newer_index.reason.contains("newer-than-requested"));
+    assert_eq!(
+        execute(engine, &historical_plan, &ExecutionBudget::default())
+            .unwrap()
+            .returned_rows,
+        1
+    );
     let quarantined = repository
         .quarantine(&context(7, "quarantine"), &entry.definition.id)
         .unwrap();

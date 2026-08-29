@@ -4,18 +4,19 @@ use rrd_contract::{
     CreateInstanceBackup, DeploymentMode, EnsureQueryIndex, EnsureVectorCollection,
     EnsureVectorIndex, ErrorBody, ErrorCode, EstateActivityPolicySnapshot, EstateBackupJobSnapshot,
     EstateBackupJobState, EstateBackupJobsSnapshot, EstateMutationResult, EstateSnapshot,
-    ExecuteQuery, FollowChangefeed, HybridFusion, IdempotencyBinding, ListQueryIndexes,
-    ListVectorCollections, Liveness, NamedVectorDefinition, PollLiveQuery, PreviewTransaction,
-    ProductCapability, ProductCapabilityCatalogue, ProductSurface, QueryBudget,
-    QueryExecutionSnapshot, QueryIndexKind, QueryPlanCandidate, QueryPlanSnapshot, QueryResult,
-    QueryRowSnapshot, QueryValue, ReadAudit, ReadChangefeed, ReadEstate, Readiness, RenewSession,
-    RequestContext, RequestEnvelope, ResourceId, ResourceKind, ResourcePath, ResponseEnvelope,
-    ResponseOutcome, RestoreInstanceBackup, SearchHybrid, SearchVectors, ServiceCapabilities,
-    SessionEndState, SessionLease, SessionLimits, SessionTermination, SurfaceBinding,
-    SurfaceDisposition, TransactionMutation, TransactionPreview, TransactionState,
-    VectorIndexConfiguration, VectorMemoryTier, VectorPayloadCondition, VectorPayloadFilter,
-    VectorPayloadOperator, VectorQuantizationBits, VectorSearchMetric, VectorSearchMode,
-    VectorSearchQuery, VectorValueKind, PROTOCOL, PROTOCOL_VERSION,
+    ExecuteQuery, FollowChangefeed, ForwardRollbackCounts, ForwardRollbackRequest, HybridFusion,
+    IdempotencyBinding, ListQueryIndexes, ListVectorCollections, Liveness, NamedVectorDefinition,
+    PollLiveQuery, PreviewTransaction, ProductCapability, ProductCapabilityCatalogue,
+    ProductSurface, QueryBudget, QueryExecutionSnapshot, QueryIndexKind, QueryPlanCandidate,
+    QueryPlanSnapshot, QueryResult, QueryRowSnapshot, QueryValue, ReadAudit, ReadChangefeed,
+    ReadEstate, Readiness, RenewSession, RequestContext, RequestEnvelope, ResourceId, ResourceKind,
+    ResourcePath, ResponseEnvelope, ResponseOutcome, RestoreInstanceBackup, SearchHybrid,
+    SearchVectors, ServiceCapabilities, SessionEndState, SessionLease, SessionLimits,
+    SessionTermination, SurfaceBinding, SurfaceDisposition, TransactionMutation,
+    TransactionPreview, TransactionState, VectorIndexConfiguration, VectorMemoryTier,
+    VectorPayloadCondition, VectorPayloadFilter, VectorPayloadOperator, VectorQuantizationBits,
+    VectorSearchMetric, VectorSearchMode, VectorSearchQuery, VectorValueKind, PROTOCOL,
+    PROTOCOL_VERSION,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -34,6 +35,30 @@ struct ContractFixture {
     success: ResponseEnvelope<FixturePayload>,
     failure: ResponseEnvelope<FixturePayload>,
     idempotency: IdempotencyBinding,
+}
+
+#[test]
+fn forward_rollback_request_is_strict_and_counts_cannot_overflow() {
+    let request: ForwardRollbackRequest = serde_json::from_value(serde_json::json!({
+        "target_valid_at": 100,
+        "target_known_at_cursor": 7,
+        "effective_at": 200,
+        "reason": "restore the accepted state"
+    }))
+    .unwrap();
+    request.validate().unwrap();
+
+    let mut unknown = serde_json::to_value(&request).unwrap();
+    unknown["rewrite_history"] = serde_json::json!(true);
+    assert!(serde_json::from_value::<ForwardRollbackRequest>(unknown).is_err());
+
+    let counts = ForwardRollbackCounts {
+        restored_records: u64::MAX,
+        retired_records: 1,
+        restored_relations: 0,
+        retired_relations: 0,
+    };
+    assert_eq!(counts.checked_mutation_count(), None);
 }
 
 fn contract_fixture() -> ContractFixture {

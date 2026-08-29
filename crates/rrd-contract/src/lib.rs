@@ -3882,6 +3882,124 @@ pub struct CommitReceipt {
     pub idempotent_replay: bool,
 }
 
+/// Selects one retained historical structural state and the later instant at
+/// which compensating versions become effective. The target cursor is
+/// transaction time; `target_valid_at` is modeled valid time. They remain
+/// independent so rollback never collapses RRFlow's two timelines.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ForwardRollbackRequest {
+    pub target_valid_at: u64,
+    pub target_known_at_cursor: u64,
+    pub effective_at: u64,
+    pub reason: String,
+}
+
+impl ForwardRollbackRequest {
+    pub fn validate(&self) -> Result<()> {
+        if self.target_valid_at == 0 || self.effective_at <= self.target_valid_at {
+            return invalid(
+                "rollback effective time must be greater than its positive target valid time",
+            );
+        }
+        if self.reason.trim().is_empty() || self.reason.len() > MAX_MESSAGE_BYTES {
+            return invalid(format!(
+                "rollback reason length must be in 1..={MAX_MESSAGE_BYTES} bytes"
+            ));
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ForwardRollbackCounts {
+    pub restored_records: u64,
+    pub retired_records: u64,
+    pub restored_relations: u64,
+    pub retired_relations: u64,
+}
+
+impl ForwardRollbackCounts {
+    pub fn checked_mutation_count(self) -> Option<u64> {
+        self.restored_records
+            .checked_add(self.retired_records)?
+            .checked_add(self.restored_relations)?
+            .checked_add(self.retired_relations)
+    }
+}
+
+/// Deterministic compensation plan bound to the transaction's original read
+/// cursor. The final mutation is an evidence claim; `operation_sha256` covers
+/// the complete ordered list and feeds the existing transaction idempotency
+/// authority.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ForwardRollbackPlan {
+    pub request: ForwardRollbackRequest,
+    pub read_cursor: u64,
+    pub target_state_sha256: String,
+    pub counts: ForwardRollbackCounts,
+    pub operation_sha256: String,
+    pub mutations: Vec<TransactionMutation>,
+}
+
+impl ForwardRollbackPlan {
+    pub fn validate(&self) -> Result<()> {
+        self.request.validate()?;
+        if self.request.target_known_at_cursor >= self.read_cursor {
+            return invalid(
+                "rollback target cursor must be older than the transaction read cursor",
+            );
+        }
+        validate_sha256(&self.target_state_sha256, "target_state_sha256")?;
+        validate_sha256(&self.operation_sha256, "operation_sha256")?;
+        let expected_mutations = self
+            .counts
+            .checked_mutation_count()
+            .and_then(|count| count.checked_add(1));
+        if u64::try_from(self.mutations.len()).ok() != expected_mutations {
+            return invalid("rollback mutation count does not match its structural counts");
+        }
+        for mutation in &self.mutations {
+            mutation.validate()?;
+        }
+        if transaction_operation_sha256(&self.mutations) != self.operation_sha256 {
+            return invalid("rollback operation digest does not match its mutations");
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ForwardRollbackReceipt {
+    pub request: ForwardRollbackRequest,
+    pub read_cursor: u64,
+    pub target_state_sha256: String,
+    pub counts: ForwardRollbackCounts,
+    pub commit: CommitReceipt,
+}
+
+impl ForwardRollbackReceipt {
+    pub fn validate(&self) -> Result<()> {
+        self.request.validate()?;
+        if self.request.target_known_at_cursor >= self.read_cursor {
+            return invalid("rollback receipt target must be older than its read cursor");
+        }
+        validate_sha256(&self.target_state_sha256, "target_state_sha256")?;
+        self.commit.validate()?;
+        let expected_mutations = self
+            .counts
+            .checked_mutation_count()
+            .and_then(|count| count.checked_add(1));
+        if Some(self.commit.mutation_count) != expected_mutations {
+            return invalid("rollback receipt does not match its committed mutation counts");
+        }
+        Ok(())
+    }
+}
+
 impl CommitReceipt {
     pub fn validate(&self) -> Result<()> {
         validate_sha256(&self.operation_sha256, "operation_sha256")?;

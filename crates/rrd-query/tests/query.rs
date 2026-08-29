@@ -190,6 +190,87 @@ fn execute_fixture<E: Engine>(engine: &E, text: &str) -> rrd_query::QueryExecuti
     .unwrap()
 }
 
+fn execute_text<E: Engine>(
+    engine: &E,
+    text: &str,
+) -> (rrd_query::PhysicalPlan, rrd_query::QueryExecution) {
+    let catalog = Catalog::capture(engine, &ScopeId::new("instance:test").unwrap()).unwrap();
+    let query = parse(text).unwrap();
+    let physical = plan(&bind(&query, &Parameters::new(), &catalog).unwrap()).unwrap();
+    let execution = execute(engine, &physical, &ExecutionBudget::default()).unwrap();
+    (physical, execution)
+}
+
+fn seed_historical_corrections<E: Engine>(engine: &E) {
+    let first = fixture_commit();
+    let head = engine.commit_runtime(&first).unwrap().last_cursor;
+    engine
+        .commit_runtime(&RuntimeCommit {
+            scope: ScopeId::new("instance:test").unwrap(),
+            at: 101,
+            actor: "agent:correction".into(),
+            expected_cursor: head,
+            mutations: vec![
+                RuntimeMutation::Record {
+                    record: RuntimeRecord {
+                        reference: RuntimeRef::new("document", "a").unwrap(),
+                        valid_from: 10,
+                        valid_to: None,
+                        properties: properties(&[("status", "open"), ("title", "Alpha corrected")]),
+                    },
+                },
+                RuntimeMutation::Claim {
+                    claim: Claim::new(
+                        Subject::new("document:a").unwrap(),
+                        Predicate::new("status").unwrap(),
+                        "corrected",
+                        30,
+                        101,
+                        Producer {
+                            actor: "agent:correction".into(),
+                            on_behalf_of: None,
+                            session: Some("correction".into()),
+                        },
+                    ),
+                },
+            ],
+        })
+        .unwrap();
+}
+
+fn historical_outcome<E: Engine>(engine: &E) -> (String, String, String, String, u64, u64) {
+    let (historical_plan, historical_record) = execute_text(
+        engine,
+        "FROM record:document AT VALID 100 KNOWN 10 WHERE id = \"a\" PROJECT title EXPLAIN CONTRACT",
+    );
+    let (_, current_record) = execute_text(
+        engine,
+        "FROM record:document AT VALID 100 KNOWN HEAD WHERE id = \"a\" PROJECT title EXPLAIN CONTRACT",
+    );
+    let (_, historical_claim) = execute_text(
+        engine,
+        "FROM claim:status AT VALID 100 KNOWN 10 PROJECT object EXPLAIN CONTRACT",
+    );
+    let (_, current_claim) = execute_text(
+        engine,
+        "FROM claim:status AT VALID 100 KNOWN HEAD PROJECT object EXPLAIN CONTRACT",
+    );
+    let string_field = |execution: &rrd_query::QueryExecution, field: &str| {
+        let RuntimeValue::String(value) = &execution.batches[0].rows[0].values[field] else {
+            panic!("{field} was not a string")
+        };
+        value.clone()
+    };
+    (
+        string_field(&historical_record, "title"),
+        string_field(&current_record, "title"),
+        string_field(&historical_claim, "object"),
+        string_field(&current_claim, "object"),
+        historical_record.known_at_cursor,
+        historical_plan.explanation.contract.source_cursor,
+    )
+}
+
 #[test]
 fn memory_fjall_and_native_return_identical_exact_rows() {
     let memory = MemoryEngine::new();
@@ -235,6 +316,39 @@ fn memory_fjall_and_native_return_identical_exact_rows() {
     assert_eq!(
         query_ids, direct_ids,
         "query must match the direct graph API"
+    );
+}
+
+#[test]
+fn valid_time_and_known_at_are_stable_across_engines_and_native_reopen() {
+    let memory = MemoryEngine::new();
+    seed_historical_corrections(&memory);
+    let expected = historical_outcome(&memory);
+
+    let fjall_root = tempfile::tempdir().unwrap();
+    let fjall = Store::open(fjall_root.path()).unwrap();
+    seed_historical_corrections(&fjall);
+    assert_eq!(historical_outcome(&fjall), expected);
+
+    let native_root = tempfile::tempdir().unwrap();
+    let native_path = native_root.path().join("native");
+    {
+        let native = NativeEngine::open(&native_path).unwrap();
+        seed_historical_corrections(&native);
+        assert_eq!(historical_outcome(&native), expected);
+    }
+    let reopened = NativeEngine::open(&native_path).unwrap();
+    assert_eq!(historical_outcome(&reopened), expected);
+    assert_eq!(
+        expected,
+        (
+            "Alpha".into(),
+            "Alpha corrected".into(),
+            "ready".into(),
+            "corrected".into(),
+            10,
+            3,
+        )
     );
 }
 

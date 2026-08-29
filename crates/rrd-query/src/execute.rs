@@ -658,7 +658,13 @@ fn rows_for_source(
             valid_at,
             known_at_cursor,
         ),
-        Source::Claim { predicate } => claim_rows(changes, scope, predicate.as_ref(), valid_at),
+        Source::Claim { predicate } => claim_rows(
+            changes,
+            scope,
+            predicate.as_ref(),
+            valid_at,
+            known_at_cursor,
+        ),
     }
 }
 
@@ -865,9 +871,13 @@ fn claim_rows(
     scope: &rrd_core::ScopeId,
     predicate: Option<&rrd_core::Predicate>,
     valid_at: u64,
+    known_at_cursor: u64,
 ) -> Vec<QueryRow> {
-    let mut groups = BTreeMap::<(String, String), Vec<Claim>>::new();
-    for change in changes.iter().filter(|change| &change.scope == scope) {
+    let mut groups = BTreeMap::<(String, String), Vec<(u64, Claim)>>::new();
+    for change in changes
+        .iter()
+        .filter(|change| change.cursor <= known_at_cursor && &change.scope == scope)
+    {
         let RuntimeMutation::Claim { claim } = &change.mutation else {
             continue;
         };
@@ -877,11 +887,16 @@ fn claim_rows(
         groups
             .entry((claim.subject.to_string(), claim.predicate.to_string()))
             .or_default()
-            .push(claim.clone());
+            .push((change.cursor, claim.clone()));
     }
     groups
         .into_iter()
-        .filter_map(|((subject, predicate), candidates)| {
+        .filter_map(|((subject, predicate), mut versions)| {
+            versions.sort_by_key(|version| std::cmp::Reverse(version.0));
+            let candidates = versions
+                .into_iter()
+                .map(|(_, claim)| claim)
+                .collect::<Vec<_>>();
             let claim = resolve_as_of(&candidates, valid_at)?;
             let mut values = BTreeMap::new();
             values.insert("subject".into(), string(subject.clone()));

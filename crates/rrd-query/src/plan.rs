@@ -243,7 +243,9 @@ pub fn bind(query: &Query, parameters: &Parameters, catalog: &Catalog) -> Result
         source: query.source.clone(),
         valid_at,
         known_at_cursor,
-        source_cursor: catalog.source_cursor(&query.source),
+        source_cursor: catalog
+            .source_watermarks
+            .for_source_at(&query.source, known_at_cursor),
         field_types: fields,
         filters,
         projection: query.projection.clone(),
@@ -298,6 +300,7 @@ pub fn plan(bound: &BoundQuery) -> Result<PhysicalPlan> {
                 .filter(|candidate| {
                     candidate.state == ProjectionState::Ready
                         && candidate.source_cursor == bound.source_cursor
+                        && candidate.source_cursor <= bound.known_at_cursor
                         && candidate.built_valid_at == Some(bound.valid_at)
                         && candidate.artifact_rows.is_some()
                         && match (&candidate.kind, match_field) {

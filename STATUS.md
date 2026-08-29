@@ -1,23 +1,25 @@
-# Runtime status — 2026-08-27
+# Runtime status — 2026-08-29
 
 ## Current recovery truth
 
-There is no verified cohesive RRFlow product checkpoint for the current
-worktree. The repository contains substantial executable storage, query,
-vector, reasoning, server, security, SDK, estate, and Connectome code. The
-RRFlow `0.1.0` alpha identity cutover was committed and pushed as `3fc2842`, but
-the current G01-W02 authority consolidation is still uncommitted. It has passed
-its exact same-tree local qualification matrix but not the required remote
-Linux/macOS/Windows gates. In the current
-tree, Connectome is client-only, the CLI opens `RrdEngine`, and the security and
-estate product executables are thin CLI adapters over engine-owned operations;
-no second embedded or physical-store product authority remains.
+The foundation is not complete, but progress is now recorded against one
+enforced 65-item board rather than an informal checklist. G00-W01 through
+G00-W05, G01-W01 through G01-W04, and G02-W01 through G02-W04 are verified:
+13/65. G02-W05 is active. The repository contains substantial executable
+storage, query, vector, reasoning, server, security, SDK, estate, and
+Connectome code under one `RrdEngine` composition root. Connectome is
+client-only, the CLI opens `RrdEngine`, and the security and estate product
+executables are thin adapters over engine-owned operations; no second embedded
+or physical-store product authority remains.
 
 The active sequence is the 13-gate, 65-item contract in
 `rrflow.workplan.toml`, persisted under `.rrflow/rrd`. The older R0-R7 recovery
-overlay in `PLAN.md` is historical analysis, not a second scheduler. As of this
-entry, G00-W01 through G00-W05 and G01-W01 through G01-W02 are verified; no
-item is active, and G01-W03 is the next dependency-ready item.
+overlay in `PLAN.md` is historical analysis, not a second scheduler. G02-W03
+is published at `b079151164d87873230aa24c7ff0a25d3515d96e` with all fourteen
+remote partitions and `pipeline / ci-gate` green in run `33217251152`.
+G02-W04 is locally committed at `b4187fe3cf18662bde8caec975ee4e24dbab2f93`
+and verified as `a3b092159ae48a9645c05b869d031396f1ac6f883f35090d2dd0f3f171c04c8a`;
+the next broad remote matrix is intentionally deferred to the G02 boundary.
 Canonical platform terminology is owned only by `docs/platform/README.md`, and
 the end-to-end execution/implementation map is owned only by
 `docs/rrflow-rrd-architecture.md`.
@@ -53,7 +55,7 @@ the end-to-end execution/implementation map is owned only by
   typed reasoning, lifecycle, claim-backed `remember`, bounded `context`,
   provenance/history `inspect`, history-preserving `forget`, public service/
   capability discovery, and exact-authorized atomic multi-model data commit.
-  Generated discovery currently contains 34 executable tools, including five
+  Generated discovery currently contains 35 executable tools, including five
   engine-owned work-plan operations plus
   governed query-index ensure/list, live-query/changefeed read/follow, and
   named-vector collection ensure/list, point retrieve/scroll, and exact search. The adapter
@@ -66,6 +68,17 @@ the end-to-end execution/implementation map is owned only by
   every implemented domain, and Connectome's parity test consumes the same
   validated runtime-tool and product-surface catalogues. Credentialed secured-daemon mode plus
   the cohesive workspace and remote matrices remain open.
+- G02-W05 currently has a locally green candidate for stable bitemporal query
+  reads and forward structural rollback. RRFlowQL now bounds claim correction
+  selection, schema/source watermarks, index selection, and log replay by the
+  same literal `KNOWN` cursor. Memory, Fjall, native, and native-reopen tests
+  return identical valid-time/known-at results. The engine-owned
+  `rrflow_data_rollback` tool restores a selected historical record/relation
+  state by appending compensating versions and an evidence claim through the
+  existing CAS/idempotency/audit transaction. Pre-rollback cursor reads remain
+  unchanged. Vector, geo, series, object, schema, event, and security-audit
+  history are not silently rewritten; broader rollback scope remains explicit
+  future work.
 - Development doctor report v3 records 14 passing checks and five blockers. It
   now distinguishes MCP's clean engine dependency boundary from actual daemon
   readiness: MCP's embedded mode opens `RrdEngine`, while its mutually
