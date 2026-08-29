@@ -468,7 +468,7 @@ mod tests {
             protocol_version: PROTOCOL_VERSION,
             implementation: CanonicalId::new("rrflow").unwrap(),
             implementation_version: "0.1.0".into(),
-            deployment_mode: DeploymentMode::LocalServer,
+            deployment_mode: DeploymentMode::LocalDaemon,
             instance: ResourceId::new(ResourceKind::Instance, "instance-test").unwrap(),
             capabilities: Vec::new(),
         }

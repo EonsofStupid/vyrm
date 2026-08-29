@@ -1503,6 +1503,228 @@ impl Engine for MemoryEngine {
     }
 }
 
+/// One composition-root-owned storage authority selected before the service
+/// starts. This wrapper keeps the engine generic internally while preventing
+/// outward adapters from opening a second physical store or branching around
+/// the [`Engine`] contract.
+pub enum EngineBox {
+    Memory(MemoryEngine),
+    Persistent(crate::PersistentEngine),
+}
+
+impl EngineBox {
+    pub fn memory() -> Self {
+        Self::Memory(MemoryEngine::new())
+    }
+
+    pub fn persistent(engine: crate::PersistentEngine) -> Self {
+        Self::Persistent(engine)
+    }
+
+    pub fn as_persistent(&self) -> Option<&crate::PersistentEngine> {
+        match self {
+            Self::Memory(_) => None,
+            Self::Persistent(engine) => Some(engine),
+        }
+    }
+
+    pub fn backend_name(&self) -> &'static str {
+        match self {
+            Self::Memory(_) => "memory",
+            Self::Persistent(engine) => engine.backend().as_str(),
+        }
+    }
+
+    fn engine(&self) -> &(dyn Engine + Send + Sync) {
+        match self {
+            Self::Memory(engine) => engine,
+            Self::Persistent(engine) => engine,
+        }
+    }
+}
+
+impl ClaimSource for EngineBox {
+    type Error = Error;
+
+    fn versions_at_or_before(
+        &self,
+        subject: &Subject,
+        predicate: &Predicate,
+        as_of: Millis,
+    ) -> Result<Vec<Claim>> {
+        self.engine()
+            .versions_at_or_before(subject, predicate, as_of)
+    }
+
+    fn all_versions(&self, subject: &Subject, predicate: &Predicate) -> Result<Vec<Claim>> {
+        self.engine().all_versions(subject, predicate)
+    }
+
+    fn subject_versions(&self, subject: &Subject) -> Result<Vec<Claim>> {
+        self.engine().subject_versions(subject)
+    }
+}
+
+impl Engine for EngineBox {
+    fn append_batch(&self, claims: &[Claim]) -> Result<AppendOutcome> {
+        self.engine().append_batch(claims)
+    }
+
+    fn append_batch_idempotent(
+        &self,
+        idempotency_key: &str,
+        operation_sha256: &str,
+        claims: &[Claim],
+    ) -> Result<IdempotentAppendOutcome> {
+        self.engine()
+            .append_batch_idempotent(idempotency_key, operation_sha256, claims)
+    }
+
+    fn control_record(&self, key: &str) -> Result<Option<Vec<u8>>> {
+        self.engine().control_record(key)
+    }
+
+    fn commit_control_transition(
+        &self,
+        transition: &ControlTransition,
+    ) -> Result<ControlJournalEntry> {
+        self.engine().commit_control_transition(transition)
+    }
+
+    fn commit_catalog_transition(
+        &self,
+        scope: &ScopeId,
+        transition: &ControlTransition,
+    ) -> Result<(u64, ControlJournalEntry)> {
+        self.engine().commit_catalog_transition(scope, transition)
+    }
+
+    fn control_journal_since(&self, after: u64, limit: usize) -> Result<Vec<ControlJournalEntry>> {
+        self.engine().control_journal_since(after, limit)
+    }
+
+    fn control_sequence(&self) -> Result<u64> {
+        self.engine().control_sequence()
+    }
+
+    fn sequence(&self) -> Result<u64> {
+        self.engine().sequence()
+    }
+
+    fn claims_in_range(&self, from: u64, to: u64) -> Result<Vec<Claim>> {
+        self.engine().claims_in_range(from, to)
+    }
+
+    fn subjects(&self) -> Result<Vec<Subject>> {
+        self.engine().subjects()
+    }
+
+    fn observe(
+        &self,
+        reader: &Reader,
+        subject: &Subject,
+        predicate: &Predicate,
+        at: Millis,
+    ) -> Result<()> {
+        self.engine().observe(reader, subject, predicate, at)
+    }
+
+    fn get_projection(&self, name: &str) -> Result<Option<Vec<u8>>> {
+        self.engine().get_projection(name)
+    }
+
+    fn put_projection_with(&self, name: &str, bytes: &[u8], durability: Durability) -> Result<()> {
+        self.engine().put_projection_with(name, bytes, durability)
+    }
+
+    fn runtime_cursor(&self) -> Result<u64> {
+        self.engine().runtime_cursor()
+    }
+
+    fn runtime_schema(&self, scope: &ScopeId) -> Result<Option<RuntimeSchemaRegistry>> {
+        self.engine().runtime_schema(scope)
+    }
+
+    fn runtime_read_stamp(&self, scope: &ScopeId) -> Result<ReadStamp> {
+        self.engine().runtime_read_stamp(scope)
+    }
+
+    fn open_runtime_snapshot(
+        &self,
+        scope: &ScopeId,
+        owner: &str,
+        now: Millis,
+        ttl: Millis,
+    ) -> Result<SnapshotHandle> {
+        self.engine().open_runtime_snapshot(scope, owner, now, ttl)
+    }
+
+    fn runtime_snapshot_changes(
+        &self,
+        snapshot: &SnapshotHandle,
+        after: u64,
+        limit: usize,
+        now: Millis,
+    ) -> Result<RuntimeChangePage> {
+        self.engine()
+            .runtime_snapshot_changes(snapshot, after, limit, now)
+    }
+
+    fn release_runtime_snapshot(&self, id: &SnapshotId) -> Result<bool> {
+        self.engine().release_runtime_snapshot(id)
+    }
+
+    fn runtime_snapshots(&self, now: Millis) -> Result<Vec<SnapshotHandle>> {
+        self.engine().runtime_snapshots(now)
+    }
+
+    fn runtime_retention_pins(&self, now: Millis) -> Result<Vec<RetentionPin>> {
+        self.engine().runtime_retention_pins(now)
+    }
+
+    fn runtime_read_changes(
+        &self,
+        read: &ReadStamp,
+        after: u64,
+        limit: usize,
+    ) -> Result<RuntimeChangePage> {
+        self.engine().runtime_read_changes(read, after, limit)
+    }
+
+    fn commit_runtime_at_read(
+        &self,
+        commit: &RuntimeCommit,
+        read: Option<&ReadStamp>,
+    ) -> Result<RuntimeCommitOutcome> {
+        self.engine().commit_runtime_at_read(commit, read)
+    }
+
+    fn runtime_changes_since(
+        &self,
+        after: u64,
+        limit: usize,
+        scope: Option<&ScopeId>,
+    ) -> Result<RuntimeChangePage> {
+        self.engine().runtime_changes_since(after, limit, scope)
+    }
+
+    fn runtime_outbox_since(&self, after: u64, limit: usize) -> Result<Vec<ProjectionWork>> {
+        self.engine().runtime_outbox_since(after, limit)
+    }
+
+    fn runtime_audit(&self, commit_id: &str) -> Result<Option<AuditEnvelope>> {
+        self.engine().runtime_audit(commit_id)
+    }
+
+    fn runtime_commit_outcome(&self, commit_id: &str) -> Result<Option<RuntimeCommitOutcome>> {
+        self.engine().runtime_commit_outcome(commit_id)
+    }
+
+    fn physical_store_evidence(&self) -> Result<PhysicalStoreEvidence> {
+        self.engine().physical_store_evidence()
+    }
+}
+
 fn memory_read_stamp(inner: &MemoryEngineInner, scope: &ScopeId) -> Result<ReadStamp> {
     ReadStamp::authenticated(
         scope.clone(),

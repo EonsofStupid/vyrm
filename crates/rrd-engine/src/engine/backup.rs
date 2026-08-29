@@ -46,6 +46,7 @@ impl RrdEngine {
             request_id,
             operation_id,
         )?;
+        self.require_persistent_root("backup creation")?;
         let operation_sha256 = operation_digest(request)?;
         let key = backup_operation_key(&self.instance, session_id, idempotency_key);
         let existing = self.storage.control_record(&key)?;
@@ -83,7 +84,7 @@ impl RrdEngine {
             (bytes, state)
         };
 
-        let root = self.backup_root();
+        let root = self.backup_root()?;
         let catalogue = rrd_store::verify_backup_catalogue(&root)?;
         let matching = catalogue
             .backups
@@ -147,10 +148,11 @@ impl RrdEngine {
             request_id,
             operation_id,
         )?;
+        self.require_persistent_root("backup catalogue reads")?;
         let catalogue = if request.verify_archives {
-            rrd_store::verify_backup_catalogue(&self.backup_root())?
+            rrd_store::verify_backup_catalogue(&self.backup_root()?)?
         } else {
-            rrd_store::load_backup_catalogue(&self.backup_root())?
+            rrd_store::load_backup_catalogue(&self.backup_root()?)?
         };
         Ok(public_backup_catalogue(&catalogue, request.verify_archives))
     }
@@ -177,6 +179,7 @@ impl RrdEngine {
             request_id,
             operation_id,
         )?;
+        self.require_persistent_root("backup restore")?;
         let operation_sha256 = operation_digest(request)?;
         let key = restore_operation_key(&self.instance, session_id, idempotency_key);
         let existing = self.storage.control_record(&key)?;
@@ -217,13 +220,14 @@ impl RrdEngine {
             (bytes, state)
         };
 
-        let catalogue = rrd_store::verify_backup_catalogue(&self.backup_root())?;
+        let backup_root = self.backup_root()?;
+        let catalogue = rrd_store::verify_backup_catalogue(&backup_root)?;
         let backup = catalogue
             .backups
             .iter()
             .find(|entry| entry.backup_id == request.backup_sha256)
             .ok_or_else(|| ServiceError::Backup("backup is not catalogued".into()))?;
-        let target = self.restore_root().join(request.restore_id.as_str());
+        let target = self.restore_root()?.join(request.restore_id.as_str());
         let (inventory, reopened, recovered) = if target.exists() {
             let restored = rrd_store::PersistentEngine::open(&target)?;
             if restored.sequence()? != backup.archive.claim_sequence
@@ -234,14 +238,14 @@ impl RrdEngine {
                 ));
             }
             rrd_store::verify_restored_backup_objects(
-                &self.backup_root(),
+                &backup_root,
                 &request.backup_sha256,
                 &target,
             )?;
             (backup.archive.clone(), true, true)
         } else {
             let report = rrd_store::restore_catalogued_backup(
-                &self.backup_root(),
+                &backup_root,
                 &request.backup_sha256,
                 &target,
                 request.restored_at_unix_ms,
@@ -272,21 +276,18 @@ impl RrdEngine {
         Ok(result)
     }
 
-    fn operation_root(&self) -> PathBuf {
-        let parent = self
-            .storage
-            .path()
-            .parent()
-            .unwrap_or_else(|| Path::new("."));
-        parent.join("rrd-service").join(self.instance.as_str())
+    fn operation_root(&self) -> Result<PathBuf> {
+        let storage = self.require_persistent_root("backup and restore")?;
+        let parent = storage.parent().unwrap_or_else(|| Path::new("."));
+        Ok(parent.join("rrd-service").join(self.instance.as_str()))
     }
 
-    fn backup_root(&self) -> PathBuf {
-        self.operation_root().join("backups")
+    fn backup_root(&self) -> Result<PathBuf> {
+        Ok(self.operation_root()?.join("backups"))
     }
 
-    fn restore_root(&self) -> PathBuf {
-        self.operation_root().join("restores")
+    fn restore_root(&self) -> Result<PathBuf> {
+        Ok(self.operation_root()?.join("restores"))
     }
 }
 

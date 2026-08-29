@@ -1,4 +1,7 @@
-use rrd_contract::{transaction_operation_sha256, CanonicalId, CorrelationId, TransactionMutation};
+use rrd_contract::{
+    transaction_operation_sha256, CanonicalId, CorrelationId, DeploymentConformanceCorpus,
+    TransactionMutation,
+};
 use rrd_core::{
     RuntimeCommit, RuntimeEventSchema, RuntimeMutation, RuntimeProperties, RuntimePropertySchema,
     RuntimeRecord, RuntimeRecordSchema, RuntimeRef, RuntimeSchemaRegistry, RuntimeType,
@@ -17,9 +20,9 @@ use std::collections::BTreeMap;
 use std::io::{Read, Write};
 use std::net::{Shutdown, SocketAddr, TcpStream};
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Child, Command};
 use std::thread::JoinHandle;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 fn estate_context(at: u64, operation: &str) -> rrd_estate::MutationContext {
     rrd_estate::MutationContext {
@@ -34,6 +37,48 @@ struct RunningServer {
     address: SocketAddr,
     shutdown: Option<tokio::sync::oneshot::Sender<()>>,
     thread: Option<JoinHandle<std::result::Result<(), HttpError>>>,
+}
+
+struct RunningServerProcess {
+    address: SocketAddr,
+    child: Option<Child>,
+    shutdown_request: PathBuf,
+    shutdown_complete: PathBuf,
+}
+
+impl RunningServerProcess {
+    fn stop(mut self) {
+        std::fs::write(&self.shutdown_request, b"stop\n").unwrap();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let status = loop {
+            if let Some(status) = self.child.as_mut().unwrap().try_wait().unwrap() {
+                break status;
+            }
+            assert!(Instant::now() < deadline, "rrd-server child did not stop");
+            std::thread::sleep(Duration::from_millis(10));
+        };
+        assert!(status.success());
+        assert!(self.shutdown_complete.is_file());
+        self.child = None;
+    }
+}
+
+impl Drop for RunningServerProcess {
+    fn drop(&mut self) {
+        let Some(mut child) = self.child.take() else {
+            return;
+        };
+        let _ = std::fs::write(&self.shutdown_request, b"stop\n");
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while Instant::now() < deadline {
+            if child.try_wait().ok().flatten().is_some() {
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        let _ = child.kill();
+        let _ = child.wait();
+    }
 }
 
 impl RunningServer {
@@ -252,6 +297,48 @@ fn seed_query_fixture(root: &Path) {
             ],
         })
         .unwrap();
+}
+
+fn deployment_corpus() -> DeploymentConformanceCorpus {
+    let corpus = serde_json::from_str(include_str!(
+        "../../../fixtures/rrd-deployment-conformance-v1.json"
+    ))
+    .unwrap();
+    DeploymentConformanceCorpus::validate(&corpus).unwrap();
+    corpus
+}
+
+fn deployment_mutations() -> Vec<TransactionMutation> {
+    let corpus = deployment_corpus();
+    let mut mutations = vec![json!({
+        "mutation": "put_schema",
+        "registry": {
+            "revision": 1,
+            "migration": "install deployment conformance corpus",
+            "records": {
+                "document": {
+                    "properties": {
+                        "body": {"value_type": "string", "required": true}
+                    },
+                    "allow_additional_properties": false,
+                    "unique_properties": []
+                }
+            },
+            "relations": {},
+            "events": {}
+        }
+    })];
+    mutations.extend(corpus.documents.iter().map(|document| {
+        json!({
+            "mutation": "put_record",
+            "reference": {"kind": "document", "id": document.id},
+            "valid_from": corpus.query.valid_at,
+            "properties": {
+                "body": {"type": "string", "value": document.text}
+            }
+        })
+    }));
+    serde_json::from_value(Value::Array(mutations)).unwrap()
 }
 
 #[test]
@@ -1696,6 +1783,193 @@ fn binary_refuses_remote_bind() {
 }
 
 #[test]
+fn standalone_daemon_process_passes_the_shared_corpus_and_exclusively_owns_its_root() {
+    let temporary = tempfile::tempdir().unwrap();
+    let project = temporary.path().join("project");
+    std::fs::create_dir(&project).unwrap();
+    InstanceManifest::ensure_dedicated_as(&project, "socket-test").unwrap();
+    let root = project.join(".rrflow/rrd");
+
+    let ready = temporary.path().join("RRD.READY");
+    let shutdown_request = temporary.path().join("SHUTDOWN.REQUEST");
+    let shutdown_complete = temporary.path().join("SHUTDOWN.COMPLETE");
+    let mut child = Command::new(env!("CARGO_BIN_EXE_rrd-server"))
+        .args([
+            "--root",
+            project.to_str().unwrap(),
+            "--bind",
+            "127.0.0.1:0",
+            "--ready-file",
+            ready.to_str().unwrap(),
+            "--shutdown-request-file",
+            shutdown_request.to_str().unwrap(),
+            "--shutdown-complete-file",
+            shutdown_complete.to_str().unwrap(),
+        ])
+        .spawn()
+        .unwrap();
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while !ready.is_file() {
+        if let Some(status) = child.try_wait().unwrap() {
+            panic!("rrd-server child exited before readiness: {status}");
+        }
+        if Instant::now() >= deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            panic!("rrd-server child did not publish readiness");
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    let readiness: Value = serde_json::from_slice(&std::fs::read(&ready).unwrap()).unwrap();
+    let address = readiness["url"]
+        .as_str()
+        .unwrap()
+        .strip_prefix("http://")
+        .unwrap()
+        .parse()
+        .unwrap();
+    let process = RunningServerProcess {
+        address,
+        child: Some(child),
+        shutdown_request,
+        shutdown_complete,
+    };
+
+    assert!(PersistentEngine::open(&root).is_err());
+    let (status, capabilities) = http(process.address, "GET", "/v1/capabilities", &[], &[]);
+    assert_eq!(status, 200);
+    assert_eq!(payload(&capabilities)["deployment_mode"], "local_daemon");
+
+    let create = envelope(
+        json!({
+            "limits": {
+                "idle_timeout_ms": 60_000,
+                "absolute_timeout_ms": 300_000,
+                "max_open_transactions": 1
+            }
+        }),
+        Some("deployment-process-session"),
+        None,
+    );
+    let create_bytes = serde_json::to_vec(&create).unwrap();
+    let (status, created) = http(
+        process.address,
+        "POST",
+        "/v1/sessions",
+        &[("Content-Type", "application/json")],
+        &create_bytes,
+    );
+    assert_eq!(status, 200, "{created}");
+    let session = payload(&created)["session_id"].as_str().unwrap();
+    let token = payload(&created)["token"].as_str().unwrap();
+    let authorization = format!("Bearer {token}");
+    let begin = envelope(
+        json!({"scope": "data", "timeout_ms": 10_000}),
+        Some("deployment-process-begin"),
+        None,
+    );
+    let begin_bytes = serde_json::to_vec(&begin).unwrap();
+    let (status, began) = http(
+        process.address,
+        "POST",
+        "/v1/transactions",
+        &[
+            ("Content-Type", "application/json"),
+            ("X-RRD-Session", session),
+            ("Authorization", &authorization),
+        ],
+        &begin_bytes,
+    );
+    assert_eq!(status, 200, "{began}");
+    let transaction = payload(&began)["transaction_id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let mutations = deployment_mutations();
+    let operation_sha256 = transaction_operation_sha256(&mutations);
+    let commit = envelope(
+        json!({
+            "operation_sha256": operation_sha256,
+            "mutations": mutations
+        }),
+        Some("deployment-process-commit"),
+        Some(u64::MAX),
+    );
+    let commit_bytes = serde_json::to_vec(&commit).unwrap();
+    let (status, committed) = http(
+        process.address,
+        "POST",
+        &format!("/v1/transactions/{transaction}/commit"),
+        &[
+            ("Content-Type", "application/json"),
+            ("X-RRD-Session", session),
+            ("Authorization", &authorization),
+        ],
+        &commit_bytes,
+    );
+    assert_eq!(status, 200, "{committed}");
+    assert_eq!(payload(&committed)["first_runtime_cursor"], 1);
+    assert_eq!(payload(&committed)["last_runtime_cursor"], 3);
+    assert_eq!(payload(&committed)["mutation_count"], 3);
+
+    let corpus = deployment_corpus();
+    let query = envelope(
+        json!({
+            "scope": "instance:socket-test",
+            "query": corpus.query.rrflowql,
+            "parameters": {},
+            "budget": {
+                "max_scanned_changes": 100,
+                "max_rows": 10,
+                "max_output_bytes": 16384,
+                "max_batch_rows": 10
+            }
+        }),
+        None,
+        None,
+    );
+    let query_bytes = serde_json::to_vec(&query).unwrap();
+    let (status, result) = http(
+        process.address,
+        "POST",
+        "/v1/query",
+        &[
+            ("Content-Type", "application/json"),
+            ("X-RRD-Session", session),
+            ("Authorization", &authorization),
+        ],
+        &query_bytes,
+    );
+    assert_eq!(status, 200, "{result}");
+    let actual = payload(&result)["rows"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|row| {
+            row["identity"]
+                .as_str()
+                .unwrap()
+                .strip_prefix("record:document:")
+                .unwrap()
+        })
+        .collect::<Vec<_>>();
+    let expected = corpus
+        .expected_ids
+        .iter()
+        .map(CanonicalId::as_str)
+        .collect::<Vec<_>>();
+    assert_eq!(actual, expected);
+    assert_eq!(
+        payload(&result)["rows"][0]["values"]["body"]["value"],
+        corpus.documents[0].text
+    );
+
+    process.stop();
+    let reopened = PersistentEngine::open(&root).unwrap();
+    assert_eq!(reopened.runtime_cursor().unwrap(), 3);
+}
+
+#[test]
 fn token_key_is_stable_exact_and_private() {
     let temporary = tempfile::tempdir().unwrap();
     let path = temporary.path().join("RRD.SERVER.SECRET");
@@ -1722,7 +1996,7 @@ fn real_socket_exercises_lifecycle_commit_and_restart_replay() {
     assert_eq!(live["outcome"]["status"], "ok");
     let (status, capabilities) = http(server.address, "GET", "/v1/capabilities", &[], &[]);
     assert_eq!(status, 200);
-    assert_eq!(payload(&capabilities)["deployment_mode"], "local_server");
+    assert_eq!(payload(&capabilities)["deployment_mode"], "local_daemon");
     assert!(payload(&capabilities)["capabilities"]
         .as_array()
         .unwrap()

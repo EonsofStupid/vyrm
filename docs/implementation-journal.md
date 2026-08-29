@@ -3258,3 +3258,26 @@ index.
 - The additive HTTP/WebSocket catalogue and frame schemas advance the generated
   OpenAPI digest to
   `89ea3a3fe1abd5f672475bf0b964773c10f7f8091ba8f3ce2ff4dd2f0e24331f`.
+
+## 2026-08-29 — G05-W01 cohesive deployment-mode engine candidate
+
+- Added a true in-memory `RrdEngine` composition by type-erasing only the
+  storage and immutable-object ports. Memory and native embedded modes continue
+  through the same session, transaction, query, policy, audit, and runtime
+  commit authorities; no second engine or test-only coordinator was created.
+- Replaced the ambiguous `local_server` vocabulary with the closed v1 set:
+  `memory`, `embedded`, `local_daemon`, `edge`, `remote`, and `distributed`.
+  Loopback servers report `local_daemon`, mutual-TLS servers report `remote`,
+  and distributed remains vocabulary rather than an availability claim.
+- Added one strict checked-in deployment corpus. The full engine executes it in
+  memory and embedded modes; a real child daemon and Rust loopback client and
+  the remote mTLS Rust client execute the same transaction/query expectation;
+  the offline edge executable builds and mmap-opens the same corpus under its
+  intentionally read-only retrieval contract.
+- Standalone-process evidence proves readiness, exclusive native-root writer
+  ownership, bounded graceful shutdown, and exact reopen cursor. Memory mode
+  denies backup, restore, project binding, and physical-root operations before
+  preparing durable operator state.
+- The additive deployment corpus schemas and corrected public enum advance the
+  reviewed generated OpenAPI digest to
+  `99c00f57d53c3f17e38590dc849c9e067a4788b8febd898d04401c95c5bc38a6`.

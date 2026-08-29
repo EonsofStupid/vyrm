@@ -217,6 +217,39 @@ fn public_contract_matches_frozen_golden_json() {
 }
 
 #[test]
+fn deployment_modes_and_shared_conformance_corpus_are_versioned_and_strict() {
+    let corpus: rrd_contract::DeploymentConformanceCorpus = serde_json::from_str(include_str!(
+        "../../../fixtures/rrd-deployment-conformance-v1.json"
+    ))
+    .unwrap();
+    corpus.validate().unwrap();
+    assert_eq!(corpus.expected_ids[0].as_str(), "alpha");
+    assert_eq!(
+        serde_json::to_value([
+            DeploymentMode::Memory,
+            DeploymentMode::Embedded,
+            DeploymentMode::LocalDaemon,
+            DeploymentMode::Edge,
+            DeploymentMode::Remote,
+            DeploymentMode::Distributed,
+        ])
+        .unwrap(),
+        serde_json::json!([
+            "memory",
+            "embedded",
+            "local_daemon",
+            "edge",
+            "remote",
+            "distributed"
+        ])
+    );
+
+    let mut unknown = serde_json::to_value(&corpus).unwrap();
+    unknown["unexpected"] = serde_json::json!(true);
+    assert!(serde_json::from_value::<rrd_contract::DeploymentConformanceCorpus>(unknown).is_err());
+}
+
+#[test]
 fn malformed_identifiers_and_unknown_fields_fail_during_decode() {
     assert!(serde_json::from_str::<CanonicalId>(r#""Not Canonical""#).is_err());
     assert!(CorrelationId::new("request/id").is_err());

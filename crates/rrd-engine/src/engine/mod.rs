@@ -12,7 +12,7 @@ use rrd_contract::{
     DataProperties, DataPropertySchema, DataRecordSchema, DataReference, DataRelationSchema,
     DataSchemaMode, DataSchemaRegistry, DataSeriesValue, DataSnapshot, DataSnapshotEntry,
     DataTableSchema, DataTarget, DataValueType, DataVectorNormalization, DataVectorValue,
-    DiagnosticAuthority, DiagnosticCoverage, DiagnosticGraphDifference,
+    DeploymentMode, DiagnosticAuthority, DiagnosticCoverage, DiagnosticGraphDifference,
     DiagnosticGraphRecordChange, DiagnosticGraphRecordSnapshot, DiagnosticGraphRelationChange,
     DiagnosticGraphRelationSnapshot, DiagnosticGraphSnapshot, DiagnosticModelCatalogueSnapshot,
     DiagnosticModelKind, DiagnosticModelSnapshot, DiagnosticReadStamp, DiagnosticRetentionPin,
@@ -53,7 +53,9 @@ use rrd_core::{
     RuntimeVector, ScopeId, SeriesValue, Subject, Tier, VectorNormalization, VectorValue,
 };
 use rrd_query::{CursorExpr, Projection, TimeExpr};
-use rrd_store::{ControlTransition, Engine, PersistentEngine};
+use rrd_store::{
+    ControlTransition, Engine, EngineBox, MemoryObjectStore, ObjectStoreBox, PersistentEngine,
+};
 use serde::{Deserialize, Serialize};
 use sha2::Sha256;
 use std::collections::BTreeMap;

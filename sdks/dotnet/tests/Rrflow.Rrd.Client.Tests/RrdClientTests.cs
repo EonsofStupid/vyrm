@@ -35,7 +35,7 @@ public sealed class RrdClientTests
                     ["protocol_version"] = 1,
                     ["implementation"] = "rrd-server",
                     ["implementation_version"] = "0.1.0",
-                    ["deployment_mode"] = "local_server",
+                    ["deployment_mode"] = "local_daemon",
                     ["instance"] = new Dictionary<string, object?>
                     {
                         ["kind"] = "instance",

@@ -1315,7 +1315,7 @@ export interface operations {
                                     status: "unavailable" | "experimental" | "available";
                                 }[];
                                 /** @enum {string} */
-                                deployment_mode: "embedded" | "local_server" | "distributed";
+                                deployment_mode: "memory" | "embedded" | "local_daemon" | "edge" | "remote" | "distributed";
                                 /**
                                  * @description A canonical public identifier component.
                                  *
@@ -1407,7 +1407,7 @@ export interface operations {
                                     status: "unavailable" | "experimental" | "available";
                                 }[];
                                 /** @enum {string} */
-                                deployment_mode: "embedded" | "local_server" | "distributed";
+                                deployment_mode: "memory" | "embedded" | "local_daemon" | "edge" | "remote" | "distributed";
                                 /**
                                  * @description A canonical public identifier component.
                                  *
@@ -18884,4 +18884,3 @@ export interface operations {
         };
     };
 }
-

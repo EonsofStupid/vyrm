@@ -1,6 +1,6 @@
 # RRD engine capability coverage
 
-Audited: 2026-08-27
+Audited: 2026-08-29
 
 This is a source-and-test audit, not a product-green declaration. `Core present`
 means an executable engine path and focused test exist. `Partial` means a real
@@ -59,7 +59,7 @@ the same order.
 | JWT/third-party auth, RBAC, row-level, and field-level permissions | Persistent principals, API-key authentication, resource/action grants, revocation/expiry, session tokens, TLS 1.3, and mTLS exist. | **Partial.** JWT issuance, OIDC/third-party identity, role inheritance, and row/field policy are missing. | G05-W03 |
 | MMap, io_uring, storage-compute separation, and low-RAM storage | Native V3 immutable segments use one policy across mmap, runtime-probed Linux io_uring, and bounded positional fallback. Process-local evidence separates physical operations/bytes/peak requests/fallbacks from decoded block-cache residency. S3 archive/artifact transfer is authenticated, resumable multipart, conditional, checksummed, retry-bounded, and range-streamed. | **Storage foundation qualified.** Vector-specific hot/cold placement, compression residency, and workload promotion remain G04 work; live provider endpoint certification remains deployment evidence. | G02-W01, G02-W06, G04-W04, G04-W05 |
 | Distributed HA, automatic sharding, multi-region replication, and read replicas | Estate, shard/replica contracts, traced object transfer, reconciliation primitives, and Kubernetes resources exist. | **Partial foundation only.** Consensus-integrated data commits, independent-host failover, automatic sharding, multi-region replication, and HA qualification are missing. | G08-W01, G08-W02, G08-W03 |
-| In-memory, embedded, daemon, edge, remote, and distributed deployment | Memory, native embedded, standalone HTTP daemon, persistent client modes, and an mmap/offline edge executable exist. | **Partial.** Distributed deployment and complete cross-mode conformance are missing. | G05-W01, G08-W02, G10-W03 |
+| In-memory, embedded, daemon, edge, remote, and distributed deployment | One strict checked-in corpus passes the full logical engine in memory/native-embedded compositions, a real standalone local daemon plus Rust client, the remote mTLS client face, and the bounded mmap/offline edge retrieval subset. Native second-writer denial and clean daemon-reopen cursor evidence are executable. | **Deployment foundation present.** Browser/mobile packaging and consensus-backed distributed placement/failover remain open; edge deliberately proves only its supported offline retrieval contract. | G05-W01, G08-W02, G10-W03 |
 | RRFlowQL, GraphQL, REST/HTTP, WebSocket, gRPC, and native SDKs | RRFlowQL, generated OpenAPI REST/HTTP, MCP, CLI, and the Rust engine/client boundary exist. | **Partial.** GraphQL, WebSocket, gRPC, and the promised TypeScript/Python/Go/Java/.NET SDK qualification do not. | G06-W01, G06-W04, G06-W05 |
 
 ## Evidence anchors

@@ -1,8 +1,9 @@
 use super::*;
 
 pub struct RrdEngine {
-    pub(crate) storage: PersistentEngine,
-    pub(crate) objects: rrd_store::LocalObjectStore,
+    pub(crate) storage: EngineBox,
+    pub(crate) objects: ObjectStoreBox,
+    pub(crate) storage_root: Option<PathBuf>,
     pub(in crate::engine) instance: CanonicalId,
     pub(crate) token_key: [u8; 32],
     /// Serializes the local definition/validation/commit boundary. The native
@@ -36,11 +37,48 @@ impl RrdEngine {
         let storage = PersistentEngine::open(root)?;
         let objects = rrd_store::LocalObjectStore::open(root.join("immutable"))?;
         Ok(Self {
-            storage,
-            objects,
+            storage: EngineBox::persistent(storage),
+            objects: ObjectStoreBox::new(objects),
+            storage_root: Some(root.to_path_buf()),
             instance,
             token_key,
             transaction_gate: Mutex::new(()),
+        })
+    }
+
+    /// Creates one process-local RRD authority with no persistent root. The
+    /// full composition remains intact: sessions, transactions, policy,
+    /// queries, audit, changefeeds, and subscriptions use the same engine
+    /// methods as embedded and daemon profiles. Durability-only operations
+    /// fail explicitly because this mode has no storage path.
+    pub fn memory(instance: CanonicalId, token_key: [u8; 32]) -> Self {
+        Self {
+            storage: EngineBox::memory(),
+            objects: ObjectStoreBox::new(MemoryObjectStore::new()),
+            storage_root: None,
+            instance,
+            token_key,
+            transaction_gate: Mutex::new(()),
+        }
+    }
+
+    pub fn has_persistent_root(&self) -> bool {
+        self.storage_root.is_some()
+    }
+
+    pub fn deployment_mode(&self) -> DeploymentMode {
+        if self.has_persistent_root() {
+            DeploymentMode::Embedded
+        } else {
+            DeploymentMode::Memory
+        }
+    }
+
+    pub(in crate::engine) fn require_persistent_root(&self, operation: &str) -> Result<&Path> {
+        self.storage_root.as_deref().ok_or_else(|| {
+            ServiceError::Backup(format!(
+                "{operation} requires a persistent RRD root; memory mode is non-durable"
+            ))
         })
     }
 
@@ -49,11 +87,12 @@ impl RrdEngine {
     }
 
     pub fn readiness(&self, observed_at_unix_ms: u64) -> Result<Readiness> {
+        let backend = self.storage.physical_store_evidence()?.backend;
         Ok(Readiness {
             observed_at_unix_ms,
             claim_sequence: self.storage.sequence()?,
             runtime_cursor: self.storage.runtime_cursor()?,
-            backend: CanonicalId::new(self.storage.backend().as_str())
+            backend: CanonicalId::new(backend)
                 .map_err(|error| ServiceError::Contract(error.to_string()))?,
         })
     }

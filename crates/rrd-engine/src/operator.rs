@@ -38,6 +38,12 @@ pub struct RuntimeHookRequest<'a> {
 }
 
 impl RrdEngine {
+    fn persistent_storage(&self) -> OperatorResult<&rrd_store::PersistentEngine> {
+        self.storage
+            .as_persistent()
+            .ok_or_else(|| "operation requires a persistent RRD root".into())
+    }
+
     /// Opens the canonical project-bound engine authority identified by an RRD
     /// store path. Only `<project>/.rrflow/rrd` is accepted.
     pub fn open_project_store(path: &Path) -> crate::Result<Self> {
@@ -69,19 +75,21 @@ impl RrdEngine {
         Self::open_bound(&binding)
     }
 
-    pub fn path(&self) -> &Path {
-        self.storage.path()
+    pub fn path(&self) -> OperatorResult<&Path> {
+        self.storage_root
+            .as_deref()
+            .ok_or_else(|| "in-memory RRD has no persistent path".into())
     }
 
     pub fn backend_name(&self) -> &'static str {
-        self.storage.backend().as_str()
+        self.storage.backend_name()
     }
 
     pub fn record_operator_invocation(
         &self,
         input: OperatorInvocationInput<'_>,
     ) -> OperatorResult<OperatorInvocation> {
-        Ok(self.storage.record_invocation(input)?)
+        Ok(self.persistent_storage()?.record_invocation(input)?)
     }
 
     pub fn set_recall_outcome(
@@ -89,19 +97,21 @@ impl RrdEngine {
         ordinal: u64,
         outcome: RecallOutcome,
     ) -> OperatorResult<OperatorInvocation> {
-        Ok(self.storage.set_recall_outcome(ordinal, outcome)?)
+        Ok(self
+            .persistent_storage()?
+            .set_recall_outcome(ordinal, outcome)?)
     }
 
     pub fn invocations_since(&self, since: Millis) -> OperatorResult<Vec<OperatorInvocation>> {
-        Ok(self.storage.invocations_since(since)?)
+        Ok(self.persistent_storage()?.invocations_since(since)?)
     }
 
     pub fn invocation_count(&self) -> OperatorResult<u64> {
-        Ok(self.storage.invocation_count()?)
+        Ok(self.persistent_storage()?.invocation_count()?)
     }
 
     pub fn access_count(&self) -> OperatorResult<usize> {
-        Ok(self.storage.access_count()?)
+        Ok(self.persistent_storage()?.access_count()?)
     }
 
     pub fn sequence(&self) -> OperatorResult<u64> {
@@ -160,7 +170,9 @@ impl RrdEngine {
         since: Millis,
         evaluated_at: Millis,
     ) -> OperatorResult<RemovalReport> {
-        Ok(self.storage.removal_report(since, evaluated_at)?)
+        Ok(self
+            .persistent_storage()?
+            .removal_report(since, evaluated_at)?)
     }
 
     pub fn export_logical_archive(
@@ -187,7 +199,7 @@ impl RrdEngine {
     pub fn verify_project_store(&self, root: &Path) -> OperatorResult<()> {
         let binding = InstanceBinding::discover(root)?;
         binding.require_runtime_ready()?;
-        binding.verify_store_path(self.path())?;
+        binding.verify_store_path(self.path()?)?;
         if binding.manifest.id != self.instance_id().as_str() {
             return Err("engine instance identity does not match the project manifest".into());
         }

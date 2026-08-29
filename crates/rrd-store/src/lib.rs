@@ -58,7 +58,7 @@ pub use backup::{
 };
 pub use control::{ControlJournalEntry, ControlTransition};
 pub use ds::{DataRuntime, DataRuntimeAccess, DataRuntimeRef, DataRuntimeStep};
-pub use engine::{Engine, MemoryEngine, PhysicalStoreEvidence};
+pub use engine::{Engine, EngineBox, MemoryEngine, PhysicalStoreEvidence};
 pub use error::{Error, Result};
 pub use footprint::{measure_storage_footprint, FootprintBytes, StorageFootprint};
 pub use gc::{PairStatus, RemovalReport, Verdict};
@@ -75,8 +75,8 @@ pub use native::{
     NativeRuntimeCommitPlan,
 };
 pub use object::{
-    ImmutableObjectStore, LocalObjectStore, ObjectInventory, ObjectInventoryEntry,
-    ObjectInventoryState, ObjectStep, VerifiedObject,
+    ImmutableObjectStore, LocalObjectStore, MemoryObjectStore, ObjectInventory,
+    ObjectInventoryEntry, ObjectInventoryState, ObjectStep, ObjectStoreBox, VerifiedObject,
 };
 pub use persistent::{PersistentBackend, PersistentEngine};
 pub use projection::{

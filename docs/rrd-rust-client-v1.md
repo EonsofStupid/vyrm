@@ -1,7 +1,7 @@
 # RRD Rust client v1
 
-Status: asynchronous loopback plus experimental mTLS client walking skeleton
-implemented against the entire currently published RRD operation catalogue.
+Status: asynchronous local-daemon plus experimental remote-mTLS client walking
+skeleton implemented against the entire currently published RRD operation catalogue.
 Distributed qualification, generated API reference, and a released-version
 matrix remain open.
 
@@ -52,6 +52,9 @@ retained changefeed decoding, durable WebSocket push/reconnect replay, protected
 audit decoding, and cleartext remote endpoint denial. A second live fixture
 proves valid mTLS HTTP and WebSocket negotiation, exact remote-listen capability
 reporting, missing-client-certificate denial, and wrong-server-name denial.
+The loopback client requires the `local_daemon` capability and the mTLS client
+requires `remote`; both commit and query the exact checked-in deployment corpus
+described in [`rrd-deployment-modes-v1.md`](rrd-deployment-modes-v1.md).
 
 This is not the F5 exit gate. Commit and vector mutations, renewal/closure,
 backup/restore, estate projection, response-limit

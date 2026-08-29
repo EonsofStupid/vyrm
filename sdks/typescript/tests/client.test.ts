@@ -27,7 +27,7 @@ test("public negotiation retries transport loss and validates the ArkType envelo
           protocol_version: 1,
           implementation: "rrd-server",
           implementation_version: "0.1.0",
-          deployment_mode: "local_server",
+          deployment_mode: "local_daemon",
           instance: { kind: "instance", id: "sdk-test" },
           capabilities: [],
         },

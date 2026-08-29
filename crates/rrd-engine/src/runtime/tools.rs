@@ -473,7 +473,7 @@ impl RrdEngine {
             Err(error) => (OperatorOutcome::Error, Some(error.to_string()), None),
         };
         let arguments = invocation_arguments(name, args);
-        self.storage.record_invocation(OperatorInvocationInput {
+        self.record_operator_invocation(OperatorInvocationInput {
             at,
             trigger: OperatorTrigger::Manual,
             command: &format!("mcp:{name}"),
@@ -482,7 +482,8 @@ impl RrdEngine {
             duration_ms,
             detail,
             effectiveness,
-        })?;
+        })
+        .map_err(|error| ServiceError::Runtime(error.to_string()))?;
 
         result
             .map(|result| RuntimeToolResult {

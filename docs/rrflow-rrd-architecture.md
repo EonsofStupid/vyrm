@@ -393,13 +393,19 @@ admitted by the same registry revision and commit. See
 
 | Face | Purpose | Required equivalence |
 |---|---|---|
+| Memory | Ephemeral in-process execution and deterministic tests | Same sessions, transactions, query, policy, audit, and ordering; durability-only operations fail explicitly |
 | Embedded | In-process latency-sensitive use | Same transactions, snapshots, events, policy, and recovery |
 | Local daemon | Per-project desktop/tooling service | Same logical operations through the RRD protocol |
-| Remote | Authenticated network and later distributed deployment | Same contract plus qualified transport/placement guarantees |
+| Edge | Offline, resource-bounded retrieval | Same versioned corpus and artifact/source-cursor integrity for the supported read-only subset |
+| Remote | Authenticated network service | Same contract plus qualified TLS, identity, authorization, and server-owned persistence |
+| Distributed | Cluster placement of the same engine | Same contract plus consensus, replication, placement, and failover evidence; not yet qualified |
 
 The `rrd` process is not the engine wrapped in HTTP. It composes the engine and
 serves its authoritative contract. A face may add transport concerns but may
 not change mutation, visibility, authorization, or replay semantics.
+[`rrd-deployment-modes-v1.md`](rrd-deployment-modes-v1.md) freezes the public
+mode names, one shared conformance corpus, root-ownership rules, and the exact
+limits of edge and distributed claims.
 
 ## Connectome boundary
 

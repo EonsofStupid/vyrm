@@ -48,3 +48,55 @@ fn build_is_deterministic_and_empty_inputs_fail_closed() {
     assert_eq!(first.artifact().as_bytes(), second.artifact().as_bytes());
     assert!(OfflineEdgeIndex::build(config, 1, Vec::new()).is_err());
 }
+
+#[test]
+fn offline_mmap_edge_passes_the_shared_deployment_corpus_without_network() {
+    let corpus: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../fixtures/rrd-deployment-conformance-v1.json"
+    ))
+    .unwrap();
+    assert_eq!(corpus["format_version"], 1);
+    let documents = corpus["documents"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|document| {
+            OfflineDocument::new(
+                document["id"].as_str().unwrap(),
+                document["text"].as_str().unwrap(),
+            )
+        })
+        .collect::<Vec<_>>();
+    let config = OfflineEdgeConfig::standard(64, 19).unwrap();
+    let built = OfflineEdgeIndex::build(config.clone(), 1, documents).unwrap();
+    let root = tempdir().unwrap();
+    let artifact = root.path().join("deployment-corpus.rrdense");
+    built.write_atomic(&artifact).unwrap();
+    drop(built);
+
+    let mut mapped = OfflineEdgeIndex::open_mmap(config, artifact).unwrap();
+    let result = mapped
+        .search_text(
+            corpus["query"]["edge_text"].as_str().unwrap(),
+            corpus["query"]["top_k"].as_u64().unwrap() as usize,
+            corpus["query"]["valid_at"].as_u64().unwrap(),
+        )
+        .unwrap();
+    let actual = result
+        .hits
+        .iter()
+        .map(|hit| hit.reference.id.as_str())
+        .collect::<Vec<_>>();
+    let expected = corpus["expected_ids"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|identity| identity.as_str().unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(actual, expected);
+    assert!(mapped.is_memory_mapped());
+    assert_eq!(
+        result.source_cursor,
+        corpus["documents"].as_array().unwrap().len() as u64
+    );
+}

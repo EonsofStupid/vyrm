@@ -383,7 +383,11 @@ impl RrdEngine {
         if authority.instance_id != *self.instance_id() {
             return Err(ServiceError::ProjectBindingMismatch);
         }
-        let engine_store = intended_path(self.storage.path())
+        let storage_root = self
+            .storage_root
+            .as_deref()
+            .ok_or(ServiceError::ProjectBindingMismatch)?;
+        let engine_store = intended_path(storage_root)
             .map_err(|error| ServiceError::Contract(error.to_string()))?;
         if authority.store_path
             != utf8_path(&engine_store, "engine store path")

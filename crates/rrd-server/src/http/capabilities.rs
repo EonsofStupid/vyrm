@@ -271,7 +271,11 @@ pub(super) fn capabilities(
         protocol_version: PROTOCOL_VERSION,
         implementation: CanonicalId::new("rrflow").unwrap(),
         implementation_version: env!("CARGO_PKG_VERSION").into(),
-        deployment_mode: DeploymentMode::LocalServer,
+        deployment_mode: if tls_enabled {
+            DeploymentMode::Remote
+        } else {
+            DeploymentMode::LocalDaemon
+        },
         instance: ResourceId {
             kind: ResourceKind::Instance,
             id: instance.clone(),

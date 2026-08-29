@@ -2,11 +2,12 @@ use rcgen::{
     BasicConstraints, Certificate, CertificateParams, ExtendedKeyUsagePurpose, IsCa, Issuer,
     KeyPair, KeyUsagePurpose,
 };
-use rrd_client::{is_unauthenticated, ClientConfig, Error, RequestOptions, RrdClient};
+use rrd_client::{is_unauthenticated, ClientConfig, Error, RequestOptions, RrdClient, Session};
 use rrd_contract::{
-    AbortTransaction, BeginTransaction, CanonicalId, CloseSubscription, CreateSession,
-    ExecuteQuery, OpenSubscription, PreviewTransaction, QueryBudget, ReadAudit, ReadChangefeed,
-    ReadDiagnosticSnapshot, ResourceId, ResourceKind, ResourcePath, SessionLimits,
+    transaction_operation_sha256, AbortTransaction, BeginTransaction, CanonicalId,
+    CloseSubscription, CommitTransaction, CreateSession, DeploymentConformanceCorpus,
+    DeploymentMode, ExecuteQuery, OpenSubscription, PreviewTransaction, QueryBudget, ReadAudit,
+    ReadChangefeed, ReadDiagnosticSnapshot, ResourceId, ResourceKind, ResourcePath, SessionLimits,
     SubscriptionServerFrame, SubscriptionStream, TransactionMutation,
 };
 use rrd_core::{
@@ -24,7 +25,7 @@ use rrd_server::RrdMutualTlsServerConfig;
 use rrd_store::{Engine, PersistentEngine};
 use rustls::pki_types::{PrivateKeyDer, PrivatePkcs8KeyDer};
 use rustls::{ClientConfig as RustlsClientConfig, RootCertStore};
-use serde_json::json;
+use serde_json::{json, Value};
 use std::collections::BTreeMap;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -105,6 +106,128 @@ fn seed(engine: &PersistentEngine, scope: &str) {
             ],
         })
         .unwrap();
+}
+
+fn deployment_corpus() -> DeploymentConformanceCorpus {
+    let corpus = serde_json::from_str(include_str!(
+        "../../../fixtures/rrd-deployment-conformance-v1.json"
+    ))
+    .unwrap();
+    DeploymentConformanceCorpus::validate(&corpus).unwrap();
+    corpus
+}
+
+fn deployment_mutations() -> Vec<TransactionMutation> {
+    let corpus = deployment_corpus();
+    let mut mutations = vec![json!({
+        "mutation": "put_schema",
+        "registry": {
+            "revision": 1,
+            "migration": "install deployment conformance corpus",
+            "records": {
+                "document": {
+                    "properties": {
+                        "body": {"value_type": "string", "required": true}
+                    },
+                    "allow_additional_properties": false,
+                    "unique_properties": []
+                }
+            },
+            "relations": {},
+            "events": {}
+        }
+    })];
+    mutations.extend(corpus.documents.iter().map(|document| {
+        json!({
+            "mutation": "put_record",
+            "reference": {"kind": "document", "id": document.id},
+            "valid_from": corpus.query.valid_at,
+            "properties": {
+                "body": {"type": "string", "value": document.text}
+            }
+        })
+    }));
+    serde_json::from_value(Value::Array(mutations)).unwrap()
+}
+
+async fn commit_client_deployment_corpus(client: &RrdClient, session: &Session, prefix: &str) {
+    let transaction = client
+        .begin_transaction(
+            session,
+            BeginTransaction {
+                scope: CanonicalId::new("data").unwrap(),
+                timeout_ms: 10_000,
+            },
+            RequestOptions::mutation(
+                &format!("request-{prefix}-begin"),
+                &format!("operation-{prefix}-begin"),
+                &format!("{prefix}-begin-key"),
+            )
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    let mutations = deployment_mutations();
+    let receipt = client
+        .commit_transaction(
+            session,
+            &transaction.transaction_id,
+            CommitTransaction {
+                operation_sha256: transaction_operation_sha256(&mutations),
+                mutations,
+            },
+            RequestOptions::new(
+                &format!("request-{prefix}-commit"),
+                &format!("operation-{prefix}-commit"),
+                Some(&format!("{prefix}-commit-key")),
+                Some(u64::MAX),
+            )
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(receipt.first_runtime_cursor, Some(1));
+    assert_eq!(receipt.last_runtime_cursor, Some(3));
+    assert_eq!(receipt.mutation_count, 3);
+}
+
+async fn assert_client_deployment_corpus(
+    client: &RrdClient,
+    session: &Session,
+    mode: DeploymentMode,
+) {
+    let corpus = deployment_corpus();
+    assert_eq!(client.capabilities().await.unwrap().deployment_mode, mode);
+    let result = client
+        .execute_query(
+            session,
+            ExecuteQuery {
+                scope: format!("instance:{}", client.instance_id()),
+                query: corpus.query.rrflowql,
+                parameters: BTreeMap::new(),
+                budget: QueryBudget::default(),
+            },
+            RequestOptions::read("request-mode-corpus", "operation-mode-corpus").unwrap(),
+        )
+        .await
+        .unwrap();
+    let actual = result
+        .rows
+        .iter()
+        .map(|row| {
+            CanonicalId::new(
+                row.identity
+                    .strip_prefix("record:document:")
+                    .expect("corpus row has document identity"),
+            )
+            .unwrap()
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(actual, corpus.expected_ids);
+    assert_eq!(
+        result.rows[0].values["body"],
+        rrd_contract::QueryValue::String(corpus.documents[0].text.clone())
+    );
 }
 
 #[tokio::test]
@@ -670,12 +793,91 @@ async fn rust_client_negotiates_authenticates_queries_and_reads_audit() {
 }
 
 #[tokio::test]
+async fn loopback_rust_client_passes_the_shared_deployment_corpus() {
+    let temporary = tempfile::tempdir().unwrap();
+    let root = temporary.path().join("local-conformance");
+    let storage = PersistentEngine::open(&root).unwrap();
+    let instance = CanonicalId::new("local-conformance").unwrap();
+    let principal = Principal {
+        id: CanonicalId::new("local-client").unwrap(),
+        kind: PrincipalKind::Service,
+        credential_sha256: digest::sha256_hex(b"local-conformance-key"),
+        not_before_unix_ms: 1,
+        expires_at_unix_ms: u64::MAX,
+        disabled: false,
+        grants: [
+            Action::SessionCreate,
+            Action::TransactionBegin,
+            Action::TransactionCommit,
+            Action::QueryExecute,
+        ]
+        .into_iter()
+        .map(|action| ResourceGrant {
+            action,
+            resource_prefix: ResourcePath {
+                segments: vec![ResourceId::new(ResourceKind::Instance, instance.as_str()).unwrap()],
+            },
+        })
+        .collect(),
+    };
+    SecurityRepository::new(&storage, instance.clone())
+        .initialize(
+            SecurityState {
+                format_version: SECURITY_FORMAT,
+                revision: 1,
+                principals: BTreeMap::from([(principal.id.clone(), principal)]),
+            },
+            1,
+            "bootstrap",
+            "request-local-conformance-bootstrap",
+            "operation-local-conformance-bootstrap",
+        )
+        .unwrap();
+    drop(storage);
+
+    let token_key = load_or_create_token_key(&root.join("RRD.SERVER.SECRET")).unwrap();
+    let engine = RrdEngine::open(&root, instance.clone(), token_key).unwrap();
+    let server = RrdHttpServer::bind(engine, "127.0.0.1:0".parse().unwrap()).unwrap();
+    let address = server.local_addr();
+    let (shutdown, receiver) = tokio::sync::oneshot::channel();
+    let task = tokio::spawn(server.serve_until(async move {
+        let _ = receiver.await;
+    }));
+
+    let client = RrdClient::connect_local(address, instance, ClientConfig::default()).unwrap();
+    let session = client
+        .create_session(
+            CanonicalId::new("local-client").unwrap(),
+            "local-conformance-key",
+            CreateSession {
+                limits: SessionLimits {
+                    idle_timeout_ms: 60_000,
+                    absolute_timeout_ms: 300_000,
+                    max_open_transactions: 1,
+                },
+            },
+            RequestOptions::mutation(
+                "request-local-conformance-session",
+                "operation-local-conformance-session",
+                "local-conformance-session-key",
+            )
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    commit_client_deployment_corpus(&client, &session, "local-conformance").await;
+    assert_client_deployment_corpus(&client, &session, DeploymentMode::LocalDaemon).await;
+
+    shutdown.send(()).unwrap();
+    task.await.unwrap().unwrap();
+}
+
+#[tokio::test]
 async fn remote_transport_requires_mutual_tls_and_exact_server_identity() {
     let temporary = tempfile::tempdir().unwrap();
     let root = temporary.path().join("mtls-instance");
     let storage = PersistentEngine::open(&root).unwrap();
     let instance = CanonicalId::new("mtls-sdk-test").unwrap();
-    seed(&storage, "instance:mtls-sdk-test");
     let principal = Principal {
         id: CanonicalId::new("mtls-client").unwrap(),
         kind: PrincipalKind::Service,
@@ -685,6 +887,9 @@ async fn remote_transport_requires_mutual_tls_and_exact_server_identity() {
         disabled: false,
         grants: [
             Action::SessionCreate,
+            Action::TransactionBegin,
+            Action::TransactionCommit,
+            Action::QueryExecute,
             Action::ChangefeedFollow,
             Action::SubscriptionOpen,
             Action::SubscriptionConnect,
@@ -775,6 +980,7 @@ async fn remote_transport_requires_mutual_tls_and_exact_server_identity() {
         RrdClient::connect_mtls(endpoint, instance, client_tls, ClientConfig::default()).unwrap();
     let capabilities = client.capabilities().await.unwrap();
     assert_eq!(capabilities.protocol_version, 1);
+    assert_eq!(capabilities.deployment_mode, DeploymentMode::Remote);
     assert_eq!(
         capabilities
             .capabilities
@@ -804,6 +1010,8 @@ async fn remote_transport_requires_mutual_tls_and_exact_server_identity() {
         )
         .await
         .unwrap();
+    commit_client_deployment_corpus(&client, &session, "remote-conformance").await;
+    assert_client_deployment_corpus(&client, &session, DeploymentMode::Remote).await;
     let subscription_id = rrd_contract::CorrelationId::new("mtls-subscription").unwrap();
     client
         .open_subscription(
@@ -814,7 +1022,7 @@ async fn remote_transport_requires_mutual_tls_and_exact_server_identity() {
                     scope: "instance:mtls-sdk-test".into(),
                 },
                 after_cursor: 0,
-                batch_size: 2,
+                batch_size: 3,
                 max_in_flight: 1,
                 retention_cursor_window: 128,
                 lease_ms: 60_000,
@@ -841,7 +1049,7 @@ async fn remote_transport_requires_mutual_tls_and_exact_server_identity() {
     assert!(matches!(
         pushed,
         SubscriptionServerFrame::Changefeed { ref page, .. }
-            if page.requested_after_cursor == 0 && page.through_cursor == 2
+            if page.requested_after_cursor == 0 && page.through_cursor == 3
     ));
     socket.close().await.unwrap();
 

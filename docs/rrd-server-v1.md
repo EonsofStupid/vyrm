@@ -23,6 +23,14 @@ credential-provider integration, field/row policy, and complete endpoint audit
 remain F4 gates. Project/instance provisioning is an explicit offline command;
 serving never creates or rewrites topology.
 
+Capability negotiation reports loopback/plain operation as `local_daemon` and
+mutual-TLS operation as `remote`. These are service faces of the same
+`RrdEngine`, not separate persistence implementations. The standalone-process
+conformance test proves that the local daemon exclusively owns its native root,
+serves the shared logical corpus, shuts down cleanly, and leaves an exactly
+reopenable cursor. See
+[`rrd-deployment-modes-v1.md`](rrd-deployment-modes-v1.md).
+
 Start the local process with:
 
 ```text

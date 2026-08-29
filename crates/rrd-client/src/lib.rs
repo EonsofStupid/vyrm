@@ -197,6 +197,10 @@ enum Transport {
 }
 
 impl RrdClient {
+    pub fn instance_id(&self) -> &CanonicalId {
+        &self.instance
+    }
+
     pub fn connect_local(
         address: SocketAddr,
         instance: CanonicalId,

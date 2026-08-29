@@ -1,0 +1,22 @@
+{
+  "format_version": 1,
+  "documents": [
+    {
+      "id": "alpha",
+      "text": "alpha beta deterministic runtime"
+    },
+    {
+      "id": "gamma",
+      "text": "gamma delta unrelated corpus"
+    }
+  ],
+  "query": {
+    "rrflowql": "FROM record:document AT VALID 100 KNOWN HEAD WHERE id = \"alpha\" PROJECT id, body EXPLAIN CONTRACT",
+    "edge_text": "alpha beta deterministic runtime",
+    "valid_at": 100,
+    "top_k": 1
+  },
+  "expected_ids": [
+    "alpha"
+  ]
+}

@@ -17,6 +17,14 @@ Version 1 freezes:
 - deployment modes and sorted, versioned capability negotiation;
 - success/error response framing and stable error codes.
 
+The v1 deployment vocabulary is `memory`, `embedded`, `local_daemon`, `edge`,
+`remote`, and `distributed`. These names describe one engine's composition or
+transport face, not separate products. The checked-in
+[`rrd-deployment-conformance-v1.json`](../fixtures/rrd-deployment-conformance-v1.json)
+and its strict public `DeploymentConformanceCorpus` schema provide the shared
+logical fixture. Current qualification and intentionally open modes are
+recorded in [`rrd-deployment-modes-v1.md`](rrd-deployment-modes-v1.md).
+
 F2 extends version 1 additively with bounded transport-session leases,
 transaction leases and terminal states, typed multi-model mutations and commit
 receipts, and the first read-only query contract. The mutation vocabulary
@@ -108,7 +116,7 @@ Malformed identifiers, duplicate/unsorted capabilities, unsupported protocol
 versions, unknown fields, repeated resource kinds, and mutations without an
 idempotency key fail closed in tests.
 
-`rrd-server` binds the current contract to a loopback-only HTTP alpha. It is
-not presented as an SDK or remote-authenticated service. F5 will generate and
-test supported SDKs against these same bytes, and F4 must land before remote
-exposure.
+`rrd-server` binds the contract to a loopback local-daemon face and an
+experimental TLS 1.3 mutual-authentication remote face. The latter is tested
+but remains pre-release deployment evidence, not distributed or managed-cloud
+qualification. Generated SDKs must preserve these same bytes and mode names.

@@ -36,7 +36,7 @@ final class RrdClientTest {
                     "protocol_version", 1,
                     "implementation", "rrd-server",
                     "implementation_version", "0.1.0",
-                    "deployment_mode", "local_server",
+                    "deployment_mode", "local_daemon",
                     "instance", Map.of("kind", "instance", "id", "sdk-test"),
                     "capabilities", List.of())));
         });

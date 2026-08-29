@@ -57,7 +57,7 @@ use std::fmt;
 pub const PROTOCOL: &str = "rrd";
 pub const PROTOCOL_VERSION: u16 = 1;
 pub const OPENAPI_DOCUMENT_SHA256: &str =
-    "89ea3a3fe1abd5f672475bf0b964773c10f7f8091ba8f3ce2ff4dd2f0e24331f";
+    "99c00f57d53c3f17e38590dc849c9e067a4788b8febd898d04401c95c5bc38a6";
 pub const MAX_ID_BYTES: usize = 128;
 pub const MAX_MESSAGE_BYTES: usize = 4_096;
 pub const MAX_CAPABILITIES: usize = 512;
@@ -87,6 +87,8 @@ pub const MAX_SUBSCRIPTION_IN_FLIGHT: u16 = 64;
 pub const MAX_SUBSCRIPTION_RETENTION_CURSORS: u64 = 10_000_000;
 pub const MIN_SUBSCRIPTION_HEARTBEAT_MS: u64 = 100;
 pub const MAX_SUBSCRIPTION_HEARTBEAT_MS: u64 = 30_000;
+pub const DEPLOYMENT_CONFORMANCE_FORMAT_VERSION: u16 = 1;
+pub const MAX_DEPLOYMENT_CONFORMANCE_DOCUMENTS: usize = 1_024;
 pub const MIN_LEASE_MS: u64 = 1_000;
 pub const MAX_LEASE_MS: u64 = 3_600_000;
 
@@ -3535,9 +3537,109 @@ impl IdempotencyBinding {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum DeploymentMode {
+    Memory,
     Embedded,
-    LocalServer,
+    LocalDaemon,
+    Edge,
+    Remote,
     Distributed,
+}
+
+/// One checked-in logical corpus used unchanged by every deployment adapter.
+/// Physical cursors, transport evidence, and storage receipts remain
+/// mode-specific; the expected logical identities may not diverge.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct DeploymentConformanceCorpus {
+    pub format_version: u16,
+    pub documents: Vec<DeploymentConformanceDocument>,
+    pub query: DeploymentConformanceQuery,
+    pub expected_ids: Vec<CanonicalId>,
+}
+
+impl DeploymentConformanceCorpus {
+    pub fn validate(&self) -> Result<()> {
+        if self.format_version != DEPLOYMENT_CONFORMANCE_FORMAT_VERSION {
+            return invalid(format!(
+                "deployment conformance format must be {DEPLOYMENT_CONFORMANCE_FORMAT_VERSION}"
+            ));
+        }
+        if self.documents.is_empty() || self.documents.len() > MAX_DEPLOYMENT_CONFORMANCE_DOCUMENTS
+        {
+            return invalid(format!(
+                "deployment conformance documents must contain 1..={MAX_DEPLOYMENT_CONFORMANCE_DOCUMENTS} entries"
+            ));
+        }
+        let mut document_ids = BTreeSet::new();
+        for document in &self.documents {
+            document.validate()?;
+            if !document_ids.insert(&document.id) {
+                return invalid("deployment conformance document identities must be unique");
+            }
+        }
+        self.query.validate()?;
+        if self.expected_ids.is_empty()
+            || self.expected_ids.len() > usize::from(self.query.top_k)
+            || self
+                .expected_ids
+                .iter()
+                .any(|identity| !document_ids.contains(identity))
+        {
+            return invalid(
+                "deployment conformance expected identities must be non-empty, bounded by top_k, and present in the corpus",
+            );
+        }
+        if self.expected_ids.windows(2).any(|pair| pair[0] >= pair[1]) {
+            return invalid("deployment conformance expected identities must be unique and sorted");
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct DeploymentConformanceDocument {
+    pub id: CanonicalId,
+    pub text: String,
+}
+
+impl DeploymentConformanceDocument {
+    pub fn validate(&self) -> Result<()> {
+        if self.text.is_empty() || self.text.len() > MAX_MESSAGE_BYTES {
+            return invalid(format!(
+                "deployment conformance document text must contain 1..={MAX_MESSAGE_BYTES} bytes"
+            ));
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct DeploymentConformanceQuery {
+    pub rrflowql: String,
+    pub edge_text: String,
+    pub valid_at: u64,
+    pub top_k: u16,
+}
+
+impl DeploymentConformanceQuery {
+    pub fn validate(&self) -> Result<()> {
+        if self.rrflowql.is_empty() || self.rrflowql.len() > MAX_QUERY_BYTES {
+            return invalid(format!(
+                "deployment conformance RRFlowQL must contain 1..={MAX_QUERY_BYTES} bytes"
+            ));
+        }
+        if self.edge_text.is_empty() || self.edge_text.len() > MAX_MESSAGE_BYTES {
+            return invalid(format!(
+                "deployment conformance edge query must contain 1..={MAX_MESSAGE_BYTES} bytes"
+            ));
+        }
+        if self.valid_at == 0 || self.top_k == 0 {
+            return invalid("deployment conformance valid_at and top_k must be greater than zero");
+        }
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]

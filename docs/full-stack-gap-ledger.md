@@ -171,7 +171,7 @@ claimed from a UI card, type, or isolated physical component:
 | Vector and full-text retrieval | Dense/sparse/multi-dense storage plus MCP collection, point and exact-search paths exist; HNSW/TurboQuant engine artifacts also exist | Collection-bound approximate serving, full-text engine/index implementation, hybrid planner and production recall/latency evidence |
 | Time travel and rollback | RRFlowQL binds schema, source watermarks, claims, index selection and authoritative replay to one valid-time/known-at coordinate across memory, Fjall, native and reopen; `rrflow_data_rollback` appends idempotent record/relation compensations plus immutable evidence through the normal audited transaction | Extend selected-state rollback beyond records/relations without rewriting append-only event, series, object, schema, vector, geo or security-audit history; qualify the complete public-surface matrix |
 | Object and tiered persistence | Authenticated capability admission, resumable/checksummed/conditional S3 multipart archive and artifact transfer, version-bound ranged recovery, and native mmap/io_uring/bounded segment I/O share the existing RRD storage authority with measured physical/cache separation | Certify named provider transports/endpoints and extend qualified hot/cold policy to vector artifacts under G04 |
-| In-memory, embedded, single-node, browser/WASM, mobile/edge and distributed modes | Embedded persistent and single-node daemon paths exist; underlying test/memory and experimental edge/distributed pieces exist | One logical conformance suite and platform-specific durability/security/resource qualification for every advertised mode |
+| In-memory, embedded, single-node, browser/WASM, mobile/edge and distributed modes | One strict corpus now passes the full logical engine in memory and embedded compositions, a real local-daemon process and Rust client, the remote mTLS client face, and the bounded mmap/offline edge retrieval subset; native root exclusion and reopen are executable | Browser/WASM and mobile packaging plus consensus-backed distributed placement, failover, and platform-specific resource qualification remain; edge does not claim unsupported mutation parity |
 | Autonomous agent memory | Bitemporal facts, exact recall, context, routing, reasoning events, attunement and lifecycle enforcement exist | Hybrid recall, reflection, ingestion, semantic code search, governed retirement and evaluation evidence under one RRD authority |
 | Managed cloud | Kubernetes and estate foundations exist | Tenant control plane, autoscaling, granular capability administration, secure outbound-network policy, upgrades, recovery and Multi-AZ qualification |
 
@@ -649,7 +649,7 @@ shared real-server/version conformance, and publication remain open.
   snapshot/backup and estate clients.
 - Async, timeout, cancellation, retry and idempotency behavior.
 - Capability/version negotiation and typed error mapping.
-- Hermetic conformance suite run against local server and supported distributed
+- Hermetic conformance suite run against the local daemon and supported distributed
   deployment; examples and API reference generated in CI.
 
 **Exit gate:** every supported SDK passes the same black-box semantic fixtures;
@@ -867,8 +867,9 @@ idempotency contracts as SDK clients.
   ingestion, estate reconciliation, and so on.
 - Correctness and recovery gates precede performance.
 - Report every losing cell and resource tradeoff.
-- Separate embedded library, local server, distributed, cloud and control-plane
-  results; they are not interchangeable.
+- Separate embedded, local-daemon, distributed, cloud and control-plane result
+  cohorts while preserving one engine contract; deployment evidence is not
+  interchangeable.
 - “Beats SurrealDB/Qdrant” is prohibited unless an explicitly published matrix
   defines the bounded scope. A single fixture never becomes a blanket claim.
 
