@@ -23,7 +23,7 @@ pub use engine::{
     EstateAdminResult, EstateBackupReconcileOutcome, EstateReconcileOutcome, Invocation,
     InvocationCompletion, InvocationCredential, Result, RrdEngine, RrdOperation,
     SecurityBootstrapOutcome, ServiceError, ServiceErrorKind, API_KEY_HEX_BYTES,
-    MAX_AUDIT_PAGE_RECORDS, TOKEN_KEY_BYTES,
+    MAX_AUDIT_PAGE_RECORDS, MAX_JWT_CREDENTIAL_BYTES, TOKEN_KEY_BYTES,
 };
 #[cfg(feature = "full")]
 pub use operator::{

@@ -29,9 +29,11 @@ fn daemon_mode_uses_one_authenticated_project_bound_authority() {
         id: CanonicalId::new("mcp-daemon-client").unwrap(),
         kind: PrincipalKind::Service,
         credential_sha256: digest::sha256_hex(api_key.as_bytes()),
+        credential_revision: 1,
         not_before_unix_ms: 1,
         expires_at_unix_ms: u64::MAX,
         disabled: false,
+        role_ids: Default::default(),
         grants: [
             Action::SessionCreate,
             Action::SessionClose,
@@ -42,6 +44,7 @@ fn daemon_mode_uses_one_authenticated_project_bound_authority() {
         .map(|action| ResourceGrant {
             action,
             resource_prefix: resource.clone(),
+            data_policy: None,
         })
         .collect(),
     };
@@ -52,6 +55,9 @@ fn daemon_mode_uses_one_authenticated_project_bound_authority() {
                 format_version: SECURITY_FORMAT,
                 revision: 1,
                 principals: BTreeMap::from([(principal.id.clone(), principal)]),
+                roles: BTreeMap::new(),
+                identity_bindings: BTreeMap::new(),
+                jwt_issuers: BTreeMap::new(),
             },
             1,
             "bootstrap",

@@ -1,6 +1,6 @@
 use rrd_contract::CanonicalId;
 use rrd_engine::{load_or_create_token_key, InstanceBinding, InstanceManifest, RrdEngine};
-use rrd_server::{RrdHttpServer, RrdMutualTlsServerConfig};
+use rrd_server::{RrdHttpServer, RrdJwtVerificationKey, RrdMutualTlsServerConfig};
 use rustls::RootCertStore;
 use std::fs::File;
 use std::io;
@@ -15,6 +15,7 @@ struct Args {
     root: PathBuf,
     bind: SocketAddr,
     token_key_file: Option<PathBuf>,
+    jwt_key_file: Option<PathBuf>,
     ready_file: Option<PathBuf>,
     shutdown_request_file: Option<PathBuf>,
     shutdown_complete_file: Option<PathBuf>,
@@ -73,9 +74,14 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         args.tls_private_key_file,
         args.tls_client_ca_file,
     )?;
-    let server = match tls {
-        Some(tls) => RrdHttpServer::bind_project_mtls(engine, project, args.bind, tls)?,
-        None => RrdHttpServer::bind_project(engine, project, args.bind)?,
+    let jwt = args.jwt_key_file.map(load_jwt_key).transpose()?;
+    let server = match (tls, jwt) {
+        (Some(tls), Some(jwt)) => {
+            RrdHttpServer::bind_project_mtls_with_jwt(engine, project, args.bind, tls, jwt)?
+        }
+        (Some(tls), None) => RrdHttpServer::bind_project_mtls(engine, project, args.bind, tls)?,
+        (None, Some(jwt)) => RrdHttpServer::bind_project_with_jwt(engine, project, args.bind, jwt)?,
+        (None, None) => RrdHttpServer::bind_project(engine, project, args.bind)?,
     };
     eprintln!(
         "rrd-server: {}://{}",
@@ -180,6 +186,7 @@ fn parse_args(arguments: impl Iterator<Item = String>) -> Result<Args, String> {
     let mut root = None;
     let mut bind = "127.0.0.1:9477".parse().expect("static bind address");
     let mut token_key_file = None;
+    let mut jwt_key_file = None;
     let mut ready_file = None;
     let mut shutdown_request_file = None;
     let mut shutdown_complete_file = None;
@@ -202,6 +209,12 @@ fn parse_args(arguments: impl Iterator<Item = String>) -> Result<Args, String> {
                 token_key_file = Some(PathBuf::from(required_value(
                     &mut arguments,
                     "--token-key-file",
+                )?));
+            }
+            "--jwt-key-file" => {
+                jwt_key_file = Some(PathBuf::from(required_value(
+                    &mut arguments,
+                    "--jwt-key-file",
                 )?));
             }
             "--ready-file" => {
@@ -279,6 +292,7 @@ fn parse_args(arguments: impl Iterator<Item = String>) -> Result<Args, String> {
         root: root.ok_or_else(|| format!("--root is required\n{}", usage()))?,
         bind,
         token_key_file,
+        jwt_key_file,
         ready_file,
         shutdown_request_file,
         shutdown_complete_file,
@@ -360,6 +374,31 @@ fn load_mtls(
     )?))
 }
 
+fn load_jwt_key(
+    path: PathBuf,
+) -> Result<RrdJwtVerificationKey, Box<dyn std::error::Error + Send + Sync>> {
+    let metadata = std::fs::metadata(&path)?;
+    if !metadata.is_file() || metadata.len() > 64 * 1024 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "JWT key must be a bounded regular file",
+        )
+        .into());
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if metadata.permissions().mode() & 0o077 != 0 {
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "JWT key file must be owner-only",
+            )
+            .into());
+        }
+    }
+    RrdJwtVerificationKey::new(std::fs::read(path)?).map_err(Into::into)
+}
+
 fn required_value(
     arguments: &mut impl Iterator<Item = String>,
     option: &str,
@@ -370,7 +409,7 @@ fn required_value(
 }
 
 fn usage() -> &'static str {
-    "usage: rrd-server --root PROJECT [--bind 127.0.0.1:9477] [--token-key-file PATH] [--ready-file PATH] [--tls-cert PATH --tls-key PATH --tls-client-ca PATH] [--shutdown-request-file PATH --shutdown-complete-file PATH]\n       rrd-server initialize --root PROJECT --instance ID"
+    "usage: rrd-server --root PROJECT [--bind 127.0.0.1:9477] [--token-key-file PATH] [--jwt-key-file PATH] [--ready-file PATH] [--tls-cert PATH --tls-key PATH --tls-client-ca PATH] [--shutdown-request-file PATH --shutdown-complete-file PATH]\n       rrd-server initialize --root PROJECT --instance ID"
 }
 
 fn initialize_usage() -> &'static str {

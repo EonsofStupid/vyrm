@@ -17,12 +17,15 @@ fn initialized_security_denies_governed_runtime_tools_but_keeps_public_status_pu
         id: CanonicalId::new("runtime-agent").unwrap(),
         kind: PrincipalKind::Service,
         credential_sha256: digest::sha256_hex(b"runtime-secret"),
+        credential_revision: 1,
         not_before_unix_ms: 1,
         expires_at_unix_ms: u64::MAX,
         disabled: false,
+        role_ids: Default::default(),
         grants: vec![ResourceGrant {
             action: SecurityAction::QueryExecute,
             resource_prefix: resource,
+            data_policy: None,
         }],
     };
     SecurityRepository::new(&storage, instance.clone())
@@ -31,6 +34,9 @@ fn initialized_security_denies_governed_runtime_tools_but_keeps_public_status_pu
                 format_version: rrd_security::SECURITY_FORMAT,
                 revision: 1,
                 principals: [(principal.id.clone(), principal)].into_iter().collect(),
+                roles: Default::default(),
+                identity_bindings: Default::default(),
+                jwt_issuers: Default::default(),
             },
             1,
             "test:security",

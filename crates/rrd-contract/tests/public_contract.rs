@@ -419,6 +419,8 @@ fn query_contract_is_transport_neutral_bounded_and_strict() {
         schema_revision: 1,
         plan: QueryPlanSnapshot {
             plan_sha256: "b".repeat(64),
+            security_policy_revision: 4,
+            authorization_sha256: "c".repeat(64),
             exact: true,
             deterministic_order: "identity_ascending".into(),
             authorization_boundary: "scope:instance:project-alpha".into(),

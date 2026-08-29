@@ -258,23 +258,30 @@ fn query_transaction_requires_the_existing_begin_and_commit_grants() {
                         id: principal_id.clone(),
                         kind: PrincipalKind::Service,
                         credential_sha256: digest::sha256_hex(b"query-program-key"),
+                        credential_revision: 1,
                         not_before_unix_ms: 1,
                         expires_at_unix_ms: u64::MAX,
                         disabled: false,
+                        role_ids: Default::default(),
                         grants: vec![
                             ResourceGrant {
                                 action: SecurityAction::SessionCreate,
                                 resource_prefix: resource.clone(),
+                                data_policy: None,
                             },
                             ResourceGrant {
                                 action: SecurityAction::TransactionBegin,
                                 resource_prefix: resource,
+                                data_policy: None,
                             },
                         ],
                     },
                 )]
                 .into_iter()
                 .collect(),
+                roles: Default::default(),
+                identity_bindings: Default::default(),
+                jwt_issuers: Default::default(),
             },
             1,
             "query-program-security",

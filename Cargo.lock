@@ -4666,11 +4666,14 @@ dependencies = [
 name = "rrd-security"
 version = "0.1.0"
 dependencies = [
+ "base64 0.22.1",
+ "hmac",
  "rrd-contract",
  "rrd-core",
  "rrd-store",
  "serde",
  "serde_json",
+ "sha2",
  "tempfile",
 ]
 

@@ -3317,3 +3317,36 @@ index.
   servers, and use a named bounded process/socket deadline. Changefeed and live
   waits remain within their public five-second limit. The complete 17-test
   process suite passed three consecutive normal-parallelism runs after the fix.
+
+## 2026-08-29 — G05-W03 identity and authorization foundation candidate
+
+- Expanded the one durable security authority with credential revisions,
+  bounded acyclic inherited roles, exact third-party issuer/subject/audience
+  bindings, RRD JWT issuer metadata, constrained grants, and one revisioned CAS
+  replacement path. Exact replacement replay is a no-op; stale revisions,
+  inheritance cycles, ambiguous equally specific policies, and unknown
+  references deny.
+- Added bounded HS256 JWT issue/verify with issuer, audience, key, principal,
+  token, validity-window, policy-revision, and credential-revision binding.
+  Only key/credential hashes persist. API-key, JWT, and externally verified
+  identities create the same durable principal-bound session.
+- Bound every authenticated session to the principal credential revision and
+  fixed the shared engine invocation boundary to check that revision before
+  authorization. Rotation or revocation now invalidates old JWTs and already
+  issued leases across reopen for HTTP, SDK, and tool-adapter callers.
+- Added typed tenant and row equality predicates plus allowed-field policy.
+  RRFlowQL injects these restrictions before bind/plan, rejects explicit
+  forbidden fields, and publishes the compiled policy revision and
+  authorization digest. Callers without a policy injector deny constrained
+  grants rather than widening them.
+- Added owner-only mounted JWT key support to the server, JWT bearer session
+  exchange, honest capability negotiation, and the existing rule that every
+  non-loopback listener requires initialized security plus TLS 1.3 mTLS.
+- Native and real-socket evidence covers role inheritance, exact external
+  binding, token tamper/expiry, issuer and credential rotation, principal
+  revocation, authority replay/reopen, cross-tenant and row exclusion,
+  field projection/denial, durable denied audit, restart replay, old-token and
+  old-lease rejection, and recursive exclusion of raw JWT/key material.
+- Regenerated the TypeScript OpenAPI schema. The two additive query-plan
+  security evidence fields advance the reviewed digest to
+  `78716ccb2720fbee0a0beffba06b4efc605f073a8e72ccca4c72b1ed4ccd7fe5`.

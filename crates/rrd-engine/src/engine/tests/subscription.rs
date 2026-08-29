@@ -412,9 +412,11 @@ fn subscription_open_requires_both_subscription_and_stream_permissions() {
         id: principal_id.clone(),
         kind: PrincipalKind::Service,
         credential_sha256: digest::sha256_hex(b"subscription-policy-key"),
+        credential_revision: 1,
         not_before_unix_ms: 1,
         expires_at_unix_ms: u64::MAX,
         disabled: false,
+        role_ids: Default::default(),
         grants: [
             SecurityAction::SessionCreate,
             SecurityAction::SubscriptionOpen,
@@ -423,6 +425,7 @@ fn subscription_open_requires_both_subscription_and_stream_permissions() {
         .map(|action| ResourceGrant {
             action,
             resource_prefix: resource.clone(),
+            data_policy: None,
         })
         .collect(),
     };
@@ -432,6 +435,9 @@ fn subscription_open_requires_both_subscription_and_stream_permissions() {
                 format_version: rrd_security::SECURITY_FORMAT,
                 revision: 1,
                 principals: [(principal_id.clone(), principal)].into_iter().collect(),
+                roles: Default::default(),
+                identity_bindings: Default::default(),
+                jwt_issuers: Default::default(),
             },
             1,
             "subscription-policy-test",

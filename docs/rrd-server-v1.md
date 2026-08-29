@@ -1,8 +1,10 @@
 # RRD server v1 implementation contract
 
-Status: F2 transaction foundation implemented. The async loopback HTTP and
-experimental TLS 1.3 mTLS boundaries plus persistent coordinator are shipped;
-the broader administration, query cancellation, metrics, mutating-query, and
+Status: F2 transaction and G05-W03 identity/authorization foundations
+implemented. The async loopback HTTP boundary, authenticated TLS 1.3 mTLS
+remote boundary, persistent transaction coordinator, API-key/JWT session
+exchange, and constrained RRFlowQL policy path are shipped; broader
+administration, query cancellation, metrics, mutating-query, and
 released-client exit gates remain open.
 
 The first RRD server is a new process boundary, not an HTTP wrapper around the
@@ -14,14 +16,16 @@ adapter. Both consume `rrd-contract`; neither owns persistence semantics.
 Plain HTTP may bind only to an explicit loopback address. Non-loopback
 cleartext startup fails closed. A TLS listener may bind remotely only when it
 requires a client certificate rooted in the configured CA and the target
-instance already has initialized `rrd-security` state. Session creation then requires a
-principal/API key, persists that principal on the lease, and every current
-authenticated route rechecks its closed action and exact resource policy. With
-no security state, sessions remain an explicitly advertised loopback development
-transport mode and TLS startup is denied. Certificate reload/revocation,
-credential-provider integration, field/row policy, and complete endpoint audit
-remain F4 gates. Project/instance provisioning is an explicit offline command;
-serving never creates or rewrites topology.
+instance already has initialized `rrd-security` state. Session creation then
+requires a principal/API key or a configured RRD-issued JWT, persists that
+principal and credential revision on the lease, and every authenticated route
+rechecks its closed action and exact resource policy. RRFlowQL additionally
+injects current tenant/row/field restrictions before binding and planning.
+With no security state, sessions remain an explicitly advertised loopback
+development transport mode and TLS/JWT startup is denied. Certificate reload,
+external OIDC/JWK verification, secret-provider integration, and comprehensive
+audit remain F4 follow-on gates. Project/instance provisioning is an explicit
+offline command; serving never creates or rewrites topology.
 
 Capability negotiation reports loopback/plain operation as `local_daemon` and
 mutual-TLS operation as `remote`. These are service faces of the same
@@ -43,12 +47,19 @@ The experimental remote path requires all three PEM inputs together:
 ```text
 rrd-server --root PROJECT --bind 0.0.0.0:9477 \
   --tls-cert SERVER_CHAIN.pem --tls-key SERVER_KEY.pem \
-  --tls-client-ca CLIENT_CA.pem
+  --tls-client-ca CLIENT_CA.pem \
+  --jwt-key-file JWT_SIGNING_KEY
 ```
 
 Rustls is restricted to TLS 1.3 for this listener. HTTP/1.1 connections are
 currently one request per connection; connection pooling, live certificate
 rotation, CRLs/OCSP, and Kubernetes Secret integration remain open.
+
+`--jwt-key-file` is optional and enables RRD-issued HS256 bearer exchange for
+session creation. The file must be regular, bounded, and owner-only on Unix;
+its SHA-256 must match one persisted issuer. Raw JWT and key bytes are held only
+in memory and are excluded from the security authority, session records, audit,
+and control journal.
 
 The database-local `RRD.SERVER.SECRET` is generated from OS entropy, requires
 owner-only permissions on Unix, and makes lease-token derivation stable across
@@ -281,6 +292,13 @@ Authorized session/query/audit work has a durable pre-execution reservation;
 the protected audit read returns thirteen authorization/completion records with
 only request/response digests. Reopened journal evidence contains neither raw
 API key nor authorization scheme.
+
+The JWT socket differential issues a bounded token, exchanges it for a durable
+session, executes an allowed field projection, denies and audits a forbidden
+field, restarts and replays the exact session request, rotates the principal
+credential revision, then proves both the old JWT and the already-issued lease
+return 401. A recursive persisted-tree check excludes the token and mounted
+signing key.
 
 F2 is not closed by that matrix. Remaining black-box gates are cancellation of
 long-running query work, deadline races during generalized commit,

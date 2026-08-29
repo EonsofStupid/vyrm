@@ -263,9 +263,11 @@ async fn rust_client_negotiates_authenticates_queries_and_reads_audit() {
         id: CanonicalId::new("rust-sdk").unwrap(),
         kind: PrincipalKind::Service,
         credential_sha256: digest::sha256_hex(b"sdk-api-key"),
+        credential_revision: 1,
         not_before_unix_ms: 1,
         expires_at_unix_ms: u64::MAX,
         disabled: false,
+        role_ids: Default::default(),
         grants: [
             Action::SessionCreate,
             Action::QueryExecute,
@@ -287,6 +289,7 @@ async fn rust_client_negotiates_authenticates_queries_and_reads_audit() {
         .map(|action| ResourceGrant {
             action,
             resource_prefix: resource.clone(),
+            data_policy: None,
         })
         .collect(),
     };
@@ -296,6 +299,9 @@ async fn rust_client_negotiates_authenticates_queries_and_reads_audit() {
                 format_version: SECURITY_FORMAT,
                 revision: 1,
                 principals: BTreeMap::from([(principal.id.clone(), principal)]),
+                roles: BTreeMap::new(),
+                identity_bindings: BTreeMap::new(),
+                jwt_issuers: BTreeMap::new(),
             },
             1,
             "bootstrap",
@@ -807,9 +813,11 @@ async fn loopback_rust_client_passes_the_shared_deployment_corpus() {
         id: CanonicalId::new("local-client").unwrap(),
         kind: PrincipalKind::Service,
         credential_sha256: digest::sha256_hex(b"local-conformance-key"),
+        credential_revision: 1,
         not_before_unix_ms: 1,
         expires_at_unix_ms: u64::MAX,
         disabled: false,
+        role_ids: Default::default(),
         grants: [
             Action::SessionCreate,
             Action::TransactionBegin,
@@ -822,6 +830,7 @@ async fn loopback_rust_client_passes_the_shared_deployment_corpus() {
             resource_prefix: ResourcePath {
                 segments: vec![ResourceId::new(ResourceKind::Instance, instance.as_str()).unwrap()],
             },
+            data_policy: None,
         })
         .collect(),
     };
@@ -831,6 +840,9 @@ async fn loopback_rust_client_passes_the_shared_deployment_corpus() {
                 format_version: SECURITY_FORMAT,
                 revision: 1,
                 principals: BTreeMap::from([(principal.id.clone(), principal)]),
+                roles: BTreeMap::new(),
+                identity_bindings: BTreeMap::new(),
+                jwt_issuers: BTreeMap::new(),
             },
             1,
             "bootstrap",
@@ -887,9 +899,11 @@ async fn remote_transport_requires_mutual_tls_and_exact_server_identity() {
         id: CanonicalId::new("mtls-client").unwrap(),
         kind: PrincipalKind::Service,
         credential_sha256: digest::sha256_hex(b"mtls-api-key"),
+        credential_revision: 1,
         not_before_unix_ms: 1,
         expires_at_unix_ms: u64::MAX,
         disabled: false,
+        role_ids: Default::default(),
         grants: [
             Action::SessionCreate,
             Action::TransactionBegin,
@@ -907,6 +921,7 @@ async fn remote_transport_requires_mutual_tls_and_exact_server_identity() {
             resource_prefix: ResourcePath {
                 segments: vec![ResourceId::new(ResourceKind::Instance, instance.as_str()).unwrap()],
             },
+            data_policy: None,
         })
         .collect(),
     };
@@ -916,6 +931,9 @@ async fn remote_transport_requires_mutual_tls_and_exact_server_identity() {
                 format_version: SECURITY_FORMAT,
                 revision: 1,
                 principals: BTreeMap::from([(principal.id.clone(), principal)]),
+                roles: BTreeMap::new(),
+                identity_bindings: BTreeMap::new(),
+                jwt_issuers: BTreeMap::new(),
             },
             1,
             "bootstrap",

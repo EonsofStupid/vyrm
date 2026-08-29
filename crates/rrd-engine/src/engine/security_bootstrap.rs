@@ -1,8 +1,9 @@
 use super::*;
 use rrd_security::{
-    Principal, PrincipalKind, ResourceGrant, SecurityRepository, SecurityState, SECURITY_FORMAT,
+    IdentityBinding, JwtIssuer, Principal, PrincipalKind, ResourceGrant, Role, SecurityRepository,
+    SecurityState, SECURITY_FORMAT,
 };
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs::File;
 use std::io::{self, Read};
 
@@ -22,6 +23,12 @@ struct BootstrapManifest {
     format_version: u16,
     revision: u64,
     principals: Vec<BootstrapPrincipal>,
+    #[serde(default)]
+    roles: Vec<Role>,
+    #[serde(default)]
+    identity_bindings: Vec<IdentityBinding>,
+    #[serde(default)]
+    jwt_issuers: Vec<JwtIssuer>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -30,8 +37,12 @@ struct BootstrapPrincipal {
     id: CanonicalId,
     kind: PrincipalKind,
     credential_file: PathBuf,
+    #[serde(default = "initial_credential_revision")]
+    credential_revision: u64,
     not_before_unix_ms: u64,
     expires_at_unix_ms: u64,
+    #[serde(default)]
+    role_ids: BTreeSet<CanonicalId>,
     grants: Vec<ResourceGrant>,
 }
 
@@ -97,8 +108,16 @@ fn materialize(
         )
         .into());
     }
+    let BootstrapManifest {
+        format_version: _,
+        revision,
+        principals: provisioned_principals,
+        roles,
+        identity_bindings,
+        jwt_issuers,
+    } = manifest;
     let mut principals = BTreeMap::new();
-    for provisioned in manifest.principals {
+    for provisioned in provisioned_principals {
         if !provisioned.credential_file.is_absolute() {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
@@ -116,9 +135,11 @@ fn materialize(
             id: provisioned.id.clone(),
             kind: provisioned.kind,
             credential_sha256: digest::sha256_hex(&credential),
+            credential_revision: provisioned.credential_revision,
             not_before_unix_ms: provisioned.not_before_unix_ms,
             expires_at_unix_ms: provisioned.expires_at_unix_ms,
             disabled: false,
+            role_ids: provisioned.role_ids,
             grants: provisioned.grants,
         };
         principal.validate()?;
@@ -132,11 +153,44 @@ fn materialize(
     }
     let state = SecurityState {
         format_version: SECURITY_FORMAT,
-        revision: manifest.revision,
+        revision,
         principals,
+        roles: unique_by_id(roles, |role| role.id.clone(), "bootstrap roles")?,
+        identity_bindings: unique_by_id(
+            identity_bindings,
+            |binding| binding.id.clone(),
+            "bootstrap identity bindings",
+        )?,
+        jwt_issuers: unique_by_id(
+            jwt_issuers,
+            |issuer| issuer.id.clone(),
+            "bootstrap JWT issuers",
+        )?,
     };
     state.validate()?;
     Ok(state)
+}
+
+fn unique_by_id<T>(
+    values: Vec<T>,
+    identity: impl Fn(&T) -> CanonicalId,
+    label: &str,
+) -> std::result::Result<BTreeMap<CanonicalId, T>, Box<dyn std::error::Error>> {
+    let mut indexed = BTreeMap::new();
+    for value in values {
+        if indexed.insert(identity(&value), value).is_some() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("{label} must have unique identities"),
+            )
+            .into());
+        }
+    }
+    Ok(indexed)
+}
+
+fn initial_credential_revision() -> u64 {
+    1
 }
 
 fn read_bounded(path: &Path, limit: u64, private: bool) -> io::Result<Vec<u8>> {

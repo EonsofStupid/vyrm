@@ -36,6 +36,11 @@ encoded-output bounds; its typed result carries the canonical query, read
 coordinates, plan evidence, execution counters, and rows. These types remain
 independent of `rrd_core`; the server performs an explicit lowering into the
 authoritative runtime rather than serializing private runtime structs.
+`QueryPlanSnapshot.security_policy_revision` and `authorization_sha256` bind
+public execution evidence to the exact compiled authorization. Revision zero
+is reserved for the explicitly unsecured loopback development mode; secured
+queries inject tenant/row filters and allowed-field projection before this plan
+is produced.
 
 Transaction preview is a durable prepare, not a read disguised as a write. Its
 mutation envelope requires idempotency, binds the pending write-set digest and

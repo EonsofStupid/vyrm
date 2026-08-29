@@ -57,7 +57,7 @@ use std::fmt;
 pub const PROTOCOL: &str = "rrd";
 pub const PROTOCOL_VERSION: u16 = 1;
 pub const OPENAPI_DOCUMENT_SHA256: &str =
-    "5e2374350f3a152f825013ed6610db42319868e268e7405174b536801ea2aa91";
+    "78716ccb2720fbee0a0beffba06b4efc605f073a8e72ccca4c72b1ed4ccd7fe5";
 pub const MAX_ID_BYTES: usize = 128;
 pub const MAX_MESSAGE_BYTES: usize = 4_096;
 pub const MAX_CAPABILITIES: usize = 512;
@@ -321,6 +321,10 @@ pub struct QueryPlanCandidate {
 #[serde(deny_unknown_fields)]
 pub struct QueryPlanSnapshot {
     pub plan_sha256: String,
+    /// Revision of the security authority compiled before query binding. Zero
+    /// denotes an explicitly unsecured loopback development engine.
+    pub security_policy_revision: u64,
+    pub authorization_sha256: String,
     pub exact: bool,
     pub deterministic_order: String,
     pub authorization_boundary: String,

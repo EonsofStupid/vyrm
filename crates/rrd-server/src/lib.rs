@@ -2,4 +2,6 @@
 
 mod http;
 
-pub use http::{HttpError, RrdHttpServer, RrdMutualTlsServerConfig, RRD_MAX_BODY_BYTES};
+pub use http::{
+    HttpError, RrdHttpServer, RrdJwtVerificationKey, RrdMutualTlsServerConfig, RRD_MAX_BODY_BYTES,
+};

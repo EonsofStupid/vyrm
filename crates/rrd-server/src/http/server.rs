@@ -6,6 +6,30 @@ pub struct RrdHttpServer {
     tls: Option<TlsAcceptor>,
 }
 
+/// In-memory verifier material for RRD-issued HS256 session credentials.
+/// Only its SHA-256 is persisted in the security authority.
+#[derive(Clone)]
+pub struct RrdJwtVerificationKey {
+    bytes: Arc<[u8]>,
+}
+
+impl RrdJwtVerificationKey {
+    pub fn new(bytes: Vec<u8>) -> Result<Self> {
+        if bytes.len() < 32 || bytes.len() > 64 * 1024 {
+            return Err(HttpError::Contract(
+                "JWT verification key must contain 32..=65536 bytes".into(),
+            ));
+        }
+        Ok(Self {
+            bytes: Arc::from(bytes),
+        })
+    }
+
+    pub(super) fn as_bytes(&self) -> &[u8] {
+        &self.bytes
+    }
+}
+
 /// A server identity whose verifier requires a trusted client certificate.
 ///
 /// The inner Rustls configuration is private so a remote RRD listener cannot
@@ -44,6 +68,7 @@ pub(super) struct AppState {
     pub(super) service: RrdEngine,
     pub(super) capabilities: ServiceCapabilities,
     pub(super) project_root: Option<std::path::PathBuf>,
+    pub(super) jwt_verification_key: Option<RrdJwtVerificationKey>,
 }
 
 impl RrdHttpServer {
@@ -51,7 +76,18 @@ impl RrdHttpServer {
         if !bind.ip().is_loopback() {
             return Err(HttpError::RemoteBindDenied(bind));
         }
-        Self::bind_inner(engine, bind, None, None)
+        Self::bind_inner(engine, bind, None, None, None)
+    }
+
+    pub fn bind_with_jwt(
+        engine: RrdEngine,
+        bind: SocketAddr,
+        jwt_verification_key: RrdJwtVerificationKey,
+    ) -> Result<Self> {
+        if !bind.ip().is_loopback() {
+            return Err(HttpError::RemoteBindDenied(bind));
+        }
+        Self::bind_inner(engine, bind, None, None, Some(jwt_verification_key))
     }
 
     pub fn bind_project(
@@ -62,7 +98,25 @@ impl RrdHttpServer {
         if !bind.ip().is_loopback() {
             return Err(HttpError::RemoteBindDenied(bind));
         }
-        Self::bind_inner(engine, bind, None, Some(project))
+        Self::bind_inner(engine, bind, None, Some(project), None)
+    }
+
+    pub fn bind_project_with_jwt(
+        engine: RrdEngine,
+        project: ProjectAuthorityBinding,
+        bind: SocketAddr,
+        jwt_verification_key: RrdJwtVerificationKey,
+    ) -> Result<Self> {
+        if !bind.ip().is_loopback() {
+            return Err(HttpError::RemoteBindDenied(bind));
+        }
+        Self::bind_inner(
+            engine,
+            bind,
+            None,
+            Some(project),
+            Some(jwt_verification_key),
+        )
     }
 
     pub fn bind_mtls(
@@ -70,7 +124,7 @@ impl RrdHttpServer {
         bind: SocketAddr,
         tls: RrdMutualTlsServerConfig,
     ) -> Result<Self> {
-        Self::bind_inner(engine, bind, Some(TlsAcceptor::from(tls.inner)), None)
+        Self::bind_inner(engine, bind, Some(TlsAcceptor::from(tls.inner)), None, None)
     }
 
     pub fn bind_project_mtls(
@@ -84,6 +138,23 @@ impl RrdHttpServer {
             bind,
             Some(TlsAcceptor::from(tls.inner)),
             Some(project),
+            None,
+        )
+    }
+
+    pub fn bind_project_mtls_with_jwt(
+        engine: RrdEngine,
+        project: ProjectAuthorityBinding,
+        bind: SocketAddr,
+        tls: RrdMutualTlsServerConfig,
+        jwt_verification_key: RrdJwtVerificationKey,
+    ) -> Result<Self> {
+        Self::bind_inner(
+            engine,
+            bind,
+            Some(TlsAcceptor::from(tls.inner)),
+            Some(project),
+            Some(jwt_verification_key),
         )
     }
 
@@ -92,6 +163,7 @@ impl RrdHttpServer {
         bind: SocketAddr,
         tls: Option<TlsAcceptor>,
         project: Option<ProjectAuthorityBinding>,
+        jwt_verification_key: Option<RrdJwtVerificationKey>,
     ) -> Result<Self> {
         let instance = engine.instance_id().clone();
         if let Some(project) = &project {
@@ -124,11 +196,23 @@ impl RrdHttpServer {
         if tls.is_some() && !security_enforced {
             return Err(HttpError::RemoteSecurityRequired);
         }
+        if jwt_verification_key.is_some() && !security_enforced {
+            return Err(HttpError::Contract(
+                "RRD JWT verification requires an initialized security authority".into(),
+            ));
+        }
         let tls_enabled = tls.is_some();
+        let jwt_enabled = jwt_verification_key.is_some();
         let listener =
             TcpListener::bind(bind).map_err(|error| HttpError::Bind(error.to_string()))?;
         listener.set_nonblocking(true)?;
-        let capabilities = capabilities(&instance, backend, security_enforced, tls_enabled);
+        let capabilities = capabilities(
+            &instance,
+            backend,
+            security_enforced,
+            tls_enabled,
+            jwt_enabled,
+        );
         capabilities
             .validate()
             .map_err(|error| HttpError::Contract(error.to_string()))?;
@@ -137,6 +221,7 @@ impl RrdHttpServer {
             service: engine,
             capabilities,
             project_root,
+            jwt_verification_key,
         });
         let app = Router::new()
             .route(

@@ -16,6 +16,7 @@ impl RrdEngine {
             request,
             idempotency_key,
             None,
+            None,
             now,
             request_id,
             operation_id,
@@ -33,18 +34,87 @@ impl RrdEngine {
         request_id: &str,
         operation_id: &str,
     ) -> Result<SessionLease> {
-        rrd_security::SecurityRepository::new(&self.storage, self.instance.clone())
-            .authenticate_and_authorize(
-                principal_id,
-                credential,
-                SecurityAction::SessionCreate,
-                &self.instance_resource(),
-                now,
-            )?;
+        let authorization =
+            rrd_security::SecurityRepository::new(&self.storage, self.instance.clone())
+                .authenticate_and_authorize(
+                    principal_id,
+                    credential,
+                    SecurityAction::SessionCreate,
+                    &self.instance_resource(),
+                    now,
+                )?;
         self.create_session_bound(
             request,
             idempotency_key,
             Some(principal_id.clone()),
+            Some(authorization.credential_revision),
+            now,
+            request_id,
+            operation_id,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn create_jwt_authenticated_session(
+        &self,
+        jwt: &str,
+        signing_key: &[u8],
+        request: &CreateSession,
+        idempotency_key: &CorrelationId,
+        now: u64,
+        request_id: &str,
+        operation_id: &str,
+    ) -> Result<SessionLease> {
+        let repository =
+            rrd_security::SecurityRepository::new(&self.storage, self.instance.clone());
+        let principal_id = repository.authenticate_jwt(jwt, signing_key, now)?;
+        let authorization = repository.authorize_principal(
+            &principal_id,
+            SecurityAction::SessionCreate,
+            &self.instance_resource(),
+            now,
+        )?;
+        self.create_session_bound(
+            request,
+            idempotency_key,
+            Some(principal_id),
+            Some(authorization.credential_revision),
+            now,
+            request_id,
+            operation_id,
+        )
+    }
+
+    /// Creates a session from a third-party identity only after the adapter
+    /// has cryptographically verified its assertion. RRD resolves the exact
+    /// persisted issuer/subject/audience binding and still applies the current
+    /// SessionCreate policy.
+    #[allow(clippy::too_many_arguments)]
+    pub fn create_verified_identity_session(
+        &self,
+        issuer: &str,
+        subject: &str,
+        audience: &str,
+        request: &CreateSession,
+        idempotency_key: &CorrelationId,
+        now: u64,
+        request_id: &str,
+        operation_id: &str,
+    ) -> Result<SessionLease> {
+        let repository =
+            rrd_security::SecurityRepository::new(&self.storage, self.instance.clone());
+        let principal_id = repository.resolve_verified_identity(issuer, subject, audience, now)?;
+        let authorization = repository.authorize_principal(
+            &principal_id,
+            SecurityAction::SessionCreate,
+            &self.instance_resource(),
+            now,
+        )?;
+        self.create_session_bound(
+            request,
+            idempotency_key,
+            Some(principal_id),
+            Some(authorization.credential_revision),
             now,
             request_id,
             operation_id,
@@ -57,6 +127,7 @@ impl RrdEngine {
         request: &CreateSession,
         idempotency_key: &CorrelationId,
         principal_id: Option<CanonicalId>,
+        principal_credential_revision: Option<u64>,
         now: u64,
         request_id: &str,
         operation_id: &str,
@@ -71,7 +142,9 @@ impl RrdEngine {
         let key = session_key(&self.instance, &session_id);
         if let Some(bytes) = self.storage.control_record(&key)? {
             let state = decode_session(&bytes)?;
-            if state.principal_id != principal_id {
+            if state.principal_id != principal_id
+                || state.principal_credential_revision != principal_credential_revision
+            {
                 return Err(ServiceError::IdempotencyConflict);
             }
             return self.replay_created_session(state, idempotency_key, &operation_sha256);
@@ -94,6 +167,7 @@ impl RrdEngine {
             format_version: SESSION_STATE_FORMAT,
             session_id: session_id.clone(),
             principal_id,
+            principal_credential_revision,
             status: SessionStatus::Active,
             issued_at_unix_ms: now,
             idle_expires_at_unix_ms: idle_expires,
@@ -128,7 +202,7 @@ impl RrdEngine {
         operation: RrdOperation,
         context: &RequestContext,
         now: u64,
-    ) -> Result<Option<CanonicalId>> {
+    ) -> Result<(Option<CanonicalId>, Option<u64>)> {
         let key = session_key(&self.instance, session_id);
         let bytes = self
             .storage
@@ -148,7 +222,7 @@ impl RrdEngine {
             _ => false,
         };
         if authenticated_replay {
-            return Ok(state.principal_id);
+            return Ok((state.principal_id, state.principal_credential_revision));
         }
         if state.token_sha256 != presented_sha256 {
             return Err(ServiceError::Unauthenticated);
@@ -161,7 +235,7 @@ impl RrdEngine {
             context.request_id.as_str(),
             context.operation_id.as_str(),
         )?;
-        Ok(state.principal_id)
+        Ok((state.principal_id, state.principal_credential_revision))
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -323,6 +397,29 @@ impl RrdEngine {
         request_id: &str,
         operation_id: &str,
     ) -> Result<(Vec<u8>, SessionState)> {
+        let (bytes, state, _) = self.authorize_resource(
+            session_id,
+            token,
+            action,
+            &self.instance_resource(),
+            now,
+            request_id,
+            operation_id,
+        )?;
+        Ok((bytes, state))
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(in crate::engine) fn authorize_resource(
+        &self,
+        session_id: &CorrelationId,
+        token: &CorrelationId,
+        action: SecurityAction,
+        resource: &ResourcePath,
+        now: u64,
+        request_id: &str,
+        operation_id: &str,
+    ) -> Result<(Vec<u8>, SessionState, Option<rrd_security::Authorization>)> {
         let (bytes, mut state) = self.load_authenticated(session_id, token)?;
         self.require_active_or_expire(
             session_id,
@@ -332,8 +429,8 @@ impl RrdEngine {
             request_id,
             operation_id,
         )?;
-        self.authorize_session_policy(&state, action, now)?;
-        Ok((bytes, state))
+        let authorization = self.compile_session_authorization(&state, action, resource, now)?;
+        Ok((bytes, state, authorization))
     }
 
     pub(in crate::engine) fn load_authenticated(

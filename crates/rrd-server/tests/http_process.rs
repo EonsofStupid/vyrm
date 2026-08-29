@@ -9,14 +9,14 @@ use rrd_core::{
 };
 use rrd_engine::{load_or_create_token_key, InstanceManifest, RrdEngine};
 use rrd_security::{
-    Action as SecurityAction, Principal, PrincipalKind, ResourceGrant, SecurityRepository,
-    SecurityState, SECURITY_FORMAT,
+    Action as SecurityAction, AuditDecision, AuditPhase, DataPolicy, JwtIssueRequest, JwtIssuer,
+    Principal, PrincipalKind, ResourceGrant, SecurityRepository, SecurityState, SECURITY_FORMAT,
 };
-use rrd_server::{HttpError, RrdHttpServer, RRD_MAX_BODY_BYTES};
+use rrd_server::{HttpError, RrdHttpServer, RrdJwtVerificationKey, RRD_MAX_BODY_BYTES};
 use rrd_store::Engine;
 use rrd_store::PersistentEngine;
 use serde_json::{json, Value};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::io::{Read, Write};
 use std::net::{Shutdown, SocketAddr, TcpStream};
 use std::path::{Path, PathBuf};
@@ -126,11 +126,29 @@ impl Drop for RunningServer {
 }
 
 fn start(root: &Path) -> RunningServer {
+    start_configured(root, None)
+}
+
+fn start_with_jwt(root: &Path, key: &[u8]) -> RunningServer {
+    start_configured(
+        root,
+        Some(RrdJwtVerificationKey::new(key.to_vec()).unwrap()),
+    )
+}
+
+fn start_configured(
+    root: &Path,
+    jwt_verification_key: Option<RrdJwtVerificationKey>,
+) -> RunningServer {
     let fixture = acquire_server_fixture();
     let token_key = load_or_create_token_key(&root.join("RRD.SERVER.SECRET")).unwrap();
     let engine =
         RrdEngine::open(root, CanonicalId::new("socket-test").unwrap(), token_key).unwrap();
-    let server = RrdHttpServer::bind(engine, "127.0.0.1:0".parse().unwrap()).unwrap();
+    let bind = "127.0.0.1:0".parse().unwrap();
+    let server = match jwt_verification_key {
+        Some(key) => RrdHttpServer::bind_with_jwt(engine, bind, key).unwrap(),
+        None => RrdHttpServer::bind(engine, bind).unwrap(),
+    };
     let address = server.local_addr();
     let (shutdown, receiver) = tokio::sync::oneshot::channel();
     let thread = std::thread::spawn(move || {
@@ -413,17 +431,21 @@ fn initialized_security_authority_binds_sessions_and_denies_ungranted_routes() {
         id: CanonicalId::new("connectome-local").unwrap(),
         kind: PrincipalKind::User,
         credential_sha256: rrd_core::digest::sha256_hex(b"local-api-key"),
+        credential_revision: 1,
         not_before_unix_ms: 1,
         expires_at_unix_ms: u64::MAX,
         disabled: false,
+        role_ids: Default::default(),
         grants: vec![
             ResourceGrant {
                 action: SecurityAction::SessionCreate,
                 resource_prefix: resource.clone(),
+                data_policy: None,
             },
             ResourceGrant {
                 action: SecurityAction::QueryExecute,
                 resource_prefix: resource,
+                data_policy: None,
             },
             ResourceGrant {
                 action: SecurityAction::AuditRead,
@@ -434,6 +456,7 @@ fn initialized_security_authority_binds_sessions_and_denies_ungranted_routes() {
                     )
                     .unwrap()],
                 },
+                data_policy: None,
             },
         ],
     };
@@ -443,6 +466,9 @@ fn initialized_security_authority_binds_sessions_and_denies_ungranted_routes() {
                 format_version: SECURITY_FORMAT,
                 revision: 1,
                 principals: BTreeMap::from([(principal.id.clone(), principal)]),
+                roles: BTreeMap::new(),
+                identity_bindings: BTreeMap::new(),
+                jwt_issuers: BTreeMap::new(),
             },
             1,
             "bootstrap",
@@ -578,6 +604,236 @@ fn initialized_security_authority_binds_sessions_and_denies_ungranted_routes() {
     assert!(!encoded.contains("ApiKey"));
     drop(reopened);
     assert_tree_excludes(&root, &["local-api-key", token]);
+}
+
+#[test]
+fn jwt_session_exchange_reopens_and_credential_rotation_revokes_token_and_lease() {
+    let temporary = tempfile::tempdir().unwrap();
+    let root = temporary.path().join("jwt-instance");
+    seed_query_fixture(&root);
+    let signing_key = b"rrd-jwt-test-signing-key-material";
+    let issued_at = u64::try_from(
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis(),
+    )
+    .unwrap();
+    let principal_id = CanonicalId::new("jwt-client").unwrap();
+    let issuer_id = CanonicalId::new("rrd-test-issuer").unwrap();
+    let resource = rrd_contract::ResourcePath {
+        segments: vec![rrd_contract::ResourceId::new(
+            rrd_contract::ResourceKind::Instance,
+            "socket-test",
+        )
+        .unwrap()],
+    };
+    let principal = Principal {
+        id: principal_id.clone(),
+        kind: PrincipalKind::Service,
+        credential_sha256: rrd_core::digest::sha256_hex(b"jwt-api-key"),
+        credential_revision: 1,
+        not_before_unix_ms: 1,
+        expires_at_unix_ms: u64::MAX,
+        disabled: false,
+        role_ids: Default::default(),
+        grants: vec![
+            ResourceGrant {
+                action: SecurityAction::SessionCreate,
+                resource_prefix: resource.clone(),
+                data_policy: None,
+            },
+            ResourceGrant {
+                action: SecurityAction::QueryExecute,
+                resource_prefix: resource.clone(),
+                data_policy: Some(DataPolicy {
+                    tenant: None,
+                    rows: Vec::new(),
+                    allowed_fields: Some(BTreeSet::from(["title".into()])),
+                }),
+            },
+        ],
+    };
+    let issuer = JwtIssuer {
+        id: issuer_id.clone(),
+        issuer: "https://rrd.test".into(),
+        audience: "rrflow-client".into(),
+        key_id: CanonicalId::new("jwt-key-1").unwrap(),
+        signing_key_sha256: rrd_core::digest::sha256_hex(signing_key),
+        not_before_unix_ms: 1,
+        expires_at_unix_ms: u64::MAX,
+        disabled: false,
+    };
+    let storage = PersistentEngine::open(&root).unwrap();
+    SecurityRepository::new(&storage, CanonicalId::new("socket-test").unwrap())
+        .initialize(
+            SecurityState {
+                format_version: SECURITY_FORMAT,
+                revision: 1,
+                principals: BTreeMap::from([(principal_id.clone(), principal)]),
+                roles: BTreeMap::new(),
+                identity_bindings: BTreeMap::new(),
+                jwt_issuers: BTreeMap::from([(issuer_id.clone(), issuer)]),
+            },
+            1,
+            "bootstrap",
+            "request-jwt-bootstrap",
+            "operation-jwt-bootstrap",
+        )
+        .unwrap();
+    drop(storage);
+    let token_key = load_or_create_token_key(&root.join("RRD.SERVER.SECRET")).unwrap();
+    let engine =
+        RrdEngine::open(&root, CanonicalId::new("socket-test").unwrap(), token_key).unwrap();
+    let jwt = engine
+        .issue_principal_jwt(
+            &principal_id,
+            b"jwt-api-key",
+            signing_key,
+            &JwtIssueRequest {
+                issuer_id,
+                token_id: CanonicalId::new("jwt-exchange-1").unwrap(),
+                issued_at_unix_ms: issued_at,
+                not_before_unix_ms: issued_at,
+                expires_at_unix_ms: issued_at + 60_000,
+            },
+        )
+        .unwrap();
+    drop(engine);
+
+    let create = envelope(
+        json!({
+            "limits": {
+                "idle_timeout_ms": 60_000,
+                "absolute_timeout_ms": 120_000,
+                "max_open_transactions": 2
+            }
+        }),
+        Some("jwt-session-create"),
+        None,
+    );
+    let create_body = serde_json::to_vec(&create).unwrap();
+    let authorization = format!("Bearer {}", jwt.token);
+    let server = start_with_jwt(&root, signing_key);
+    let (status, capabilities) = http(server.address, "GET", "/v1/capabilities", &[], &[]);
+    assert_eq!(status, 200);
+    let advertised = payload(&capabilities)["capabilities"].as_array().unwrap();
+    assert!(advertised.iter().any(|entry| {
+        entry["name"] == "jwt-session-credentials" && entry["status"] == "available"
+    }));
+    let (status, created) = http(
+        server.address,
+        "POST",
+        "/v1/sessions",
+        &[
+            ("Content-Type", "application/json"),
+            ("Authorization", &authorization),
+        ],
+        &create_body,
+    );
+    assert_eq!(status, 200, "{created}");
+    let session_id = payload(&created)["session_id"].as_str().unwrap().to_owned();
+    let session_token = payload(&created)["token"].as_str().unwrap().to_owned();
+    let query = envelope(
+        json!({
+            "scope": "instance:socket-test",
+            "query": "FROM record:document AT VALID 100 KNOWN HEAD PROJECT title",
+            "parameters": {},
+            "budget": {
+                "max_scanned_changes": 100,
+                "max_rows": 10,
+                "max_output_bytes": 4096,
+                "max_batch_rows": 10
+            }
+        }),
+        None,
+        None,
+    );
+    let (status, queried) = post(
+        &server,
+        "/v1/query",
+        &query,
+        Some((&session_id, &session_token)),
+    );
+    assert_eq!(status, 200, "{queried}");
+    let mut forbidden_field_query = query.clone();
+    forbidden_field_query["payload"]["query"] =
+        json!("FROM record:document AT VALID 100 KNOWN HEAD PROJECT secret");
+    let (status, denied) = post(
+        &server,
+        "/v1/query",
+        &forbidden_field_query,
+        Some((&session_id, &session_token)),
+    );
+    assert_eq!(status, 403, "{denied}");
+    assert_eq!(denied["outcome"]["error"]["code"], "permission_denied");
+    server.stop();
+
+    let server = start_with_jwt(&root, signing_key);
+    let (status, replay) = http(
+        server.address,
+        "POST",
+        "/v1/sessions",
+        &[
+            ("Content-Type", "application/json"),
+            ("Authorization", &authorization),
+        ],
+        &create_body,
+    );
+    assert_eq!(status, 200, "{replay}");
+    assert_eq!(payload(&replay)["session_id"], session_id);
+    server.stop();
+
+    let storage = PersistentEngine::open(&root).unwrap();
+    let repository = SecurityRepository::new(&storage, CanonicalId::new("socket-test").unwrap());
+    let audit = repository.audit_since(0, 64).unwrap();
+    assert!(audit.records.iter().any(|(_, record)| {
+        record.action == SecurityAction::QueryExecute
+            && record.phase == AuditPhase::Completed
+            && record.decision == AuditDecision::Denied
+            && record.status_code == 403
+    }));
+    let mut rotated = repository.load().unwrap().unwrap();
+    rotated.revision = 2;
+    let principal = rotated.principals.get_mut(&principal_id).unwrap();
+    principal.credential_revision = 2;
+    principal.credential_sha256 = rrd_core::digest::sha256_hex(b"rotated-jwt-api-key");
+    repository
+        .replace(
+            1,
+            rotated,
+            issued_at + 1,
+            "security-admin",
+            "request-jwt-rotate",
+            "operation-jwt-rotate",
+        )
+        .unwrap();
+    drop(storage);
+
+    let server = start_with_jwt(&root, signing_key);
+    let (status, _) = http(
+        server.address,
+        "POST",
+        "/v1/sessions",
+        &[
+            ("Content-Type", "application/json"),
+            ("Authorization", &authorization),
+        ],
+        &create_body,
+    );
+    assert_eq!(status, 401);
+    let (status, _) = post(
+        &server,
+        "/v1/query",
+        &query,
+        Some((&session_id, &session_token)),
+    );
+    assert_eq!(status, 401);
+    server.stop();
+    assert_tree_excludes(
+        &root,
+        &[&jwt.token, std::str::from_utf8(signing_key).unwrap()],
+    );
 }
 
 #[test]
@@ -1892,7 +2148,7 @@ fn binary_refuses_remote_bind() {
     assert!(!output.status.success());
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
-        stderr.contains("denied before F4 security"),
+        stderr.contains("denied without authenticated TLS"),
         "unexpected stderr: {stderr}"
     );
 }

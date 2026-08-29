@@ -147,6 +147,10 @@ pub enum InvocationCredential<'a> {
         principal_id: &'a CanonicalId,
         credential: &'a [u8],
     },
+    Jwt {
+        token: &'a str,
+        signing_key: &'a [u8],
+    },
     Session {
         session_id: &'a CorrelationId,
         token: &'a CorrelationId,
@@ -199,8 +203,25 @@ impl RrdEngine {
                 Ok(Some(principal_id.clone()))
             })(),
             InvocationCredential::ApiKey { .. } => Ok(None),
+            InvocationCredential::Jwt { token, signing_key } if security_enforced => (|| {
+                let principal_id = repository.authenticate_jwt(
+                    token,
+                    signing_key,
+                    invocation.observed_at_unix_ms,
+                )?;
+                authenticated_principal = Some(principal_id.clone());
+                self.authorize_principal(
+                    &principal_id,
+                    operation.action(),
+                    &invocation.resource,
+                    invocation.observed_at_unix_ms,
+                )?;
+                Ok(Some(principal_id))
+            })(
+            ),
+            InvocationCredential::Jwt { .. } => Err(ServiceError::Unauthenticated),
             InvocationCredential::Session { session_id, token } => (|| {
-                let principal = self.invocation_session_principal(
+                let (principal, credential_revision) = self.invocation_session_principal(
                     session_id,
                     token,
                     operation,
@@ -210,12 +231,15 @@ impl RrdEngine {
                 authenticated_principal = principal.clone();
                 if security_enforced {
                     let principal_id = principal.as_ref().ok_or(ServiceError::Unauthenticated)?;
-                    self.authorize_principal(
+                    let authorization = self.authorize_principal(
                         principal_id,
                         operation.action(),
                         &invocation.resource,
                         invocation.observed_at_unix_ms,
                     )?;
+                    if credential_revision != Some(authorization.credential_revision) {
+                        return Err(ServiceError::Unauthenticated);
+                    }
                 }
                 Ok(principal)
             })(),

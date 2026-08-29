@@ -62,9 +62,11 @@ fn runtime_dispatch_preserves_api_key_and_session_principals_through_nested_exec
         id: principal_id.clone(),
         kind: PrincipalKind::Service,
         credential_sha256: digest::sha256_hex(credential),
+        credential_revision: 1,
         not_before_unix_ms: 1,
         expires_at_unix_ms: u64::MAX,
         disabled: false,
+        role_ids: Default::default(),
         grants: [
             SecurityAction::SessionCreate,
             SecurityAction::QueryIndexList,
@@ -74,6 +76,7 @@ fn runtime_dispatch_preserves_api_key_and_session_principals_through_nested_exec
         .map(|action| ResourceGrant {
             action,
             resource_prefix: instance_resource.clone(),
+            data_policy: None,
         })
         .collect(),
     };
@@ -84,6 +87,9 @@ fn runtime_dispatch_preserves_api_key_and_session_principals_through_nested_exec
                 format_version: rrd_security::SECURITY_FORMAT,
                 revision: 1,
                 principals: [(principal_id.clone(), principal)].into_iter().collect(),
+                roles: Default::default(),
+                identity_bindings: Default::default(),
+                jwt_issuers: Default::default(),
             },
             1,
             "test:runtime-caller",

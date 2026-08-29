@@ -52,7 +52,7 @@ use rrd_core::{
     RuntimeSeriesSample, RuntimeTableSchema, RuntimeType, RuntimeValue, RuntimeValueType,
     RuntimeVector, ScopeId, SeriesValue, Subject, Tier, VectorNormalization, VectorValue,
 };
-use rrd_query::{CursorExpr, Projection, TimeExpr};
+use rrd_query::{ComparisonOperator, CursorExpr, Filter, Projection, TimeExpr, ValueExpr};
 use rrd_store::{
     ControlTransition, Engine, EngineBox, MemoryObjectStore, ObjectStoreBox, PersistentEngine,
 };
@@ -98,7 +98,7 @@ pub use invocation::{
     AuthorizedInvocation, Invocation, InvocationCompletion, InvocationCredential, RrdOperation,
 };
 use model::*;
-pub use security::MAX_AUDIT_PAGE_RECORDS;
+pub use security::{MAX_AUDIT_PAGE_RECORDS, MAX_JWT_CREDENTIAL_BYTES};
 pub use security_bootstrap::SecurityBootstrapOutcome;
 use session::*;
 pub use token_key::{
@@ -115,6 +115,8 @@ struct SessionState {
     session_id: CorrelationId,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     principal_id: Option<CanonicalId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    principal_credential_revision: Option<u64>,
     status: SessionStatus,
     issued_at_unix_ms: u64,
     idle_expires_at_unix_ms: u64,

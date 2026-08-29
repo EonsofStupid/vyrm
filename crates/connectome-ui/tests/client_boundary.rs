@@ -117,9 +117,11 @@ fn start_rrd() -> (tempfile::TempDir, RunningRrd) {
         id: CanonicalId::new("connectome-client").unwrap(),
         kind: PrincipalKind::Service,
         credential_sha256: digest::sha256_hex(b"connectome-api-key"),
+        credential_revision: 1,
         not_before_unix_ms: 1,
         expires_at_unix_ms: u64::MAX,
         disabled: false,
+        role_ids: Default::default(),
         grants: [
             Action::SessionCreate,
             Action::DiagnosticsRead,
@@ -132,6 +134,7 @@ fn start_rrd() -> (tempfile::TempDir, RunningRrd) {
         .map(|action| ResourceGrant {
             action,
             resource_prefix: resource.clone(),
+            data_policy: None,
         })
         .collect(),
     };
@@ -141,6 +144,9 @@ fn start_rrd() -> (tempfile::TempDir, RunningRrd) {
                 format_version: SECURITY_FORMAT,
                 revision: 1,
                 principals: BTreeMap::from([(principal.id.clone(), principal)]),
+                roles: BTreeMap::new(),
+                identity_bindings: BTreeMap::new(),
+                jwt_issuers: BTreeMap::new(),
             },
             1,
             "bootstrap",

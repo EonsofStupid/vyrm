@@ -1,6 +1,7 @@
 use super::*;
 
 pub const MAX_AUDIT_PAGE_RECORDS: u64 = rrd_security::MAX_AUDIT_PAGE as u64;
+pub const MAX_JWT_CREDENTIAL_BYTES: u64 = rrd_security::MAX_JWT_BYTES as u64;
 
 pub(in crate::engine) struct AuditEvent {
     pub at_unix_ms: u64,
@@ -18,6 +19,58 @@ pub(in crate::engine) struct AuditEvent {
 }
 
 impl RrdEngine {
+    pub fn issue_principal_jwt(
+        &self,
+        principal_id: &CanonicalId,
+        credential: &[u8],
+        signing_key: &[u8],
+        request: &rrd_security::JwtIssueRequest,
+    ) -> Result<rrd_security::JwtCredential> {
+        let repository =
+            rrd_security::SecurityRepository::new(&self.storage, self.instance.clone());
+        repository.authenticate_and_authorize(
+            principal_id,
+            credential,
+            SecurityAction::SessionCreate,
+            &self.instance_resource(),
+            request.issued_at_unix_ms,
+        )?;
+        repository
+            .issue_jwt(principal_id, credential, signing_key, request)
+            .map_err(Into::into)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn replace_security_authority(
+        &self,
+        session_id: &CorrelationId,
+        token: &CorrelationId,
+        expected_revision: u64,
+        replacement: rrd_security::SecurityState,
+        now: u64,
+        request_id: &str,
+        operation_id: &str,
+    ) -> Result<()> {
+        self.authorize(
+            session_id,
+            token,
+            SecurityAction::SecurityAdmin,
+            now,
+            request_id,
+            operation_id,
+        )?;
+        rrd_security::SecurityRepository::new(&self.storage, self.instance.clone())
+            .replace(
+                expected_revision,
+                replacement,
+                now,
+                "rrd-engine-security-admin",
+                request_id,
+                operation_id,
+            )
+            .map_err(Into::into)
+    }
+
     pub(in crate::engine) fn instance_resource(&self) -> ResourcePath {
         ResourcePath {
             segments: vec![ResourceId::new(
@@ -34,17 +87,37 @@ impl RrdEngine {
         action: SecurityAction,
         now: u64,
     ) -> Result<()> {
+        let authorization =
+            self.compile_session_authorization(state, action, &self.instance_resource(), now)?;
+        if authorization.is_some_and(|authorization| authorization.data_policy.is_some()) {
+            return Err(ServiceError::PermissionDenied);
+        }
+        Ok(())
+    }
+
+    pub(in crate::engine) fn compile_session_authorization(
+        &self,
+        state: &SessionState,
+        action: SecurityAction,
+        resource: &ResourcePath,
+        now: u64,
+    ) -> Result<Option<rrd_security::Authorization>> {
         let repository =
             rrd_security::SecurityRepository::new(&self.storage, self.instance.clone());
         if !repository.is_initialized()? {
-            return Ok(());
+            return Ok(None);
         }
         let principal = state
             .principal_id
             .as_ref()
             .ok_or(ServiceError::Unauthenticated)?;
-        repository.authorize_principal(principal, action, &self.instance_resource(), now)?;
-        Ok(())
+        let authorization = repository
+            .authorize_principal(principal, action, resource, now)
+            .map_err(ServiceError::from)?;
+        if state.principal_credential_revision != Some(authorization.credential_revision) {
+            return Err(ServiceError::Unauthenticated);
+        }
+        Ok(Some(authorization))
     }
 
     pub fn security_enforced(&self) -> Result<bool> {
@@ -69,10 +142,10 @@ impl RrdEngine {
         action: SecurityAction,
         resource: &ResourcePath,
         now: u64,
-    ) -> Result<()> {
+    ) -> Result<rrd_security::Authorization> {
         rrd_security::SecurityRepository::new(&self.storage, self.instance.clone())
-            .authorize_principal(principal_id, action, resource, now)?;
-        Ok(())
+            .authorize_principal(principal_id, action, resource, now)
+            .map_err(Into::into)
     }
 
     pub(in crate::engine) fn append_audit(&self, event: AuditEvent) -> Result<()> {

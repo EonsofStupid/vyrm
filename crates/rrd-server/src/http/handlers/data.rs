@@ -63,10 +63,11 @@ impl AppState {
             None,
             |envelope, session, token| {
                 self.service
-                    .execute_query(
+                    .execute_query_scoped(
                         session,
                         token,
                         &envelope.payload,
+                        &envelope.resource,
                         now,
                         envelope.context.request_id.as_str(),
                         envelope.context.operation_id.as_str(),

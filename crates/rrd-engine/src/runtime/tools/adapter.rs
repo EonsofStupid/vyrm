@@ -9,6 +9,10 @@ pub(super) enum AdapterCaller<'a> {
         principal_id: &'a CanonicalId,
         credential: &'a [u8],
     },
+    Jwt {
+        token: &'a str,
+        signing_key: &'a [u8],
+    },
     Session {
         session_id: &'a CorrelationId,
         token: &'a CorrelationId,
@@ -81,6 +85,18 @@ impl AdapterSession {
             }
             AdapterCaller::ApiKey { .. } => {
                 let lease = engine.create_session(
+                    &request,
+                    &session_key,
+                    at,
+                    request_id.as_str(),
+                    operation_id.as_str(),
+                )?;
+                (lease.session_id, lease.token)
+            }
+            AdapterCaller::Jwt { token, signing_key } => {
+                let lease = engine.create_jwt_authenticated_session(
+                    token,
+                    signing_key,
                     &request,
                     &session_key,
                     at,

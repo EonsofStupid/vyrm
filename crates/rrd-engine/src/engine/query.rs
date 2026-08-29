@@ -11,25 +11,68 @@ impl RrdEngine {
         request_id: &str,
         operation_id: &str,
     ) -> Result<QueryResult> {
+        self.execute_query_scoped(
+            session_id,
+            token,
+            request,
+            &self.instance_resource(),
+            now,
+            request_id,
+            operation_id,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn execute_query_scoped(
+        &self,
+        session_id: &CorrelationId,
+        token: &CorrelationId,
+        request: &ExecuteQuery,
+        resource: &ResourcePath,
+        now: u64,
+        request_id: &str,
+        operation_id: &str,
+    ) -> Result<QueryResult> {
         request
             .validate()
             .map_err(|error| ServiceError::Query(error.to_string()))?;
-        self.authorize(
+        let (_, _, authorization) = self.authorize_resource(
             session_id,
             token,
             SecurityAction::QueryExecute,
+            resource,
             now,
             request_id,
             operation_id,
         )?;
+        let (security_policy_revision, authorization_sha256, data_policy) = authorization
+            .map_or_else(
+                || {
+                    (
+                        0,
+                        digest::sha256_hex(b"rrd-security-disabled-loopback-development"),
+                        None,
+                    )
+                },
+                |authorization| {
+                    (
+                        authorization.policy_revision,
+                        authorization.authorization_sha256,
+                        authorization.data_policy,
+                    )
+                },
+            );
         let expected_scope = format!("instance:{}", self.instance);
         if request.scope != expected_scope {
             return Err(ServiceError::WrongScope);
         }
         let scope = ScopeId::new(request.scope.clone())
             .map_err(|error| ServiceError::Query(error.to_string()))?;
-        let query = rrd_query::parse(&request.query)
+        let mut query = rrd_query::parse(&request.query)
             .map_err(|error| ServiceError::Query(error.to_string()))?;
+        if let Some(policy) = &data_policy {
+            apply_query_policy(&mut query, policy)?;
+        }
         let parameters = request
             .parameters
             .iter()
@@ -67,6 +110,8 @@ impl RrdEngine {
             schema_revision: bound.schema_revision,
             plan: QueryPlanSnapshot {
                 plan_sha256: plan.digest.clone(),
+                security_policy_revision,
+                authorization_sha256,
                 exact: plan.explanation.contract.exact,
                 deterministic_order: plan.explanation.contract.deterministic_order.clone(),
                 authorization_boundary: plan.explanation.contract.authorization_boundary.clone(),
@@ -403,6 +448,32 @@ impl RrdEngine {
                 .collect::<Result<_>>()?,
         })
     }
+}
+
+fn apply_query_policy(
+    query: &mut rrd_query::Query,
+    policy: &rrd_security::DataPolicy,
+) -> Result<()> {
+    for predicate in policy.predicates() {
+        query.filters.push(Filter {
+            field: predicate.field.clone(),
+            comparison: ComparisonOperator::Equal,
+            value: ValueExpr::Literal(predicate.value.clone()),
+        });
+    }
+    if let Some(allowed) = &policy.allowed_fields {
+        match &query.projection {
+            Projection::All => {
+                query.projection = Projection::Fields(allowed.iter().cloned().collect())
+            }
+            Projection::Fields(requested)
+                if requested.iter().all(|field| allowed.contains(field)) => {}
+            Projection::Fields(_) => return Err(ServiceError::PermissionDenied),
+        }
+    }
+    query
+        .validate()
+        .map_err(|error| ServiceError::Query(error.to_string()))
 }
 
 fn public_query_row(row: &rrd_query::QueryRow) -> Result<QueryRowSnapshot> {

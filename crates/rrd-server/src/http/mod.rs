@@ -51,7 +51,7 @@ mod router;
 mod server;
 mod websocket;
 
-use auth::{api_key_identity, authenticated_session, header_values};
+use auth::{authenticated_session, header_values, session_creation_identity, SessionIdentity};
 use capabilities::{
     capabilities, estate_action, parse_correlation, session_action, session_id, transaction_action,
     transaction_id, unix_time_ms,
@@ -65,7 +65,7 @@ use router::dispatch;
 use server::AppState;
 use websocket::subscription_websocket_upgrade;
 
-pub use server::{RrdHttpServer, RrdMutualTlsServerConfig};
+pub use server::{RrdHttpServer, RrdJwtVerificationKey, RrdMutualTlsServerConfig};
 
 pub const RRD_MAX_BODY_BYTES: usize = 1024 * 1024;
 static HTTP_ID_COUNTER: AtomicU64 = AtomicU64::new(1);
@@ -86,7 +86,10 @@ impl fmt::Display for HttpError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::RemoteBindDenied(address) => {
-                write!(formatter, "remote bind {address} denied before F4 security")
+                write!(
+                    formatter,
+                    "remote bind {address} denied without authenticated TLS"
+                )
             }
             Self::RemoteSecurityRequired => formatter.write_str(
                 "RRD mTLS listeners require an initialized application security authority",

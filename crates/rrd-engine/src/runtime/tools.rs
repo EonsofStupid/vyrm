@@ -512,6 +512,9 @@ fn adapter_caller(credential: InvocationCredential<'_>) -> AdapterCaller<'_> {
             principal_id,
             credential,
         },
+        InvocationCredential::Jwt { token, signing_key } => {
+            AdapterCaller::Jwt { token, signing_key }
+        }
         InvocationCredential::Session { session_id, token } => {
             AdapterCaller::Session { session_id, token }
         }

@@ -524,9 +524,10 @@ As of 2026-08-29:
 - TurboQuant contract variants and an experimental physical artifact path are
   present, but they are not a qualified Qdrant-complete collection lifecycle or
   an automatic memory-pressure policy;
-- current authorization reloads security state and linearly scans direct
-  grants per request; compiled roles/privileges and the locked warm-path
-  performance invariant remain incomplete;
+- current authorization reloads one revisioned authority, expands bounded
+  acyclic roles, selects the most-specific exact resource grant, and compiles
+  tenant/row/field RRFlowQL restrictions before planning. A locked warm-path
+  compiled-policy cache and non-query data-policy injectors remain incomplete;
 - several source files exceed 2,000 lines, so migration must extract reviewed
   responsibilities rather than merely rename oversized modules;
 - existing RRD wire contracts and SDK names are closer to the target than the

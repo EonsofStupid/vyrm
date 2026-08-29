@@ -38,6 +38,7 @@ pub(super) fn capabilities(
     backend: CanonicalId,
     security_enforced: bool,
     tls_enabled: bool,
+    jwt_enabled: bool,
 ) -> ServiceCapabilities {
     let mut capabilities = vec![
         CapabilityDescriptor {
@@ -85,7 +86,7 @@ pub(super) fn capabilities(
                 rrd_contract::MAX_TRANSACTION_CLAIMS as u64,
             )]),
             limitation: Some(
-                "atomic schema, claim, record, relation, event, vector, series, geo, and pre-staged object-reference commits; mutating RRFlowQL and read-your-writes remain open"
+                "atomic schema, claim, record, relation, event, vector, series, geo, and pre-staged object-reference commits with durable all-model prospective read-your-writes; mutating RRFlowQL remains open"
                     .into(),
             ),
         },
@@ -138,6 +139,26 @@ pub(super) fn capabilities(
             ),
         },
         CapabilityDescriptor {
+            name: CanonicalId::new("jwt-session-credentials").unwrap(),
+            contract_version: 1,
+            status: if jwt_enabled {
+                CapabilityStatus::Available
+            } else {
+                CapabilityStatus::Unavailable
+            },
+            limits: BTreeMap::from([(
+                CanonicalId::new("max-token-bytes").unwrap(),
+                rrd_engine::MAX_JWT_CREDENTIAL_BYTES,
+            )]),
+            limitation: Some(if jwt_enabled {
+                "RRD-issued HS256 bearer exchange bound to issuer, audience, key id, principal, credential revision, expiry, and current policy"
+                    .into()
+            } else {
+                "configure an owner-only JWT key file and matching persisted issuer"
+                    .into()
+            }),
+        },
+        CapabilityDescriptor {
             name: CanonicalId::new("lifecycle-journal").unwrap(),
             contract_version: 1,
             status: CapabilityStatus::Available,
@@ -173,7 +194,10 @@ pub(super) fn capabilities(
             )]),
             limitation: Some(if security_enforced {
                 if tls_enabled {
-                    "principal-authenticated policy-bound sessions over TLS 1.3 mutual authentication"
+                    "API-key or configured JWT principal sessions over TLS 1.3 mutual authentication"
+                        .into()
+                } else if jwt_enabled {
+                    "API-key or JWT principal sessions on loopback; configure mTLS for remote transport"
                         .into()
                 } else {
                     "principal-authenticated policy-bound loopback sessions; configure mTLS for remote transport"
@@ -220,7 +244,7 @@ pub(super) fn capabilities(
             },
             limits: BTreeMap::new(),
             limitation: Some(if security_enforced {
-                "persistent principals and exact deny-by-default endpoint policy; provisioning and TLS remain open"
+                "revisioned principals, inherited roles, credentials, issuers, external identity bindings, exact resource grants, and compiled tenant/row/field RRFlowQL policy; constrained operations without an injector deny"
                     .into()
             } else {
                 "no persistent security authority is initialized for this instance".into()

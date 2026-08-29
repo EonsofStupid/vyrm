@@ -12285,6 +12285,7 @@ export interface operations {
                                 known_at_cursor: number;
                                 plan: {
                                     authorization_boundary: string;
+                                    authorization_sha256: string;
                                     candidates: {
                                         exact: boolean;
                                         name: string;
@@ -12294,6 +12295,12 @@ export interface operations {
                                     deterministic_order: string;
                                     exact: boolean;
                                     plan_sha256: string;
+                                    /**
+                                     * Format: uint64
+                                     * @description Revision of the security authority compiled before query binding. Zero
+                                     *     denotes an explicitly unsecured loopback development engine.
+                                     */
+                                    security_policy_revision: number;
                                 };
                                 read_manifest_sha256: string;
                                 rows: {
@@ -12424,6 +12431,7 @@ export interface operations {
                                 known_at_cursor: number;
                                 plan: {
                                     authorization_boundary: string;
+                                    authorization_sha256: string;
                                     candidates: {
                                         exact: boolean;
                                         name: string;
@@ -12433,6 +12441,12 @@ export interface operations {
                                     deterministic_order: string;
                                     exact: boolean;
                                     plan_sha256: string;
+                                    /**
+                                     * Format: uint64
+                                     * @description Revision of the security authority compiled before query binding. Zero
+                                     *     denotes an explicitly unsecured loopback development engine.
+                                     */
+                                    security_policy_revision: number;
                                 };
                                 read_manifest_sha256: string;
                                 rows: {

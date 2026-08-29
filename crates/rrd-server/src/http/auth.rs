@@ -1,5 +1,13 @@
 use super::*;
 
+pub(super) enum SessionIdentity {
+    ApiKey {
+        principal_id: CanonicalId,
+        credential: String,
+    },
+    Jwt(String),
+}
+
 pub(super) fn authenticated_session(
     headers: &HeaderMap,
     expected_session: Option<&str>,
@@ -80,6 +88,47 @@ pub(super) fn api_key_identity(
         CanonicalId::new(principals[0])
             .map_err(|error| ApiError::new(ErrorCode::Unauthenticated, error.to_string(), false))?,
         credential.into(),
+    ))
+}
+
+pub(super) fn session_creation_identity(
+    headers: &HeaderMap,
+) -> std::result::Result<SessionIdentity, ApiError> {
+    let authorizations = header_values(headers, "Authorization").map_err(|_| {
+        ApiError::new(
+            ErrorCode::Unauthenticated,
+            "exactly one supported session credential is required",
+            false,
+        )
+    })?;
+    if authorizations.len() != 1 {
+        return Err(ApiError::new(
+            ErrorCode::Unauthenticated,
+            "exactly one authorization header is required",
+            false,
+        ));
+    }
+    if authorizations[0].starts_with("ApiKey ") {
+        let (principal_id, credential) = api_key_identity(headers)?;
+        return Ok(SessionIdentity::ApiKey {
+            principal_id,
+            credential,
+        });
+    }
+    if let Some(token) = authorizations[0].strip_prefix("Bearer ") {
+        if headers.contains_key("X-RRD-Principal") || token.is_empty() {
+            return Err(ApiError::new(
+                ErrorCode::Unauthenticated,
+                "JWT bearer session creation must not include X-RRD-Principal",
+                false,
+            ));
+        }
+        return Ok(SessionIdentity::Jwt(token.into()));
+    }
+    Err(ApiError::new(
+        ErrorCode::Unauthenticated,
+        "session creation Authorization must use ApiKey or Bearer JWT",
+        false,
     ))
 }
 

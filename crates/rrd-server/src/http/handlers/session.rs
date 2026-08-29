@@ -15,7 +15,10 @@ impl AppState {
             |envelope, identity| {
                 let idempotency_key = required_idempotency(&envelope.context)?;
                 match identity {
-                    Some((principal_id, credential)) => self.service.create_authenticated_session(
+                    Some(SessionIdentity::ApiKey {
+                        principal_id,
+                        credential,
+                    }) => self.service.create_authenticated_session(
                         &principal_id,
                         credential.as_bytes(),
                         &envelope.payload,
@@ -24,6 +27,19 @@ impl AppState {
                         envelope.context.request_id.as_str(),
                         envelope.context.operation_id.as_str(),
                     ),
+                    Some(SessionIdentity::Jwt(jwt)) => {
+                        self.service.create_jwt_authenticated_session(
+                            &jwt,
+                            self.jwt_verification_key
+                                .as_ref()
+                                .map_or(&[], |key| key.as_bytes()),
+                            &envelope.payload,
+                            idempotency_key,
+                            now,
+                            envelope.context.request_id.as_str(),
+                            envelope.context.operation_id.as_str(),
+                        )
+                    }
                     None => self.service.create_session(
                         &envelope.payload,
                         idempotency_key,

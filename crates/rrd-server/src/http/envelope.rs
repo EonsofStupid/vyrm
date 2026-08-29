@@ -12,10 +12,7 @@ impl AppState {
     where
         T: DeserializeOwned,
         O: Serialize,
-        F: FnOnce(
-            &RequestEnvelope<T>,
-            Option<(CanonicalId, String)>,
-        ) -> std::result::Result<O, ApiError>,
+        F: FnOnce(&RequestEnvelope<T>, Option<SessionIdentity>) -> std::result::Result<O, ApiError>,
     {
         let attempt = HTTP_ID_COUNTER.fetch_add(1, Ordering::Relaxed);
         let envelope = match parse_envelope::<T>(
@@ -41,8 +38,8 @@ impl AppState {
             }
         };
         let invocation = invocation(&envelope, body, now, attempt);
-        let identity = if has_api_key_headers(headers) {
-            match api_key_identity(headers) {
+        let identity = if has_session_creation_headers(headers) {
+            match session_creation_identity(headers) {
                 Ok(identity) => Some(identity),
                 Err(error) => {
                     return self.rejected_response(
@@ -61,12 +58,26 @@ impl AppState {
             None
         };
         let authorized = match identity.as_ref() {
-            Some((principal_id, credential)) => self.service.begin_invocation(
+            Some(SessionIdentity::ApiKey {
+                principal_id,
+                credential,
+            }) => self.service.begin_invocation(
                 invocation,
                 operation_kind,
                 InvocationCredential::ApiKey {
                     principal_id,
                     credential: credential.as_bytes(),
+                },
+            ),
+            Some(SessionIdentity::Jwt(token)) => self.service.begin_invocation(
+                invocation,
+                operation_kind,
+                InvocationCredential::Jwt {
+                    token,
+                    signing_key: self
+                        .jwt_verification_key
+                        .as_ref()
+                        .map_or(&[], |key| key.as_bytes()),
                 },
             ),
             None => self.service.begin_invocation(
@@ -246,13 +257,8 @@ pub(super) fn invocation_completion(response: &HttpResponse) -> InvocationComple
     }
 }
 
-fn has_api_key_headers(headers: &HeaderMap) -> bool {
-    headers.contains_key("X-RRD-Principal")
-        || headers
-            .get_all("Authorization")
-            .iter()
-            .filter_map(|value| value.to_str().ok())
-            .any(|value| value.starts_with("ApiKey "))
+fn has_session_creation_headers(headers: &HeaderMap) -> bool {
+    headers.contains_key("X-RRD-Principal") || headers.contains_key("Authorization")
 }
 
 pub(in crate::http) fn parse_envelope<T: DeserializeOwned>(

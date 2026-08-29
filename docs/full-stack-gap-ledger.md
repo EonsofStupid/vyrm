@@ -506,32 +506,36 @@ authentication, or organization-wide authorization.
 
 ### F4 — establish security and governance before remote management
 
-**Status:** in progress. The persistent authority core is implemented in
-`rrd-security` and specified by [`rrd-security-v1.md`](rrd-security-v1.md).
-It stores bounded user/service/node principals with credential verifiers,
-validity/disable state, and exact action/resource-prefix grants. Missing policy,
+**Status:** identity/authorization foundation implemented; comprehensive audit
+remains in progress. One revisioned `rrd-security` authority persists bounded
+users/services/nodes, credential revisions, direct and inherited acyclic roles,
+RRD JWT issuers, exact post-verification third-party identity bindings, and
+most-specific action/resource grants. Complete-authority administration is a
+single compare-and-swap transition with exact replay. Missing/ambiguous policy,
 unknown or expired principals, wrong credentials, ungranted actions, and wrong
-resource prefixes deny by default. Typed redacted audit records are immutable,
-idempotent, and replayed through the authenticated RRFlow control journal.
-Native reopen tests prove policy and audit persistence without journaling the
-raw credential. When security state exists, the real server now authenticates
-session creation with a principal/API key, durably binds that principal to the
-session, maps every current authenticated route to a closed action, and
-re-evaluates current exact resource policy on every request. A real-socket
-differential proves missing/wrong credential denial, allowed query, and denied
-ungranted backup with no data mutation. Routed success, authorization denial,
-and execution failure are now written as redacted typed audit completions and
-available through a policy-protected bounded public read whose cursor advances
-over unrelated control history. The socket/reopen test proves all three
-decision classes and absence of API-key material from public and journal
-evidence. Pre-effect audit reservation is now implemented for authorized
-routed work. An experimental TLS 1.3 mTLS listener/client now admits remote
-binding only with initialized application security, requires a trusted client
-certificate, verifies the exact server name, and advertises its transport mode;
-plain HTTP remains loopback-only. Provisioning APIs, certificate reload/
-revocation, secret providers, row/field policy, rate limits, application-
-mutation/audit-completion atomicity, oversized-body/handler-failure coverage,
-retention/rotation, and external archival remain open.
+resources deny by default.
+
+API-key, RRD-issued short-lived JWT, and externally verified identities all
+create the same principal- and credential-revision-bound durable session. JWT
+claims bind issuer/audience/key/principal/token/policy/credential revisions;
+disablement, issuer/key rotation, or credential rotation invalidates old tokens
+and existing leases across reopen. Only credential/key digests persist. Exact
+tenant and row predicates plus allowed fields are injected into RRFlowQL before
+binding/planning, with policy revision/digest in public plan evidence;
+constrained operations without an injector deny. Real-socket evidence covers
+allowed/forbidden fields, durable denied audit, restart replay, rotation, old
+JWT/lease rejection, and recursive secret exclusion.
+
+Typed redacted audit records remain immutable/idempotent in the authenticated
+control journal. Routed success, denial, and failure are available through the
+protected bounded read, and authorized routed work has a pre-effect audit
+reservation. TLS 1.3 mTLS is the only non-loopback listener: it requires
+initialized application security, a trusted client certificate, and exact
+server-name verification. External OIDC/JWK cryptographic verification remains
+an adapter responsibility. Certificate hot reload/revocation, secret providers,
+rate limits, application-mutation/audit-completion atomicity, complete
+security-admin audit, oversized-body/handler-failure coverage, retention, and
+external archival remain open under later F4 work.
 
 The first provisioning boundary is now executable through
 `rrd-security-bootstrap`. A strict versioned manifest references mounted
@@ -539,8 +543,9 @@ credential files; only credential digests enter the persistent authority. It
 is idempotent for identical material, denies drift after initialization, accepts
 only bounded/private in-mount credential files, and has restart/reopen evidence.
 This unblocks fresh Kubernetes volumes without adding an unauthenticated server
-bootstrap route. Authorized ongoing policy/credential administration remains
-open.
+bootstrap route. Authorized ongoing policy/credential administration is
+available through the engine CAS authority; generated public administration
+surfaces remain G06 work.
 
 **Deliverables**
 
