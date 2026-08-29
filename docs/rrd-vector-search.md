@@ -1,6 +1,6 @@
-# RRFlow vector/search contract (M5)
+# RRD vector/search and online HNSW contract
 
-Status: local executable reference gate, 2026-08-19.
+Status: G04-W02 executable engine gate, 2026-08-29.
 
 `rrd-vector` is the rebuildable search layer over canonical `RuntimeVector`
 versions. The data-runtime commit log remains truth. An index may accelerate a
@@ -33,7 +33,7 @@ The portable contract and projection identities are frozen by
 
 ## Persistent collection control
 
-The first F7 product-facing control surface is now executable. A
+The product-facing control surface is executable. A
 `VectorCollectionRepository` stores a versioned catalogue in authoritative
 control state and advances it through compare-and-swap journal transitions.
 Each collection owns one or more named vector definitions binding field, value
@@ -42,23 +42,21 @@ pinned/cached/cold placement. Accepted mutations retain bounded operation
 receipts so exact retries survive restart and changed payloads under one key
 conflict.
 
-RRD exposes authenticated ensure/list operations with separate deny-by-default
-actions. Collection-addressed search resolves the stored definition and rejects
-kind/dimension drift before planning. Atomic `put_vector` mutations may also
-bind collection plus vector name; commit validates field, kind, dimensions, and
-model provenance before retaining the vector and payload properties in the
-unified data transaction. Native reopen and real-process tests prove replay,
-collision, list, denial, bound point commit, and exact search through the
-catalogue. Dedicated point lifecycle/scroll APIs, payload indexes, physical
-memory-tier enforcement, and persistent ANN artifact serving remain open.
+RRD exposes authenticated collection and typed payload-index lifecycle
+operations with separate deny-by-default actions. Collection-addressed search
+resolves the stored definition and rejects kind/dimension drift before planning.
+Atomic point batches and valid-time retirement use the same `RuntimeCommit`
+authority as every other logical model. Retrieve, scroll, exact search, HNSW,
+and collection-deletion preflight reduce that history at one read stamp.
 
-RRD search now exposes the oracle's complete bounded payload-filter algebra:
+RRD search exposes the oracle's complete bounded payload-filter algebra:
 equals/not-equals, membership, range, existence, and recursive all/any/not.
-The server lowers public values into the existing exact filter evaluator rather
-than maintaining transport-specific semantics. A real committed point proves a
-matching tenant filter returns it and a non-matching filter returns no hit.
-This is exact one-stage semantic filtering; persisted payload indexes and
-persisted filter-aware HNSW serving remain separate open gates.
+The server lowers public values into one filter evaluator rather than
+maintaining transport-specific semantics. HNSW configuration may name only
+active typed payload indexes; deletion of a property used by an active HNSW or
+TurboQuant artifact fails closed. The same expression participates in graph
+layer-zero admission and final exact reranking, including nested all/any/not,
+equality, inequality, membership, range, and existence semantics.
 
 `POST /v1/vector/points/scroll` adds the first dedicated point-read lifecycle
 operation. It resolves the named collection space, captures one authoritative
@@ -71,15 +69,17 @@ deny-by-default action.
 resolves the same collection visibility snapshot, returns found points in
 request order, and explicitly returns missing references. It has an independent
 authorization action and does not infer absence from an omitted result.
-First-class deletion remains open.
+Point deletion is the ordinary batched `retire_data` mutation. Collection
+deletion remains fail-closed while points or active approximate artifacts exist.
 
 ## Rebuildable projections
 
 Two canonical JSON reference artifacts currently exist:
 
 1. `ImmutableVectorSegment` stores authenticated exact candidate history.
-2. `HnswIndex` stores deterministic dense-vector HNSW with a wider layer zero,
-   heap-based traversal, filter-aware candidate admission, and exact reranking.
+2. `HnswIndex` format v2 stores deterministic dense-vector HNSW with a wider
+   layer zero, heap-based traversal, filter-aware candidate admission, exact
+   reranking, and explicit full-build versus incremental-generation evidence.
 
 Both carry a `ProjectionStamp` with contract version, identity, configuration
 digest, artifact digest, generation, source cursor, and lifecycle state. The
@@ -90,11 +90,20 @@ when no supplied `(projection id, generation)` pin protects them.
 
 `VectorRuntime` is the in-process coordinator. It plans from the current catalog
 and then rechecks the selected artifact against the exact published descriptor
-before execution. `Exact` never selects HNSW. `RequireApproximate` fails if no
-fresh HNSW exists. `AllowApproximate` can fall back to exact. Highly selective
-filters raise estimated graph cost because traversal still needs non-matching
-nodes for navigation; the reference planner uses a conservative four-unit
-navigation multiplier.
+before execution. `Exact` never selects HNSW. A post-generation vector delta no
+longer makes the graph unusable: insertion, update, and retirement versions are
+searched exactly beside HNSW candidates and share final exact visibility,
+filtering, scoring, and ordering. The plan records the immutable base cursor,
+overlay cursor, and delta count. `RequireApproximate` therefore keeps the graph
+path while new authoritative data is immediately visible; `AllowApproximate`
+may still choose a cheaper exact scan. Highly selective filters raise estimated
+graph cost because traversal needs non-matching navigation nodes.
+
+For unchanged configuration, maintenance inserts only versions after the
+active generation's source cursor. It builds a new immutable graph while the
+old generation remains readable, then publishes object bytes and the catalogue
+record with one CAS. Authoritative transactions and searches do not wait for
+that publication. Configuration changes deliberately perform a full build.
 
 The in-process coordinator is not durable truth. Node publication explicitly
 records the artifact codec (`exact_segment`, `compact_dense`, or `hnsw`), stages
@@ -144,10 +153,13 @@ The same run observed:
   reranking 64 candidates.
 
 The deterministic test matrix additionally covers an independent scalar exact
-oracle, Memory/Fjall/native log differential, 512-vector unfiltered/selective
-recall gate, corrupt/stale denial, and eight generations of mixed updates,
-valid-time deletes, deterministic rebuild, byte reopen, catalog replacement,
-snapshot-protected retirement, and reclamation.
+oracle, Memory/Fjall/native log differential, and 512-vector fixed corpora for
+cosine, dot, Euclidean, and Manhattan at 100%, 50%, 10%, and 1% selectivity.
+Scalar and runtime-dispatched AVX2 HNSW results are identical and mean
+Recall@10 is at least 0.95 in every cell with `ef=128`. Separate tests cover
+nested filter algebra, corrupt/stale denial, immediate insertion/retirement
+overlays, and eight incremental generations of mixed updates and valid-time
+deletes with deterministic byte reopen and catalogue replacement.
 
 ## M6 extension
 
@@ -175,9 +187,10 @@ establish superiority over Qdrant or any other vector database.
   Public artifact build/lifecycle APIs, SIMD, broad quality/latency evidence,
   and the paper's residual QJL estimator are not implemented.
 - HNSW graph artifacts remain canonical JSON and storage-heavy. Dense exact
-  payloads now have a compact mmap representation; compact graph/payload bitmap
-  indexes and background optimization remain open.
-- Scalar and AVX2 exact kernels exist. The GPU boundary verifies adapter output,
+  payloads have a compact mmap representation; compact graph and payload-bitmap
+  layouts, ACORN-style payload-derived edges, and automatic merge thresholds
+  remain open.
+- Scalar and AVX2 HNSW and exact kernels exist. The GPU boundary verifies adapter output,
   but no physical GPU adapter, shard replication, or live cross-system
   benchmark is certified yet.
 - Recall depends strongly on dimension, corpus, graph parameters, filter

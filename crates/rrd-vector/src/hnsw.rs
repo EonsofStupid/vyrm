@@ -1,5 +1,5 @@
 use crate::contract::invalid;
-use crate::exact::{score_dense_candidate, validate_candidate_versions};
+use crate::exact::{score_dense, validate_candidate_versions};
 use crate::{
     search_exact, AccessPathKind, CandidatePath, EmbeddingModelBinding, ScoreMetric, SearchHit,
     SearchMode, SearchRequest, VectorCandidate, VectorQuery,
@@ -12,14 +12,37 @@ use serde::{Deserialize, Serialize};
 use std::cmp::{Ordering, Reverse};
 use std::collections::{BTreeMap, BTreeSet, BinaryHeap};
 
-pub const HNSW_FORMAT_VERSION: u16 = 1;
-const HNSW_MAGIC: &str = "RRDHNS01";
+pub const HNSW_FORMAT_VERSION: u16 = 2;
+const HNSW_MAGIC: &str = "RRDHNS02";
 const MAX_HNSW_BYTES: usize = 1 << 30;
 const MAX_HNSW_NODES: usize = 10_000_000;
 // A graph visit performs vector scoring plus heap/navigation work. Four
 // score-equivalent units is deliberately conservative at filter crossovers;
 // callers may still force ANN through `RequireApproximate`.
 const HNSW_NAVIGATION_COST_MULTIPLIER: usize = 4;
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum HnswMaintenanceKind {
+    #[default]
+    FullBuild,
+    Incremental,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HnswKernel {
+    Scalar,
+    /// Runtime-dispatched AVX2 on supported x86_64 hosts, otherwise scalar.
+    Auto,
+}
+
+fn is_full_build(value: &HnswMaintenanceKind) -> bool {
+    *value == HnswMaintenanceKind::FullBuild
+}
+
+fn is_zero(value: &usize) -> bool {
+    *value == 0
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -91,6 +114,12 @@ pub struct HnswDescriptor {
     pub nodes: usize,
     #[serde(default)]
     pub filter_properties: BTreeSet<String>,
+    #[serde(default, skip_serializing_if = "is_full_build")]
+    pub maintenance: HnswMaintenanceKind,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub previous_generation: Option<u64>,
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub indexed_delta_vectors: usize,
 }
 
 impl HnswDescriptor {
@@ -115,6 +144,19 @@ impl HnswDescriptor {
         if let Some(model) = &self.embedding_model {
             model.validate()?;
         }
+        match self.maintenance {
+            HnswMaintenanceKind::FullBuild if self.previous_generation.is_some() => {
+                return invalid("full-build HNSW descriptor cannot name a previous generation");
+            }
+            HnswMaintenanceKind::Incremental
+                if self.previous_generation != self.stamp.generation.checked_sub(1)
+                    || self.indexed_delta_vectors == 0
+                    || self.indexed_delta_vectors > self.nodes =>
+            {
+                return invalid("incremental HNSW descriptor has incoherent maintenance evidence");
+            }
+            HnswMaintenanceKind::FullBuild | HnswMaintenanceKind::Incremental => {}
+        }
         Ok(())
     }
 
@@ -129,6 +171,8 @@ impl HnswDescriptor {
             filter_properties: self.filter_properties.clone(),
             estimated_candidates: self.nodes as u64,
             estimated_cost,
+            overlay_source_cursor: None,
+            overlay_candidates: 0,
         }
     }
 }
@@ -150,6 +194,12 @@ struct HnswBody {
     source_cursor: u64,
     entrypoint: Option<usize>,
     nodes: Vec<HnswNode>,
+    #[serde(default, skip_serializing_if = "is_full_build")]
+    maintenance: HnswMaintenanceKind,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    previous_generation: Option<u64>,
+    #[serde(default, skip_serializing_if = "is_zero")]
+    indexed_delta_vectors: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -212,8 +262,99 @@ impl HnswIndex {
             generation,
             source_cursor,
             entrypoint,
+            indexed_delta_vectors: nodes.len(),
             nodes,
+            maintenance: HnswMaintenanceKind::FullBuild,
+            previous_generation: None,
         };
+        Self::from_body(body)
+    }
+
+    /// Appends only vector versions newer than this immutable generation.
+    ///
+    /// The returned generation is a new content-addressed artifact, so readers
+    /// continue serving the prior graph while insertion work runs. Publication
+    /// remains one catalogue CAS; no authoritative commit waits for graph work.
+    pub fn advance(
+        &self,
+        generation: u64,
+        source_cursor: u64,
+        candidates: impl IntoIterator<Item = VectorCandidate>,
+    ) -> Result<Self> {
+        let expected_generation =
+            self.descriptor
+                .stamp
+                .generation
+                .checked_add(1)
+                .ok_or_else(|| rrd_core::Error::InvalidRuntime {
+                    reason: "HNSW generation overflowed".into(),
+                })?;
+        if generation != expected_generation {
+            return invalid("incremental HNSW generation must immediately follow the active one");
+        }
+        if source_cursor <= self.descriptor.stamp.source_cursor {
+            return invalid("incremental HNSW source cursor must advance");
+        }
+        let mut candidates = candidates.into_iter().collect::<Vec<_>>();
+        if candidates.is_empty() {
+            return invalid("incremental HNSW update must contain at least one vector version");
+        }
+        if self
+            .nodes
+            .len()
+            .checked_add(candidates.len())
+            .is_none_or(|total| total > MAX_HNSW_NODES)
+        {
+            return invalid("HNSW node limit exceeded");
+        }
+        validate_candidate_versions(&candidates)?;
+        let existing = self
+            .nodes
+            .iter()
+            .map(|node| {
+                (
+                    node.candidate.vector.reference.clone(),
+                    node.candidate.source_cursor,
+                )
+            })
+            .collect::<BTreeSet<_>>();
+        candidates.sort_by(|left, right| {
+            left.source_cursor
+                .cmp(&right.source_cursor)
+                .then_with(|| left.vector.reference.cmp(&right.vector.reference))
+        });
+        for candidate in &candidates {
+            if candidate.source_cursor <= self.descriptor.stamp.source_cursor
+                || candidate.source_cursor > source_cursor
+                || existing.contains(&(candidate.vector.reference.clone(), candidate.source_cursor))
+                || candidate.scope != self.config.scope
+                || candidate.vector.field != self.config.field
+                || candidate.vector.value.dimensions() != self.config.dimensions
+                || !candidate.matches_model(self.config.embedding_model.as_ref())
+                || !matches!(candidate.vector.value, VectorValue::Dense { .. })
+            {
+                return invalid("incremental HNSW candidate violates configuration or coverage");
+            }
+        }
+        let indexed_delta_vectors = candidates.len();
+        let mut nodes = self.nodes.clone();
+        let mut entrypoint = self.entrypoint;
+        for candidate in candidates {
+            insert_node(&self.config, &mut nodes, &mut entrypoint, candidate)?;
+        }
+        Self::from_body(HnswBody {
+            config: self.config.clone(),
+            generation,
+            source_cursor,
+            entrypoint,
+            nodes,
+            maintenance: HnswMaintenanceKind::Incremental,
+            previous_generation: Some(self.descriptor.stamp.generation),
+            indexed_delta_vectors,
+        })
+    }
+
+    fn from_body(body: HnswBody) -> Result<Self> {
         let artifact_digest = digest::sha256_hex(&encode_json(&body)?);
         let envelope = HnswEnvelope {
             magic: HNSW_MAGIC.into(),
@@ -271,6 +412,9 @@ impl HnswIndex {
             max_level: envelope.body.config.max_level,
             nodes: envelope.body.nodes.len(),
             filter_properties: envelope.body.config.filter_properties.clone(),
+            maintenance: envelope.body.maintenance,
+            previous_generation: envelope.body.previous_generation,
+            indexed_delta_vectors: envelope.body.indexed_delta_vectors,
         };
         descriptor.validate()?;
         validate_graph(
@@ -301,6 +445,10 @@ impl HnswIndex {
 
     pub fn descriptor(&self) -> &HnswDescriptor {
         &self.descriptor
+    }
+
+    pub fn config(&self) -> &HnswConfig {
+        &self.config
     }
 
     pub fn as_bytes(&self) -> &[u8] {
@@ -354,7 +502,21 @@ impl HnswIndex {
     /// Generates HNSW candidates, then delegates final scoring, filtering, and
     /// deterministic ordering to the exact oracle.
     pub fn search(&self, request: &SearchRequest, ef_search: usize) -> Result<Vec<SearchHit>> {
-        self.search_at(request, ef_search, request.read.commit_cursor)
+        self.search_at_with_kernel(
+            request,
+            ef_search,
+            request.read.commit_cursor,
+            HnswKernel::Auto,
+        )
+    }
+
+    pub fn search_with_kernel(
+        &self,
+        request: &SearchRequest,
+        ef_search: usize,
+        kernel: HnswKernel,
+    ) -> Result<Vec<SearchHit>> {
+        self.search_at_with_kernel(request, ef_search, request.read.commit_cursor, kernel)
     }
 
     pub fn search_at(
@@ -363,10 +525,34 @@ impl HnswIndex {
         ef_search: usize,
         required_source_cursor: u64,
     ) -> Result<Vec<SearchHit>> {
+        self.search_at_with_kernel(request, ef_search, required_source_cursor, HnswKernel::Auto)
+    }
+
+    fn search_at_with_kernel(
+        &self,
+        request: &SearchRequest,
+        ef_search: usize,
+        required_source_cursor: u64,
+        kernel: HnswKernel,
+    ) -> Result<Vec<SearchHit>> {
         request.validate()?;
         if required_source_cursor > request.read.commit_cursor {
             return invalid("HNSW source cursor exceeds the request read stamp");
         }
+        if self.descriptor.stamp.source_cursor < required_source_cursor {
+            return invalid("HNSW artifact does not satisfy request identity or freshness");
+        }
+        let candidates = self.search_candidates_with_kernel(request, ef_search, kernel)?;
+        search_exact(request, candidates)
+    }
+
+    pub(crate) fn search_candidates_with_kernel(
+        &self,
+        request: &SearchRequest,
+        ef_search: usize,
+        kernel: HnswKernel,
+    ) -> Result<Vec<VectorCandidate>> {
+        request.validate()?;
         let exact_rerank = match request.mode {
             SearchMode::Exact => return invalid("HNSW cannot serve an exact-only request"),
             SearchMode::AllowApproximate { exact_rerank }
@@ -381,9 +567,8 @@ impl HnswIndex {
             || self.descriptor.metric != request.metric
             || self.descriptor.embedding_model != request.embedding_model
             || self.descriptor.dimensions != request.query.dimensions()
-            || self.descriptor.stamp.source_cursor < required_source_cursor
         {
-            return invalid("HNSW artifact does not satisfy request identity or freshness");
+            return invalid("HNSW artifact does not satisfy request identity");
         }
         let required = request
             .filter
@@ -410,24 +595,26 @@ impl HnswIndex {
                 current,
                 layer as usize,
                 self.config.metric,
+                kernel,
             )?;
         }
         let mut candidates = search_layer(
             &self.nodes,
             query,
             &[current],
-            ef_search,
-            0,
-            self.config.metric,
-            Some(&|id| self.is_visible(request, id)),
+            SearchLayerOptions {
+                ef: ef_search,
+                layer: 0,
+                metric: self.config.metric,
+                kernel,
+                eligible: Some(&|id| self.is_visible(request, id)),
+            },
         )?;
         candidates.truncate(exact_rerank);
-        search_exact(
-            request,
-            candidates
-                .into_iter()
-                .map(|scored| self.nodes[scored.id].candidate.clone()),
-        )
+        Ok(candidates
+            .into_iter()
+            .map(|scored| self.nodes[scored.id].candidate.clone())
+            .collect())
     }
 
     fn is_visible(&self, request: &SearchRequest, id: usize) -> bool {
@@ -505,7 +692,14 @@ fn insert_node(
     let query = dense_candidate(&candidate)?;
     let entry_level = nodes[current].level;
     for layer in ((level + 1)..=entry_level).rev() {
-        current = greedy_layer(nodes, query, current, layer as usize, config.metric)?;
+        current = greedy_layer(
+            nodes,
+            query,
+            current,
+            layer as usize,
+            config.metric,
+            HnswKernel::Scalar,
+        )?;
     }
     let mut selected_by_layer = Vec::new();
     for layer in (0..=level.min(entry_level)).rev() {
@@ -513,10 +707,13 @@ fn insert_node(
             nodes,
             query,
             &[current],
-            config.ef_construction,
-            layer as usize,
-            config.metric,
-            None,
+            SearchLayerOptions {
+                ef: config.ef_construction,
+                layer: layer as usize,
+                metric: config.metric,
+                kernel: HnswKernel::Scalar,
+                eligible: None,
+            },
         )?;
         let selected = select_neighbors(found, layer_limit(config.m, layer as usize));
         if let Some(best) = selected.first() {
@@ -567,7 +764,7 @@ fn prune_neighbors(
         .map(|id| {
             Ok(ScoredNode {
                 id,
-                score: score_dense_query(&query, &nodes[id].candidate, metric)?,
+                score: score_dense_query(&query, &nodes[id].candidate, metric, HnswKernel::Scalar)?,
             })
         })
         .collect::<Result<Vec<_>>>()?;
@@ -598,14 +795,15 @@ fn greedy_layer(
     start: usize,
     layer: usize,
     metric: ScoreMetric,
+    kernel: HnswKernel,
 ) -> Result<usize> {
     let mut current = start;
-    let mut current_score = score_dense_query(query, &nodes[current].candidate, metric)?;
+    let mut current_score = score_dense_query(query, &nodes[current].candidate, metric, kernel)?;
     loop {
         let mut improved = false;
         if let Some(neighbors) = nodes[current].neighbors.get(layer) {
             for neighbor in neighbors {
-                let score = score_dense_query(query, &nodes[*neighbor].candidate, metric)?;
+                let score = score_dense_query(query, &nodes[*neighbor].candidate, metric, kernel)?;
                 if score > current_score || (score == current_score && *neighbor < current) {
                     current = *neighbor;
                     current_score = score;
@@ -619,14 +817,19 @@ fn greedy_layer(
     }
 }
 
+struct SearchLayerOptions<'a> {
+    ef: usize,
+    layer: usize,
+    metric: ScoreMetric,
+    kernel: HnswKernel,
+    eligible: Option<&'a dyn Fn(usize) -> bool>,
+}
+
 fn search_layer(
     nodes: &[HnswNode],
     query: &[f32],
     entries: &[usize],
-    ef: usize,
-    layer: usize,
-    metric: ScoreMetric,
-    eligible: Option<&dyn Fn(usize) -> bool>,
+    options: SearchLayerOptions<'_>,
 ) -> Result<Vec<ScoredNode>> {
     let mut visited = BTreeSet::new();
     let mut frontier = BinaryHeap::new();
@@ -637,15 +840,20 @@ fn search_layer(
         }
         let scored = ScoredNode {
             id: *entry,
-            score: score_dense_query(query, &nodes[*entry].candidate, metric)?,
+            score: score_dense_query(
+                query,
+                &nodes[*entry].candidate,
+                options.metric,
+                options.kernel,
+            )?,
         };
         frontier.push(scored);
-        if eligible.is_none_or(|eligible| eligible(*entry)) {
+        if options.eligible.is_none_or(|eligible| eligible(*entry)) {
             best.push(Reverse(scored));
         }
     }
     while let Some(current) = frontier.pop() {
-        if best.len() >= ef
+        if best.len() >= options.ef
             && current.score
                 < best
                     .peek()
@@ -654,16 +862,21 @@ fn search_layer(
         {
             break;
         }
-        if let Some(neighbors) = nodes[current.id].neighbors.get(layer) {
+        if let Some(neighbors) = nodes[current.id].neighbors.get(options.layer) {
             for neighbor in neighbors {
                 if !visited.insert(*neighbor) {
                     continue;
                 }
                 let scored = ScoredNode {
                     id: *neighbor,
-                    score: score_dense_query(query, &nodes[*neighbor].candidate, metric)?,
+                    score: score_dense_query(
+                        query,
+                        &nodes[*neighbor].candidate,
+                        options.metric,
+                        options.kernel,
+                    )?,
                 };
-                if best.len() < ef
+                if best.len() < options.ef
                     || scored.score
                         > best
                             .peek()
@@ -671,9 +884,9 @@ fn search_layer(
                             .unwrap_or(f64::NEG_INFINITY)
                 {
                     frontier.push(scored);
-                    if eligible.is_none_or(|eligible| eligible(*neighbor)) {
+                    if options.eligible.is_none_or(|eligible| eligible(*neighbor)) {
                         best.push(Reverse(scored));
-                        if best.len() > ef {
+                        if best.len() > options.ef {
                             best.pop();
                         }
                     }
@@ -699,8 +912,78 @@ fn score_dense_query(
     query: &[f32],
     candidate: &VectorCandidate,
     metric: ScoreMetric,
+    kernel: HnswKernel,
 ) -> Result<f64> {
-    score_dense_candidate(query, &candidate.vector.value, metric)
+    let values = dense_candidate(candidate)?;
+    score_dense_values(query, values, metric, kernel)
+}
+
+fn score_dense_values(
+    query: &[f32],
+    candidate: &[f32],
+    metric: ScoreMetric,
+    kernel: HnswKernel,
+) -> Result<f64> {
+    if query.len() != candidate.len() {
+        return invalid("dense query and candidate dimensions differ");
+    }
+    #[cfg(target_arch = "x86_64")]
+    if kernel == HnswKernel::Auto && std::arch::is_x86_feature_detected!("avx2") {
+        // SAFETY: AVX2 was detected at runtime and both slices have the same
+        // proven length; the kernel performs only unaligned in-bounds loads.
+        return Ok(unsafe { score_dense_avx2(query, candidate, metric) });
+    }
+    score_dense(query, candidate, metric)
+}
+
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2")]
+unsafe fn score_dense_avx2(left: &[f32], right: &[f32], metric: ScoreMetric) -> f64 {
+    use std::arch::x86_64::*;
+    let mut dot = _mm256_setzero_ps();
+    let mut left_norm = _mm256_setzero_ps();
+    let mut right_norm = _mm256_setzero_ps();
+    let mut distance = _mm256_setzero_ps();
+    let mut manhattan = _mm256_setzero_ps();
+    let sign_mask = _mm256_set1_ps(-0.0);
+    let mut index = 0;
+    while index + 8 <= left.len() {
+        let lhs = _mm256_loadu_ps(left.as_ptr().add(index));
+        let rhs = _mm256_loadu_ps(right.as_ptr().add(index));
+        let delta = _mm256_sub_ps(lhs, rhs);
+        dot = _mm256_add_ps(dot, _mm256_mul_ps(lhs, rhs));
+        left_norm = _mm256_add_ps(left_norm, _mm256_mul_ps(lhs, lhs));
+        right_norm = _mm256_add_ps(right_norm, _mm256_mul_ps(rhs, rhs));
+        distance = _mm256_add_ps(distance, _mm256_mul_ps(delta, delta));
+        manhattan = _mm256_add_ps(manhattan, _mm256_andnot_ps(sign_mask, delta));
+        index += 8;
+    }
+    let mut lanes = [0.0_f32; 8];
+    let reduce = |value: __m256, lanes: &mut [f32; 8]| {
+        _mm256_storeu_ps(lanes.as_mut_ptr(), value);
+        lanes.iter().map(|value| f64::from(*value)).sum::<f64>()
+    };
+    let mut dot = reduce(dot, &mut lanes);
+    let mut left_norm = reduce(left_norm, &mut lanes);
+    let mut right_norm = reduce(right_norm, &mut lanes);
+    let mut distance = reduce(distance, &mut lanes);
+    let mut manhattan = reduce(manhattan, &mut lanes);
+    for (lhs, rhs) in left[index..].iter().zip(&right[index..]) {
+        let lhs = f64::from(*lhs);
+        let rhs = f64::from(*rhs);
+        dot += lhs * rhs;
+        left_norm += lhs * lhs;
+        right_norm += rhs * rhs;
+        distance += (lhs - rhs).powi(2);
+        manhattan += (lhs - rhs).abs();
+    }
+    match metric {
+        ScoreMetric::Dot => dot,
+        ScoreMetric::Cosine if right_norm == 0.0 => 0.0,
+        ScoreMetric::Cosine => dot / (left_norm.sqrt() * right_norm.sqrt()),
+        ScoreMetric::Euclidean => -distance.sqrt(),
+        ScoreMetric::Manhattan => -manhattan,
+    }
 }
 
 fn dense_query(query: &VectorQuery) -> Result<&[f32]> {
@@ -746,14 +1029,6 @@ fn validate_graph(
         || (nodes.is_empty() != entrypoint.is_none())
     {
         return invalid("HNSW entrypoint is inconsistent with its nodes");
-    }
-    if nodes.windows(2).any(|pair| {
-        let left = &pair[0].candidate;
-        let right = &pair[1].candidate;
-        (left.vector.reference.clone(), left.source_cursor)
-            >= (right.vector.reference.clone(), right.source_cursor)
-    }) {
-        return invalid("HNSW nodes are not in canonical identity/version order");
     }
     if let Some(entrypoint) = entrypoint {
         let maximum_level = nodes.iter().map(|node| node.level).max().unwrap_or(0);

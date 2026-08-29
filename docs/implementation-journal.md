@@ -3446,3 +3446,39 @@ index.
   collection snapshot and security-action schema advance the reviewed OpenAPI
   digest to
   `bbf2f27f80e47091a56df67b3383b965cbd0aabdcf5a60af1a4f66fb4aa753ed`.
+
+## 2026-08-29 — G04-W02 online filtered HNSW candidate
+
+- Corrected canonical vector reduction so retirement appends a new version at
+  the retirement commit cursor instead of rewriting the original put. Reads
+  before the retirement cursor remain reproducible, delete freshness is now
+  measurable, and online projections receive an exact tombstone delta.
+- Added HNSW artifact format v2 (`RRDHNS02`). Unchanged configurations advance
+  by inserting only post-generation vector versions into a successor immutable
+  graph. Descriptor/body evidence records full-build versus incremental mode,
+  previous generation, delta count, total nodes, and source cursor; generation,
+  cursor, identity, coverage, duplicate, size, and corruption checks fail closed.
+- Added authoritative delta overlay planning and execution. Plans retain the
+  immutable graph cursor plus exact overlay cursor/count. HNSW candidates and
+  all post-generation puts, updates, and retirements pass through one final
+  latest-version/valid-time/filter/exact-score reducer, so writes are searchable
+  immediately and deletes suppress old graph nodes before maintenance runs.
+- Kept authoritative commits and readers independent of graph work. The active
+  immutable generation serves while a successor is built and staged; one
+  object/catalogue CAS publishes it. A repeated no-delta ensure is idempotent;
+  configuration change deliberately performs a full build.
+- Required HNSW/TurboQuant filter fields to remain active typed collection
+  payload indexes. Deletion is refused while a live artifact depends on the
+  field. Layer-zero eligible admission and exact reranking share the same
+  bounded equals/not-equals/in/range/exists/all/any/not evaluator.
+- Added runtime-dispatched AVX2 HNSW traversal with portable scalar construction
+  and exact reranking. A fixed 512-vector, 16-dimensional corpus covers cosine,
+  dot, Euclidean, and Manhattan at 100/50/10/1% selectivity; scalar/automatic
+  results are identical and every cell reaches at least 0.95 mean Recall@10 at
+  `ef=128`.
+- Added nested-filter, immediate insert/retirement, incremental byte reopen,
+  eight-generation update/delete soak, collection-bound filtered engine,
+  payload-index protection, and post-restart tests. The public OpenAPI digest
+  remains `bbf2f27f80e47091a56df67b3383b965cbd0aabdcf5a60af1a4f66fb4aa753ed`
+  because index administration is still an engine-only G06 binding; the Rust
+  snapshot now exposes maintenance provenance.

@@ -1041,6 +1041,22 @@ impl EnsureVectorIndex {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
+pub struct VectorIndexMaintenanceSnapshot {
+    pub mode: VectorIndexMaintenanceMode,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub previous_generation: Option<u64>,
+    pub indexed_delta_vectors: u64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum VectorIndexMaintenanceMode {
+    FullBuild,
+    Incremental,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct VectorIndexSnapshot {
     pub index_id: CanonicalId,
     pub collection_id: CanonicalId,
@@ -1049,6 +1065,7 @@ pub struct VectorIndexSnapshot {
     pub generation: u64,
     pub source_cursor: u64,
     pub indexed_vectors: u64,
+    pub maintenance: VectorIndexMaintenanceSnapshot,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub packed_vector_bytes: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

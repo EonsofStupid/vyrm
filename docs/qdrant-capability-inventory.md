@@ -43,22 +43,22 @@ Sources: [manage data](https://qdrant.tech/documentation/manage-data/),
 
 | Qdrant capability | RRFlow disposition |
 |---|---|
-| Collections as independently configured sets of points | **Absent** — scope/field/catalog generations are not collection administration |
-| Collection create, inspect, update, delete and list | **Absent** public API |
+| Collections as independently configured sets of points | **Verified in the engine** — revisioned named-vector and payload-index metadata over the shared point transaction log |
+| Collection create, inspect, update, delete and list | **Engine operations verified**; generated HTTP/MCP/CLI/SDK bindings remain G06 |
 | Atomic collection aliases for migrations/blue-green cutover | **Absent** |
 | Points identified by 64-bit integer or UUID | **Partial** — typed runtime references, different identity contract |
-| Point upsert, retrieve, delete, count and existence APIs | **Partial** internally; no equivalent public point API |
-| Batch and column-oriented point upload | **Partial** — atomic batches, no optimized public bulk ingestion contract |
-| Point vector update/delete independent of payload | **Partial** internally |
+| Point upsert, retrieve, delete, count and existence APIs | **Partial** — atomic batch upsert/retirement plus retrieve/scroll exist; count/existence and generated bindings remain |
+| Batch and column-oriented point upload | **Partial** — atomic row-oriented batches, no optimized columnar ingestion contract |
+| Point vector update/delete independent of payload | **Verified in the engine** through versioned put/retire mutations |
 | Payload set/overwrite/delete/clear independent of vector | **Absent** public point operation |
 | Arbitrary JSON payload objects and arrays | **Partial** — typed runtime properties are narrower |
 | Payload selectors on read and query results | **Partial** |
 | Dense vectors | **Verified locally** |
 | Sparse vectors as first-class named values | **Verified locally** for exact search |
-| Named multiple vectors with independent dimension/metric/config | **Partial** |
+| Named multiple vectors with independent dimension/metric/config | **Verified in the collection engine** for dense, sparse, and multi-dense definitions |
 | Multivectors with variable row count | **Verified locally** for exact storage/search |
 | ColBERT-style MaxSim comparator | **Verified locally** for exact oracle |
-| Vector datatypes such as float32, float16 and uint8 | **Partial** — authoritative f32 and one internal int8 experiment; no collection datatype surface |
+| Vector datatypes such as float32, float16 and uint8 | **Partial** — authoritative f32 only; quantized artifacts do not change the point datatype |
 | Cosine, dot, Euclidean and Manhattan metrics | **Verified locally** |
 | Collection-specific WAL, optimizer, shard, strict-mode and quantization configuration | **Absent** public administration |
 | Approximate point/vector counts and detailed collection status | **Absent** public service |
@@ -82,7 +82,7 @@ Sources: [similarity search](https://qdrant.tech/documentation/search/search/),
 | Average-vector and best-score recommendation strategies | **Absent** |
 | Discovery search using positive/negative context pairs plus target | **Absent** |
 | Context-only search that partitions vector space | **Absent** |
-| Scroll through all filtered points | **Partial** — cursor pages over runtime changes, not points |
+| Scroll through all filtered points | **Verified in the engine** — deterministic point-reference pages at one read stamp |
 | Order results by payload field | **Absent** vector API |
 | Group search results by payload value | **Absent** |
 | Cross-collection lookup for group/detail enrichment | **Absent** |
@@ -117,16 +117,16 @@ Sources: [filtering](https://qdrant.tech/documentation/search/filtering/) and
 | Point-ID filters | **Absent** |
 | Nested-object filters with same-element semantics | **Absent** |
 | Filter by payload paths/array members | **Partial** |
-| Keyword payload index | **Absent** |
-| Integer/float/datetime payload indexes | **Absent** |
-| Boolean payload index | **Absent** |
+| Keyword payload index | **Verified in the engine** for exact scalar filter governance |
+| Integer/float/datetime payload indexes | **Partial** — signed/unsigned/decimal exact kinds exist; datetime does not |
+| Boolean payload index | **Verified in the engine** |
 | Geo payload index | **Absent** |
 | Full-text payload index with tokenizer/configuration | **Absent** |
-| UUID payload index | **Absent** |
+| UUID payload index | **Partial** — exact digest kind exists, not Qdrant UUID semantics |
 | Tenant-aware/principal payload index | **Absent** |
 | On-disk payload index variants | **Absent** |
-| Cardinality estimation and planner selection between scan/index/HNSW | **Partial** — vector planner exists without mature payload indexes |
-| One-stage filterable HNSW with filter-aware graph edges | **Partial** — admission filtering exists; payload-index-derived graph edges do not |
+| Cardinality estimation and planner selection between scan/index/HNSW | **Partial** — exact/HNSW cost crossover uses typed-filter eligibility; richer payload statistics remain |
+| One-stage filterable HNSW with filter-aware graph edges | **Core verified** for in-traversal admission and exact rerank; payload-index-derived edges remain absent |
 | ACORN filtered traversal for restrictive combined filters | **Absent** |
 
 ## 5. Vector indexing and optimization
@@ -137,14 +137,14 @@ Sources: [indexing](https://qdrant.tech/documentation/manage-data/indexing/),
 
 | Qdrant capability | RRFlow disposition |
 |---|---|
-| Mutable/background-built dense HNSW | **Partial** — immutable generation build/publish |
+| Mutable/background-built dense HNSW | **Engine core verified** — immediate authoritative delta plus incremental immutable successor generations; automatic scheduler/merge policy remains |
 | Per-collection and per-named-vector `m`, `ef_construct`, full-scan threshold | **Partial** programmatic config |
 | Sparse inverted index | **Absent** — sparse path is exact scanning |
 | Automatic segment optimization, merge and index thresholds | **Partial** in RRD LSM; vector segment optimization is absent |
 | Optimizer status and indexing progress | **Partial** catalogue only |
 | GPU-accelerated HNSW indexing | **Absent** physical backend |
 | Vulkan GPU support across NVIDIA/AMD and selected devices | **Absent** |
-| CPU SIMD scoring | **Verified locally** for compact dense exact search |
+| CPU SIMD scoring | **Verified locally** for compact exact and four-metric HNSW traversal with scalar differential |
 | mmap/on-disk vector access | **Verified locally** for compact dense exact artifacts |
 | Per-structure `pinned`, `cached`, and `cold` memory tiers | **Absent** |
 | Independent tiers for original dense vectors, HNSW, quantized vectors, sparse index, payload and payload indexes | **Absent** |
@@ -353,18 +353,19 @@ Sources: [Managed Cloud](https://qdrant.tech/documentation/cloud/),
 
 ## 14. Immediate conclusion
 
-RRFlow's strongest overlap with Qdrant today is real but narrow: exact dense,
-sparse and multivector values; dense HNSW; exact reranking; typed filters;
-model-bound provenance; immutable artifacts; mmap dense search; WAL-backed
-persistence; snapshots; offline embedding/search; and detailed causal runtime
-evidence. It does **not** have Qdrant's full vector product stack.
+RRD's strongest overlap with Qdrant today is real but bounded: revisioned
+collections and named vectors; atomic point batches and retirements; typed
+payload-index lifecycle; exact dense/sparse/multivector values; online filtered
+dense HNSW; exact reranking; model-bound provenance; immutable artifacts; mmap
+dense search; WAL-backed persistence; snapshots; offline embedding/search; and
+detailed causal runtime evidence. It does **not** have Qdrant's full vector
+product stack.
 
-The critical missing blocks are collection/point APIs, mature payload indexes,
-one-stage filterable HNSW/ACORN, hybrid/recommend/discover/query algebra,
-TurboQuant and the other promoted quantizers, compact mutable vector lifecycle,
-memory tiers, physical GPU indexing, server inference, official SDKs, REST/gRPC,
-complete security/audit, production distribution, backups, Kubernetes, and an
-estate control plane.
+The critical missing blocks are generated collection/point bindings, richer
+payload index families and statistics, ACORN/payload-derived graph edges,
+hybrid/recommend/discover/query algebra, promoted quantizer lifecycles, compact
+graph storage, memory tiers, physical GPU indexing, server inference, official
+SDK qualification, REST/gRPC breadth, and production distribution.
 
 Until those exist and pass fixed-corpus/fixed-hardware differentials, a RRFlow
 versus Qdrant superiority claim would be false. The correct near-term claim is

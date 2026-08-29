@@ -49,6 +49,8 @@ fn deterministic_update_delete_reopen_and_generation_compaction_soak() {
         filter_properties: BTreeSet::from(["group".into()]),
     };
     let mut catalog = VectorCatalog::default();
+    let mut active_hnsw = None::<HnswIndex>;
+    let mut indexed_versions = 0;
 
     for generation in 1..=8 {
         if generation > 1 {
@@ -75,12 +77,31 @@ fn deterministic_update_delete_reopen_and_generation_compaction_soak() {
         let reopened_segment = ImmutableVectorSegment::from_bytes(segment.as_bytes()).unwrap();
         assert_eq!(segment.as_bytes(), reopened_segment.as_bytes());
 
-        let index =
-            HnswIndex::build(hnsw_config.clone(), generation, cursor, history.clone()).unwrap();
-        let repeated =
-            HnswIndex::build(hnsw_config.clone(), generation, cursor, history.clone()).unwrap();
+        let delta = history[indexed_versions..].to_vec();
+        let index = if let Some(active) = &active_hnsw {
+            active.advance(generation, cursor, delta.clone()).unwrap()
+        } else {
+            HnswIndex::build(hnsw_config.clone(), generation, cursor, delta.clone()).unwrap()
+        };
+        let repeated = if let Some(active) = &active_hnsw {
+            active.advance(generation, cursor, delta).unwrap()
+        } else {
+            HnswIndex::build(hnsw_config.clone(), generation, cursor, delta).unwrap()
+        };
         assert_eq!(index.as_bytes(), repeated.as_bytes());
         let reopened_index = HnswIndex::from_bytes(index.as_bytes()).unwrap();
+        if generation > 1 {
+            assert_eq!(
+                reopened_index.descriptor().maintenance,
+                rrd_vector::HnswMaintenanceKind::Incremental
+            );
+            assert_eq!(
+                reopened_index.descriptor().previous_generation,
+                Some(generation - 1)
+            );
+        }
+        indexed_versions = history.len();
+        active_hnsw = Some(reopened_index.clone());
 
         let query = vector(16, &mut random);
         let exact_request = request(&scope, cursor, query.clone(), SearchMode::Exact);

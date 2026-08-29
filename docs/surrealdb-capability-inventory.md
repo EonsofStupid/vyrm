@@ -164,12 +164,12 @@ Sources: [hybrid search](https://surrealdb.com/docs/learn/data-models/vector-sea
 | SurrealDB capability | RRFlow disposition |
 |---|---|
 | Exact/brute-force KNN | **Verified locally** for dense, sparse and multivector |
-| In-memory HNSW ANN | **Verified locally** for deterministic dense search only |
-| Concurrent HNSW writes/build behavior | **Partial** — generation rebuild/publish, not equivalent concurrent mutation |
+| In-memory HNSW ANN | **Verified in the engine** for persistent collection-bound dense search |
+| Concurrent HNSW writes/build behavior | **Engine core verified** — commits/search remain available through an exact authoritative delta while incremental immutable successor generations build and publish |
 | On-disk DiskANN | **Absent** |
 | Vector distances/similarities including cosine, dot, Euclidean and Manhattan | **Verified locally** |
 | Exact reranking after ANN | **Verified locally** |
-| Metadata-filter-aware ANN | **Partial** — filter-aware candidate admission, not Surreal's indexed prefilter stack |
+| Metadata-filter-aware ANN | **Core verified** — typed-index-governed in-traversal admission plus exact rerank; bitmap prefilter fusion remains absent |
 | Full-text inverted indexes and BM25 scoring | **Absent** |
 | Configurable analyzers/tokenizers/filters, highlighting and score functions | **Absent** |
 | Reciprocal-rank-fusion hybrid search | **Absent** |

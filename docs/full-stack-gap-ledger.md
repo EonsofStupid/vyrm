@@ -168,7 +168,7 @@ claimed from a UI card, type, or isolated physical component:
 |---|---|---|
 | Concurrent document, relational, native graph-edge, vector, event, time-series and geo storage | One typed RRD transaction can atomically create, update, retire and recreate every logical family; bounded RRFlowQL transaction programs bind the same mutations and delegate to that authority | Complete public administration, indexes, query/search parity and cross-model transaction qualification |
 | Real-time live queries and changefeeds | Engine-owned durable subscriptions provide authenticated WebSocket push, cumulative ACK, bounded in-flight windows, retained resume floors, fenced reconnect/restart replay, semantic query deltas, and one global cursor/hash-chain order across writers; HTTP/MCP poll/read/follow remain bounded fallbacks | Cross-region fan-out placement and managed gateway scale qualification under later topology work |
-| Vector and full-text retrieval | Revisioned dense/sparse/multi-dense collections, ACID batch point upsert/retirement, exact retrieve/scroll/search, typed payload-index lifecycle, guarded collection deletion, content-addressed BM25 v2, hybrid RRF, and persistent HNSW/TurboQuant artifacts share the engine authority | Complete online filtered HNSW qualification, broad multistage/reranking algebra, codec/tier/inference/GPU lifecycles, generated administration bindings, and production recall/latency evidence |
+| Vector and full-text retrieval | Revisioned dense/sparse/multi-dense collections, ACID batch point upsert/retirement, exact retrieve/scroll/search, typed payload-index lifecycle, guarded collection deletion, online filtered HNSW with authoritative deltas and incremental immutable generations, content-addressed BM25 v2, hybrid RRF, and persistent TurboQuant artifacts share the engine authority | Complete broad multistage/reranking algebra, codec/tier/inference/GPU lifecycles, generated administration bindings, compact graph/payload-index layouts, and production fixed-hardware evidence |
 | Time travel and rollback | RRFlowQL binds schema, source watermarks, claims, index selection and authoritative replay to one valid-time/known-at coordinate across memory, Fjall, native and reopen; `rrflow_data_rollback` appends idempotent record/relation compensations plus immutable evidence through the normal audited transaction | Extend selected-state rollback beyond records/relations without rewriting append-only event, series, object, schema, vector, geo or security-audit history; qualify the complete public-surface matrix |
 | Object and tiered persistence | Authenticated capability admission, resumable/checksummed/conditional S3 multipart archive and artifact transfer, version-bound ranged recovery, and native mmap/io_uring/bounded segment I/O share the existing RRD storage authority with measured physical/cache separation | Certify named provider transports/endpoints and extend qualified hot/cold policy to vector artifacts under G04 |
 | In-memory, embedded, single-node, browser/WASM, mobile/edge and distributed modes | One strict corpus now passes the full logical engine in memory and embedded compositions, a real local-daemon process and Rust client, the remote mTLS client face, and the bounded mmap/offline edge retrieval subset; native root exclusion and reopen are executable | Browser/WASM and mobile packaging plus consensus-backed distributed placement, failover, and platform-specific resource qualification remain; edge does not claim unsupported mutation parity |
@@ -763,9 +763,14 @@ payload values are type-checked before the entire point batch commits.
 Collection deletion replays across restart and refuses to orphan live/future
 points or active HNSW/TurboQuant artifacts. Native reopen plus denial, replay,
 collision, dense/sparse/multi-dense commit/retrieve/scroll/retirement, mismatch,
-and deletion tests pass. Physical tier enforcement, filtered persisted ANN,
-generated administration bindings, and public inference administration remain
-open. A deterministic MSE TurboQuant codec and
+and deletion tests pass. HNSW v2 keeps post-generation puts, updates, and
+retirements immediately visible through an exact authoritative delta over the
+serving graph; unchanged configurations append only those versions into a new
+immutable generation while the prior generation serves. Active graph filters
+protect their typed payload indexes. Four-metric scalar/AVX2, nested filter,
+100/50/10/1% selectivity, eight-generation update/delete, and reopen corpora
+pass. Physical tier enforcement, compact graph/payload-bitmaps, generated
+administration bindings, and public inference administration remain open. A deterministic MSE TurboQuant codec and
 authenticated binary artifact now implement seeded rotation, fixed
 distribution-matched 4/2/1.5/1-bit packing, norm-corrected asymmetric scoring,
 catalogue/planner selection, corruption denial, and exact-f32 reranking. Public
@@ -785,9 +790,12 @@ identities.
   upsert/retirement, deterministic point scroll, direct batch retrieval, and
   typed payload-index ensure/list/delete are implemented in the engine;
   generated transport/SDK administration bindings remain G06 work.
-- Compact mutable dense HNSW and sparse index lifecycle.
-- Typed payload indexes and true one-stage filtered traversal; ACORN-quality
-  restrictive-filter path evaluated on fixed selectivity corpora.
+- Online dense HNSW lifecycle is implemented with immediate exact deltas,
+  incremental immutable generation publication, one-stage filter admission,
+  four metrics, scalar/AVX2 differential, and fixed selectivity/reopen corpora.
+  Compact graph storage, automatic merge thresholds, and ACORN-style
+  payload-derived edges remain physical optimizations.
+- Sparse inverted-index lifecycle.
 - Unified nearest/id/recommend/discover/context/scroll/group/facet/matrix,
   hybrid/prefetch/multistage/formula query algebra.
 - Dense+sparse rank fusion and ColBERT late interaction without middleware.

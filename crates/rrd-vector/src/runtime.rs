@@ -1,8 +1,8 @@
 use crate::contract::invalid;
 use crate::{
-    search_exact_ref, AccessPathKind, CompactDenseSegment, HnswIndex, ImmutableVectorSegment,
-    SearchHit, SearchPlan, SearchRequest, TurboQuantSegment, VectorCandidate, VectorCatalog,
-    VectorPlanner, VectorProjectionDescriptor,
+    search_exact_ref, AccessPathKind, CompactDenseSegment, HnswIndex, HnswKernel,
+    ImmutableVectorSegment, SearchHit, SearchPlan, SearchRequest, TurboQuantSegment,
+    VectorCandidate, VectorCatalog, VectorPlanner, VectorProjectionDescriptor,
 };
 use rrd_core::{
     digest, Error, ProjectionId, ProjectionStamp, ProjectionState, Result,
@@ -212,6 +212,10 @@ impl VectorRuntime {
         &self.catalog
     }
 
+    pub fn artifact(&self, id: &ProjectionId, generation: u64) -> Option<&VectorArtifact> {
+        self.artifacts.get(&(id.clone(), generation))
+    }
+
     pub fn publish(
         &mut self,
         expected_revision: u64,
@@ -285,7 +289,31 @@ impl VectorRuntime {
                     descriptor.candidate_versions.max(1) as u64
                 }
             };
-            paths.push(descriptor.candidate_path(estimated_cost));
+            let mut path = descriptor.candidate_path(estimated_cost);
+            if let VectorProjectionDescriptor::Hnsw { descriptor } = descriptor {
+                let overlay_candidates = self
+                    .canonical
+                    .iter()
+                    .filter(|candidate| {
+                        candidate.source_cursor > descriptor.stamp.source_cursor
+                            && candidate.source_cursor <= required_source_cursor
+                            && hnsw_covers_candidate(descriptor, candidate)
+                    })
+                    .count();
+                if overlay_candidates != 0 {
+                    path.overlay_source_cursor = Some(required_source_cursor);
+                    path.overlay_candidates =
+                        u64::try_from(overlay_candidates).map_err(|_| Error::InvalidRuntime {
+                            reason: "HNSW overlay candidate count exceeds u64".into(),
+                        })?;
+                    path.estimated_candidates = path
+                        .estimated_candidates
+                        .saturating_add(path.overlay_candidates);
+                    path.estimated_cost =
+                        path.estimated_cost.saturating_add(path.overlay_candidates);
+                }
+            }
+            paths.push(path);
         }
         let plan = VectorPlanner::new(self.canonical.len() as u64).plan_at(
             request,
@@ -382,7 +410,19 @@ impl VectorRuntime {
                         )?
                     }
                     (AccessPathKind::Hnsw, VectorArtifact::Hnsw(index)) => {
-                        index.search_at(request, prepared.ef_search, plan.required_source_cursor)?
+                        let base = index.search_candidates_with_kernel(
+                            request,
+                            prepared.ef_search,
+                            HnswKernel::Auto,
+                        )?;
+                        search_exact_ref(
+                            request,
+                            base.iter().chain(self.canonical.iter().filter(|candidate| {
+                                candidate.source_cursor > index.descriptor().stamp.source_cursor
+                                    && candidate.source_cursor <= plan.required_source_cursor
+                                    && hnsw_covers_candidate(index.descriptor(), candidate)
+                            })),
+                        )?
                     }
                     (AccessPathKind::TurboQuant, VectorArtifact::TurboQuant(segment)) => {
                         let approximate = segment.search_candidates_at(
@@ -415,6 +455,14 @@ impl VectorRuntime {
         let prepared = self.prepare_search(request, ef_search)?;
         self.execute_search(request, &prepared)
     }
+}
+
+fn hnsw_covers_candidate(descriptor: &crate::HnswDescriptor, candidate: &VectorCandidate) -> bool {
+    candidate.scope == descriptor.scope
+        && candidate.vector.field == descriptor.field
+        && candidate.vector.value.dimensions() == descriptor.dimensions
+        && candidate.matches_model(descriptor.embedding_model.as_ref())
+        && matches!(candidate.vector.value, rrd_core::VectorValue::Dense { .. })
 }
 
 fn prepared_plan_digest(

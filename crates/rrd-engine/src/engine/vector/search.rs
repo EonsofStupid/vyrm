@@ -105,6 +105,7 @@ impl RrdEngine {
             .collect::<Vec<_>>();
         let source_cursor = candidates
             .iter()
+            .filter(|candidate| candidate.vector.field == field)
             .map(|candidate| candidate.source_cursor)
             .max()
             .unwrap_or(0);

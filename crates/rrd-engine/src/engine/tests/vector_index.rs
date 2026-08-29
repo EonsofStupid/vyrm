@@ -6,8 +6,9 @@ use rrd_contract::{
     DeleteVectorPayloadIndex, EnsureQueryIndex, EnsureVectorIndex, EnsureVectorPayloadIndex,
     HybridFusion, ListVectorCollections, ListVectorPayloadIndexes, QueryBudget, QueryIndexKind,
     QueryValue, RestoreInstanceBackup, RetrieveVectorPoints, SearchHybrid, SearchVectors,
-    VectorIndexConfiguration, VectorPayloadIndexKind, VectorQuantizationBits, VectorSearchMode,
-    VectorSearchQuery,
+    VectorIndexConfiguration, VectorIndexMaintenanceMode, VectorPayloadCondition,
+    VectorPayloadFilter, VectorPayloadIndexKind, VectorPayloadOperator, VectorQuantizationBits,
+    VectorSearchMode, VectorSearchQuery,
 };
 use std::collections::BTreeMap;
 
@@ -219,6 +220,11 @@ fn persistent_retrieval_indexes_and_hybrid_fusion_survive_reopen_and_staleness()
     assert_eq!(first.index.kind.as_str(), "hnsw");
     assert_eq!(first.index.generation, 1);
     assert_eq!(first.index.indexed_vectors, 3);
+    assert_eq!(
+        first.index.maintenance.mode,
+        VectorIndexMaintenanceMode::FullBuild
+    );
+    assert_eq!(first.index.maintenance.indexed_delta_vectors, 3);
     assert!(!first.idempotent_replay);
 
     let replay = engine
@@ -273,18 +279,21 @@ fn persistent_retrieval_indexes_and_hybrid_fusion_survive_reopen_and_staleness()
         600,
         vec![
             document_mutation("delta", "durable update"),
-            vector_mutation("delta", vec![0.9, 0.1]),
+            vector_mutation("delta", vec![1.1, 0.0]),
         ],
     );
-    let stale = reopened.search_vectors(
-        &lease.session_id,
-        &lease.token,
-        &approximate,
-        700,
-        "request-search-stale",
-        "operation-search-stale",
-    );
-    assert!(matches!(stale, Err(ServiceError::Vector(_))));
+    let immediate = reopened
+        .search_vectors(
+            &lease.session_id,
+            &lease.token,
+            &approximate,
+            700,
+            "request-search-online-delta",
+            "operation-search-online-delta",
+        )
+        .unwrap();
+    assert_eq!(immediate.access_path.as_str(), "hnsw");
+    assert_eq!(immediate.hits[0].reference.id.as_str(), "delta");
 
     let fallback = reopened
         .search_vectors(
@@ -314,6 +323,12 @@ fn persistent_retrieval_indexes_and_hybrid_fusion_survive_reopen_and_staleness()
         .unwrap();
     assert_eq!(rebuilt.index.generation, 2);
     assert_eq!(rebuilt.index.indexed_vectors, 4);
+    assert_eq!(
+        rebuilt.index.maintenance.mode,
+        VectorIndexMaintenanceMode::Incremental
+    );
+    assert_eq!(rebuilt.index.maintenance.previous_generation, Some(1));
+    assert_eq!(rebuilt.index.maintenance.indexed_delta_vectors, 1);
     assert!(rebuilt.index.source_cursor > first.index.source_cursor);
     let after_rebuild = reopened
         .search_vectors(
@@ -375,8 +390,8 @@ fn persistent_retrieval_indexes_and_hybrid_fusion_survive_reopen_and_staleness()
         )
         .unwrap();
     assert_eq!(turbo_search.access_path.as_str(), "turboquant");
-    assert_eq!(turbo_search.hits[0].reference.id.as_str(), "alpha");
-    assert_eq!(turbo_search.hits[0].score, 1.0);
+    assert_eq!(turbo_search.hits[0].reference.id.as_str(), "delta");
+    assert!((turbo_search.hits[0].score - 1.1).abs() < 1e-6);
     drop(reopened);
 
     let reopened = RrdEngine::open(root.path(), instance(), TOKEN_KEY).unwrap();
@@ -457,7 +472,7 @@ fn persistent_retrieval_indexes_and_hybrid_fusion_survive_reopen_and_staleness()
     assert!(!hybrid.vector_exact);
     assert_eq!(hybrid.hits[0].subject.id.as_str(), "alpha");
     assert_eq!(hybrid.hits[0].text_rank, Some(1));
-    assert_eq!(hybrid.hits[0].vector_rank, Some(1));
+    assert_eq!(hybrid.hits[0].vector_rank, Some(2));
     assert_eq!(hybrid.read_manifest_sha256.len(), 64);
     assert_eq!(hybrid.fusion_plan_sha256.len(), 64);
     drop(reopened);
@@ -633,6 +648,269 @@ fn application_backup_restores_turboquant_payload_before_instance_activation() {
         .unwrap();
     assert_eq!(result.access_path.as_str(), "turboquant");
     assert_eq!(result.hits[0].reference.id.as_str(), "alpha");
+}
+
+#[test]
+fn collection_filtered_hnsw_overlays_retirement_and_protects_payload_index() {
+    let root = tempfile::tempdir().unwrap();
+    let engine = RrdEngine::open(root.path(), instance(), TOKEN_KEY).unwrap();
+    let lease = engine
+        .create_session(
+            &session_request(9_000, 8),
+            &id("online-filter-session"),
+            100,
+            "request-session",
+            "operation-session",
+        )
+        .unwrap();
+    let scope = format!("instance:{}", instance());
+    engine
+        .ensure_vector_collection(
+            &lease.session_id,
+            &lease.token,
+            &EnsureVectorCollection {
+                scope: scope.clone(),
+                collection_id: CanonicalId::new("filtered-documents").unwrap(),
+                vectors: vec![NamedVectorDefinition {
+                    name: CanonicalId::new("body").unwrap(),
+                    field: CanonicalId::new("filtered-body").unwrap(),
+                    kind: VectorValueKind::Dense,
+                    dimensions: 2,
+                    metric: VectorSearchMetric::Dot,
+                    embedding_model: None,
+                    memory_tier: VectorMemoryTier::Cached,
+                }],
+            },
+            &mutation_context(
+                &id("online-filter-collection"),
+                "request-collection",
+                "operation-collection",
+            ),
+            200,
+        )
+        .unwrap();
+    engine
+        .ensure_vector_payload_index(
+            &lease.session_id,
+            &lease.token,
+            &EnsureVectorPayloadIndex {
+                scope: scope.clone(),
+                collection_id: CanonicalId::new("filtered-documents").unwrap(),
+                field: CanonicalId::new("bucket").unwrap(),
+                kind: VectorPayloadIndexKind::Unsigned,
+            },
+            &mutation_context(
+                &id("online-filter-payload-index"),
+                "request-payload-index",
+                "operation-payload-index",
+            ),
+            210,
+        )
+        .unwrap();
+    let vector = |id: &str, bucket: u64, values: Vec<f32>| TransactionMutation::PutVector {
+        reference: reference("embedding", id),
+        subject: reference("document", id),
+        collection_id: Some(CanonicalId::new("filtered-documents").unwrap()),
+        vector_name: Some(CanonicalId::new("body").unwrap()),
+        field: CanonicalId::new("filtered-body").unwrap(),
+        valid_from: 1,
+        valid_to: None,
+        value: DataVectorValue::Dense { values },
+        provenance: None,
+        properties: DataProperties::from([("bucket".into(), QueryValue::Unsigned(bucket))]),
+    };
+    commit_vectors(
+        &engine,
+        &lease,
+        300,
+        vec![
+            TransactionMutation::PutSchema {
+                registry: DataSchemaRegistry {
+                    revision: 1,
+                    migration: "install filtered HNSW schema".into(),
+                    catalogue: DataCatalogueIdentity::default(),
+                    tables: BTreeMap::from([
+                        (
+                            CanonicalId::new("embedding").unwrap(),
+                            DataTableSchema {
+                                model: DataLogicalModel::Vector,
+                                mode: DataSchemaMode::Schemaless,
+                                properties: BTreeMap::new(),
+                                allow_additional_properties: false,
+                            },
+                        ),
+                        (
+                            CanonicalId::new("document").unwrap(),
+                            DataTableSchema {
+                                model: DataLogicalModel::Document,
+                                mode: DataSchemaMode::Schemaless,
+                                properties: BTreeMap::new(),
+                                allow_additional_properties: false,
+                            },
+                        ),
+                        (
+                            CanonicalId::new("object").unwrap(),
+                            DataTableSchema {
+                                model: DataLogicalModel::Object,
+                                mode: DataSchemaMode::Schemaless,
+                                properties: BTreeMap::new(),
+                                allow_additional_properties: false,
+                            },
+                        ),
+                    ]),
+                    records: BTreeMap::new(),
+                    relations: BTreeMap::new(),
+                    events: BTreeMap::new(),
+                },
+            },
+            TransactionMutation::PutRecord {
+                reference: reference("document", "alpha"),
+                valid_from: 1,
+                valid_to: None,
+                properties: DataProperties::new(),
+            },
+            TransactionMutation::PutRecord {
+                reference: reference("document", "beta"),
+                valid_from: 1,
+                valid_to: None,
+                properties: DataProperties::new(),
+            },
+            vector("alpha", 1, vec![1.0, 0.0]),
+            vector("beta", 2, vec![0.9, 0.1]),
+        ],
+    );
+    let index = EnsureVectorIndex {
+        scope: scope.clone(),
+        collection_id: CanonicalId::new("filtered-documents").unwrap(),
+        vector_name: CanonicalId::new("body").unwrap(),
+        configuration: VectorIndexConfiguration::Hnsw {
+            m: 4,
+            ef_construction: 8,
+            max_level: 4,
+            seed: 47,
+            filter_properties: vec![CanonicalId::new("bucket").unwrap()],
+        },
+        max_scanned_changes: 10_000,
+    };
+    engine
+        .ensure_vector_index(
+            &lease.session_id,
+            &lease.token,
+            &index,
+            400,
+            "request-filter-index",
+            "operation-filter-index",
+        )
+        .unwrap();
+    let search = SearchVectors {
+        scope: scope.clone(),
+        valid_at: 2,
+        collection_id: Some(CanonicalId::new("filtered-documents").unwrap()),
+        vector_name: Some(CanonicalId::new("body").unwrap()),
+        field: None,
+        query: VectorSearchQuery::Dense {
+            values: vec![1.0, 0.0],
+        },
+        filter: Some(VectorPayloadFilter::Condition {
+            condition: VectorPayloadCondition {
+                property: CanonicalId::new("bucket").unwrap(),
+                operator: VectorPayloadOperator::Equals {
+                    value: QueryValue::Unsigned(2),
+                },
+            },
+        }),
+        metric: None,
+        top_k: 1,
+        mode: VectorSearchMode::RequireApproximate {
+            exact_rerank: 2,
+            ef_search: 2,
+        },
+        max_scanned_changes: 10_000,
+    };
+    let filtered = engine
+        .search_vectors(
+            &lease.session_id,
+            &lease.token,
+            &search,
+            500,
+            "request-filter-search",
+            "operation-filter-search",
+        )
+        .unwrap();
+    assert_eq!(filtered.access_path.as_str(), "hnsw");
+    assert_eq!(filtered.hits[0].reference.id.as_str(), "beta");
+
+    commit_vectors(
+        &engine,
+        &lease,
+        600,
+        vec![TransactionMutation::RetireData {
+            model: DataLogicalModel::Vector,
+            target: DataTarget::Reference {
+                reference: reference("embedding", "beta"),
+            },
+            effective_at: 2,
+        }],
+    );
+    let immediate = engine
+        .search_vectors(
+            &lease.session_id,
+            &lease.token,
+            &search,
+            700,
+            "request-retired-overlay",
+            "operation-retired-overlay",
+        )
+        .unwrap();
+    assert_eq!(immediate.access_path.as_str(), "hnsw");
+    assert!(immediate.hits.is_empty());
+    assert!(engine
+        .delete_vector_payload_index(
+            &lease.session_id,
+            &lease.token,
+            &DeleteVectorPayloadIndex {
+                scope: scope.clone(),
+                collection_id: CanonicalId::new("filtered-documents").unwrap(),
+                field: CanonicalId::new("bucket").unwrap(),
+            },
+            &mutation_context(
+                &id("delete-active-filter-index"),
+                "request-delete-active-filter-index",
+                "operation-delete-active-filter-index",
+            ),
+            701,
+        )
+        .is_err());
+    let maintained = engine
+        .ensure_vector_index(
+            &lease.session_id,
+            &lease.token,
+            &index,
+            800,
+            "request-filter-index-incremental",
+            "operation-filter-index-incremental",
+        )
+        .unwrap();
+    assert_eq!(
+        maintained.index.maintenance.mode,
+        VectorIndexMaintenanceMode::Incremental
+    );
+    assert_eq!(maintained.index.maintenance.indexed_delta_vectors, 1);
+    drop(engine);
+
+    let reopened = RrdEngine::open(root.path(), instance(), TOKEN_KEY).unwrap();
+    let after_reopen = reopened
+        .search_vectors(
+            &lease.session_id,
+            &lease.token,
+            &search,
+            900,
+            "request-filter-search-reopen",
+            "operation-filter-search-reopen",
+        )
+        .unwrap();
+    assert_eq!(after_reopen.access_path.as_str(), "hnsw");
+    assert!(after_reopen.hits.is_empty());
 }
 
 #[test]

@@ -34,6 +34,11 @@ pub struct CandidatePath {
     pub filter_properties: BTreeSet<String>,
     pub estimated_candidates: u64,
     pub estimated_cost: u64,
+    /// Authoritative exact delta coverage layered over an immutable HNSW base.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub overlay_source_cursor: Option<u64>,
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub overlay_candidates: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -52,6 +57,14 @@ pub struct PlanDecision {
     pub estimated_candidates: u64,
     pub estimated_cost: u64,
     pub exact_rerank: usize,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub overlay_source_cursor: Option<u64>,
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub overlay_candidates: u64,
+}
+
+fn is_zero(value: &u64) -> bool {
+    *value == 0
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -120,6 +133,8 @@ impl VectorPlanner {
             filter_properties: required_property_set.clone(),
             estimated_candidates: self.exact_scan_candidates,
             estimated_cost: self.exact_scan_candidates.max(1),
+            overlay_source_cursor: None,
+            overlay_candidates: 0,
         };
 
         let mut accepted = Vec::new();
@@ -174,6 +189,8 @@ impl VectorPlanner {
                 estimated_candidates: selected.estimated_candidates,
                 estimated_cost: selected.estimated_cost,
                 exact_rerank,
+                overlay_source_cursor: selected.overlay_source_cursor,
+                overlay_candidates: selected.overlay_candidates,
             },
             rejected,
             required_source_cursor,
@@ -199,10 +216,22 @@ fn reject_reasons(
             candidate.stamp.state
         ));
     }
-    if candidate.stamp.source_cursor < required_source_cursor {
+    let effective_source_cursor = candidate
+        .overlay_source_cursor
+        .unwrap_or(candidate.stamp.source_cursor);
+    if candidate.overlay_source_cursor.is_some_and(|cursor| {
+        candidate.kind != AccessPathKind::Hnsw
+            || cursor <= candidate.stamp.source_cursor
+            || cursor > request.read.commit_cursor
+            || candidate.overlay_candidates == 0
+    }) || (candidate.overlay_source_cursor.is_none() && candidate.overlay_candidates != 0)
+    {
+        reasons.push("invalid authoritative delta overlay".into());
+    }
+    if effective_source_cursor < required_source_cursor {
         reasons.push(format!(
             "stale source coverage {} < required {}",
-            candidate.stamp.source_cursor, required_source_cursor
+            effective_source_cursor, required_source_cursor
         ));
     }
     if candidate.field != request.field {
@@ -276,6 +305,8 @@ mod tests {
             filter_properties: properties.iter().map(|value| (*value).into()).collect(),
             estimated_candidates: 20,
             estimated_cost: 20,
+            overlay_source_cursor: None,
+            overlay_candidates: 0,
         }
     }
 
@@ -300,6 +331,24 @@ mod tests {
             .reasons
             .iter()
             .any(|reason| reason.contains("filter")));
+    }
+
+    #[test]
+    fn authoritative_delta_overlay_keeps_a_stale_hnsw_base_eligible() {
+        let mut online = path(8, &["tenant"], ProjectionState::Ready);
+        online.overlay_source_cursor = Some(10);
+        online.overlay_candidates = 2;
+        online.estimated_cost = 22;
+        let plan = VectorPlanner::new(1_000)
+            .plan(
+                &request(SearchMode::RequireApproximate { exact_rerank: 20 }),
+                [online],
+            )
+            .unwrap();
+        assert_eq!(plan.selected.kind, AccessPathKind::Hnsw);
+        assert_eq!(plan.selected.source_cursor, 8);
+        assert_eq!(plan.selected.overlay_source_cursor, Some(10));
+        assert_eq!(plan.selected.overlay_candidates, 2);
     }
 
     #[test]

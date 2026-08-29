@@ -50,7 +50,9 @@ pub use exact::{
     search_exact_ref,
 };
 pub use filter::{FilterCondition, FilterExpression, FilterOperator};
-pub use hnsw::{HnswConfig, HnswDescriptor, HnswIndex, HNSW_FORMAT_VERSION};
+pub use hnsw::{
+    HnswConfig, HnswDescriptor, HnswIndex, HnswKernel, HnswMaintenanceKind, HNSW_FORMAT_VERSION,
+};
 pub use plan::{
     AccessPathKind, CandidatePath, PlanDecision, RejectedPath, SearchPlan, VectorPlanner,
     EXACT_SCAN_PROJECTION_ID,

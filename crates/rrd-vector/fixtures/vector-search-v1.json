@@ -135,7 +135,7 @@
       }
     }
   ],
-  "comment": "M5 portable vector contract; changes require an explicit format-version decision",
+  "comment": "portable vector contract; HNSW artifact format v2 adds online-maintenance provenance",
   "exact_hits": [
     {
       "reference": {
@@ -169,13 +169,14 @@
     "filter_properties": [
       "temperature"
     ],
+    "indexed_delta_vectors": 4,
     "m": 4,
     "max_level": 4,
     "metric": "dot",
     "nodes": 4,
     "scope": "instance:vector-golden",
     "stamp": {
-      "artifact_digest": "2fbe7a30b2e83f2757ff88810ed6039bae996ee25ebc00ccb8e8de62512137ef",
+      "artifact_digest": "16554c28c48458cd8263402f1fc53df6efa3f0195f5acbe0033287e78ab16d27",
       "config_digest": "229d146576a37ed2a6268dc9a523d1d49fc69f1380d70624ee353a3a3deabf96",
       "contract_version": 1,
       "generation": 1,

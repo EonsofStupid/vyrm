@@ -4,7 +4,7 @@ use rrd_core::{
 };
 use rrd_vector::{
     search_exact_ref, FilterCondition, FilterExpression, FilterOperator, HnswConfig, HnswIndex,
-    ScoreMetric, SearchMode, SearchRequest, VectorCandidate, VectorQuery,
+    HnswKernel, ScoreMetric, SearchMode, SearchRequest, VectorCandidate, VectorQuery,
 };
 use std::collections::{BTreeSet, HashSet};
 
@@ -15,43 +15,71 @@ fn deterministic_ann_recall_gate_covers_unfiltered_and_selective_queries() {
     let candidates = (0..512)
         .map(|id| candidate(&scope, id, vector(16, &mut random)))
         .collect::<Vec<_>>();
-    let index = HnswIndex::build(
-        HnswConfig {
-            id: ProjectionId::new("vector:hnsw:recall-gate").unwrap(),
-            scope: scope.clone(),
-            field: "body".into(),
-            dimensions: 16,
-            metric: ScoreMetric::Cosine,
-            embedding_model: None,
-            m: 16,
-            ef_construction: 100,
-            max_level: 10,
-            seed: 31,
-            filter_properties: BTreeSet::from(["bucket".into()]),
-        },
-        1,
-        512,
-        candidates.clone(),
-    )
-    .unwrap();
-    for filter_percent in [100, 10] {
-        let mut recall = 0.0;
-        for _ in 0..20 {
-            let query = vector(16, &mut random);
-            let exact_request = request(&scope, query.clone(), filter_percent, SearchMode::Exact);
-            let expected = search_exact_ref(&exact_request, &candidates).unwrap();
-            let approximate_request = request(
-                &scope,
-                query,
-                filter_percent,
-                SearchMode::RequireApproximate { exact_rerank: 64 },
+    for metric in [
+        ScoreMetric::Cosine,
+        ScoreMetric::Dot,
+        ScoreMetric::Euclidean,
+        ScoreMetric::Manhattan,
+    ] {
+        let index = HnswIndex::build(
+            HnswConfig {
+                id: ProjectionId::new(format!("vector:hnsw:recall-{metric:?}").to_lowercase())
+                    .unwrap(),
+                scope: scope.clone(),
+                field: "body".into(),
+                dimensions: 16,
+                metric,
+                embedding_model: None,
+                m: 16,
+                ef_construction: 128,
+                max_level: 10,
+                seed: 31,
+                filter_properties: BTreeSet::from(["bucket".into()]),
+            },
+            1,
+            512,
+            candidates.clone(),
+        )
+        .unwrap();
+        let reopened = HnswIndex::from_bytes(index.as_bytes()).unwrap();
+        for filter_percent in [100, 50, 10, 1] {
+            let mut recall = 0.0;
+            for _ in 0..12 {
+                let query = vector(16, &mut random);
+                let exact_request = request(
+                    &scope,
+                    query.clone(),
+                    filter_percent,
+                    metric,
+                    SearchMode::Exact,
+                );
+                let expected = search_exact_ref(&exact_request, &candidates).unwrap();
+                let approximate_request = request(
+                    &scope,
+                    query,
+                    filter_percent,
+                    metric,
+                    SearchMode::RequireApproximate { exact_rerank: 128 },
+                );
+                let scalar = reopened
+                    .search_with_kernel(&approximate_request, 128, HnswKernel::Scalar)
+                    .unwrap();
+                let automatic = reopened
+                    .search_with_kernel(&approximate_request, 128, HnswKernel::Auto)
+                    .unwrap();
+                assert_eq!(
+                    automatic, scalar,
+                    "metric={metric:?} filter={filter_percent}%"
+                );
+                assert_eq!(automatic.len(), expected.len());
+                recall += overlap(&expected, &automatic);
+            }
+            let mean = recall / 12.0;
+            assert!(
+                mean >= 0.95,
+                "metric={metric:?} filter={filter_percent}% recall={mean}"
             );
-            let actual = index.search(&approximate_request, 64).unwrap();
-            assert_eq!(actual.len(), expected.len());
-            recall += overlap(&expected, &actual);
         }
-        let mean = recall / 20.0;
-        assert!(mean >= 0.95, "filter={filter_percent}% recall={mean}");
     }
 }
 
@@ -59,6 +87,7 @@ fn request(
     scope: &ScopeId,
     query: Vec<f32>,
     filter_percent: usize,
+    metric: ScoreMetric,
     mode: SearchMode,
 ) -> SearchRequest {
     SearchRequest {
@@ -67,7 +96,7 @@ fn request(
         valid_at: 2,
         field: "body".into(),
         query: VectorQuery::Dense { values: query },
-        metric: ScoreMetric::Cosine,
+        metric,
         embedding_model: None,
         top_k: 10,
         mode,

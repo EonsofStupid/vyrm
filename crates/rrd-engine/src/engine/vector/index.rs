@@ -116,44 +116,94 @@ impl RrdEngine {
             .as_ref()
             .map(|descriptor| descriptor.stamp().generation)
             .unwrap_or(1);
-        let artifact = build_index_artifact(
-            request,
-            vector,
-            scope,
-            projection_id,
-            generation,
-            source_cursor,
-            candidates.clone(),
-        )?;
-        let descriptor = artifact.descriptor();
-        if previous.as_ref() == Some(&descriptor) {
-            let entry = crate::vector_artifact_catalog_entries(&self.storage, descriptor.scope())
-                .map_err(|error| ServiceError::Vector(error.to_string()))?
-                .into_iter()
-                .find(|entry| entry.descriptor == descriptor)
+        let artifact = if let (VectorIndexConfiguration::Hnsw { .. }, Some(previous)) =
+            (&request.configuration, previous.as_ref())
+        {
+            let active = runtime
+                .artifact(&projection_id, previous.stamp().generation)
                 .ok_or_else(|| {
-                    ServiceError::Vector("ready vector index catalog entry disappeared".into())
+                    ServiceError::Vector("active HNSW artifact bytes disappeared".into())
                 })?;
-            return Ok(EnsureVectorIndexResult {
-                index: public_vector_index(&entry, &request.collection_id, &request.vector_name)?,
-                idempotent_replay: true,
-            });
-        }
-
-        let artifact = if previous.is_some() {
-            build_index_artifact(
+            let rrd_vector::VectorArtifact::Hnsw(active) = active else {
+                return Err(ServiceError::Vector(
+                    "active vector index has the wrong artifact kind".into(),
+                ));
+            };
+            let desired = hnsw_config(request, vector, scope.clone(), projection_id.clone())?;
+            if active.config() == &desired {
+                if source_cursor < active.descriptor().stamp.source_cursor {
+                    return Err(ServiceError::Vector(
+                        "canonical vector coverage regressed behind the active HNSW index".into(),
+                    ));
+                }
+                if source_cursor == active.descriptor().stamp.source_cursor {
+                    return replay_vector_index(
+                        &self.storage,
+                        active.descriptor().clone().into(),
+                        &request.collection_id,
+                        &request.vector_name,
+                    );
+                }
+                let next_generation = generation.checked_add(1).ok_or_else(|| {
+                    ServiceError::Vector("vector index generation overflowed".into())
+                })?;
+                active
+                    .advance(
+                        next_generation,
+                        source_cursor,
+                        candidates.into_iter().filter(|candidate| {
+                            candidate.source_cursor > active.descriptor().stamp.source_cursor
+                        }),
+                    )
+                    .map(Into::into)
+                    .map_err(core_vector)?
+            } else {
+                build_index_artifact(
+                    request,
+                    vector,
+                    scope,
+                    projection_id,
+                    generation.checked_add(1).ok_or_else(|| {
+                        ServiceError::Vector("vector index generation overflowed".into())
+                    })?,
+                    source_cursor,
+                    candidates,
+                )?
+            }
+        } else {
+            let artifact = build_index_artifact(
                 request,
                 vector,
-                descriptor.scope().clone(),
-                descriptor.stamp().id.clone(),
-                generation.checked_add(1).ok_or_else(|| {
-                    ServiceError::Vector("vector index generation overflowed".into())
-                })?,
+                scope,
+                projection_id,
+                generation,
                 source_cursor,
-                candidates,
-            )?
-        } else {
-            artifact
+                candidates.clone(),
+            )?;
+            let descriptor = artifact.descriptor();
+            if previous.as_ref() == Some(&descriptor) {
+                return replay_vector_index(
+                    &self.storage,
+                    descriptor,
+                    &request.collection_id,
+                    &request.vector_name,
+                );
+            }
+            if previous.is_some() {
+                build_index_artifact(
+                    request,
+                    vector,
+                    descriptor.scope().clone(),
+                    descriptor.stamp().id.clone(),
+                    generation.checked_add(1).ok_or_else(|| {
+                        ServiceError::Vector("vector index generation overflowed".into())
+                    })?,
+                    source_cursor,
+                    candidates,
+                )?
+            } else {
+                artifact
+            }
         };
         let expected_revision = runtime.catalog().revision;
         let publication = crate::publish_traced_vector_artifact(
@@ -176,6 +226,64 @@ impl RrdEngine {
     }
 }
 
+fn replay_vector_index<E>(
+    storage: &E,
+    descriptor: rrd_vector::VectorProjectionDescriptor,
+    collection_id: &CanonicalId,
+    vector_name: &CanonicalId,
+) -> Result<EnsureVectorIndexResult>
+where
+    E: rrd_store::Engine,
+{
+    let entry = crate::vector_artifact_catalog_entries(storage, descriptor.scope())
+        .map_err(|error| ServiceError::Vector(error.to_string()))?
+        .into_iter()
+        .find(|entry| entry.descriptor == descriptor)
+        .ok_or_else(|| {
+            ServiceError::Vector("ready vector index catalog entry disappeared".into())
+        })?;
+    Ok(EnsureVectorIndexResult {
+        index: public_vector_index(&entry, collection_id, vector_name)?,
+        idempotent_replay: true,
+    })
+}
+
+fn hnsw_config(
+    request: &EnsureVectorIndex,
+    vector: &rrd_vector::NamedVectorConfig,
+    scope: ScopeId,
+    id: ProjectionId,
+) -> Result<rrd_vector::HnswConfig> {
+    let dimensions = usize::try_from(vector.dimensions)
+        .map_err(|_| ServiceError::Vector("vector dimensions exceed usize".into()))?;
+    let VectorIndexConfiguration::Hnsw {
+        m,
+        ef_construction,
+        max_level,
+        seed,
+        filter_properties,
+    } = &request.configuration
+    else {
+        return Err(ServiceError::Vector(
+            "HNSW configuration helper received another index kind".into(),
+        ));
+    };
+    Ok(rrd_vector::HnswConfig {
+        id,
+        scope,
+        field: vector.field.clone(),
+        dimensions,
+        metric: vector.metric,
+        embedding_model: vector.embedding_model.clone(),
+        m: usize::try_from(*m).map_err(|_| ServiceError::Vector("HNSW m exceeds usize".into()))?,
+        ef_construction: usize::try_from(*ef_construction)
+            .map_err(|_| ServiceError::Vector("HNSW ef_construction exceeds usize".into()))?,
+        max_level: *max_level,
+        seed: *seed,
+        filter_properties: public_filter_properties(filter_properties),
+    })
+}
+
 #[allow(clippy::too_many_arguments)]
 fn build_index_artifact(
     request: &EnsureVectorIndex,
@@ -189,29 +297,8 @@ fn build_index_artifact(
     let dimensions = usize::try_from(vector.dimensions)
         .map_err(|_| ServiceError::Vector("vector dimensions exceed usize".into()))?;
     match &request.configuration {
-        VectorIndexConfiguration::Hnsw {
-            m,
-            ef_construction,
-            max_level,
-            seed,
-            filter_properties,
-        } => rrd_vector::HnswIndex::build(
-            rrd_vector::HnswConfig {
-                id,
-                scope,
-                field: vector.field.clone(),
-                dimensions,
-                metric: vector.metric,
-                embedding_model: vector.embedding_model.clone(),
-                m: usize::try_from(*m)
-                    .map_err(|_| ServiceError::Vector("HNSW m exceeds usize".into()))?,
-                ef_construction: usize::try_from(*ef_construction).map_err(|_| {
-                    ServiceError::Vector("HNSW ef_construction exceeds usize".into())
-                })?,
-                max_level: *max_level,
-                seed: *seed,
-                filter_properties: public_filter_properties(filter_properties),
-            },
+        VectorIndexConfiguration::Hnsw { .. } => rrd_vector::HnswIndex::build(
+            hnsw_config(request, vector, scope, id)?,
             generation,
             source_cursor,
             candidates,
@@ -268,24 +355,54 @@ fn public_vector_index(
     collection_id: &CanonicalId,
     vector_name: &CanonicalId,
 ) -> Result<VectorIndexSnapshot> {
-    let (stamp, kind, indexed_vectors, packed_vector_bytes, full_precision_vector_bytes) =
-        match &entry.descriptor {
-            rrd_vector::VectorProjectionDescriptor::Hnsw { descriptor } => {
-                (&descriptor.stamp, "hnsw", descriptor.nodes, None, None)
-            }
-            rrd_vector::VectorProjectionDescriptor::TurboQuant { descriptor } => (
-                &descriptor.stamp,
-                "turboquant",
-                descriptor.candidate_versions,
-                Some(descriptor.packed_vector_bytes),
-                Some(descriptor.full_precision_vector_bytes),
-            ),
-            rrd_vector::VectorProjectionDescriptor::ExactSegment { .. } => {
-                return Err(ServiceError::Vector(
-                    "vector index catalog entry is not an approximate index".into(),
-                ));
-            }
-        };
+    let (
+        stamp,
+        kind,
+        indexed_vectors,
+        packed_vector_bytes,
+        full_precision_vector_bytes,
+        maintenance,
+    ) = match &entry.descriptor {
+        rrd_vector::VectorProjectionDescriptor::Hnsw { descriptor } => (
+            &descriptor.stamp,
+            "hnsw",
+            descriptor.nodes,
+            None,
+            None,
+            VectorIndexMaintenanceSnapshot {
+                mode: match descriptor.maintenance {
+                    rrd_vector::HnswMaintenanceKind::FullBuild => {
+                        VectorIndexMaintenanceMode::FullBuild
+                    }
+                    rrd_vector::HnswMaintenanceKind::Incremental => {
+                        VectorIndexMaintenanceMode::Incremental
+                    }
+                },
+                previous_generation: descriptor.previous_generation,
+                indexed_delta_vectors: u64::try_from(descriptor.indexed_delta_vectors)
+                    .map_err(|_| ServiceError::Vector("HNSW delta count exceeds u64".into()))?,
+            },
+        ),
+        rrd_vector::VectorProjectionDescriptor::TurboQuant { descriptor } => (
+            &descriptor.stamp,
+            "turboquant",
+            descriptor.candidate_versions,
+            Some(descriptor.packed_vector_bytes),
+            Some(descriptor.full_precision_vector_bytes),
+            VectorIndexMaintenanceSnapshot {
+                mode: VectorIndexMaintenanceMode::FullBuild,
+                previous_generation: None,
+                indexed_delta_vectors: u64::try_from(descriptor.candidate_versions).map_err(
+                    |_| ServiceError::Vector("TurboQuant delta count exceeds u64".into()),
+                )?,
+            },
+        ),
+        rrd_vector::VectorProjectionDescriptor::ExactSegment { .. } => {
+            return Err(ServiceError::Vector(
+                "vector index catalog entry is not an approximate index".into(),
+            ));
+        }
+    };
     let indexed_vectors = u64::try_from(indexed_vectors)
         .map_err(|_| ServiceError::Vector("vector index count exceeds u64".into()))?;
     let packed_vector_bytes = packed_vector_bytes
@@ -309,6 +426,7 @@ fn public_vector_index(
         generation: stamp.generation,
         source_cursor: stamp.source_cursor,
         indexed_vectors,
+        maintenance,
         packed_vector_bytes,
         full_precision_vector_bytes,
         configuration_sha256: stamp.config_digest.clone(),

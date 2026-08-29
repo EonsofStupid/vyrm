@@ -77,7 +77,7 @@ fn contract() -> serde_json::Value {
     approximate_request.mode = SearchMode::RequireApproximate { exact_rerank: 4 };
     let approximate_hits = hnsw.search(&approximate_request, 4).unwrap();
     serde_json::json!({
-        "comment": "M5 portable vector contract; changes require an explicit format-version decision",
+        "comment": "portable vector contract; HNSW artifact format v2 adds online-maintenance provenance",
         "request": request,
         "candidates": candidates,
         "exact_hits": exact_hits,

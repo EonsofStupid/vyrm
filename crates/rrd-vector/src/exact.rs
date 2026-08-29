@@ -28,11 +28,18 @@ fn candidates_from_changes_at(
             RuntimeMutation::Retire { retirement }
                 if retirement.model == rrd_core::RuntimeLogicalModel::Vector =>
             {
-                if let Some(candidate) = candidates
-                    .iter_mut()
+                if let Some(mut candidate) = candidates
+                    .iter()
                     .rev()
                     .find(|candidate| candidate.vector.reference == retirement.reference)
+                    .cloned()
                 {
+                    // A retirement is a new authoritative vector version, not
+                    // an in-place rewrite of the original put. Retaining its
+                    // commit cursor lets projection freshness detect deletes,
+                    // preserves reads before the retirement cursor, and gives
+                    // online indexes an exact tombstone delta to fold in.
+                    candidate.source_cursor = change.cursor;
                     candidate.vector.valid_to = Some(
                         candidate
                             .vector
@@ -41,6 +48,7 @@ fn candidates_from_changes_at(
                                 current.min(retirement.effective_at)
                             }),
                     );
+                    candidates.push(candidate);
                 }
             }
             _ => {}
@@ -244,18 +252,7 @@ pub(crate) fn score_query(
     }
 }
 
-pub(crate) fn score_dense_candidate(
-    query: &[f32],
-    candidate: &VectorValue,
-    metric: ScoreMetric,
-) -> Result<f64> {
-    match candidate {
-        VectorValue::Dense { values } => score_dense(query, values, metric),
-        _ => invalid("dense query requires a dense candidate"),
-    }
-}
-
-fn score_dense(left: &[f32], right: &[f32], metric: ScoreMetric) -> Result<f64> {
+pub(crate) fn score_dense(left: &[f32], right: &[f32], metric: ScoreMetric) -> Result<f64> {
     if left.len() != right.len() {
         return invalid("dense query and candidate dimensions differ");
     }
@@ -535,6 +532,16 @@ mod tests {
             Some(first.digest.clone()),
         );
         let changes = vec![first, second];
+        let versions = candidates_from_changes(&changes, &scope);
+        assert_eq!(
+            versions
+                .iter()
+                .map(|candidate| candidate.source_cursor)
+                .collect::<Vec<_>>(),
+            vec![1, 2]
+        );
+        assert_eq!(versions[0].vector.valid_to, None);
+        assert_eq!(versions[1].vector.valid_to, Some(5));
         let request = |valid_at, known_at_cursor| SearchRequest {
             scope: scope.clone(),
             read: stamp(&scope, known_at_cursor),

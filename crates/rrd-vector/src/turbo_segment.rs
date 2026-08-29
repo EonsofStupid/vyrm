@@ -117,6 +117,8 @@ impl TurboQuantDescriptor {
             filter_properties: self.filter_properties.clone(),
             estimated_candidates: self.candidate_versions as u64,
             estimated_cost,
+            overlay_source_cursor: None,
+            overlay_candidates: 0,
         }
     }
 }

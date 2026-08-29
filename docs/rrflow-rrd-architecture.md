@@ -340,6 +340,14 @@ transaction coordinator. Deletion cannot remove a collection while any latest
 point version remains live or future-effective, or while a named vector still
 owns an active HNSW/TurboQuant artifact.
 
+HNSW v2 is an online projection over that authority. The serving immutable
+generation remains readable while post-generation vector versions are searched
+as an exact delta and inserted into a successor graph. The plan records base
+and overlay cursors; final exact reduction closes update, retirement, valid-time,
+filter, and ordering semantics. Unchanged configurations never rebuild old
+nodes, and one object/catalogue CAS publishes the successor. See
+[`rrd-hnsw-online-v2.md`](rrd-hnsw-online-v2.md).
+
 ```text
 database catalogue
   → resolve collection or same-kind alias

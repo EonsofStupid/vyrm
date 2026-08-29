@@ -274,6 +274,20 @@ impl RrdEngine {
         let collection_id =
             ProjectionId::new(request.collection_id.as_str()).map_err(core_vector)?;
         let field = ProjectionId::new(request.field.as_str()).map_err(core_vector)?;
+        let catalogue = repository.load().map_err(vector_collection_error)?;
+        let collection = catalogue.collections.get(&collection_id).ok_or_else(|| {
+            ServiceError::Vector(format!(
+                "unknown vector collection {}",
+                request.collection_id
+            ))
+        })?;
+        require_payload_index_not_in_use(
+            self,
+            &self.query_scope(&request.scope)?,
+            &request.collection_id,
+            collection,
+            request.field.as_str(),
+        )?;
         let mutation = collection_mutation_context(session_id, context, now);
         let (catalogue, deleted_index, idempotent_replay) = repository
             .delete_payload_index(
@@ -736,6 +750,44 @@ fn require_no_collection_artifacts(
             {
                 return Err(ServiceError::Vector(format!(
                     "vector collection {collection_id} still owns active {kind} artifacts; retire them before deletion"
+                )));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn require_payload_index_not_in_use(
+    engine: &RrdEngine,
+    scope: &ScopeId,
+    collection_id: &CanonicalId,
+    collection: &rrd_vector::CollectionEntry,
+    field: &str,
+) -> Result<()> {
+    let entries = crate::vector_artifact_catalog_entries(&engine.storage, scope)
+        .map_err(|error| ServiceError::Vector(error.to_string()))?;
+    for vector in collection.definition.vectors.values() {
+        for kind in ["hnsw", "turboquant"] {
+            let expected = format!("{kind}-{collection_id}-{}", vector.name);
+            let Some(entry) = entries
+                .iter()
+                .find(|entry| entry.descriptor.stamp().id.as_str() == expected)
+            else {
+                continue;
+            };
+            let properties = match &entry.descriptor {
+                rrd_vector::VectorProjectionDescriptor::Hnsw { descriptor } => {
+                    &descriptor.filter_properties
+                }
+                rrd_vector::VectorProjectionDescriptor::TurboQuant { descriptor } => {
+                    &descriptor.filter_properties
+                }
+                rrd_vector::VectorProjectionDescriptor::ExactSegment { .. } => continue,
+            };
+            if properties.contains(field) {
+                return Err(ServiceError::Vector(format!(
+                    "payload index {field} is required by active {kind} artifact {}; retire or replace the artifact before deletion",
+                    entry.descriptor.stamp().id
                 )));
             }
         }
