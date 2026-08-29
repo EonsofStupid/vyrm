@@ -141,6 +141,7 @@ impl RrdEngine {
         }
         let (mut bytes, mut state) = self.load_authenticated(session_id, token)?;
         self.authorize_session_policy(&state, SecurityAction::TransactionCommit, now)?;
+        let principal_id = state.principal_id.clone();
         self.validate_collection_vector_mutations(request)?;
         let record = state
             .transactions
@@ -171,6 +172,7 @@ impl RrdEngine {
         if record.lease.state != TransactionState::Open {
             return Err(ServiceError::TransactionClosed);
         }
+        let mut prepared_runtime_commit = None;
         if let Some(intent) = &record.commit_intent {
             require_same_commit(intent, idempotency_key, &request.operation_sha256)?;
         } else {
@@ -182,12 +184,20 @@ impl RrdEngine {
                 request_id,
                 operation_id,
             )?;
-            let record = state
-                .transactions
-                .get_mut(transaction_id)
-                .expect("transaction retained");
-            if now >= record.lease.expires_at_unix_ms {
-                record.lease.state = TransactionState::Expired;
+            if now
+                >= state
+                    .transactions
+                    .get(transaction_id)
+                    .expect("transaction retained")
+                    .lease
+                    .expires_at_unix_ms
+            {
+                state
+                    .transactions
+                    .get_mut(transaction_id)
+                    .expect("transaction retained")
+                    .lease
+                    .state = TransactionState::Expired;
                 touch_session(&mut state, now);
                 self.replace_session(
                     session_id,
@@ -200,12 +210,23 @@ impl RrdEngine {
                 )?;
                 return Err(ServiceError::TransactionExpired);
             }
-            let runtime_at = record
+            let runtime_at = state
+                .transactions
+                .get(transaction_id)
+                .expect("transaction retained")
                 .prepared
                 .as_ref()
                 .map(|prepared| prepared.runtime_at_unix_ms)
                 .unwrap_or(now);
             let runtime_identity = if matches!(transaction_scope.as_str(), "claims" | "data") {
+                let catalogue = self.load_current_automation_catalogue()?;
+                self.authorize_transaction_triggers(
+                    &state,
+                    &catalogue,
+                    now,
+                    request_id,
+                    operation_id,
+                )?;
                 let commit = public_runtime_commit(
                     request,
                     session_id,
@@ -213,15 +234,31 @@ impl RrdEngine {
                     read.commit_cursor,
                     runtime_at,
                 )?;
-                (runtime_at, commit.digest())
+                let commit = self.apply_transaction_triggers(
+                    &catalogue,
+                    request,
+                    commit,
+                    principal_id.clone(),
+                    runtime_at,
+                    request_id,
+                    operation_id,
+                )?;
+                let identity = (runtime_at, commit.digest(), catalogue.revision);
+                prepared_runtime_commit = Some(commit);
+                identity
             } else {
                 return Err(ServiceError::WrongScope);
             };
-            record.commit_intent = Some(CommitIntent {
+            state
+                .transactions
+                .get_mut(transaction_id)
+                .expect("transaction retained")
+                .commit_intent = Some(CommitIntent {
                 idempotency_key: idempotency_key.clone(),
                 operation_sha256: request.operation_sha256.clone(),
                 runtime_at_unix_ms: Some(runtime_identity.0),
                 runtime_commit_sha256: Some(runtime_identity.1),
+                automation_revision: Some(runtime_identity.2),
             });
             bytes = self.replace_session(
                 session_id,
@@ -245,13 +282,37 @@ impl RrdEngine {
             let expected_commit = intent.runtime_commit_sha256.as_ref().ok_or_else(|| {
                 ServiceError::Contract("data transaction intent lacks runtime identity".into())
             })?;
-            let commit = public_runtime_commit(
-                request,
-                session_id,
-                &self.instance,
-                read.commit_cursor,
-                runtime_at,
-            )?;
+            let commit = match prepared_runtime_commit.take() {
+                Some(commit) => commit,
+                None => {
+                    let catalogue = self.load_automation_catalogue_revision(
+                        intent.automation_revision.unwrap_or(0),
+                    )?;
+                    self.authorize_transaction_triggers(
+                        &state,
+                        &catalogue,
+                        now,
+                        request_id,
+                        operation_id,
+                    )?;
+                    let commit = public_runtime_commit(
+                        request,
+                        session_id,
+                        &self.instance,
+                        read.commit_cursor,
+                        runtime_at,
+                    )?;
+                    self.apply_transaction_triggers(
+                        &catalogue,
+                        request,
+                        commit,
+                        principal_id.clone(),
+                        runtime_at,
+                        request_id,
+                        operation_id,
+                    )?
+                }
+            };
             if commit.digest() != *expected_commit {
                 return Err(ServiceError::OperationDigestMismatch);
             }

@@ -118,8 +118,8 @@ the [complete statement catalogue](https://surrealdb.com/docs/reference/query-la
 | Define/alter/remove indexes | **Partial** — programmatic vector artifact catalogue only |
 | Unique, compound, count and ordinary indexes | **Absent** as general indexes |
 | Full-text analyzers, tokenizers and filters | **Absent** |
-| Database events/triggers on mutations | **Partial** — typed runtime events and package hooks exist; user-defined transactional triggers do not |
-| User-defined SurrealQL functions and closures | **Absent** |
+| Database events/triggers on mutations | **Core engine foundation present** — revision-pinned synchronous triggers can reject a transaction or append a typed event in the same commit; outward DDL is pending |
+| User-defined SurrealQL functions and closures | **Partial** — governed JavaScript ES2020 and portable WebAssembly JSON-v1 functions exist at the engine boundary; SurrealQL-compatible definition syntax and namespaces do not |
 | Parameters/constants | **Partial** — query parameters exist; persisted database parameters do not |
 | Sequences | **Absent** as a public schema primitive |
 | Users and access methods as schema objects | **Absent** |
@@ -193,7 +193,7 @@ Sources: [live queries](https://surrealdb.com/docs/learn/querying/real-time/live
 | Managed SDK resubscription/reconnect | **Absent** |
 | Durable changefeeds with configured retention | **Partial** — immutable cursor log exists; retention controls are not a public feed contract |
 | Replay with `SHOW CHANGES` from time/versionstamp | **Partial** — resumable cursor pages and temporal UI exist |
-| User-defined database events/triggers | **Absent** |
+| User-defined database events/triggers | **Partial** — synchronous revision-pinned engine triggers are transactional; outward definition syntax and asynchronous delivery are absent |
 | Custom API endpoints as a controlled alternative to arbitrary queries | **Absent** |
 
 ## 8. Security, identity, and governance
@@ -261,9 +261,9 @@ and the [documentation index](https://surrealdb.com/docs).
 
 | SurrealDB capability | RRFlow disposition |
 |---|---|
-| Sandboxed WASM extension system (`Surrealism`) | **Absent** |
-| Custom modules and namespaced functions | **Absent** |
-| Asynchronous/write-capable extension functions | **Absent** |
+| Sandboxed WASM extension system (`Surrealism`) | **Partial** — a no-import/no-WASI Wasmi runtime implements the explicit JSON-v1 ABI with memory and fuel bounds; Surrealism compatibility is not claimed |
+| Custom modules and namespaced functions | **Partial** — immutable digested JavaScript/Wasm definitions exist; module imports, packages, and public namespaces do not |
+| Asynchronous/write-capable extension functions | **Partial** — v1 is synchronous only and permits a trigger to append one typed event atomically; background execution and general host writes are absent |
 | File put/get/head/list/copy/rename/delete and conditional variants | **Partial** — immutable put/get/verify/list/delete semantics only |
 | In-database ML model import/use (`SurrealML`) | **Absent** |
 | Local/cloud embedding pipeline integrated with data writes | **Partial** — governed local embedding exists, not cluster inference |

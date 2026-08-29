@@ -148,6 +148,28 @@ fn required_unimplemented_foundation_is_visible_and_not_falsely_available() {
         .reason
         .as_deref()
         .is_some_and(|reason| !reason.is_empty()));
+
+    let functions = catalogue
+        .capabilities
+        .iter()
+        .find(|capability| capability.id == "embedded-functions")
+        .expect("embedded function capability");
+    let engine = functions
+        .bindings
+        .iter()
+        .find(|binding| binding.surface == ProductSurface::Engine)
+        .unwrap();
+    assert_eq!(engine.disposition, SurfaceDisposition::Available);
+    assert_eq!(engine.entrypoints.len(), 3);
+    assert!(functions.bindings.iter().all(|binding| {
+        binding.surface == ProductSurface::Engine
+            || (binding.disposition == SurfaceDisposition::Planned
+                && binding.entrypoints.is_empty()
+                && binding
+                    .reason
+                    .as_deref()
+                    .is_some_and(|reason| reason.contains("G06")))
+    }));
 }
 
 #[test]

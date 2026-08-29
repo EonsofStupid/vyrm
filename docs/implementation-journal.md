@@ -3385,3 +3385,33 @@ index.
   Coupling every terminal record to the application data transaction, retention
   policy, and external sink delivery remain later hardening rather than hidden
   claims in this foundation slice.
+
+## 2026-08-29 — G03-W07 governed functions and triggers candidate
+
+- Added one versioned automation contract for digested JavaScript ES2020 and
+  portable WebAssembly JSON-v1 definitions, explicit execution limits,
+  capabilities, typed trigger selectors/effects, and single-attempt semantics.
+  The shared JSON domain also bounds depth/item amplification and rejects
+  integers outside the exact cross-runtime range instead of losing precision.
+- Added an immutable per-instance automation catalogue. Revision record and
+  compare-and-swap head publish in one control batch, validate their SHA-256 on
+  reopen, and preserve old revisions for transaction recovery.
+- Added fresh-context QuickJS execution with heap, stack, interrupt, input, and
+  output bounds. Clock, locale, dynamic code, random, module, network, and
+  filesystem authority are absent. Added no-import/no-WASI Wasmi execution
+  with memory, value-stack, call-stack, instance, output, and deterministic
+  fuel limits.
+- Integrated synchronous triggers into the existing transaction coordinator.
+  The commit intent pins the automation revision and derived runtime digest;
+  retry reexecutes that revision at the frozen transaction time. Triggers only
+  inspect original typed mutations and can require boolean true or append one
+  capability-gated event to the same authoritative commit.
+- Added separate catalogue-read, catalogue-write, and function-execute security
+  actions plus trigger authorization and terminal audit evidence. Runtime,
+  contract, permission, missing-revision, and resource-limit failures remain
+  distinct and cannot advance the data cursor.
+- Added deterministic JavaScript/WebAssembly parity, restart, heap, stack,
+  interrupt, fuel, import, randomness, atomic derived-event, rejecting-trigger,
+  and audit tests. The engine-only capability is published honestly; generated
+  outward surfaces remain owned by G06. The reviewed OpenAPI digest advances to
+  `3d8a057d9c89a82ab190bf2fe1f5839945dd3943006cbf297c03264312616be2`.

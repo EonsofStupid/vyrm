@@ -733,7 +733,13 @@ adapters, not a second public transaction surface. See
   all six SDKs. Bounded server-side waiting now wakes on authoritative cursor
   advancement with deadline and timeout evidence. Streaming, typed ergonomic
   SDK methods, retained subscription leases, and backpressure remain open.
-- User-defined triggers/functions only after capability and audit gates exist.
+- Governed JavaScript ES2020 and portable WebAssembly JSON-v1 functions now
+  execute inside the engine under explicit digest, capability, memory, stack,
+  interrupt, fuel, security, and audit contracts. Synchronous triggers pin an
+  immutable catalogue revision into the transaction intent, inspect only the
+  original typed mutations, and can reject the transaction or append one typed
+  event atomically. Generated HTTP/MCP/CLI/SDK surfaces remain G06 work;
+  asynchronous/background functions and host I/O are deliberately outside v1.
 
 **Exit gate:** multi-model and live-query differentials cover semantics,
 failure, restart, permissions and bounded performance. SurrealDB comparisons

@@ -7,6 +7,7 @@
 
 mod capability_surface;
 mod diagnostic;
+mod function;
 mod lifecycle;
 mod platform;
 mod runtime_tool;
@@ -25,6 +26,15 @@ pub use diagnostic::{
     DiagnosticSnapshot, DiagnosticSnapshotLease, DiagnosticVectorArtifactCatalogueSnapshot,
     DiagnosticVectorArtifactKind, DiagnosticVectorArtifactSnapshot, ReadDiagnosticSnapshot,
     DIAGNOSTIC_SNAPSHOT_FORMAT_VERSION, MAX_DIAGNOSTIC_AUDIT_RECORDS,
+};
+pub use function::{
+    validate_function_value, AutomationCatalogue, ExecuteFunction, FunctionCapability,
+    FunctionDefinition, FunctionExecutionResult, FunctionLimits, FunctionRuntime,
+    FunctionRuntimeKind, FunctionTrigger, FunctionTriggerEffect, FunctionTriggerMutation,
+    ListAutomationCatalogue, ReplaceAutomationCatalogue, WebAssemblyAbi, FUNCTION_CONTRACT_VERSION,
+    MAX_FUNCTIONS_PER_CATALOGUE, MAX_FUNCTION_INPUT_BYTES, MAX_FUNCTION_JSON_SAFE_INTEGER,
+    MAX_FUNCTION_OUTPUT_BYTES, MAX_FUNCTION_SOURCE_BYTES, MAX_FUNCTION_TRIGGERS_PER_CATALOGUE,
+    MAX_FUNCTION_VALUE_DEPTH, MAX_FUNCTION_VALUE_ITEMS, MAX_FUNCTION_WASM_BYTES,
 };
 pub use lifecycle::{
     LifecycleEnforcementLevelV1, LifecycleEventCommandV1, LifecycleEventEnvelopeV1,
@@ -57,7 +67,7 @@ use std::fmt;
 pub const PROTOCOL: &str = "rrd";
 pub const PROTOCOL_VERSION: u16 = 1;
 pub const OPENAPI_DOCUMENT_SHA256: &str =
-    "2a02019b9d89b06714b62d27477413c6216fbb8bff79c371ac24f3b18653ebc3";
+    "3d8a057d9c89a82ab190bf2fe1f5839945dd3943006cbf297c03264312616be2";
 pub const MAX_ID_BYTES: usize = 128;
 pub const MAX_MESSAGE_BYTES: usize = 4_096;
 pub const MAX_CAPABILITIES: usize = 512;
@@ -1927,6 +1937,9 @@ pub enum SecurityAction {
     EstateAdmin,
     AuditRead,
     AuditExport,
+    FunctionCatalogueRead,
+    FunctionCatalogueWrite,
+    FunctionExecute,
     DiagnosticsRead,
     SecurityAdmin,
     MemoryContextRead,

@@ -100,6 +100,29 @@ pub fn product_capability_catalogue() -> ProductCapabilityCatalogue {
         });
     }
 
+    let mut embedded_functions = ProductCapability {
+        id: "embedded-functions".into(),
+        label: "Embedded functions".into(),
+        category: "query".into(),
+        summary: "Run revision-pinned JavaScript ES2020 and portable WebAssembly JSON functions, including synchronous transaction triggers, inside deterministic engine-owned sandboxes.".into(),
+        bindings: bindings(
+            available("rrd-engine:RrdEngine::execute_function"),
+            planned(FUNCTION_SURFACE_PLAN_REASON),
+            planned(FUNCTION_SURFACE_PLAN_REASON),
+            planned(FUNCTION_SURFACE_PLAN_REASON),
+            planned(FUNCTION_SURFACE_PLAN_REASON),
+        ),
+    };
+    expose(
+        binding(&mut embedded_functions, ProductSurface::Engine),
+        "rrd-engine:RrdEngine::automation_catalogue",
+    );
+    expose(
+        binding(&mut embedded_functions, ProductSurface::Engine),
+        "rrd-engine:RrdEngine::replace_automation_catalogue",
+    );
+    capabilities.push(embedded_functions);
+
     for (id, label, category, summary) in [
         (
             "document-ingest",
@@ -309,6 +332,8 @@ fn expose(binding: &mut SurfaceBinding, entrypoint: impl Into<String>) {
 
 const FOUNDATION_PLAN_REASON: &str =
     "Scheduled by the checked-in RRFlow foundation work plan; no executable implementation is available yet.";
+const FUNCTION_SURFACE_PLAN_REASON: &str =
+    "The engine implementation is available; generated HTTP, MCP, CLI, SDK, and Connectome bindings are owned by G06.";
 
 fn category(id: &str) -> &str {
     id.split_once('-').map_or("service", |(prefix, _)| prefix)

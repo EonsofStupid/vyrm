@@ -577,6 +577,9 @@ fn runtime_tool_operation_for_action(action: SecurityAction) -> crate::Result<Rr
         | SecurityAction::SubscriptionAck
         | SecurityAction::SubscriptionClose
         | SecurityAction::AuditExport
+        | SecurityAction::FunctionCatalogueRead
+        | SecurityAction::FunctionCatalogueWrite
+        | SecurityAction::FunctionExecute
         | SecurityAction::DiagnosticsRead
         | SecurityAction::EstateAdmin
         | SecurityAction::SecurityAdmin

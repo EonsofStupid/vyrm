@@ -36,6 +36,9 @@ pub enum RrdOperation {
     SubscriptionClose,
     AuditRead,
     AuditExport,
+    FunctionCatalogueRead,
+    FunctionCatalogueWrite,
+    FunctionExecute,
     DiagnosticsRead,
     MemoryContextRead,
     MemoryInspect,
@@ -72,6 +75,7 @@ impl RrdOperation {
                 | Self::QueryIndexEnsure
                 | Self::BackupCreate
                 | Self::RestoreCreate
+                | Self::FunctionCatalogueWrite
                 | Self::VectorCollectionEnsure
                 | Self::MemoryRetire
                 | Self::MemoryWrite
@@ -117,6 +121,9 @@ impl RrdOperation {
             Self::SubscriptionClose => SecurityAction::SubscriptionClose,
             Self::AuditRead => SecurityAction::AuditRead,
             Self::AuditExport => SecurityAction::AuditExport,
+            Self::FunctionCatalogueRead => SecurityAction::FunctionCatalogueRead,
+            Self::FunctionCatalogueWrite => SecurityAction::FunctionCatalogueWrite,
+            Self::FunctionExecute => SecurityAction::FunctionExecute,
             Self::DiagnosticsRead => SecurityAction::DiagnosticsRead,
             Self::MemoryContextRead => SecurityAction::MemoryContextRead,
             Self::MemoryInspect => SecurityAction::MemoryInspect,

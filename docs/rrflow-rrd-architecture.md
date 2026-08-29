@@ -181,6 +181,8 @@ RRD has exactly one of each authoritative concern:
 - identity and policy-decision path;
 - durable mutation/event log and transactional outbox;
 - query contract and execution result contract;
+- catalogue-owned immutable automation subcatalogue and deterministic
+  function/trigger execution;
 - recovery and version-migration authority.
 
 Physical components may maintain specialized files and indexes. They must not

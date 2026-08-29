@@ -35,6 +35,10 @@ pub enum ServiceError {
     SubscriptionConnectionReplaced,
     SubscriptionBackpressure,
     Backup(String),
+    Function(String),
+    FunctionLimit(String),
+    FunctionNotFound,
+    AutomationRevisionNotFound,
     Runtime(String),
     PermissionDenied,
     DeadlineExceeded,
@@ -61,13 +65,15 @@ impl ServiceError {
             | Self::Changefeed(_)
             | Self::Subscription(_)
             | Self::Query(_)
+            | Self::Function(_)
             | Self::Runtime(_)
             | Self::Vector(_)
             | Self::OperationDigestMismatch
             | Self::WrongScope => ServiceErrorKind::InvalidArgument,
-            Self::SessionNotFound | Self::TransactionNotFound | Self::SubscriptionNotFound => {
-                ServiceErrorKind::NotFound
-            }
+            Self::SessionNotFound
+            | Self::TransactionNotFound
+            | Self::SubscriptionNotFound
+            | Self::FunctionNotFound => ServiceErrorKind::NotFound,
             Self::Unauthenticated => ServiceErrorKind::Unauthenticated,
             Self::PermissionDenied => ServiceErrorKind::PermissionDenied,
             Self::IdempotencyConflict => ServiceErrorKind::Conflict,
@@ -79,10 +85,12 @@ impl ServiceError {
             | Self::SubscriptionLeaseExpired
             | Self::SubscriptionClosed
             | Self::SubscriptionConnectionReplaced
+            | Self::AutomationRevisionNotFound
             | Self::ProjectBindingMismatch => ServiceErrorKind::FailedPrecondition,
-            Self::TransactionQuota | Self::RenewalQuota | Self::SubscriptionBackpressure => {
-                ServiceErrorKind::ResourceExhausted
-            }
+            Self::TransactionQuota
+            | Self::RenewalQuota
+            | Self::SubscriptionBackpressure
+            | Self::FunctionLimit(_) => ServiceErrorKind::ResourceExhausted,
             Self::DeadlineExceeded => ServiceErrorKind::DeadlineExceeded,
             Self::StorageConflict(_) => ServiceErrorKind::Conflict,
             Self::Storage(_) | Self::Backup(_) | Self::Estate(_) => ServiceErrorKind::Internal,
