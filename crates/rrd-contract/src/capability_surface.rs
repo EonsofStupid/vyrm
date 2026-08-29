@@ -9,18 +9,32 @@ use std::collections::BTreeSet;
 #[serde(rename_all = "snake_case")]
 pub enum ProductSurface {
     Engine,
+    #[serde(rename = "rrflowql")]
+    Rrflowql,
+    #[serde(rename = "graphql")]
+    Graphql,
     RrdHttp,
+    #[serde(rename = "websocket")]
+    WebSocket,
+    #[serde(rename = "grpc")]
+    Grpc,
     Mcp,
     Cli,
+    Sdk,
     Connectome,
 }
 
 impl ProductSurface {
-    pub const ALL: [Self; 5] = [
+    pub const ALL: [Self; 10] = [
         Self::Engine,
+        Self::Rrflowql,
+        Self::Graphql,
         Self::RrdHttp,
+        Self::WebSocket,
+        Self::Grpc,
         Self::Mcp,
         Self::Cli,
+        Self::Sdk,
         Self::Connectome,
     ];
 }
@@ -85,7 +99,14 @@ impl ProductCapabilityCatalogue {
                 return invalid("every product capability must declare every surface");
             }
             let mut surfaces = BTreeSet::new();
-            for binding in &capability.bindings {
+            for (expected_surface, binding) in
+                ProductSurface::ALL.into_iter().zip(&capability.bindings)
+            {
+                if binding.surface != expected_surface {
+                    return invalid(
+                        "product capability surfaces must follow the canonical surface order",
+                    );
+                }
                 if !surfaces.insert(binding.surface) {
                     return invalid("product capability surfaces must be unique");
                 }

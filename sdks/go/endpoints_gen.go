@@ -2,6 +2,8 @@
 
 package rrd
 
+// OpenAPI SHA-256: 74432cc158bed22d9db4216684654f763f7a915ae05084356fa70ffb4f2653d0
+
 type OperationID string
 
 const (

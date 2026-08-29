@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -23,7 +24,9 @@ const raw = execFileSync(
   { encoding: "utf8", maxBuffer: 16 * 1024 * 1024 },
 );
 const document: unknown = JSON.parse(raw);
-const generatedSchema = `${astToString(await openapiTS(document as never)).trimEnd()}\n`;
+const openapiDigest = createHash("sha256").update(raw).digest("hex");
+const generatedHeader = `// OpenAPI SHA-256: ${openapiDigest}\n`;
+const generatedSchema = `${generatedHeader}${astToString(await openapiTS(document as never)).trimEnd()}\n`;
 const source = document as {
   paths: Record<
     string,
@@ -58,7 +61,7 @@ const endpoints = Object.fromEntries(
     }),
   ),
 );
-const generatedEndpoints = `// Generated from rrd-contract; do not edit.\nexport const endpoints = ${JSON.stringify(endpoints, null, 2)} as const;\n\nexport type OperationId = keyof typeof endpoints;\n`;
+const generatedEndpoints = `// Generated from rrd-contract; do not edit.\n${generatedHeader}export const endpoints = ${JSON.stringify(endpoints, null, 2)} as const;\n\nexport type OperationId = keyof typeof endpoints;\n`;
 
 if (process.argv.includes("--check")) {
   const currentSchema = await readFile(schemaOutput, "utf8").catch(() => "");

@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -106,6 +107,8 @@ func render(raw []byte) ([]byte, error) {
 	})
 	var source strings.Builder
 	source.WriteString("// Code generated from rrd-contract; DO NOT EDIT.\n\npackage rrd\n\n")
+	digest := sha256.Sum256(raw)
+	fmt.Fprintf(&source, "// OpenAPI SHA-256: %x\n\n", digest)
 	source.WriteString("type OperationID string\n\nconst (\n")
 	for _, item := range endpoints {
 		fmt.Fprintf(&source, "\tOperation%s OperationID = %q\n", exportedName(item.Operation), item.Operation)

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import pprint
 import subprocess
@@ -29,6 +30,7 @@ def render() -> str:
         text=True,
     ).stdout
     document = json.loads(raw)
+    openapi_digest = hashlib.sha256(raw.encode()).hexdigest()
     endpoints: dict[str, dict[str, object]] = {}
     for path, path_item in document["paths"].items():
         for method, operation in path_item.items():
@@ -51,6 +53,7 @@ def render() -> str:
     encoded = pprint.pformat(endpoints, sort_dicts=True, width=100)
     source = (
         "# Generated from rrd-contract; do not edit.\n"
+        f"# OpenAPI SHA-256: {openapi_digest}\n"
         "from typing import Final, Literal, TypedDict\n\n"
         "OperationId = Literal[" + operations + "]\n\n"
         "class Endpoint(TypedDict):\n"

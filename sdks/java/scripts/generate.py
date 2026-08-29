@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import subprocess
 import sys
@@ -32,6 +33,7 @@ def render() -> str:
         text=True,
     ).stdout
     document = json.loads(raw)
+    openapi_digest = hashlib.sha256(raw.encode()).hexdigest()
     endpoints: list[tuple[str, str, str, str, bool]] = []
     for path, path_item in document["paths"].items():
         for method, operation in path_item.items():
@@ -62,6 +64,7 @@ def render() -> str:
         )
     return (
         "// Generated from rrd-contract; do not edit.\n"
+        f"// OpenAPI SHA-256: {openapi_digest}\n"
         "package io.rrflow.rrd;\n\n"
         "public enum OperationId {\n"
         + ",\n".join(constants)

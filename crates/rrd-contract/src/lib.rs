@@ -75,7 +75,7 @@ use std::fmt;
 pub const PROTOCOL: &str = "rrd";
 pub const PROTOCOL_VERSION: u16 = 1;
 pub const OPENAPI_DOCUMENT_SHA256: &str =
-    "449d8d7e1124ebc456e315fd27f0a7de71b4aacbe9f5a6269a258e432068fc70";
+    "74432cc158bed22d9db4216684654f763f7a915ae05084356fa70ffb4f2653d0";
 pub const MAX_ID_BYTES: usize = 128;
 pub const MAX_MESSAGE_BYTES: usize = 4_096;
 pub const MAX_CAPABILITIES: usize = 512;
@@ -3219,6 +3219,15 @@ pub struct EndpointCatalogue {
 }
 
 impl EndpointCatalogue {
+    /// Resolves one concrete HTTP request against the authoritative endpoint
+    /// templates. Transports use this instead of maintaining a second route
+    /// capability table.
+    pub fn resolve_http(&self, method: HttpMethod, path: &str) -> Option<&EndpointDescriptor> {
+        self.endpoints.iter().find(|endpoint| {
+            endpoint.method == method && endpoint_path_matches(&endpoint.path, path)
+        })
+    }
+
     pub fn validate(&self) -> Result<()> {
         validate_protocol(&self.protocol, self.protocol_version)?;
         if self.endpoints.is_empty() || self.endpoints.len() > 256 {
@@ -3303,6 +3312,23 @@ impl EndpointCatalogue {
             return invalid("WebSocket endpoint descriptors must be sorted by operation");
         }
         Ok(())
+    }
+}
+
+fn endpoint_path_matches(template: &str, concrete: &str) -> bool {
+    let mut template_segments = template.split('/');
+    let mut concrete_segments = concrete.split('/');
+    loop {
+        match (template_segments.next(), concrete_segments.next()) {
+            (Some(expected), Some(actual)) => {
+                let parameter = expected.starts_with('{') && expected.ends_with('}');
+                if (parameter && actual.is_empty()) || (!parameter && expected != actual) {
+                    return false;
+                }
+            }
+            (None, None) => return true,
+            _ => return false,
+        }
     }
 }
 

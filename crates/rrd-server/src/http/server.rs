@@ -223,9 +223,19 @@ impl RrdHttpServer {
             project_root,
             jwt_verification_key,
         });
+        let endpoint_catalogue = rrd_contract::endpoint_catalogue();
+        let subscription_stream = endpoint_catalogue
+            .websocket_endpoints
+            .iter()
+            .find(|endpoint| endpoint.operation.as_str() == "subscription-stream")
+            .ok_or_else(|| {
+                HttpError::Contract(
+                    "endpoint catalogue omitted the subscription-stream dispatch".into(),
+                )
+            })?;
         let app = Router::new()
             .route(
-                "/v1/subscriptions/{subscription}/stream",
+                &subscription_stream.path,
                 get(subscription_websocket_upgrade),
             )
             .fallback(any(dispatch))

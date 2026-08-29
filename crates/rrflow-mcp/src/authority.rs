@@ -15,11 +15,11 @@ static REQUEST_COUNTER: AtomicU64 = AtomicU64::new(1);
 
 pub(crate) enum RuntimeAuthority {
     Embedded {
-        engine: RrdEngine,
+        engine: Box<RrdEngine>,
         project_root: PathBuf,
         catalogue: RuntimeToolCatalogue,
     },
-    Daemon(DaemonAuthority),
+    Daemon(Box<DaemonAuthority>),
 }
 
 pub(crate) struct DaemonAuthority {
@@ -42,7 +42,7 @@ impl RuntimeAuthority {
                 binding.verify_store_path(&database)?;
                 let engine = RrdEngine::open_bound(&binding)?;
                 Ok(Self::Embedded {
-                    engine,
+                    engine: Box::new(engine),
                     project_root: binding.project_root,
                     catalogue: runtime_tool_contract_catalogue(),
                 })
@@ -76,23 +76,22 @@ impl RuntimeAuthority {
                 if catalogue != runtime_tool_contract_catalogue() {
                     return Err("daemon runtime-tool catalogue differs from this MCP build".into());
                 }
-                Ok(Self::Daemon(DaemonAuthority {
+                Ok(Self::Daemon(Box::new(DaemonAuthority {
                     runtime,
                     client,
                     session,
                     catalogue,
                     principal,
                     api_key,
-                }))
+                })))
             }
         }
     }
 
     pub(crate) fn catalogue(&self) -> &RuntimeToolCatalogue {
         match self {
-            Self::Embedded { catalogue, .. } | Self::Daemon(DaemonAuthority { catalogue, .. }) => {
-                catalogue
-            }
+            Self::Embedded { catalogue, .. } => catalogue,
+            Self::Daemon(authority) => &authority.catalogue,
         }
     }
 

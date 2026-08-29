@@ -278,11 +278,16 @@ fn authorized_admin_mutations_replay_reopen_and_journal_exact_identity() {
     assert_eq!(document.revision, 9);
     assert_eq!(document.instances.len(), 1);
     assert_eq!(document.backup_jobs.len(), 1);
-    let journal = engine.control_journal_since(0, 16).unwrap();
-    assert_eq!(journal.len(), 9);
-    assert_eq!(journal[0].action, "estate.create");
-    assert_eq!(journal[1].action, "estate.desired.set");
-    assert_eq!(journal[7].action, "estate.recovery.policy.set");
-    assert_eq!(journal[8].action, "estate.backup.schedule");
-    assert_eq!(journal[8].actor, "operator-one");
+    let journal = engine.control_journal_since(0, 64).unwrap();
+    assert!(journal.iter().any(|entry| entry.action == "security.audit"));
+    let estate_journal = journal
+        .iter()
+        .filter(|entry| entry.action.starts_with("estate."))
+        .collect::<Vec<_>>();
+    assert_eq!(estate_journal.len(), 9);
+    assert_eq!(estate_journal[0].action, "estate.create");
+    assert_eq!(estate_journal[1].action, "estate.desired.set");
+    assert_eq!(estate_journal[7].action, "estate.recovery.policy.set");
+    assert_eq!(estate_journal[8].action, "estate.backup.schedule");
+    assert_eq!(estate_journal[8].actor, "operator-one");
 }

@@ -119,10 +119,38 @@ fn contract_fixture() -> ContractFixture {
                             reason: None,
                         },
                         SurfaceBinding {
+                            surface: ProductSurface::Rrflowql,
+                            disposition: SurfaceDisposition::Unavailable,
+                            entrypoints: Vec::new(),
+                            reason: Some(
+                                "No RRFlowQL statement maps this fixture operation.".into(),
+                            ),
+                        },
+                        SurfaceBinding {
+                            surface: ProductSurface::Graphql,
+                            disposition: SurfaceDisposition::Unavailable,
+                            entrypoints: Vec::new(),
+                            reason: Some("No GraphQL field maps this fixture operation.".into()),
+                        },
+                        SurfaceBinding {
                             surface: ProductSurface::RrdHttp,
                             disposition: SurfaceDisposition::Available,
                             entrypoints: vec!["POST /v1/backups/create".into()],
                             reason: None,
+                        },
+                        SurfaceBinding {
+                            surface: ProductSurface::WebSocket,
+                            disposition: SurfaceDisposition::Unavailable,
+                            entrypoints: Vec::new(),
+                            reason: Some(
+                                "No WebSocket operation maps this fixture operation.".into(),
+                            ),
+                        },
+                        SurfaceBinding {
+                            surface: ProductSurface::Grpc,
+                            disposition: SurfaceDisposition::Unavailable,
+                            entrypoints: Vec::new(),
+                            reason: Some("No gRPC method maps this fixture operation.".into()),
                         },
                         SurfaceBinding {
                             surface: ProductSurface::Mcp,
@@ -135,6 +163,12 @@ fn contract_fixture() -> ContractFixture {
                             disposition: SurfaceDisposition::Unavailable,
                             entrypoints: Vec::new(),
                             reason: Some("No CLI command is present in this fixture.".into()),
+                        },
+                        SurfaceBinding {
+                            surface: ProductSurface::Sdk,
+                            disposition: SurfaceDisposition::Available,
+                            entrypoints: vec!["openapi:operation#backup-create".into()],
+                            reason: None,
                         },
                         SurfaceBinding {
                             surface: ProductSurface::Connectome,

@@ -262,6 +262,10 @@ def main() -> None:
         and "python3 scripts/ci/check_workflow.py" in jobs["verify"],
         "repository policy must check formatting and this CI contract",
     )
+    require(
+        "python3 scripts/ci/check_generated_surfaces.py" in jobs["verify"],
+        "repository policy must reject generated product-surface drift",
+    )
 
     suite_count, package_count = verify_engine_suites(jobs["engine-suites"])
     feature_count = verify_optional_features(jobs["optional-features"], jobs["pgvector-feature"])

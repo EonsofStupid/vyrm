@@ -8,7 +8,8 @@ use rrd_contract::{
 /// public protocol registries. Planned gaps are explicit catalogue rows, not
 /// fake adapter entrypoints.
 pub fn product_capability_catalogue() -> ProductCapabilityCatalogue {
-    let mut capabilities = endpoint_catalogue()
+    let endpoints = endpoint_catalogue();
+    let mut capabilities = endpoints
         .endpoints
         .into_iter()
         .map(|endpoint| {
@@ -32,16 +33,74 @@ pub fn product_capability_catalogue() -> ProductCapabilityCatalogue {
                     endpoint.response_type
                 ),
                 id,
-                bindings: bindings(
-                    available(engine_binding),
-                    available(format!("{} {}", method(endpoint.method), endpoint.path)),
-                    unavailable("No MCP runtime tool maps this HTTP operation."),
-                    unavailable("No RRFlow CLI command maps this HTTP operation."),
-                    planned("Connectome operation control is scheduled by G09."),
+                bindings: surface_bindings(
+                    unavailable(NO_SURFACE_BINDING_REASON),
+                    [
+                        (ProductSurface::Engine, available(engine_binding)),
+                        (
+                            ProductSurface::RrdHttp,
+                            available(format!("{} {}", method(endpoint.method), endpoint.path)),
+                        ),
+                        (
+                            ProductSurface::Sdk,
+                            available(format!("openapi:operation#{}", endpoint.operation)),
+                        ),
+                        (
+                            ProductSurface::Connectome,
+                            planned("Connectome operation control is scheduled by G09."),
+                        ),
+                    ],
                 ),
             }
         })
         .collect::<Vec<_>>();
+
+    if let Some(query) = capabilities
+        .iter_mut()
+        .find(|capability| capability.id == "query-execute")
+    {
+        expose(
+            binding(query, ProductSurface::Rrflowql),
+            "rrd-query:RrflowQlQuery::parse_and_bind",
+        );
+    }
+
+    for endpoint in endpoints.websocket_endpoints {
+        let id = endpoint.operation.as_str().to_owned();
+        capabilities.push(ProductCapability {
+            label: title(&id),
+            category: category(&id).to_owned(),
+            summary: format!(
+                "RRD WebSocket {}: {} to {}.",
+                endpoint.path, endpoint.client_frame_type, endpoint.server_frame_type
+            ),
+            id,
+            bindings: surface_bindings(
+                unavailable(NO_SURFACE_BINDING_REASON),
+                [
+                    (
+                        ProductSurface::Engine,
+                        available(format!(
+                            "rrd-engine:RrdOperation::{:?}",
+                            endpoint.connect_action
+                        )),
+                    ),
+                    (
+                        ProductSurface::WebSocket,
+                        available(format!("GET {}", endpoint.path)),
+                    ),
+                    (
+                        ProductSurface::Sdk,
+                        available("rrd-client:RrdClient::connect_subscription"),
+                    ),
+                    (
+                        ProductSurface::Connectome,
+                        planned("Connectome subscription streaming is scheduled by G09."),
+                    ),
+                ],
+            ),
+        });
+    }
 
     for tool in runtime_tool_catalogue() {
         let suffix = tool.name.trim_start_matches("rrflow_").replace('_', "-");
@@ -62,6 +121,10 @@ pub fn product_capability_catalogue() -> ProductCapabilityCatalogue {
                 format!("POST /v1/runtime/tools/invoke#{}", tool.name),
             );
             expose(binding(capability, ProductSurface::Mcp), tool.name);
+            expose(
+                binding(capability, ProductSurface::Sdk),
+                format!("openapi:runtime-tool-invoke#{}", tool.name),
+            );
             expose(
                 binding(capability, ProductSurface::Connectome),
                 format!("/api/runtime/tools/invoke#{}", tool.name),
@@ -86,15 +149,34 @@ pub fn product_capability_catalogue() -> ProductCapabilityCatalogue {
                 let operation = WorkPlanOperation::ALL
                     .into_iter()
                     .find(|operation| operation.runtime_tool_name() == tool.name);
-                bindings(
-                    available(format!("rrd-engine:runtime/{}", tool.name)),
-                    available(format!("POST /v1/runtime/tools/invoke#{}", tool.name)),
-                    available(tool.name),
-                    operation.map_or_else(
-                        || unavailable("No RRFlow CLI command maps this runtime tool."),
-                        |operation| available(operation.cli_command()),
-                    ),
-                    available(format!("/api/runtime/tools/invoke#{}", tool.name)),
+                surface_bindings(
+                    unavailable(NO_SURFACE_BINDING_REASON),
+                    [
+                        (
+                            ProductSurface::Engine,
+                            available(format!("rrd-engine:runtime/{}", tool.name)),
+                        ),
+                        (
+                            ProductSurface::RrdHttp,
+                            available(format!("POST /v1/runtime/tools/invoke#{}", tool.name)),
+                        ),
+                        (ProductSurface::Mcp, available(tool.name)),
+                        (
+                            ProductSurface::Cli,
+                            operation.map_or_else(
+                                || unavailable("No RRFlow CLI command maps this runtime tool."),
+                                |operation| available(operation.cli_command()),
+                            ),
+                        ),
+                        (
+                            ProductSurface::Sdk,
+                            available(format!("openapi:runtime-tool-invoke#{}", tool.name)),
+                        ),
+                        (
+                            ProductSurface::Connectome,
+                            available(format!("/api/runtime/tools/invoke#{}", tool.name)),
+                        ),
+                    ],
                 )
             },
         });
@@ -105,12 +187,12 @@ pub fn product_capability_catalogue() -> ProductCapabilityCatalogue {
         label: "Embedded functions".into(),
         category: "query".into(),
         summary: "Run revision-pinned JavaScript ES2020 and portable WebAssembly JSON functions, including synchronous transaction triggers, inside deterministic engine-owned sandboxes.".into(),
-        bindings: bindings(
-            available("rrd-engine:RrdEngine::execute_function"),
+        bindings: surface_bindings(
             planned(FUNCTION_SURFACE_PLAN_REASON),
-            planned(FUNCTION_SURFACE_PLAN_REASON),
-            planned(FUNCTION_SURFACE_PLAN_REASON),
-            planned(FUNCTION_SURFACE_PLAN_REASON),
+            [(
+                ProductSurface::Engine,
+                available("rrd-engine:RrdEngine::execute_function"),
+            )],
         ),
     };
     expose(
@@ -128,12 +210,12 @@ pub fn product_capability_catalogue() -> ProductCapabilityCatalogue {
         label: "Native Embedding Inference".into(),
         category: "ai_runtime".into(),
         summary: "Run exact-model bounded batch inference and atomic embed-and-vector-search through an engine-owned registry with explicit local/offline and remote-provider trust boundaries.".into(),
-        bindings: bindings(
-            available("rrd-engine:RrdEngine::generate_embeddings"),
+        bindings: surface_bindings(
             planned(ENGINE_SURFACE_PLAN_REASON),
-            planned(ENGINE_SURFACE_PLAN_REASON),
-            planned(ENGINE_SURFACE_PLAN_REASON),
-            planned(ENGINE_SURFACE_PLAN_REASON),
+            [(
+                ProductSurface::Engine,
+                available("rrd-engine:RrdEngine::generate_embeddings"),
+            )],
         ),
     };
     expose(
@@ -276,12 +358,9 @@ pub fn product_capability_catalogue() -> ProductCapabilityCatalogue {
             label: label.into(),
             category: category.into(),
             summary: summary.into(),
-            bindings: bindings(
+            bindings: surface_bindings(
                 planned(FOUNDATION_PLAN_REASON),
-                planned(FOUNDATION_PLAN_REASON),
-                planned(FOUNDATION_PLAN_REASON),
-                planned(FOUNDATION_PLAN_REASON),
-                planned(FOUNDATION_PLAN_REASON),
+                std::iter::empty(),
             ),
         });
     }
@@ -310,12 +389,12 @@ pub fn product_capability_catalogue() -> ProductCapabilityCatalogue {
         label: "Vector payload index administration".into(),
         category: "vector".into(),
         summary: "Ensure, list, and delete typed collection payload indexes through the revisioned RRD vector catalogue.".into(),
-        bindings: bindings(
-            available("rrd-engine:RrdEngine::ensure_vector_payload_index,list_vector_payload_indexes,delete_vector_payload_index"),
+        bindings: surface_bindings(
             planned(ENGINE_SURFACE_PLAN_REASON),
-            planned(ENGINE_SURFACE_PLAN_REASON),
-            planned(ENGINE_SURFACE_PLAN_REASON),
-            planned(ENGINE_SURFACE_PLAN_REASON),
+            [(
+                ProductSurface::Engine,
+                available("rrd-engine:RrdEngine::ensure_vector_payload_index,list_vector_payload_indexes,delete_vector_payload_index"),
+            )],
         ),
     });
     capabilities.push(ProductCapability {
@@ -323,12 +402,12 @@ pub fn product_capability_catalogue() -> ProductCapabilityCatalogue {
         label: "Vector query algebra".into(),
         category: "vector".into(),
         summary: "Execute bounded nested keyword, dense, sparse, multivector, recommendation, discovery, fusion, reranking, diversity, grouping, facet, and matrix stages at one authoritative read stamp.".into(),
-        bindings: bindings(
-            available("rrd-engine:RrdEngine::execute_retrieval_query"),
+        bindings: surface_bindings(
             planned(ENGINE_SURFACE_PLAN_REASON),
-            planned(ENGINE_SURFACE_PLAN_REASON),
-            planned(ENGINE_SURFACE_PLAN_REASON),
-            planned(ENGINE_SURFACE_PLAN_REASON),
+            [(
+                ProductSurface::Engine,
+                available("rrd-engine:RrdEngine::execute_retrieval_query"),
+            )],
         ),
     });
     capabilities.push(ProductCapability {
@@ -336,12 +415,12 @@ pub fn product_capability_catalogue() -> ProductCapabilityCatalogue {
         label: "Vector quantization lifecycle".into(),
         category: "vector".into(),
         summary: "Build, list, activate, and retire immutable scalar, product, binary, and TurboQuant artifacts while preserving canonical exact reranking.".into(),
-        bindings: bindings(
-            available("rrd-engine:RrdEngine::activate_vector_quantization_artifact,build_vector_quantization_artifact,list_vector_quantization_artifacts,retire_vector_quantization_artifact"),
+        bindings: surface_bindings(
             planned(ENGINE_SURFACE_PLAN_REASON),
-            planned(ENGINE_SURFACE_PLAN_REASON),
-            planned(ENGINE_SURFACE_PLAN_REASON),
-            planned(ENGINE_SURFACE_PLAN_REASON),
+            [(
+                ProductSurface::Engine,
+                available("rrd-engine:RrdEngine::activate_vector_quantization_artifact,build_vector_quantization_artifact,list_vector_quantization_artifacts,retire_vector_quantization_artifact"),
+            )],
         ),
     });
     capabilities.push(ProductCapability {
@@ -349,12 +428,12 @@ pub fn product_capability_catalogue() -> ProductCapabilityCatalogue {
         label: "Vector memory residency".into(),
         category: "vector".into(),
         summary: "Enforce per-named-vector pinned, byte-bounded cached LRU, and transient cold mmap/owned artifact placement with exact pressure fallback and restart reconstruction.".into(),
-        bindings: bindings(
-            available("rrd-engine:RrdEngine::search_vectors,vector_residency_snapshot"),
+        bindings: surface_bindings(
             planned(ENGINE_SURFACE_PLAN_REASON),
-            planned(ENGINE_SURFACE_PLAN_REASON),
-            planned(ENGINE_SURFACE_PLAN_REASON),
-            planned(ENGINE_SURFACE_PLAN_REASON),
+            [(
+                ProductSurface::Engine,
+                available("rrd-engine:RrdEngine::search_vectors,vector_residency_snapshot"),
+            )],
         ),
     });
 
@@ -365,21 +444,26 @@ pub fn product_capability_catalogue() -> ProductCapabilityCatalogue {
     }
 }
 
-fn bindings(
-    engine: SurfaceBinding,
-    rrd_http: SurfaceBinding,
-    mcp: SurfaceBinding,
-    cli: SurfaceBinding,
-    connectome: SurfaceBinding,
+fn surface_bindings(
+    default: SurfaceBinding,
+    overrides: impl IntoIterator<Item = (ProductSurface, SurfaceBinding)>,
 ) -> Vec<SurfaceBinding> {
-    [engine, rrd_http, mcp, cli, connectome]
+    let mut bindings = ProductSurface::ALL
         .into_iter()
-        .zip(ProductSurface::ALL)
-        .map(|(mut binding, surface)| {
+        .map(|surface| {
+            let mut binding = default.clone();
             binding.surface = surface;
             binding
         })
-        .collect()
+        .collect::<Vec<_>>();
+    for (surface, mut replacement) in overrides {
+        replacement.surface = surface;
+        *bindings
+            .iter_mut()
+            .find(|binding| binding.surface == surface)
+            .expect("canonical product surface must have a generated binding") = replacement;
+    }
+    bindings
 }
 
 fn available(entrypoint: impl Into<String>) -> SurfaceBinding {
@@ -431,6 +515,8 @@ const FUNCTION_SURFACE_PLAN_REASON: &str =
     "The engine implementation is available; generated HTTP, MCP, CLI, SDK, and Connectome bindings are owned by G06.";
 const ENGINE_SURFACE_PLAN_REASON: &str =
     "The engine implementation is available; generated outward bindings are owned by G06.";
+const NO_SURFACE_BINDING_REASON: &str =
+    "No executable binding for this operation exists on this product surface.";
 
 fn category(id: &str) -> &str {
     id.split_once('-').map_or("service", |(prefix, _)| prefix)

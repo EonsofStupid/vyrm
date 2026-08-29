@@ -3656,3 +3656,27 @@ index.
   This qualifies the provider-neutral engine boundary; no production CUDA,
   ROCm, Metal, or Vulkan adapter and no fixed-hardware performance claim is
   implied.
+
+## 2026-08-29 — G06-W01 generated product-surface catalogue candidate
+
+- Expanded the public product taxonomy from five implicit adapters to one
+  canonical ten-surface matrix: engine, RRFlowQL, GraphQL, REST/HTTP,
+  WebSocket, gRPC, MCP, CLI, SDK, and Connectome. Validation now requires every
+  capability to publish every surface exactly once in canonical order with an
+  executable entrypoint or an explicit non-executable reason.
+- Generated HTTP and SDK dispositions from `EndpointCatalogue`, WebSocket
+  dispositions from its stream catalogue, and MCP/CLI/Connectome entrypoints
+  from runtime-tool and work-plan registries. Planned foundation rows remain in
+  the same product catalogue; GraphQL and gRPC are not falsely advertised.
+- Replaced the server's duplicate method/path attribution table with catalogue
+  template resolution. The handler dispatch enum is exhaustively matched and a
+  unit gate compares all 34 executable HTTP operations back to the contract.
+  The WebSocket router obtains its path from the same catalogue.
+- Stamped TypeScript schema/endpoints plus Python, Go, Java, and .NET generated
+  maps with the exact OpenAPI SHA-256. A dependency-light CI verifier compares
+  every generated operation's method, path, authentication, and mutation bit
+  with the live contract export, and the CI policy requires that verifier.
+- The reviewed public schema advances the OpenAPI digest to
+  `74432cc158bed22d9db4216684654f763f7a915ae05084356fa70ffb4f2653d0`.
+  Complete task-level MCP/CLI coverage and shared SDK black-box qualification
+  remain G06-W02 through G06-W05 rather than being implied by catalogue rows.

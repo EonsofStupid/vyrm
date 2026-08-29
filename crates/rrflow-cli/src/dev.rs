@@ -154,21 +154,21 @@ pub fn doctor(root: &Path) -> Result<DevDoctorReport, Box<dyn std::error::Error>
             .any(|line| line.starts_with(&format!("{number}. `CAP-{number:02}`")))
     });
     let closure_gates = coverage_gate_ids(&capability_source);
-    let closure_gates_exist = closure_gates.len() == 24
-        && closure_gates
-            .iter()
-            .all(|gate| workplan_source.contains(&format!("id = \"{gate}\"")));
+    let existing_closure_gates = closure_gates
+        .iter()
+        .filter(|gate| workplan_source.contains(&format!("id = \"{gate}\"")))
+        .count();
+    let closure_gates_exist =
+        !closure_gates.is_empty() && existing_closure_gates == closure_gates.len();
     checks.push(check(
         "capabilities.coverage-ledger",
         stable_capabilities && closure_gates_exist,
         "all twenty requested engine capabilities have stable IDs and real work-plan closure gates",
         format!(
-            "{}: 20 ordered CAP rows; rrflow.workplan.toml: {}/24 referenced gates found",
+            "{}: 20 ordered CAP rows; rrflow.workplan.toml: {}/{} referenced gates found",
             relative(&root, &capability_path),
-            closure_gates
-                .iter()
-                .filter(|gate| workplan_source.contains(&format!("id = \"{gate}\"")))
-                .count()
+            existing_closure_gates,
+            closure_gates.len(),
         ),
         "restore CAP-01 through CAP-20 one-for-one and repair every dangling Gxx-Wxx closure mapping",
     ));
@@ -213,13 +213,24 @@ pub fn doctor(root: &Path) -> Result<DevDoctorReport, Box<dyn std::error::Error>
 
     let router = root.join("crates/rrd-server/src/http/router.rs");
     let router_source = std::fs::read_to_string(&router)?;
+    let endpoint_catalogue = rrd_contract::endpoint_catalogue();
+    let required_daemon_operations = ["health-live", "health-ready", "capabilities-read"];
+    let daemon_operations_catalogued = required_daemon_operations.iter().all(|required| {
+        endpoint_catalogue
+            .endpoints
+            .iter()
+            .any(|endpoint| endpoint.operation.as_str() == *required)
+    });
     checks.push(check(
         "daemon.readiness",
-        router_source.contains("/v1/health/live")
-            && router_source.contains("/v1/health/ready")
-            && router_source.contains("/v1/capabilities"),
+        daemon_operations_catalogued
+            && router_source.contains("HttpDispatch::resolve")
+            && router_source.contains("endpoint_catalogue"),
         "RRD exposes liveness, readiness, and capability negotiation",
-        relative(&root, &router),
+        format!(
+            "{} resolves health-live, health-ready, and capabilities-read from EndpointCatalogue",
+            relative(&root, &router)
+        ),
         "add contract-backed readiness and capability routes before supervision",
     ));
 
@@ -632,7 +643,7 @@ mod tests {
         assert!(report.checks.iter().any(|check| {
             check.id == "capabilities.coverage-ledger"
                 && check.status == CheckStatus::Passed
-                && check.evidence.contains("24/24")
+                && check.evidence.contains("referenced gates found")
         }));
         assert!(report.checks.iter().any(|check| {
             check.id == "surface.mcp-engine-boundary" && check.status == CheckStatus::Passed

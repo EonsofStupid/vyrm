@@ -571,20 +571,25 @@ every public mutation and prove denied actions do not partially apply.
 
 **Order:** Rust embedded/client → TypeScript → Python → Go → Java/.NET.
 
-**Status:** in progress. `rrd-contract::EndpointCatalogue` now freezes all 34
+**Status:** in progress. `rrd-contract::EndpointCatalogue` freezes all 34
 current HTTP routes plus one WebSocket stream by canonical operation,
-method/path template, authentication,
-mutation rule, fixed or descriptor-derived security action, and public
-request/response type. Every public
+method/path template, authentication, mutation rule, fixed or
+descriptor-derived security action, and public request/response type. The
+validated product catalogue projects every capability into one canonically
+ordered engine/RRFlowQL/GraphQL/REST/WebSocket/gRPC/MCP/CLI/SDK/Connectome
+matrix; missing adapters remain explicit non-executable dispositions. Every public
 wire type derives JSON Schema, and deterministic OpenAPI 3.1 is built from that
 catalogue rather than maintained separately. The server publishes both at
 `GET /v1/schema/endpoints` and `GET /v1/schema/openapi`; a frozen SHA-256 fails
-unreviewed schema drift. This removes handwritten route and payload discovery
-as SDK sources. Rust, TypeScript, Python, Go, Java, and .NET now have executable
-walking skeletons; shared black-box conformance and release qualification
-remain open. All six checked-in HTTP route maps are regenerated at the 34-route
-cut; language-appropriate WebSocket client surfaces remain G06-W04 work and
-are not counted as G03-W06 transport evidence.
+unreviewed schema drift. HTTP error attribution and executable handler selection
+resolve from the same endpoint templates, while the WebSocket router obtains its
+path from the catalogue. Each checked-in generated SDK artifact carries that
+OpenAPI digest, and CI compares TypeScript, Python, Go, Java, and .NET endpoint
+metadata against the contract export without requiring their build toolchains.
+Rust, TypeScript, Python, Go, Java, and .NET have executable walking skeletons;
+shared black-box conformance and release qualification remain open. The Rust
+client owns the current WebSocket client path; language-appropriate WebSocket
+surfaces remain later G06 work and are not counted as G03-W06 transport evidence.
 
 The first Rust client is now implemented in `rrd-client` and specified by
 [`rrd-rust-client-v1.md`](rrd-rust-client-v1.md). It is async, depends only on

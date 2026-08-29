@@ -43,11 +43,31 @@
               ]
             },
             {
+              "surface": "rrflowql",
+              "disposition": "unavailable",
+              "reason": "No RRFlowQL statement maps this fixture operation."
+            },
+            {
+              "surface": "graphql",
+              "disposition": "unavailable",
+              "reason": "No GraphQL field maps this fixture operation."
+            },
+            {
               "surface": "rrd_http",
               "disposition": "available",
               "entrypoints": [
                 "POST /v1/backups/create"
               ]
+            },
+            {
+              "surface": "websocket",
+              "disposition": "unavailable",
+              "reason": "No WebSocket operation maps this fixture operation."
+            },
+            {
+              "surface": "grpc",
+              "disposition": "unavailable",
+              "reason": "No gRPC method maps this fixture operation."
             },
             {
               "surface": "mcp",
@@ -58,6 +78,13 @@
               "surface": "cli",
               "disposition": "unavailable",
               "reason": "No CLI command is present in this fixture."
+            },
+            {
+              "surface": "sdk",
+              "disposition": "available",
+              "entrypoints": [
+                "openapi:operation#backup-create"
+              ]
             },
             {
               "surface": "connectome",

@@ -1,5 +1,97 @@
 use super::*;
 
+macro_rules! http_dispatch_catalogue {
+    ($( $variant:ident => ($operation_id:literal, $audit_operation:expr) ),+ $(,)?) => {
+        #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+        enum HttpDispatch {
+            $( $variant, )+
+        }
+
+        impl HttpDispatch {
+            #[cfg(test)]
+            const ALL: &'static [Self] = &[$( Self::$variant, )+];
+
+            fn resolve(method: &Method, path: &str) -> Option<Self> {
+                let method = match *method {
+                    Method::GET => ContractHttpMethod::Get,
+                    Method::POST => ContractHttpMethod::Post,
+                    Method::DELETE => ContractHttpMethod::Delete,
+                    _ => return None,
+                };
+                let catalogue = rrd_contract::endpoint_catalogue();
+                let endpoint = catalogue.resolve_http(method, path)?;
+                Self::from_operation(endpoint.operation.as_str())
+            }
+
+            fn from_operation(operation_id: &str) -> Option<Self> {
+                match operation_id {
+                    $( $operation_id => Some(Self::$variant), )+
+                    _ => None,
+                }
+            }
+
+            #[cfg(test)]
+            const fn operation_id(self) -> &'static str {
+                match self {
+                    $( Self::$variant => $operation_id, )+
+                }
+            }
+
+            fn audit_operation(self) -> RrdOperation {
+                match self {
+                    $( Self::$variant => $audit_operation, )+
+                }
+            }
+        }
+    };
+}
+
+http_dispatch_catalogue! {
+    AuditExport => ("audit-export", RrdOperation::AuditExport),
+    AuditRead => ("audit-read", RrdOperation::AuditRead),
+    BackupCreate => ("backup-create", RrdOperation::BackupCreate),
+    BackupList => ("backup-list", RrdOperation::BackupList),
+    CapabilitiesRead => ("capabilities-read", RrdOperation::ServiceInspect),
+    ChangefeedFollow => ("changefeed-follow", RrdOperation::ChangefeedFollow),
+    ChangefeedRead => ("changefeed-read", RrdOperation::ChangefeedRead),
+    DiagnosticsRead => ("diagnostics-read", RrdOperation::DiagnosticsRead),
+    EndpointCatalogue => ("endpoint-catalogue", RrdOperation::ServiceInspect),
+    EstateRead => ("estate-read", RrdOperation::EstateRead),
+    HealthLive => ("health-live", RrdOperation::ServiceInspect),
+    HealthReady => ("health-ready", RrdOperation::ServiceInspect),
+    OpenapiRead => ("openapi-read", RrdOperation::ServiceInspect),
+    QueryExecute => ("query-execute", RrdOperation::QueryExecute),
+    QueryIndexEnsure => ("query-index-ensure", RrdOperation::QueryIndexEnsure),
+    QueryIndexList => ("query-index-list", RrdOperation::QueryIndexList),
+    QueryLivePoll => ("query-live-poll", RrdOperation::QueryLivePoll),
+    RestoreCreate => ("restore-create", RrdOperation::RestoreCreate),
+    RuntimeToolCatalogueRead => (
+        "runtime-tool-catalogue-read",
+        RrdOperation::RuntimeToolCatalogueRead
+    ),
+    // Tool invocation resolves its granular policy action from the versioned
+    // descriptor after decoding. Transport failures before that point cannot
+    // safely claim a broader operation.
+    RuntimeToolInvoke => ("runtime-tool-invoke", RrdOperation::UnknownRequest),
+    SessionClose => ("session-close", RrdOperation::SessionClose),
+    SessionCreate => ("session-create", RrdOperation::SessionCreate),
+    SessionRenew => ("session-renew", RrdOperation::SessionRenew),
+    SubscriptionClose => ("subscription-close", RrdOperation::SubscriptionClose),
+    SubscriptionOpen => ("subscription-open", RrdOperation::SubscriptionOpen),
+    TransactionAbort => ("transaction-abort", RrdOperation::TransactionAbort),
+    TransactionBegin => ("transaction-begin", RrdOperation::TransactionBegin),
+    TransactionCommit => ("transaction-commit", RrdOperation::TransactionCommit),
+    TransactionPreview => ("transaction-preview", RrdOperation::TransactionPreview),
+    VectorCollectionEnsure => (
+        "vector-collection-ensure",
+        RrdOperation::VectorCollectionEnsure
+    ),
+    VectorCollectionList => ("vector-collection-list", RrdOperation::VectorCollectionList),
+    VectorPointRetrieve => ("vector-point-retrieve", RrdOperation::VectorPointRetrieve),
+    VectorPointScroll => ("vector-point-scroll", RrdOperation::VectorPointScroll),
+    VectorSearch => ("vector-search", RrdOperation::VectorSearch),
+}
+
 pub(super) async fn dispatch(State(state): State<Arc<AppState>>, request: Request) -> HttpResponse {
     let now = unix_time_ms();
     let (parts, body) = request.into_parts();
@@ -49,51 +141,9 @@ pub(super) async fn dispatch(State(state): State<Arc<AppState>>, request: Reques
 }
 
 fn route_operation(method: &Method, path: &str) -> RrdOperation {
-    match (method, path) {
-        (
-            &Method::GET,
-            "/v1/health/live"
-            | "/v1/health/ready"
-            | "/v1/capabilities"
-            | "/v1/schema/endpoints"
-            | "/v1/schema/openapi",
-        ) => RrdOperation::ServiceInspect,
-        (&Method::POST, "/v1/sessions") => RrdOperation::SessionCreate,
-        (&Method::POST, path) if session_action(path, "renew").is_some() => {
-            RrdOperation::SessionRenew
-        }
-        (&Method::DELETE, path) if session_id(path).is_some() => RrdOperation::SessionClose,
-        (&Method::POST, "/v1/transactions") => RrdOperation::TransactionBegin,
-        (&Method::POST, "/v1/query") => RrdOperation::QueryExecute,
-        (&Method::POST, "/v1/query/indexes/ensure") => RrdOperation::QueryIndexEnsure,
-        (&Method::POST, "/v1/query/indexes/list") => RrdOperation::QueryIndexList,
-        (&Method::POST, "/v1/query/live/poll") => RrdOperation::QueryLivePoll,
-        (&Method::POST, "/v1/runtime/tools/list") => RrdOperation::RuntimeToolCatalogueRead,
-        (&Method::POST, "/v1/backups") => RrdOperation::BackupCreate,
-        (&Method::POST, "/v1/backups/list") => RrdOperation::BackupList,
-        (&Method::POST, "/v1/restores") => RrdOperation::RestoreCreate,
-        (&Method::POST, "/v1/audit/read") => RrdOperation::AuditRead,
-        (&Method::POST, "/v1/audit/export") => RrdOperation::AuditExport,
-        (&Method::POST, "/v1/changes/read") => RrdOperation::ChangefeedRead,
-        (&Method::POST, "/v1/changes/follow") => RrdOperation::ChangefeedFollow,
-        (&Method::POST, "/v1/subscriptions/open") => RrdOperation::SubscriptionOpen,
-        (&Method::POST, "/v1/subscriptions/close") => RrdOperation::SubscriptionClose,
-        (&Method::POST, "/v1/diagnostics/read") => RrdOperation::DiagnosticsRead,
-        (&Method::POST, "/v1/vector/collections/ensure") => RrdOperation::VectorCollectionEnsure,
-        (&Method::POST, "/v1/vector/collections/list") => RrdOperation::VectorCollectionList,
-        (&Method::POST, "/v1/vector/points/scroll") => RrdOperation::VectorPointScroll,
-        (&Method::POST, "/v1/vector/points/retrieve") => RrdOperation::VectorPointRetrieve,
-        (&Method::POST, "/v1/vector/search") => RrdOperation::VectorSearch,
-        (&Method::POST, path) if estate_action(path, "read").is_some() => RrdOperation::EstateRead,
-        (&Method::POST, path) if transaction_action(path, "preview").is_some() => {
-            RrdOperation::TransactionPreview
-        }
-        (&Method::POST, path) if transaction_action(path, "commit").is_some() => {
-            RrdOperation::TransactionCommit
-        }
-        (&Method::DELETE, path) if transaction_id(path).is_some() => RrdOperation::TransactionAbort,
-        _ => RrdOperation::UnknownRequest,
-    }
+    HttpDispatch::resolve(method, path)
+        .map(HttpDispatch::audit_operation)
+        .unwrap_or(RrdOperation::UnknownRequest)
 }
 
 impl AppState {
@@ -113,8 +163,8 @@ impl AppState {
         );
         let _entered = span.enter();
         let mut public_audit = None;
-        let response = match (method, path.as_str()) {
-            (Method::GET, "/v1/health/live") => {
+        let response = match HttpDispatch::resolve(&method, &path) {
+            Some(HttpDispatch::HealthLive) => {
                 let context = generated_context(now, "health-live");
                 public_audit = Some((RrdOperation::ServiceInspect, context.clone()));
                 success(
@@ -125,7 +175,7 @@ impl AppState {
                     },
                 )
             }
-            (Method::GET, "/v1/health/ready") => {
+            Some(HttpDispatch::HealthReady) => {
                 let context = generated_context(now, "health-ready");
                 public_audit = Some((RrdOperation::ServiceInspect, context.clone()));
                 match self.readiness(now) {
@@ -133,17 +183,17 @@ impl AppState {
                     Err(error) => failure(&context, api_error(error)),
                 }
             }
-            (Method::GET, "/v1/capabilities") => {
+            Some(HttpDispatch::CapabilitiesRead) => {
                 let context = generated_context(now, "capabilities");
                 public_audit = Some((RrdOperation::ServiceInspect, context.clone()));
                 success(StatusCode::OK, &context, self.capabilities.clone())
             }
-            (Method::GET, "/v1/schema/endpoints") => {
+            Some(HttpDispatch::EndpointCatalogue) => {
                 let context = generated_context(now, "endpoint-catalogue");
                 public_audit = Some((RrdOperation::ServiceInspect, context.clone()));
                 success(StatusCode::OK, &context, rrd_contract::endpoint_catalogue())
             }
-            (Method::GET, "/v1/schema/openapi") => {
+            Some(HttpDispatch::OpenapiRead) => {
                 let context = generated_context(now, "openapi-read");
                 public_audit = Some((RrdOperation::ServiceInspect, context.clone()));
                 match rrd_contract::openapi_document() {
@@ -154,70 +204,54 @@ impl AppState {
                     ),
                 }
             }
-            (Method::POST, "/v1/sessions") => self.create_session(&headers, &body, now),
-            (Method::POST, path) if session_action(path, "renew").is_some() => {
-                self.renew_session(&headers, &body, path, now)
-            }
-            (Method::DELETE, path) if session_id(path).is_some() => {
-                self.close_session(&headers, &body, path, now)
-            }
-            (Method::POST, "/v1/transactions") => self.begin_transaction(&headers, &body, now),
-            (Method::POST, "/v1/query") => self.execute_query(&headers, &body, now),
-            (Method::POST, "/v1/query/indexes/ensure") => {
-                self.ensure_query_index(&headers, &body, now)
-            }
-            (Method::POST, "/v1/query/indexes/list") => {
-                self.list_query_indexes(&headers, &body, now)
-            }
-            (Method::POST, "/v1/query/live/poll") => self.poll_live_query(&headers, &body, now),
-            (Method::POST, "/v1/runtime/tools/list") => {
+            Some(HttpDispatch::SessionCreate) => self.create_session(&headers, &body, now),
+            Some(HttpDispatch::SessionRenew) => self.renew_session(&headers, &body, &path, now),
+            Some(HttpDispatch::SessionClose) => self.close_session(&headers, &body, &path, now),
+            Some(HttpDispatch::TransactionBegin) => self.begin_transaction(&headers, &body, now),
+            Some(HttpDispatch::QueryExecute) => self.execute_query(&headers, &body, now),
+            Some(HttpDispatch::QueryIndexEnsure) => self.ensure_query_index(&headers, &body, now),
+            Some(HttpDispatch::QueryIndexList) => self.list_query_indexes(&headers, &body, now),
+            Some(HttpDispatch::QueryLivePoll) => self.poll_live_query(&headers, &body, now),
+            Some(HttpDispatch::RuntimeToolCatalogueRead) => {
                 self.list_runtime_tools(&headers, &body, now)
             }
-            (Method::POST, "/v1/runtime/tools/invoke") => {
-                self.invoke_runtime_tool(&headers, &body, now)
-            }
-            (Method::POST, "/v1/backups") => self.create_instance_backup(&headers, &body, now),
-            (Method::POST, "/v1/backups/list") => self.list_instance_backups(&headers, &body, now),
-            (Method::POST, "/v1/restores") => self.restore_instance_backup(&headers, &body, now),
-            (Method::POST, "/v1/audit/read") => self.read_audit(&headers, &body, now),
-            (Method::POST, "/v1/audit/export") => self.export_audit(&headers, &body, now),
-            (Method::POST, "/v1/changes/read") => self.read_changefeed(&headers, &body, now),
-            (Method::POST, "/v1/changes/follow") => self.follow_changefeed(&headers, &body, now),
-            (Method::POST, "/v1/subscriptions/open") => {
-                self.open_subscription(&headers, &body, now)
-            }
-            (Method::POST, "/v1/subscriptions/close") => {
-                self.close_subscription(&headers, &body, now)
-            }
-            (Method::POST, "/v1/diagnostics/read") => {
+            Some(HttpDispatch::RuntimeToolInvoke) => self.invoke_runtime_tool(&headers, &body, now),
+            Some(HttpDispatch::BackupCreate) => self.create_instance_backup(&headers, &body, now),
+            Some(HttpDispatch::BackupList) => self.list_instance_backups(&headers, &body, now),
+            Some(HttpDispatch::RestoreCreate) => self.restore_instance_backup(&headers, &body, now),
+            Some(HttpDispatch::AuditRead) => self.read_audit(&headers, &body, now),
+            Some(HttpDispatch::AuditExport) => self.export_audit(&headers, &body, now),
+            Some(HttpDispatch::ChangefeedRead) => self.read_changefeed(&headers, &body, now),
+            Some(HttpDispatch::ChangefeedFollow) => self.follow_changefeed(&headers, &body, now),
+            Some(HttpDispatch::SubscriptionOpen) => self.open_subscription(&headers, &body, now),
+            Some(HttpDispatch::SubscriptionClose) => self.close_subscription(&headers, &body, now),
+            Some(HttpDispatch::DiagnosticsRead) => {
                 self.read_diagnostic_snapshot(&headers, &body, now)
             }
-            (Method::POST, "/v1/vector/collections/ensure") => {
+            Some(HttpDispatch::VectorCollectionEnsure) => {
                 self.ensure_vector_collection(&headers, &body, now)
             }
-            (Method::POST, "/v1/vector/collections/list") => {
+            Some(HttpDispatch::VectorCollectionList) => {
                 self.list_vector_collections(&headers, &body, now)
             }
-            (Method::POST, "/v1/vector/points/scroll") => {
+            Some(HttpDispatch::VectorPointScroll) => {
                 self.scroll_vector_points(&headers, &body, now)
             }
-            (Method::POST, "/v1/vector/points/retrieve") => {
+            Some(HttpDispatch::VectorPointRetrieve) => {
                 self.retrieve_vector_points(&headers, &body, now)
             }
-            (Method::POST, "/v1/vector/search") => self.search_vectors(&headers, &body, now),
-            (Method::POST, path) if estate_action(path, "read").is_some() => {
-                self.read_estate(&headers, &body, path, now)
+            Some(HttpDispatch::VectorSearch) => self.search_vectors(&headers, &body, now),
+            Some(HttpDispatch::EstateRead) => self.read_estate(&headers, &body, &path, now),
+            Some(HttpDispatch::TransactionPreview) => {
+                self.preview_transaction(&headers, &body, &path, now)
             }
-            (Method::POST, path) if transaction_action(path, "preview").is_some() => {
-                self.preview_transaction(&headers, &body, path, now)
+            Some(HttpDispatch::TransactionCommit) => {
+                self.commit_transaction(&headers, &body, &path, now)
             }
-            (Method::POST, path) if transaction_action(path, "commit").is_some() => {
-                self.commit_transaction(&headers, &body, path, now)
+            Some(HttpDispatch::TransactionAbort) => {
+                self.abort_transaction(&headers, &body, &path, now)
             }
-            (Method::DELETE, path) if transaction_id(path).is_some() => {
-                self.abort_transaction(&headers, &body, path, now)
-            }
-            _ => {
+            None => {
                 let context = generated_context(now, "not-found");
                 public_audit = Some((RrdOperation::UnknownRequest, context.clone()));
                 failure(
@@ -251,5 +285,67 @@ impl AppState {
 
     fn readiness(&self, now: u64) -> std::result::Result<Readiness, ServiceError> {
         self.service.readiness(now)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::BTreeSet;
+
+    #[test]
+    fn every_catalogued_http_operation_resolves_to_one_executable_dispatch() {
+        let catalogue = rrd_contract::endpoint_catalogue();
+        let mut resolved = BTreeSet::new();
+        for endpoint in &catalogue.endpoints {
+            let method = match endpoint.method {
+                ContractHttpMethod::Get => Method::GET,
+                ContractHttpMethod::Post => Method::POST,
+                ContractHttpMethod::Delete => Method::DELETE,
+            };
+            let path = concrete_path(&endpoint.path);
+            let dispatch = HttpDispatch::resolve(&method, &path).unwrap_or_else(|| {
+                panic!(
+                    "catalogued operation {} has no server dispatch",
+                    endpoint.operation
+                )
+            });
+            assert_eq!(dispatch.operation_id(), endpoint.operation.as_str());
+            assert!(resolved.insert(dispatch.operation_id()));
+            assert_eq!(route_operation(&method, &path), dispatch.audit_operation());
+        }
+
+        let declared = catalogue
+            .endpoints
+            .iter()
+            .map(|endpoint| endpoint.operation.as_str())
+            .collect::<BTreeSet<_>>();
+        let executable = HttpDispatch::ALL
+            .iter()
+            .map(|dispatch| dispatch.operation_id())
+            .collect::<BTreeSet<_>>();
+        assert_eq!(executable, declared);
+    }
+
+    #[test]
+    fn route_resolution_rejects_unknown_methods_paths_and_empty_parameters() {
+        assert!(HttpDispatch::resolve(&Method::PUT, "/v1/query").is_none());
+        assert!(HttpDispatch::resolve(&Method::GET, "/v1/not-real").is_none());
+        assert!(HttpDispatch::resolve(&Method::POST, "/v1/estates//read").is_none());
+        assert!(HttpDispatch::resolve(&Method::POST, "/v1/estates/a/b/read").is_none());
+    }
+
+    fn concrete_path(template: &str) -> String {
+        template
+            .split('/')
+            .map(|segment| {
+                if segment.starts_with('{') && segment.ends_with('}') {
+                    "fixture"
+                } else {
+                    segment
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("/")
     }
 }

@@ -22,6 +22,34 @@ fn every_http_operation_and_runtime_tool_has_one_authoritative_surface_row() {
             .entrypoints
             .iter()
             .any(|entrypoint| entrypoint.ends_with(&endpoint.path)));
+        let sdk = capability
+            .bindings
+            .iter()
+            .find(|binding| binding.surface == ProductSurface::Sdk)
+            .unwrap();
+        assert_eq!(sdk.disposition, SurfaceDisposition::Available);
+        assert!(sdk
+            .entrypoints
+            .iter()
+            .any(|entrypoint| entrypoint == &format!("openapi:operation#{}", endpoint.operation)));
+    }
+
+    for endpoint in rrd_contract::endpoint_catalogue().websocket_endpoints {
+        let capability = catalogue
+            .capabilities
+            .iter()
+            .find(|capability| capability.id == endpoint.operation.as_str())
+            .unwrap_or_else(|| panic!("missing WebSocket capability {}", endpoint.operation));
+        let websocket = capability
+            .bindings
+            .iter()
+            .find(|binding| binding.surface == ProductSurface::WebSocket)
+            .unwrap();
+        assert_eq!(websocket.disposition, SurfaceDisposition::Available);
+        assert_eq!(
+            websocket.entrypoints,
+            vec![format!("GET {}", endpoint.path)]
+        );
     }
 
     for tool in rrd_engine::runtime_tool_catalogue() {
@@ -126,6 +154,7 @@ fn required_unimplemented_foundation_is_visible_and_not_falsely_available() {
         ProductSurface::Engine,
         ProductSurface::RrdHttp,
         ProductSurface::Mcp,
+        ProductSurface::Sdk,
         ProductSurface::Connectome,
     ] {
         let binding = rollback
@@ -210,11 +239,23 @@ fn generated_work_plan_capabilities_are_available_on_every_required_surface() {
             .find(|capability| capability.id == operation.capability_id())
             .unwrap();
         assert_eq!(capability.bindings.len(), ProductSurface::ALL.len());
-        assert!(capability.bindings.iter().all(|binding| {
-            binding.disposition == SurfaceDisposition::Available
-                && !binding.entrypoints.is_empty()
-                && binding.reason.is_none()
-        }));
+        for surface in [
+            ProductSurface::Engine,
+            ProductSurface::RrdHttp,
+            ProductSurface::Mcp,
+            ProductSurface::Cli,
+            ProductSurface::Sdk,
+            ProductSurface::Connectome,
+        ] {
+            let binding = capability
+                .bindings
+                .iter()
+                .find(|binding| binding.surface == surface)
+                .unwrap();
+            assert_eq!(binding.disposition, SurfaceDisposition::Available);
+            assert!(!binding.entrypoints.is_empty());
+            assert!(binding.reason.is_none());
+        }
         let cli = capability
             .bindings
             .iter()
@@ -224,6 +265,45 @@ fn generated_work_plan_capabilities_are_available_on_every_required_surface() {
             .entrypoints
             .iter()
             .any(|entrypoint| entrypoint == operation.cli_command()));
+    }
+}
+
+#[test]
+fn every_capability_has_the_complete_generated_surface_taxonomy() {
+    let catalogue = rrd_engine::product_capability_catalogue();
+    for capability in &catalogue.capabilities {
+        assert_eq!(
+            capability
+                .bindings
+                .iter()
+                .map(|binding| binding.surface)
+                .collect::<Vec<_>>(),
+            ProductSurface::ALL,
+            "{} drifted from the canonical surface order",
+            capability.id
+        );
+    }
+
+    let query = catalogue
+        .capabilities
+        .iter()
+        .find(|capability| capability.id == "query-execute")
+        .unwrap();
+    let rrflowql = query
+        .bindings
+        .iter()
+        .find(|binding| binding.surface == ProductSurface::Rrflowql)
+        .unwrap();
+    assert_eq!(rrflowql.disposition, SurfaceDisposition::Available);
+    for surface in [ProductSurface::Graphql, ProductSurface::Grpc] {
+        let binding = query
+            .bindings
+            .iter()
+            .find(|binding| binding.surface == surface)
+            .unwrap();
+        assert_eq!(binding.disposition, SurfaceDisposition::Unavailable);
+        assert!(binding.entrypoints.is_empty());
+        assert!(binding.reason.is_some());
     }
 }
 
