@@ -39,6 +39,8 @@ changefeed read/follow; durable subscription open/connect/receive/ACK/heartbeat/
 close over `ws://` or mTLS `wss://`; backup create/list/restore; estate read;
 and audit read.
 `RequestOptions` makes correlation, deadline, and mutation idempotency explicit.
+Transaction preview is a mutation-idempotent durable prepare and returns the
+complete prospective all-model snapshot without publishing it.
 API errors retain stable `ErrorCode`, message, retryability and HTTP status.
 
 ## Black-box evidence
@@ -55,6 +57,9 @@ reporting, missing-client-certificate denial, and wrong-server-name denial.
 The loopback client requires the `local_daemon` capability and the mTLS client
 requires `remote`; both commit and query the exact checked-in deployment corpus
 described in [`rrd-deployment-modes-v1.md`](rrd-deployment-modes-v1.md).
+The complementary real-server fault row drops a data-commit response, restarts
+the process on the same root, and proves the ordinary idempotent retry returns
+the durable receipt without duplicating any runtime change.
 
 This is not the F5 exit gate. Commit and vector mutations, renewal/closure,
 backup/restore, estate projection, response-limit

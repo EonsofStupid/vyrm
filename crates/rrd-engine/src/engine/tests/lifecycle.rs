@@ -1,5 +1,29 @@
 use super::*;
 
+fn assert_tree_excludes(root: &std::path::Path, secrets: &[&str]) {
+    let mut pending = vec![root.to_path_buf()];
+    while let Some(path) = pending.pop() {
+        for entry in std::fs::read_dir(path).unwrap() {
+            let entry = entry.unwrap();
+            let file_type = entry.file_type().unwrap();
+            if file_type.is_dir() {
+                pending.push(entry.path());
+            } else if file_type.is_file() {
+                let bytes = std::fs::read(entry.path()).unwrap();
+                for secret in secrets {
+                    assert!(
+                        !bytes
+                            .windows(secret.len())
+                            .any(|window| window == secret.as_bytes()),
+                        "raw session secret reached {}",
+                        entry.path().display()
+                    );
+                }
+            }
+        }
+    }
+}
+
 #[test]
 fn journal_redacts_tokens_and_records_expiry_once() {
     let (_root, service) = isolated_engine();
@@ -96,7 +120,9 @@ fn journal_redacts_tokens_and_records_expiry_once() {
 
 #[test]
 fn quota_transaction_expiry_and_abort_are_authoritative_transitions() {
-    let (_root, service) = isolated_engine();
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join("lifecycle");
+    let service = RrdEngine::open(&path, instance(), TOKEN_KEY).unwrap();
     let lease = service
         .create_session(
             &session_request(5_000, 1),
@@ -129,6 +155,8 @@ fn quota_transaction_expiry_and_abort_are_authoritative_transitions() {
         service.storage.control_journal_since(0, 10).unwrap().len(),
         2
     );
+    drop(service);
+    let service = RrdEngine::open(&path, instance(), TOKEN_KEY).unwrap();
     assert!(matches!(
         service.abort_transaction(
             &lease.session_id,
@@ -156,6 +184,8 @@ fn quota_transaction_expiry_and_abort_are_authoritative_transitions() {
             2_200,
         )
         .unwrap();
+    drop(service);
+    let service = RrdEngine::open(&path, instance(), TOKEN_KEY).unwrap();
     let aborted = service
         .abort_transaction(
             &lease.session_id,
@@ -167,6 +197,8 @@ fn quota_transaction_expiry_and_abort_are_authoritative_transitions() {
         )
         .unwrap();
     assert_eq!(aborted.state, TransactionState::Aborted);
+    drop(service);
+    let service = RrdEngine::open(&path, instance(), TOKEN_KEY).unwrap();
     let replay = service
         .abort_transaction(
             &lease.session_id,
@@ -269,7 +301,9 @@ fn create_and_begin_replay_exact_responses_and_reject_collisions() {
 
 #[test]
 fn renewal_rotates_without_persisting_tokens_and_close_is_idempotent() {
-    let (_root, service) = isolated_engine();
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join("lifecycle");
+    let service = RrdEngine::open(&path, instance(), TOKEN_KEY).unwrap();
     let lease = service
         .create_session(
             &session_request(5_000, 2),
@@ -279,6 +313,8 @@ fn renewal_rotates_without_persisting_tokens_and_close_is_idempotent() {
             "operation-create",
         )
         .unwrap();
+    drop(service);
+    let service = RrdEngine::open(&path, instance(), TOKEN_KEY).unwrap();
     let renewal_key = id("renew-key");
     let renewed = service
         .renew_session(
@@ -292,6 +328,8 @@ fn renewal_rotates_without_persisting_tokens_and_close_is_idempotent() {
         )
         .unwrap();
     assert_ne!(renewed.token, lease.token);
+    drop(service);
+    let service = RrdEngine::open(&path, instance(), TOKEN_KEY).unwrap();
     let replay = service
         .renew_session(
             &lease.session_id,
@@ -344,6 +382,8 @@ fn renewal_rotates_without_persisting_tokens_and_close_is_idempotent() {
         .unwrap();
     assert_eq!(closed.affected_open_transactions, 1);
     assert!(!closed.idempotent_replay);
+    drop(service);
+    let service = RrdEngine::open(&path, instance(), TOKEN_KEY).unwrap();
     let close_replay = service
         .close_session(
             &lease.session_id,
@@ -391,4 +431,6 @@ fn renewal_rotates_without_persisting_tokens_and_close_is_idempotent() {
         assert!(!replacement.contains(lease.token.as_str()));
         assert!(!replacement.contains(renewed.token.as_str()));
     }
+    drop(service);
+    assert_tree_excludes(&path, &[lease.token.as_str(), renewed.token.as_str()]);
 }

@@ -2,7 +2,7 @@ use rrd_contract::{
     transaction_operation_sha256, BeginTransaction, CanonicalId, CapabilityDescriptor,
     CapabilityStatus, CloseSession, CommitReceipt, CommitTransaction, CorrelationId,
     CreateInstanceBackup, DataCatalogueIdentity, DataLogicalModel, DataRecordSchema, DataReference,
-    DataSchemaMode, DataSchemaRegistry, DataTableSchema, DataTarget, DeploymentMode,
+    DataSchemaMode, DataSchemaRegistry, DataSnapshot, DataTableSchema, DataTarget, DeploymentMode,
     EnsureQueryIndex, EnsureVectorCollection, EnsureVectorIndex, ErrorBody, ErrorCode,
     EstateActivityPolicySnapshot, EstateBackupJobSnapshot, EstateBackupJobState,
     EstateBackupJobsSnapshot, EstateMutationResult, EstateSnapshot, ExecuteQuery,
@@ -1178,6 +1178,8 @@ fn lifecycle_health_and_preview_payloads_are_bounded_and_strict() {
     };
     let preview = PreviewTransaction {
         mutations: vec![mutation.clone()],
+        valid_at: Some(100),
+        max_scanned_changes: 100,
     };
     preview.validate().unwrap();
     TransactionPreview {
@@ -1185,6 +1187,15 @@ fn lifecycle_health_and_preview_payloads_are_bounded_and_strict() {
         read_cursor: 7,
         operation_sha256: "3c94150b4ea4f9dcb27d3b602e9f190debe656533c047b99e11367bc6a28017f".into(),
         mutations: preview.mutations,
+        prospective: DataSnapshot {
+            scope: "instance:test".into(),
+            valid_at: 100,
+            known_at_cursor: 8,
+            schema_revision: 1,
+            read_manifest_sha256: "0".repeat(64),
+            entries: Vec::new(),
+        },
+        idempotent_replay: false,
     }
     .validate()
     .unwrap();

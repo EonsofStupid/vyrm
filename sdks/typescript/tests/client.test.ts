@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { endpoints } from "../src/generated/endpoints.js";
 import { RrdApiError, RrdClient, RrdClientError } from "../src/index.js";
 
 const jsonResponse = (value: unknown, status = 200) =>
@@ -7,6 +8,12 @@ const jsonResponse = (value: unknown, status = 200) =>
     status,
     headers: { "content-type": "application/json" },
   });
+
+test("generated catalogue tracks all mutation boundaries", () => {
+  assert.equal(Object.keys(endpoints).length, 33);
+  assert.equal(endpoints["backup-create"].mutation, true);
+  assert.equal(endpoints["transaction-preview"].mutation, true);
+});
 
 test("public negotiation retries transport loss and validates the ArkType envelope", async () => {
   let attempts = 0;

@@ -132,6 +132,18 @@ export const endpoints = {
     "authentication": "session_bearer",
     "mutation": true
   },
+  "subscription-close": {
+    "method": "POST",
+    "path": "/v1/subscriptions/close",
+    "authentication": "session_bearer",
+    "mutation": true
+  },
+  "subscription-open": {
+    "method": "POST",
+    "path": "/v1/subscriptions/open",
+    "authentication": "session_bearer",
+    "mutation": true
+  },
   "transaction-begin": {
     "method": "POST",
     "path": "/v1/transactions",
@@ -154,7 +166,7 @@ export const endpoints = {
     "method": "POST",
     "path": "/v1/transactions/{transaction}/preview",
     "authentication": "session_bearer",
-    "mutation": false
+    "mutation": true
   },
   "vector-collection-ensure": {
     "method": "POST",

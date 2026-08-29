@@ -1,9 +1,9 @@
 # RRD server v1 implementation contract
 
-Status: F2 alpha process implemented. The async loopback HTTP and experimental
-TLS 1.3 mTLS boundaries plus persistent coordinator are shipped; the broader F2 administration,
-cancellation, metrics, read-your-writes, and mutating-query exit gate remains
-open.
+Status: F2 transaction foundation implemented. The async loopback HTTP and
+experimental TLS 1.3 mTLS boundaries plus persistent coordinator are shipped;
+the broader administration, query cancellation, metrics, mutating-query, and
+released-client exit gates remain open.
 
 The first RRD server is a new process boundary, not an HTTP wrapper around the
 CLI and not an extension of `rrflow-mcp`'s MCP protocol. `rrflow-mcp` remains the AI-tool
@@ -142,9 +142,12 @@ places that secret elsewhere. `X-RRD-Session` carries the session identifier;
 - `POST /v1/transactions` captures an Engine read stamp and creates one
   server-side transaction lease bound to exactly one instance and either the
   legacy `claims` scope or typed `data` scope.
-- `POST /v1/transactions/{transaction}/preview` validates and returns the
-  ordered prospective mutations, read cursor, and canonical operation digest.
-  Full multi-model read-your-writes projection remains an F6 gate.
+- `POST /v1/transactions/{transaction}/preview` is the durable prepare
+  operation. It requires a mutation idempotency key, freezes the ordered write
+  set and runtime time, and returns the canonical digest plus a complete
+  prospective all-model `DataSnapshot` at the transaction's exact read stamp.
+  It does not publish a runtime cursor. Exact replay survives restart; either
+  key or payload substitution conflicts.
 - `POST /v1/transactions/{transaction}/commit` requires a mutation
   idempotency key, exact operation digest, and deadline; it commits through
   the matching authoritative Engine transaction. The `claims` scope retains
@@ -185,9 +188,9 @@ state digest, and the complete replacement state required to replay it.
 
 Persisted session state and journal entries contain only the session-token
 SHA-256; raw bearer tokens are derived for responses and never journaled.
-Session expiry atomically marks all open transactions expired. Begin, commit
-prepare, commit completion, abort, renewal, close, preview, transaction expiry,
-and session expiry have explicit lifecycle events. An idempotent response
+Session expiry atomically marks all open transactions expired. Begin,
+transaction prepare, commit intent, commit completion, abort, renewal, close,
+transaction expiry, and session expiry have explicit lifecycle events. An idempotent response
 replay does not invent a second lifecycle transition. Successful activity
 advances idle expiry but never crosses absolute expiry. A compare-and-swap
 conflict fails closed rather than overwriting a concurrent lifecycle event.
@@ -223,8 +226,9 @@ deliberately not presented as one cross-keyspace commit.
 The current real-socket matrix proves liveness/readiness on reopen, capability
 negotiation, malformed/oversized-body denial, wrong-instance denial, elapsed
 deadline denial before mutation, token rotation and replay, idle expiry,
-transaction quota, claim-scope preview, explicit abort and close, same-process
-and post-restart commit replay, idempotency collision, disconnect/retry,
+transaction quota, durable all-model prepare/read-your-writes, explicit abort
+and close, same-process and post-restart commit replay, idempotency collision,
+lost-response cancellation followed by process restart and retry,
 concurrent same-operation convergence, graceful shutdown, and refusal by both
 the library and real binary to bind cleartext remotely. The mTLS matrix proves
 trusted-client success, missing-client-certificate denial, wrong-server-name
@@ -263,10 +267,12 @@ effect. Public requests contain no filesystem path. The server derives
 parent. Archive labels are operation-qualified internally so an effect can be
 found after an acknowledgement gap.
 
-It also commits all nine runtime mutation families through one `data`
-transaction, verifies the single eleven-change cursor interval and one-claim
-receipt, restarts the server, replays the same runtime commit identity, and
-confirms that the authoritative scoped log contains exactly eleven changes.
+It also prepares all nine runtime mutation families through one `data`
+transaction, proves the prospective snapshot contains the uncommitted writes
+while the authoritative cursor remains unchanged, restarts, and replays the
+same prepare. It then commits the single eleven-change cursor interval and
+one-claim receipt, restarts again, replays the same runtime commit identity,
+and confirms that the authoritative scoped log contains exactly eleven changes.
 
 The secured-socket differential records public inspection, an unknown route,
 missing and wrong API-key session denials, an allowed exact query, an ungranted
@@ -277,9 +283,8 @@ only request/response digests. Reopened journal evidence contains neither raw
 API key nor authorization scheme.
 
 F2 is not closed by that matrix. Remaining black-box gates are cancellation of
-long-running query work, deadline races during generalized commit, prospective
-multi-model read-your-writes, lost-ack process interruption for the data scope,
-mutating RRFlowQL, live subscriptions,
+long-running query work, deadline races during generalized commit,
+mutating RRFlowQL,
 CRUD/schema/vector/snapshot administration, generalized result/time limits,
 durable query-span export, metrics export, and released-version negotiation
 clients. Backup object payloads remain referenced-only and the service does not

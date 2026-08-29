@@ -205,7 +205,7 @@ def test_remote_cleartext_expired_deadlines_and_typed_api_errors_are_rejected() 
 
 
 def test_generated_catalogue_covers_the_frozen_contract() -> None:
-    assert len(ENDPOINTS) == 31
+    assert len(ENDPOINTS) == 33
     assert ENDPOINTS["capabilities-read"] == {
         "method": "GET",
         "path": "/v1/capabilities",
@@ -213,3 +213,4 @@ def test_generated_catalogue_covers_the_frozen_contract() -> None:
         "mutation": False,
     }
     assert ENDPOINTS["backup-create"]["mutation"] is True
+    assert ENDPOINTS["transaction-preview"]["mutation"] is True

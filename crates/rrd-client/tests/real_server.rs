@@ -29,6 +29,8 @@ use serde_json::{json, Value};
 use std::collections::BTreeMap;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+const INTEGRATION_IO_TIMEOUT: Duration = Duration::from_secs(10);
+
 fn test_ca() -> (Certificate, Issuer<'static, KeyPair>) {
     let mut params = CertificateParams::new(Vec::<String>::new()).unwrap();
     params.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
@@ -347,7 +349,7 @@ async fn rust_client_negotiates_authenticates_queries_and_reads_audit() {
         proxy_address,
         instance.clone(),
         ClientConfig {
-            request_timeout: Duration::from_secs(2),
+            request_timeout: INTEGRATION_IO_TIMEOUT,
             max_attempts: 2,
         },
     )
@@ -422,7 +424,7 @@ async fn rust_client_negotiates_authenticates_queries_and_reads_audit() {
         .await
         .unwrap();
     assert_eq!(first_connection.connection_generation, 1);
-    let first = tokio::time::timeout(Duration::from_secs(2), subscription.receive())
+    let first = tokio::time::timeout(INTEGRATION_IO_TIMEOUT, subscription.receive())
         .await
         .unwrap()
         .unwrap();
@@ -443,7 +445,7 @@ async fn rust_client_negotiates_authenticates_queries_and_reads_audit() {
         .await
         .unwrap();
     loop {
-        let frame = tokio::time::timeout(Duration::from_secs(2), subscription.receive())
+        let frame = tokio::time::timeout(INTEGRATION_IO_TIMEOUT, subscription.receive())
             .await
             .unwrap()
             .unwrap();
@@ -456,7 +458,7 @@ async fn rust_client_negotiates_authenticates_queries_and_reads_audit() {
             break;
         }
     }
-    let unacknowledged = tokio::time::timeout(Duration::from_secs(2), subscription.receive())
+    let unacknowledged = tokio::time::timeout(INTEGRATION_IO_TIMEOUT, subscription.receive())
         .await
         .unwrap()
         .unwrap();
@@ -473,7 +475,7 @@ async fn rust_client_negotiates_authenticates_queries_and_reads_audit() {
         .unwrap();
     assert_eq!(reconnected.connection_generation, 2);
     assert_eq!(reconnected.acknowledged_cursor, 1);
-    let replay = tokio::time::timeout(Duration::from_secs(2), subscription.receive())
+    let replay = tokio::time::timeout(INTEGRATION_IO_TIMEOUT, subscription.receive())
         .await
         .unwrap()
         .unwrap();
@@ -495,7 +497,7 @@ async fn rust_client_negotiates_authenticates_queries_and_reads_audit() {
         .unwrap();
     subscription.close().await.unwrap();
     loop {
-        let frame = tokio::time::timeout(Duration::from_secs(2), subscription.receive())
+        let frame = tokio::time::timeout(INTEGRATION_IO_TIMEOUT, subscription.receive())
             .await
             .unwrap()
             .unwrap();
@@ -620,8 +622,11 @@ async fn rust_client_negotiates_authenticates_queries_and_reads_audit() {
                     producer: CanonicalId::new("rust-sdk").unwrap(),
                     confidence: Some(0.9),
                 }],
+                valid_at: Some(100),
+                max_scanned_changes: 100,
             },
-            RequestOptions::read("request-preview", "operation-preview").unwrap(),
+            RequestOptions::mutation("request-preview", "operation-preview", "prepare-preview")
+                .unwrap(),
         )
         .await
         .unwrap();
@@ -775,7 +780,7 @@ async fn rust_client_negotiates_authenticates_queries_and_reads_audit() {
             proxy_address,
             instance.clone(),
             ClientConfig {
-                request_timeout: Duration::from_secs(2),
+                request_timeout: INTEGRATION_IO_TIMEOUT,
                 max_attempts: 2,
             },
         )
@@ -1042,7 +1047,7 @@ async fn remote_transport_requires_mutual_tls_and_exact_server_identity() {
         .await
         .unwrap();
     assert_eq!(connected.connection_generation, 1);
-    let pushed = tokio::time::timeout(Duration::from_secs(2), socket.receive())
+    let pushed = tokio::time::timeout(INTEGRATION_IO_TIMEOUT, socket.receive())
         .await
         .unwrap()
         .unwrap();

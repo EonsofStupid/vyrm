@@ -391,6 +391,72 @@ pub trait Engine: ClaimSource<Error = Error> {
         transaction.preview(&base).map_err(Error::from)
     }
 
+    /// Reconstructs the complete all-model state at the transaction's exact
+    /// read stamp, then overlays its pending mutations without publishing
+    /// them. The returned cursor is prospective and cannot be used as durable
+    /// evidence until the ordinary transaction commit succeeds.
+    fn preview_data_snapshot(
+        &self,
+        transaction: &DataTransaction,
+        valid_at: Millis,
+        replay_limit: usize,
+    ) -> Result<RuntimeDataSnapshot> {
+        transaction.validate()?;
+        if valid_at == 0 || replay_limit == 0 {
+            return Err(Error::Substrate(
+                "transaction data preview requires non-zero valid time and replay limit".into(),
+            ));
+        }
+        let page = self.runtime_read_changes(&transaction.read, 0, replay_limit)?;
+        if page.through_cursor != transaction.read.commit_cursor || page.has_more() {
+            return Err(Error::Substrate(format!(
+                "transaction data preview requires more than {replay_limit} retained changes"
+            )));
+        }
+        let schema = transaction
+            .commit
+            .mutations
+            .iter()
+            .filter_map(|mutation| match mutation {
+                RuntimeMutation::Schema { registry } => Some(registry.clone()),
+                _ => None,
+            })
+            .next_back()
+            .map(Ok)
+            .unwrap_or_else(|| schema_at_read(&transaction.read, &page))?;
+        schema.validate()?;
+
+        let prospective_cursor = transaction
+            .read
+            .commit_cursor
+            .checked_add(transaction.commit.mutations.len() as u64)
+            .ok_or_else(|| Error::Substrate("transaction preview cursor overflowed".into()))?;
+        let commit_id = transaction.commit.digest();
+        let mut changes = page.changes;
+        let mut previous_digest = changes.last().map(|change| change.digest.clone());
+        for (ordinal, mutation) in transaction.commit.mutations.iter().cloned().enumerate() {
+            let cursor = transaction.read.commit_cursor + ordinal as u64 + 1;
+            let change = RuntimeChange::committed(
+                cursor,
+                &transaction.commit,
+                &commit_id,
+                ordinal as u64,
+                mutation,
+                previous_digest,
+            );
+            previous_digest = Some(change.digest.clone());
+            changes.push(change);
+        }
+        RuntimeDataSnapshot::from_changes(
+            &changes,
+            &schema,
+            transaction.read.scope.clone(),
+            valid_at,
+            prospective_cursor,
+        )
+        .map_err(Error::from)
+    }
+
     // ---- provided: the semantic layer every engine inherits ----
 
     /// Appends a single claim. Equivalent to a batch of one.

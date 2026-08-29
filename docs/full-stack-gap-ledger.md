@@ -339,13 +339,13 @@ claim.
 
 `rrd-server` is now an Axum/Tokio process with versioned envelopes, liveness,
 readiness, capability negotiation, one-MiB body denial, canonical typed
-operation digests, claim preview/commit, JSON tracing, graceful shutdown, and
+operation digests, durable all-model prepare/commit, JSON tracing, graceful shutdown, and
 fail-closed loopback binding. Its real-socket tests cover rotation, expiry,
 quota, abort/close, malformed input, deadline precheck, disconnect/retry,
 concurrent commit convergence, restart replay, secret-file permissions, and
 binary remote-bind denial. These transport leases still do not constitute F4
-user authentication or comprehensive audit. Cancellation, generalized
-read-your-writes, CRUD/schema/vector/snapshot administration, result/time
+user authentication or comprehensive audit. Long-running query cancellation,
+CRUD/schema/vector/snapshot administration, result/time
 bounds, metrics, and released-version client qualification keep F2 open.
 
 The public service now also exposes the first F6 breadth path through
@@ -363,12 +363,14 @@ vocabulary lowers explicitly into one authoritative `RuntimeCommit`. Schema,
 claim, record, relation, event, dense/sparse/multi-dense vector, series sample,
 geo, and pre-staged object-reference changes share exact-cursor conflict
 detection, the runtime hash chain, audit envelope, projection outbox, and one
-commit identity. The coordinator freezes that identity in its durable prepared
-intent and resolves lost acknowledgements from the runtime commit catalogue.
-A real-socket test commits all nine families, restarts, replays the identical
-receipt, and observes no duplicate changes. Generalized read-your-writes,
-data-scope process-kill qualification, mutating RRFlowQL, object upload/staging,
-and model-specific administration endpoints remain open.
+commit identity. The coordinator first freezes that identity in a
+mutation-idempotent durable prepare and returns a complete prospective snapshot
+at the exact read stamp, then resolves lost acknowledgements from the runtime
+commit catalogue. A real-socket test prepares all nine families, restarts and
+replays the same unpublished prospective state, then commits and replays the
+identical receipt. A second row drops the first data-commit response, restarts
+the server, and observes no duplicate changes after retry. Mutating RRFlowQL,
+object upload/staging, and model-specific administration endpoints remain open.
 
 `POST /v1/vector/search` now exposes the canonical vector truth path over an
 authenticated runtime read stamp. Dense, sparse, and multi-dense/MaxSim query
@@ -602,7 +604,7 @@ client at walking-skeleton status.
 The Python walking skeleton is implemented in `sdks/python` and specified by
 [`rrd-python-client-v1.md`](rrd-python-client-v1.md). Its shell-free generator
 derives the closed operation/route/auth/mutation map from the same OpenAPI
-authority. The synchronous HTTPX client covers all 31 operations and enforces
+authority. The synchronous HTTPX client covers all 33 operations and enforces
 bounded responses, correlation, resource identity, mutation idempotency,
 absolute/per-attempt deadlines, safe retry, API-key/session authentication,
 typed errors, and loopback-only cleartext. Pydantic validates response
@@ -612,7 +614,7 @@ real-server conformance, and publication remain open.
 
 The Go walking skeleton is implemented in `sdks/go` and specified by
 [`rrd-go-client-v1.md`](rrd-go-client-v1.md). Its shell-free generator emits a
-closed operation constant set and route/auth/mutation map for all 31 operations
+closed operation constant set and route/auth/mutation map for all 33 operations
 from the same OpenAPI authority. The standard-library client uses caller
 contexts, bounded response reads, strict envelopes, correlated identities,
 resource validation, mutation idempotency, combined deadlines, safe transport
@@ -623,7 +625,7 @@ conformance, and publication remain open.
 
 The Java walking skeleton is implemented in `sdks/java` and specified by
 [`rrd-java-client-v1.md`](rrd-java-client-v1.md). Its generator emits a closed
-operation enum with route/auth/mutation metadata for all 31 operations. Java's
+operation enum with route/auth/mutation metadata for all 33 operations. Java's
 HTTP client plus Jackson 3.2 enforce bounded reads, exact envelopes, correlation,
 resources, mutation idempotency, combined deadlines, safe I/O retry,
 authentication, redirect denial, and loopback-only cleartext. Maven/Java 21
@@ -634,7 +636,7 @@ dependency verification, shared conformance, and publication remain open.
 The asynchronous .NET walking skeleton is implemented in `sdks/dotnet` and
 specified by [`rrd-dotnet-client-v1.md`](rrd-dotnet-client-v1.md). Its generator
 emits a closed operation enum/switch with route/auth/mutation metadata for all
-31 operations. `HttpClient` and `System.Text.Json` provide a third-party-free
+33 operations. `HttpClient` and `System.Text.Json` provide a third-party-free
 runtime with caller cancellation, bounded streaming, exact envelopes,
 correlation, resources, mutation idempotency, combined deadlines, safe retry,
 authentication, redirect denial, and loopback-only cleartext. .NET 10 nullable

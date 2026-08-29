@@ -5,9 +5,9 @@ use super::{
 use rrd_contract::{
     AbortTransaction, AuditDecision, AuditPhase, BeginTransaction, CanonicalId, CloseSession,
     CommitTransaction, CorrelationId, CreateSession, DataCatalogueIdentity, EnsureVectorCollection,
-    NamedVectorDefinition, RenewSession, RequestContext, ResourceId, ResourceKind, ResourcePath,
-    SecurityAction, SessionLimits, TransactionMutation, TransactionState, VectorMemoryTier,
-    VectorSearchMetric, VectorValueKind,
+    NamedVectorDefinition, PreviewTransaction, RenewSession, RequestContext, ResourceId,
+    ResourceKind, ResourcePath, SecurityAction, SessionLimits, TransactionMutation,
+    TransactionState, VectorMemoryTier, VectorSearchMetric, VectorValueKind,
 };
 use rrd_core::digest;
 use rrd_security::{Principal, PrincipalKind, ResourceGrant, SecurityRepository, SecurityState};

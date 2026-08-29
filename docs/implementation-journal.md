@@ -3281,3 +3281,39 @@ index.
 - The additive deployment corpus schemas and corrected public enum advance the
   reviewed generated OpenAPI digest to
   `99c00f57d53c3f17e38590dc849c9e067a4788b8febd898d04401c95c5bc38a6`.
+
+## 2026-08-29 — G05-W02 durable client-transaction foundation candidate
+
+- Reclassified transaction preview as the durable prepare mutation it actually
+  is. It now requires and persists an idempotency key, freezes the exact
+  write-set digest and runtime time, rejects key or payload substitution, and
+  does not append another lifecycle transition on exact replay.
+- Added complete prospective read-your-writes reduction over the transaction's
+  captured read stamp for schema, record/document/key-value, relation, event,
+  vector, series, geo, object-reference, and claim-bearing commits. Preparing
+  never advances the authoritative runtime cursor; commit lowers the same
+  frozen runtime identity.
+- Lifecycle tests now physically reopen the engine across lease renewal/token
+  rotation, timeout, abort/replay, commit-intent recovery, runtime acceptance,
+  and terminal receipt recovery. Persisted lifecycle records and journals
+  continue to contain token hashes only.
+- Real-socket evidence prepares the eleven-change all-model transaction,
+  restarts and replays the identical prospective snapshot, then commits it. A
+  separate cancellation row sends a typed data commit, discards the response,
+  stops the server, reopens the same root, and proves retry convergence with
+  exactly three runtime changes and no claim duplication.
+- Regenerated the TypeScript OpenAPI/types and the TypeScript, Python, Go,
+  Java, and .NET endpoint catalogues from the reviewed contract. Transaction
+  prepare is consistently marked as a mutation. The OpenAPI digest advances to
+  `5e2374350f3a152f825013ed6610db42319868e268e7405174b536801ea2aa91`.
+- The first cold board qualification exposed a two-second WebSocket integration
+  timeout that could expire under verifier load before the opened frame. The
+  real-client fixture now uses one named ten-second I/O bound for connection and
+  frame waits; three consecutive secured-server runs pass, including a cold run
+  that legitimately took more than the retired two-second allowance.
+- The next board qualification exposed resource amplification inside the HTTP
+  process tests: every parallel fixture created a full multi-thread Tokio
+  runtime. Fixtures now use one async runtime thread, admit at most four live
+  servers, and use a named bounded process/socket deadline. Changefeed and live
+  waits remain within their public five-second limit. The complete 17-test
+  process suite passed three consecutive normal-parallelism runs after the fix.

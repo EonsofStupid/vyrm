@@ -12,7 +12,8 @@ use crate::{
 use rrd_core::{
     AuditEnvelope, Claim, ClaimSource, DataTransaction, DataTransactionView, Millis, Predicate,
     ProjectionWork, ReadStamp, Reader, RetentionPin, RuntimeChangePage, RuntimeCommit,
-    RuntimeCommitOutcome, RuntimeSchemaRegistry, ScopeId, SnapshotHandle, SnapshotId, Subject,
+    RuntimeCommitOutcome, RuntimeDataSnapshot, RuntimeSchemaRegistry, ScopeId, SnapshotHandle,
+    SnapshotId, Subject,
 };
 use std::path::Path;
 
@@ -452,6 +453,22 @@ impl Engine for PersistentEngine {
             Self::Native(engine) => Engine::preview_data_transaction(engine, transaction, valid_at),
             Self::FjallCompatibility(engine) => {
                 Engine::preview_data_transaction(engine, transaction, valid_at)
+            }
+        }
+    }
+
+    fn preview_data_snapshot(
+        &self,
+        transaction: &DataTransaction,
+        valid_at: Millis,
+        replay_limit: usize,
+    ) -> Result<RuntimeDataSnapshot> {
+        match self {
+            Self::Native(engine) => {
+                Engine::preview_data_snapshot(engine, transaction, valid_at, replay_limit)
+            }
+            Self::FjallCompatibility(engine) => {
+                Engine::preview_data_snapshot(engine, transaction, valid_at, replay_limit)
             }
         }
     }

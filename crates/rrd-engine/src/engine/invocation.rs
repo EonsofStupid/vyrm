@@ -59,6 +59,7 @@ impl RrdOperation {
                 | Self::SessionRenew
                 | Self::SessionClose
                 | Self::TransactionBegin
+                | Self::TransactionPreview
                 | Self::TransactionCommit
                 | Self::TransactionAbort
                 | Self::SubscriptionOpen

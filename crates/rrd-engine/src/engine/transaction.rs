@@ -97,6 +97,7 @@ impl RrdEngine {
                 read,
                 begin_idempotency_key: idempotency_key.clone(),
                 begin_operation_sha256: operation_sha256,
+                prepared: None,
                 commit_intent: None,
                 commit_receipt: None,
                 abort: None,
@@ -147,6 +148,13 @@ impl RrdEngine {
             .ok_or(ServiceError::TransactionNotFound)?;
         let transaction_scope = record.lease.scope.clone();
         let read = record.read.clone();
+        if record
+            .prepared
+            .as_ref()
+            .is_some_and(|prepared| prepared.operation_sha256 != request.operation_sha256)
+        {
+            return Err(ServiceError::IdempotencyConflict);
+        }
         if record.lease.state == TransactionState::Committed {
             let intent = record
                 .commit_intent
@@ -192,15 +200,20 @@ impl RrdEngine {
                 )?;
                 return Err(ServiceError::TransactionExpired);
             }
+            let runtime_at = record
+                .prepared
+                .as_ref()
+                .map(|prepared| prepared.runtime_at_unix_ms)
+                .unwrap_or(now);
             let runtime_identity = if matches!(transaction_scope.as_str(), "claims" | "data") {
                 let commit = public_runtime_commit(
                     request,
                     session_id,
                     &self.instance,
                     read.commit_cursor,
-                    now,
+                    runtime_at,
                 )?;
-                (now, commit.digest())
+                (runtime_at, commit.digest())
             } else {
                 return Err(ServiceError::WrongScope);
             };
@@ -362,17 +375,21 @@ impl RrdEngine {
         Ok(transaction)
     }
 
-    #[allow(clippy::too_many_arguments)]
     pub fn preview_transaction(
         &self,
         session_id: &CorrelationId,
         token: &CorrelationId,
         transaction_id: &CorrelationId,
         request: &PreviewTransaction,
+        context: &RequestContext,
         now: u64,
-        request_id: &str,
-        operation_id: &str,
     ) -> Result<TransactionPreview> {
+        context
+            .validate(true)
+            .map_err(|error| ServiceError::Contract(error.to_string()))?;
+        let idempotency_key = context.idempotency_key.as_ref().ok_or_else(|| {
+            ServiceError::Contract("transaction prepare requires idempotency".into())
+        })?;
         request
             .validate()
             .map_err(|error| ServiceError::Contract(error.to_string()))?;
@@ -381,12 +398,12 @@ impl RrdEngine {
             token,
             SecurityAction::TransactionPreview,
             now,
-            request_id,
-            operation_id,
+            context.request_id.as_str(),
+            context.operation_id.as_str(),
         )?;
         let transaction = state
             .transactions
-            .get_mut(transaction_id)
+            .get(transaction_id)
             .ok_or(ServiceError::TransactionNotFound)?;
         if transaction.lease.state != TransactionState::Open {
             return Err(ServiceError::TransactionClosed);
@@ -395,36 +412,113 @@ impl RrdEngine {
             return Err(ServiceError::CommitInProgress);
         }
         if now >= transaction.lease.expires_at_unix_ms {
-            transaction.lease.state = TransactionState::Expired;
+            state
+                .transactions
+                .get_mut(transaction_id)
+                .expect("transaction retained")
+                .lease
+                .state = TransactionState::Expired;
             self.replace_session(
                 session_id,
                 bytes,
                 state,
                 now,
                 "transaction.expired",
-                request_id,
-                operation_id,
+                context.request_id.as_str(),
+                context.operation_id.as_str(),
             )?;
             return Err(ServiceError::TransactionExpired);
         }
         if !matches!(transaction.lease.scope.as_str(), "claims" | "data") {
             return Err(ServiceError::WrongScope);
         }
+        let operation_sha256 = transaction_operation_sha256(&request.mutations);
+        let prepared = transaction.prepared.clone();
+        if let Some(prepared) = &prepared {
+            if prepared.idempotency_key != *idempotency_key
+                || prepared.operation_sha256 != operation_sha256
+            {
+                return Err(ServiceError::IdempotencyConflict);
+            }
+        }
+        let runtime_at = prepared
+            .as_ref()
+            .map(|prepared| prepared.runtime_at_unix_ms)
+            .unwrap_or(now);
+        let commit_request = CommitTransaction {
+            operation_sha256: operation_sha256.clone(),
+            mutations: request.mutations.clone(),
+        };
+        self.validate_collection_vector_mutations(&commit_request)?;
+        let commit = public_runtime_commit(
+            &commit_request,
+            session_id,
+            &self.instance,
+            transaction.read.commit_cursor,
+            runtime_at,
+        )?;
+        let data_transaction = DataTransaction::new(transaction.read.clone(), commit)
+            .map_err(|error| ServiceError::Contract(error.to_string()))?;
+        let replay_limit = usize::try_from(request.max_scanned_changes)
+            .map_err(|_| ServiceError::Query("preview replay limit exceeds usize".into()))?;
+        let valid_at = request.valid_at.unwrap_or(now);
+        let prospective = if transaction.read.schema_revision.is_none()
+            && data_transaction
+                .commit
+                .mutations
+                .iter()
+                .all(|mutation| matches!(mutation, RuntimeMutation::Claim { .. }))
+        {
+            DataSnapshot {
+                scope: transaction.read.scope.to_string(),
+                valid_at,
+                known_at_cursor: transaction
+                    .read
+                    .commit_cursor
+                    .checked_add(data_transaction.commit.mutations.len() as u64)
+                    .ok_or_else(|| {
+                        ServiceError::Contract("transaction preview cursor overflowed".into())
+                    })?,
+                schema_revision: 0,
+                read_manifest_sha256: transaction.read.manifest_id.clone(),
+                entries: Vec::new(),
+            }
+        } else {
+            public_data_snapshot(
+                &transaction.read,
+                self.storage
+                    .preview_data_snapshot(&data_transaction, valid_at, replay_limit)?,
+            )?
+        };
         let preview = TransactionPreview {
             transaction_id: transaction_id.clone(),
             read_cursor: transaction.lease.read_cursor,
-            operation_sha256: transaction_operation_sha256(&request.mutations),
+            operation_sha256: operation_sha256.clone(),
             mutations: request.mutations.clone(),
+            prospective,
+            idempotent_replay: prepared.is_some(),
         };
+        if prepared.is_some() {
+            return Ok(preview);
+        }
+        state
+            .transactions
+            .get_mut(transaction_id)
+            .expect("transaction retained")
+            .prepared = Some(PreparedRecord {
+            idempotency_key: idempotency_key.clone(),
+            operation_sha256,
+            runtime_at_unix_ms: runtime_at,
+        });
         touch_session(&mut state, now);
         self.replace_session(
             session_id,
             bytes,
             state,
             now,
-            "transaction.previewed",
-            request_id,
-            operation_id,
+            "transaction.prepared",
+            context.request_id.as_str(),
+            context.operation_id.as_str(),
         )?;
         Ok(preview)
     }

@@ -91,6 +91,103 @@ fn commit_reopens_replays_and_does_not_duplicate_claims() {
 }
 
 #[test]
+fn durable_prepare_reopens_without_republishing_or_rejournaling() {
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join("prepared");
+    let service = RrdEngine::open(&path, instance(), TOKEN_KEY).unwrap();
+    let lease = service
+        .create_session(
+            &session_request(5_000, 2),
+            &id("prepare-create-key"),
+            1_000,
+            "request-create",
+            "operation-create",
+        )
+        .unwrap();
+    let transaction = service
+        .begin_transaction(
+            &lease.session_id,
+            &lease.token,
+            &begin_request(),
+            &mutation_context(&id("prepare-begin-key"), "request-begin", "operation-begin"),
+            1_100,
+        )
+        .unwrap();
+    let request = PreviewTransaction {
+        mutations: vec![mutation("prepared")],
+        valid_at: Some(1_000),
+        max_scanned_changes: 10,
+    };
+    let context = mutation_context(&id("prepare-key"), "request-prepare", "operation-prepare");
+    let first = service
+        .preview_transaction(
+            &lease.session_id,
+            &lease.token,
+            &transaction.transaction_id,
+            &request,
+            &context,
+            1_150,
+        )
+        .unwrap();
+    assert!(!first.idempotent_replay);
+    assert_eq!(first.prospective.known_at_cursor, 1);
+    assert_eq!(service.storage.runtime_cursor().unwrap(), 0);
+    assert_eq!(
+        service.storage.control_journal_since(0, 10).unwrap().len(),
+        3
+    );
+    drop(service);
+
+    let service = RrdEngine::open(&path, instance(), TOKEN_KEY).unwrap();
+    let replay = service
+        .preview_transaction(
+            &lease.session_id,
+            &lease.token,
+            &transaction.transaction_id,
+            &request,
+            &context,
+            1_200,
+        )
+        .unwrap();
+    assert!(replay.idempotent_replay);
+    assert_eq!(replay.prospective, first.prospective);
+    assert_eq!(service.storage.runtime_cursor().unwrap(), 0);
+    assert_eq!(
+        service.storage.control_journal_since(0, 10).unwrap().len(),
+        3
+    );
+
+    let mut substituted = request.clone();
+    substituted.mutations = vec![mutation("substituted")];
+    assert!(matches!(
+        service.preview_transaction(
+            &lease.session_id,
+            &lease.token,
+            &transaction.transaction_id,
+            &substituted,
+            &context,
+            1_250,
+        ),
+        Err(ServiceError::IdempotencyConflict)
+    ));
+    assert!(matches!(
+        service.preview_transaction(
+            &lease.session_id,
+            &lease.token,
+            &transaction.transaction_id,
+            &request,
+            &mutation_context(
+                &id("different-prepare-key"),
+                "request-collision",
+                "operation-collision",
+            ),
+            1_250,
+        ),
+        Err(ServiceError::IdempotencyConflict)
+    ));
+}
+
+#[test]
 fn expired_session_still_resolves_an_exact_committed_transaction_replay() {
     let (_root, service) = isolated_engine();
     let lease = service
@@ -174,7 +271,9 @@ fn expired_session_still_resolves_an_exact_committed_transaction_replay() {
 
 #[test]
 fn retry_closes_the_journal_gap_after_a_crash_window() {
-    let (_root, service) = isolated_engine();
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join("crash-window");
+    let service = RrdEngine::open(&path, instance(), TOKEN_KEY).unwrap();
     let lease = service
         .create_session(
             &session_request(5_000, 2),
@@ -234,12 +333,16 @@ fn retry_closes_the_journal_gap_after_a_crash_window() {
         .unwrap();
 
     let crash_key = id("crash-key");
+    drop(service);
+    let service = RrdEngine::open(&path, instance(), TOKEN_KEY).unwrap();
     service.storage.commit_runtime(&runtime_commit).unwrap();
     assert_eq!(
         service.storage.control_journal_since(0, 10).unwrap().len(),
         3
     );
 
+    drop(service);
+    let service = RrdEngine::open(&path, instance(), TOKEN_KEY).unwrap();
     let recovered = service
         .commit_transaction(
             &lease.session_id,

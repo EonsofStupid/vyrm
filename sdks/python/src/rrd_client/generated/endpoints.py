@@ -24,6 +24,8 @@ OperationId = Literal[
     "session-close",
     "session-create",
     "session-renew",
+    "subscription-close",
+    "subscription-open",
     "transaction-abort",
     "transaction-begin",
     "transaction-commit",
@@ -176,6 +178,18 @@ ENDPOINTS: Final[dict[OperationId, Endpoint]] = {
         "mutation": True,
         "path": "/v1/sessions/{session}/renew",
     },
+    "subscription-close": {
+        "authentication": "session_bearer",
+        "method": "POST",
+        "mutation": True,
+        "path": "/v1/subscriptions/close",
+    },
+    "subscription-open": {
+        "authentication": "session_bearer",
+        "method": "POST",
+        "mutation": True,
+        "path": "/v1/subscriptions/open",
+    },
     "transaction-abort": {
         "authentication": "session_bearer",
         "method": "DELETE",
@@ -197,7 +211,7 @@ ENDPOINTS: Final[dict[OperationId, Endpoint]] = {
     "transaction-preview": {
         "authentication": "session_bearer",
         "method": "POST",
-        "mutation": False,
+        "mutation": True,
         "path": "/v1/transactions/{transaction}/preview",
     },
     "vector-collection-ensure": {

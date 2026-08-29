@@ -37,6 +37,13 @@ coordinates, plan evidence, execution counters, and rows. These types remain
 independent of `rrd_core`; the server performs an explicit lowering into the
 authoritative runtime rather than serializing private runtime structs.
 
+Transaction preview is a durable prepare, not a read disguised as a write. Its
+mutation envelope requires idempotency, binds the pending write-set digest and
+stable runtime time, and returns a complete prospective `DataSnapshot` reduced
+from the exact read stamp plus the pending mutations. The prospective cursor is
+explicitly non-authoritative until commit; replay, timeout, abort, commit, and
+payload/key collision semantics persist across engine and server restart.
+
 The vector boundary now includes journaled collection administration. A named
 vector definition freezes its stored field, dense/sparse/multi-dense kind,
 dimensions, metric, optional embedding-model digest, and requested

@@ -31,93 +31,100 @@ impl RrdEngine {
             self.storage
                 .runtime_data_snapshot(&scope, request.valid_at, replay_limit)?;
 
-        let mut entries = Vec::with_capacity(
-            snapshot.records.len()
-                + snapshot.relations.len()
-                + snapshot.events.len()
-                + snapshot.vectors.len()
-                + snapshot.series.len()
-                + snapshot.geo.len()
-                + snapshot.objects.len(),
-        );
-        for entry in snapshot.records {
-            let reference = entry.value.reference.clone();
-            entries.push(snapshot_entry(
-                entry.model,
-                reference,
-                RuntimeMutation::Record {
-                    record: entry.value,
-                },
-            )?);
-        }
-        for entry in snapshot.relations {
-            let reference = entry.value.reference.clone();
-            entries.push(snapshot_entry(
-                entry.model,
-                reference,
-                RuntimeMutation::Relation {
-                    relation: entry.value,
-                },
-            )?);
-        }
-        for entry in snapshot.events {
-            let reference = entry.value.reference.clone();
-            entries.push(snapshot_entry(
-                entry.model,
-                reference,
-                RuntimeMutation::Event {
-                    event: entry.value.event,
-                },
-            )?);
-        }
-        for entry in snapshot.vectors {
-            let reference = entry.value.reference.clone();
-            entries.push(snapshot_entry(
-                entry.model,
-                reference,
-                RuntimeMutation::Vector {
-                    vector: entry.value,
-                },
-            )?);
-        }
-        for entry in snapshot.series {
-            let reference = entry.value.reference.clone();
-            entries.push(snapshot_entry(
-                entry.model,
-                reference,
-                RuntimeMutation::SeriesSample {
-                    sample: entry.value,
-                },
-            )?);
-        }
-        for entry in snapshot.geo {
-            let reference = entry.value.reference.clone();
-            entries.push(snapshot_entry(
-                entry.model,
-                reference,
-                RuntimeMutation::Geo { geo: entry.value },
-            )?);
-        }
-        for entry in snapshot.objects {
-            let reference = entry.value.reference.clone();
-            entries.push(snapshot_entry(
-                entry.model,
-                reference,
-                RuntimeMutation::Object {
-                    object: entry.value,
-                },
-            )?);
-        }
-
-        Ok(DataSnapshot {
-            scope: snapshot.scope.to_string(),
-            valid_at: snapshot.valid_at,
-            known_at_cursor: snapshot.known_at_cursor,
-            schema_revision: snapshot.schema_revision,
-            read_manifest_sha256: read.manifest_id,
-            entries,
-        })
+        public_data_snapshot(&read, snapshot)
     }
+}
+
+pub(in crate::engine) fn public_data_snapshot(
+    read: &ReadStamp,
+    snapshot: RuntimeDataSnapshot,
+) -> Result<DataSnapshot> {
+    let mut entries = Vec::with_capacity(
+        snapshot.records.len()
+            + snapshot.relations.len()
+            + snapshot.events.len()
+            + snapshot.vectors.len()
+            + snapshot.series.len()
+            + snapshot.geo.len()
+            + snapshot.objects.len(),
+    );
+    for entry in snapshot.records {
+        let reference = entry.value.reference.clone();
+        entries.push(snapshot_entry(
+            entry.model,
+            reference,
+            RuntimeMutation::Record {
+                record: entry.value,
+            },
+        )?);
+    }
+    for entry in snapshot.relations {
+        let reference = entry.value.reference.clone();
+        entries.push(snapshot_entry(
+            entry.model,
+            reference,
+            RuntimeMutation::Relation {
+                relation: entry.value,
+            },
+        )?);
+    }
+    for entry in snapshot.events {
+        let reference = entry.value.reference.clone();
+        entries.push(snapshot_entry(
+            entry.model,
+            reference,
+            RuntimeMutation::Event {
+                event: entry.value.event,
+            },
+        )?);
+    }
+    for entry in snapshot.vectors {
+        let reference = entry.value.reference.clone();
+        entries.push(snapshot_entry(
+            entry.model,
+            reference,
+            RuntimeMutation::Vector {
+                vector: entry.value,
+            },
+        )?);
+    }
+    for entry in snapshot.series {
+        let reference = entry.value.reference.clone();
+        entries.push(snapshot_entry(
+            entry.model,
+            reference,
+            RuntimeMutation::SeriesSample {
+                sample: entry.value,
+            },
+        )?);
+    }
+    for entry in snapshot.geo {
+        let reference = entry.value.reference.clone();
+        entries.push(snapshot_entry(
+            entry.model,
+            reference,
+            RuntimeMutation::Geo { geo: entry.value },
+        )?);
+    }
+    for entry in snapshot.objects {
+        let reference = entry.value.reference.clone();
+        entries.push(snapshot_entry(
+            entry.model,
+            reference,
+            RuntimeMutation::Object {
+                object: entry.value,
+            },
+        )?);
+    }
+
+    Ok(DataSnapshot {
+        scope: snapshot.scope.to_string(),
+        valid_at: snapshot.valid_at,
+        known_at_cursor: snapshot.known_at_cursor,
+        schema_revision: snapshot.schema_revision,
+        read_manifest_sha256: read.manifest_id.clone(),
+        entries,
+    })
 }
 
 fn snapshot_entry(

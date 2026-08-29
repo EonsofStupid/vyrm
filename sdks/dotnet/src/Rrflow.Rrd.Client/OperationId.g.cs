@@ -25,6 +25,8 @@ public enum OperationId
     SessionClose,
     SessionCreate,
     SessionRenew,
+    SubscriptionClose,
+    SubscriptionOpen,
     TransactionAbort,
     TransactionBegin,
     TransactionCommit,
@@ -52,7 +54,7 @@ public sealed record Endpoint(
 
 public static class EndpointCatalog
 {
-    public const int Count = 31;
+    public const int Count = 33;
 
     public static Endpoint Get(OperationId operation) => operation switch
     {
@@ -78,10 +80,12 @@ public static class EndpointCatalog
         OperationId.SessionClose => new("session-close", "DELETE", "/v1/sessions/{session}", Authentication.SessionBearer, true),
         OperationId.SessionCreate => new("session-create", "POST", "/v1/sessions", Authentication.ApiKey, true),
         OperationId.SessionRenew => new("session-renew", "POST", "/v1/sessions/{session}/renew", Authentication.SessionBearer, true),
+        OperationId.SubscriptionClose => new("subscription-close", "POST", "/v1/subscriptions/close", Authentication.SessionBearer, true),
+        OperationId.SubscriptionOpen => new("subscription-open", "POST", "/v1/subscriptions/open", Authentication.SessionBearer, true),
         OperationId.TransactionAbort => new("transaction-abort", "DELETE", "/v1/transactions/{transaction}", Authentication.SessionBearer, true),
         OperationId.TransactionBegin => new("transaction-begin", "POST", "/v1/transactions", Authentication.SessionBearer, true),
         OperationId.TransactionCommit => new("transaction-commit", "POST", "/v1/transactions/{transaction}/commit", Authentication.SessionBearer, true),
-        OperationId.TransactionPreview => new("transaction-preview", "POST", "/v1/transactions/{transaction}/preview", Authentication.SessionBearer, false),
+        OperationId.TransactionPreview => new("transaction-preview", "POST", "/v1/transactions/{transaction}/preview", Authentication.SessionBearer, true),
         OperationId.VectorCollectionEnsure => new("vector-collection-ensure", "POST", "/v1/vector/collections/ensure", Authentication.SessionBearer, true),
         OperationId.VectorCollectionList => new("vector-collection-list", "POST", "/v1/vector/collections/list", Authentication.SessionBearer, false),
         OperationId.VectorPointRetrieve => new("vector-point-retrieve", "POST", "/v1/vector/points/retrieve", Authentication.SessionBearer, false),

@@ -141,9 +141,8 @@ impl AppState {
                         token,
                         &transaction,
                         &envelope.payload,
+                        &envelope.context,
                         now,
-                        envelope.context.request_id.as_str(),
-                        envelope.context.operation_id.as_str(),
                     )
                     .map_err(api_error)
             },

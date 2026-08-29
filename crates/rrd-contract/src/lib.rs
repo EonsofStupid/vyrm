@@ -57,7 +57,7 @@ use std::fmt;
 pub const PROTOCOL: &str = "rrd";
 pub const PROTOCOL_VERSION: u16 = 1;
 pub const OPENAPI_DOCUMENT_SHA256: &str =
-    "99c00f57d53c3f17e38590dc849c9e067a4788b8febd898d04401c95c5bc38a6";
+    "5e2374350f3a152f825013ed6610db42319868e268e7405174b536801ea2aa91";
 pub const MAX_ID_BYTES: usize = 128;
 pub const MAX_MESSAGE_BYTES: usize = 4_096;
 pub const MAX_CAPABILITIES: usize = 512;
@@ -2440,7 +2440,7 @@ pub fn endpoint_catalogue() -> EndpointCatalogue {
             HttpMethod::Post,
             "/v1/transactions/{transaction}/preview",
             EndpointAuthentication::SessionBearer,
-            false,
+            true,
             SecurityAction::TransactionPreview,
             "PreviewTransaction",
             "TransactionPreview",
@@ -4729,6 +4729,13 @@ pub fn transaction_operation_sha256(mutations: &[TransactionMutation]) -> String
 #[serde(deny_unknown_fields)]
 pub struct PreviewTransaction {
     pub mutations: Vec<TransactionMutation>,
+    /// Valid-time coordinate for the prospective read-your-writes snapshot.
+    /// Omission preserves the pre-G05 request shape and selects the server's
+    /// single request time.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub valid_at: Option<u64>,
+    #[serde(default = "default_transaction_preview_changes")]
+    pub max_scanned_changes: u32,
 }
 
 impl PreviewTransaction {
@@ -4741,8 +4748,20 @@ impl PreviewTransaction {
         for mutation in &self.mutations {
             mutation.validate()?;
         }
+        if self.valid_at == Some(0)
+            || self.max_scanned_changes == 0
+            || self.max_scanned_changes > MAX_DATA_SNAPSHOT_CHANGES
+        {
+            return invalid(format!(
+                "transaction preview requires a non-zero valid_at when present and max_scanned_changes in 1..={MAX_DATA_SNAPSHOT_CHANGES}"
+            ));
+        }
         Ok(())
     }
+}
+
+fn default_transaction_preview_changes() -> u32 {
+    10_000
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -4752,6 +4771,8 @@ pub struct TransactionPreview {
     pub read_cursor: u64,
     pub operation_sha256: String,
     pub mutations: Vec<TransactionMutation>,
+    pub prospective: DataSnapshot,
+    pub idempotent_replay: bool,
 }
 
 impl TransactionPreview {
@@ -4759,8 +4780,24 @@ impl TransactionPreview {
         validate_sha256(&self.operation_sha256, "operation_sha256")?;
         PreviewTransaction {
             mutations: self.mutations.clone(),
+            valid_at: Some(self.prospective.valid_at),
+            max_scanned_changes: MAX_DATA_SNAPSHOT_CHANGES,
         }
-        .validate()
+        .validate()?;
+        if self.prospective.known_at_cursor
+            != self
+                .read_cursor
+                .checked_add(self.mutations.len() as u64)
+                .ok_or_else(|| ContractError("transaction preview cursor overflowed".into()))?
+        {
+            return invalid(
+                "transaction prospective cursor must cover the read cursor and every mutation",
+            );
+        }
+        validate_sha256(
+            &self.prospective.read_manifest_sha256,
+            "prospective read manifest",
+        )
     }
 }
 

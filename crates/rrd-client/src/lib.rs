@@ -435,7 +435,7 @@ impl RrdClient {
             session,
             request,
             options,
-            false,
+            true,
         )
         .await
     }

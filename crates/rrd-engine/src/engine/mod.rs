@@ -45,10 +45,10 @@ use rrd_contract::{
 use rrd_core::{
     digest, Claim, DataTransaction, EmbeddingProvenance, GeoPoint, GeoValue, ObjectReceipt,
     ObjectReference, Predicate, Producer, ProjectionId, ProjectionState, PromotionState, ReadStamp,
-    RetentionPin, RuntimeCatalogueIdentity, RuntimeChange, RuntimeCommit, RuntimeEvent,
-    RuntimeEventSchema, RuntimeGeo, RuntimeGraphSnapshot, RuntimeLogicalModel, RuntimeMutation,
-    RuntimeProperties, RuntimePropertySchema, RuntimeRecord, RuntimeRecordSchema, RuntimeRef,
-    RuntimeRelation, RuntimeRelationSchema, RuntimeSchemaMode, RuntimeSchemaRegistry,
+    RetentionPin, RuntimeCatalogueIdentity, RuntimeChange, RuntimeCommit, RuntimeDataSnapshot,
+    RuntimeEvent, RuntimeEventSchema, RuntimeGeo, RuntimeGraphSnapshot, RuntimeLogicalModel,
+    RuntimeMutation, RuntimeProperties, RuntimePropertySchema, RuntimeRecord, RuntimeRecordSchema,
+    RuntimeRef, RuntimeRelation, RuntimeRelationSchema, RuntimeSchemaMode, RuntimeSchemaRegistry,
     RuntimeSeriesSample, RuntimeTableSchema, RuntimeType, RuntimeValue, RuntimeValueType,
     RuntimeVector, ScopeId, SeriesValue, Subject, Tier, VectorNormalization, VectorValue,
 };
@@ -89,6 +89,7 @@ mod vector;
 
 use control::*;
 pub use core::RrdEngine;
+use data::public_data_snapshot;
 pub use error::{Result, ServiceError, ServiceErrorKind};
 pub use estate_control::{
     EstateAdminAction, EstateAdminResult, EstateBackupReconcileOutcome, EstateReconcileOutcome,
@@ -163,9 +164,19 @@ struct TransactionRecord {
     read: ReadStamp,
     begin_idempotency_key: CorrelationId,
     begin_operation_sha256: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    prepared: Option<PreparedRecord>,
     commit_intent: Option<CommitIntent>,
     commit_receipt: Option<CommitReceipt>,
     abort: Option<AbortRecord>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PreparedRecord {
+    idempotency_key: CorrelationId,
+    operation_sha256: String,
+    runtime_at_unix_ms: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

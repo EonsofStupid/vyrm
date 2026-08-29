@@ -373,6 +373,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/subscriptions/close": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** RRD subscription-close */
+        post: operations["subscription-close"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/subscriptions/open": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** RRD subscription-open */
+        post: operations["subscription-open"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/transactions": {
         parameters: {
             query?: never;
@@ -571,6 +605,1274 @@ export interface components {
                 [key: string]: components["schemas"]["QueryValue"];
             };
         };
+        /** SubscriptionClientFrame */
+        SubscriptionClientFrame: {
+            /** Format: uint64 */
+            connection_generation: number;
+            /** Format: uint64 */
+            delivery_sequence: number;
+            /** Format: uint64 */
+            through_cursor: number;
+            /** @constant */
+            type: "ack";
+        } | {
+            /** Format: uint64 */
+            connection_generation: number;
+            /** @constant */
+            type: "heartbeat";
+        } | {
+            /** Format: uint64 */
+            connection_generation: number;
+            /** @constant */
+            type: "close";
+        };
+        /** SubscriptionServerFrame */
+        SubscriptionServerFrame: {
+            subscription: {
+                /** Format: uint64 */
+                acknowledged_cursor: number;
+                /** Format: uint64 */
+                batch_size: number;
+                /** Format: uint64 */
+                connection_generation: number;
+                /** Format: uint64 */
+                head_cursor: number;
+                /** Format: uint64 */
+                heartbeat_interval_ms: number;
+                /** Format: uint64 */
+                lease_expires_at_unix_ms: number;
+                /** Format: uint16 */
+                max_in_flight: number;
+                /** Format: uint64 */
+                retention_floor_cursor: number;
+                /** @enum {string} */
+                status: "open" | "closed";
+                stream_sha256: string;
+                subscription_id: string;
+            };
+            /** @constant */
+            type: "opened";
+        } | {
+            /** Format: uint64 */
+            connection_generation: number;
+            /** Format: uint64 */
+            delivery_sequence: number;
+            page: {
+                changes: {
+                    actor: string;
+                    /** Format: uint64 */
+                    at_unix_ms: number;
+                    change_sha256: string;
+                    /** Format: uint64 */
+                    commit_ordinal: number;
+                    commit_sha256: string;
+                    /** Format: uint64 */
+                    cursor: number;
+                    mutation: {
+                        claim: {
+                            /** Format: float */
+                            confidence?: number | null;
+                            object: string;
+                            on_behalf_of?: string | null;
+                            predicate: string;
+                            producer: string;
+                            /** @enum {string} */
+                            promotion: "unpromoted" | "pending" | "promoted" | "denied";
+                            session?: string | null;
+                            signature?: string | null;
+                            subject: string;
+                            supersedes_sha256?: string | null;
+                            /** @enum {string} */
+                            tier: "local" | "primary" | "tenant";
+                            /** Format: uint64 */
+                            tx_time: number;
+                            /** Format: uint64 */
+                            valid_from: number;
+                            /** Format: uint64 */
+                            valid_to?: number | null;
+                        };
+                        /** @constant */
+                        family: "claim";
+                    } | {
+                        /** @constant */
+                        family: "data";
+                        /**
+                         * @description Public multi-model mutation vocabulary. It is deliberately independent of
+                         *     `rrd_core`; adapters lower these values into the authoritative runtime.
+                         */
+                        mutation: {
+                            /** Format: float */
+                            confidence?: number | null;
+                            /** @constant */
+                            mutation: "assert_claim";
+                            object: string;
+                            /**
+                             * @description A canonical public identifier component.
+                             *
+                             *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                             *     labels are separate data and may use arbitrary Unicode.
+                             */
+                            predicate: string;
+                            /**
+                             * @description A canonical public identifier component.
+                             *
+                             *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                             *     labels are separate data and may use arbitrary Unicode.
+                             */
+                            producer: string;
+                            /**
+                             * @description A canonical public identifier component.
+                             *
+                             *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                             *     labels are separate data and may use arbitrary Unicode.
+                             */
+                            subject: string;
+                            /** Format: uint64 */
+                            tx_time: number;
+                            /** Format: uint64 */
+                            valid_from: number;
+                        } | {
+                            /** @constant */
+                            mutation: "put_schema";
+                            registry: {
+                                catalogue?: {
+                                    /**
+                                     * @description A canonical public identifier component.
+                                     *
+                                     *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                     *     labels are separate data and may use arbitrary Unicode.
+                                     */
+                                    database: string;
+                                    /**
+                                     * @description A canonical public identifier component.
+                                     *
+                                     *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                     *     labels are separate data and may use arbitrary Unicode.
+                                     */
+                                    namespace: string;
+                                };
+                                /** @default {} */
+                                events: {
+                                    [key: string]: {
+                                        /** @default false */
+                                        allow_additional_properties: boolean;
+                                        /** @default {} */
+                                        properties: {
+                                            [key: string]: {
+                                                /** @default false */
+                                                required: boolean;
+                                                /** @enum {string} */
+                                                value_type: "null" | "bool" | "integer" | "unsigned" | "decimal" | "string" | "digest" | "list" | "map";
+                                            };
+                                        };
+                                        /** @default false */
+                                        subject_required: boolean;
+                                        /** @default [] */
+                                        subject_types: string[];
+                                    };
+                                };
+                                migration: string;
+                                /** @default {} */
+                                records: {
+                                    [key: string]: {
+                                        /** @default false */
+                                        allow_additional_properties: boolean;
+                                        /** @default {} */
+                                        properties: {
+                                            [key: string]: {
+                                                /** @default false */
+                                                required: boolean;
+                                                /** @enum {string} */
+                                                value_type: "null" | "bool" | "integer" | "unsigned" | "decimal" | "string" | "digest" | "list" | "map";
+                                            };
+                                        };
+                                        /** @default [] */
+                                        unique_properties: string[];
+                                    };
+                                };
+                                /** @default {} */
+                                relations: {
+                                    [key: string]: {
+                                        /** @default false */
+                                        allow_additional_properties: boolean;
+                                        /** @default [] */
+                                        from: string[];
+                                        /** Format: uint64 */
+                                        max_incoming?: number | null;
+                                        /** Format: uint64 */
+                                        max_outgoing?: number | null;
+                                        /** @default {} */
+                                        properties: {
+                                            [key: string]: {
+                                                /** @default false */
+                                                required: boolean;
+                                                /** @enum {string} */
+                                                value_type: "null" | "bool" | "integer" | "unsigned" | "decimal" | "string" | "digest" | "list" | "map";
+                                            };
+                                        };
+                                        /** @default [] */
+                                        to: string[];
+                                        /** @default false */
+                                        unique_pair: boolean;
+                                    };
+                                };
+                                /** Format: uint64 */
+                                revision: number;
+                                tables?: {
+                                    [key: string]: {
+                                        /** @default false */
+                                        allow_additional_properties: boolean;
+                                        /** @enum {string} */
+                                        mode: "strict" | "schemaless";
+                                        /** @enum {string} */
+                                        model: "document" | "relational" | "graph_node" | "graph_relation" | "key_value" | "vector" | "event" | "time_series" | "geo" | "object" | "reasoning_claim" | "reasoning_record" | "reasoning_event" | "lifecycle_record" | "lifecycle_event";
+                                        /** @default {} */
+                                        properties: {
+                                            [key: string]: {
+                                                /** @default false */
+                                                required: boolean;
+                                                /** @enum {string} */
+                                                value_type: "null" | "bool" | "integer" | "unsigned" | "decimal" | "string" | "digest" | "list" | "map";
+                                            };
+                                        };
+                                    };
+                                };
+                            };
+                        } | {
+                            /** @constant */
+                            mutation: "put_record";
+                            /** @default {} */
+                            properties: {
+                                [key: string]: {
+                                    /** @constant */
+                                    type: "null";
+                                } | {
+                                    /** @constant */
+                                    type: "bool";
+                                    value: boolean;
+                                } | {
+                                    /** @constant */
+                                    type: "integer";
+                                    /** Format: int64 */
+                                    value: number;
+                                } | {
+                                    /** @constant */
+                                    type: "unsigned";
+                                    /** Format: uint64 */
+                                    value: number;
+                                } | {
+                                    /** @constant */
+                                    type: "decimal";
+                                    value: string;
+                                } | {
+                                    /** @constant */
+                                    type: "string";
+                                    value: string;
+                                } | {
+                                    /** @constant */
+                                    type: "digest";
+                                    value: string;
+                                } | {
+                                    /** @constant */
+                                    type: "list";
+                                    value: components["schemas"]["QueryValue"][];
+                                } | {
+                                    /** @constant */
+                                    type: "map";
+                                    value: {
+                                        [key: string]: components["schemas"]["QueryValue"];
+                                    };
+                                };
+                            };
+                            reference: {
+                                /**
+                                 * @description A canonical public identifier component.
+                                 *
+                                 *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                 *     labels are separate data and may use arbitrary Unicode.
+                                 */
+                                id: string;
+                                /**
+                                 * @description A canonical public identifier component.
+                                 *
+                                 *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                 *     labels are separate data and may use arbitrary Unicode.
+                                 */
+                                kind: string;
+                            };
+                            /** Format: uint64 */
+                            valid_from: number;
+                            /** Format: uint64 */
+                            valid_to?: number | null;
+                        } | {
+                            from: {
+                                /**
+                                 * @description A canonical public identifier component.
+                                 *
+                                 *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                 *     labels are separate data and may use arbitrary Unicode.
+                                 */
+                                id: string;
+                                /**
+                                 * @description A canonical public identifier component.
+                                 *
+                                 *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                 *     labels are separate data and may use arbitrary Unicode.
+                                 */
+                                kind: string;
+                            };
+                            /** @constant */
+                            mutation: "put_relation";
+                            /** @default {} */
+                            properties: {
+                                [key: string]: {
+                                    /** @constant */
+                                    type: "null";
+                                } | {
+                                    /** @constant */
+                                    type: "bool";
+                                    value: boolean;
+                                } | {
+                                    /** @constant */
+                                    type: "integer";
+                                    /** Format: int64 */
+                                    value: number;
+                                } | {
+                                    /** @constant */
+                                    type: "unsigned";
+                                    /** Format: uint64 */
+                                    value: number;
+                                } | {
+                                    /** @constant */
+                                    type: "decimal";
+                                    value: string;
+                                } | {
+                                    /** @constant */
+                                    type: "string";
+                                    value: string;
+                                } | {
+                                    /** @constant */
+                                    type: "digest";
+                                    value: string;
+                                } | {
+                                    /** @constant */
+                                    type: "list";
+                                    value: components["schemas"]["QueryValue"][];
+                                } | {
+                                    /** @constant */
+                                    type: "map";
+                                    value: {
+                                        [key: string]: components["schemas"]["QueryValue"];
+                                    };
+                                };
+                            };
+                            reference: {
+                                /**
+                                 * @description A canonical public identifier component.
+                                 *
+                                 *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                 *     labels are separate data and may use arbitrary Unicode.
+                                 */
+                                id: string;
+                                /**
+                                 * @description A canonical public identifier component.
+                                 *
+                                 *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                 *     labels are separate data and may use arbitrary Unicode.
+                                 */
+                                kind: string;
+                            };
+                            to: {
+                                /**
+                                 * @description A canonical public identifier component.
+                                 *
+                                 *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                 *     labels are separate data and may use arbitrary Unicode.
+                                 */
+                                id: string;
+                                /**
+                                 * @description A canonical public identifier component.
+                                 *
+                                 *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                 *     labels are separate data and may use arbitrary Unicode.
+                                 */
+                                kind: string;
+                            };
+                            /** Format: uint64 */
+                            valid_from: number;
+                            /** Format: uint64 */
+                            valid_to?: number | null;
+                        } | {
+                            /**
+                             * @description A canonical public identifier component.
+                             *
+                             *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                             *     labels are separate data and may use arbitrary Unicode.
+                             */
+                            kind: string;
+                            /** @constant */
+                            mutation: "append_event";
+                            /** @default {} */
+                            properties: {
+                                [key: string]: {
+                                    /** @constant */
+                                    type: "null";
+                                } | {
+                                    /** @constant */
+                                    type: "bool";
+                                    value: boolean;
+                                } | {
+                                    /** @constant */
+                                    type: "integer";
+                                    /** Format: int64 */
+                                    value: number;
+                                } | {
+                                    /** @constant */
+                                    type: "unsigned";
+                                    /** Format: uint64 */
+                                    value: number;
+                                } | {
+                                    /** @constant */
+                                    type: "decimal";
+                                    value: string;
+                                } | {
+                                    /** @constant */
+                                    type: "string";
+                                    value: string;
+                                } | {
+                                    /** @constant */
+                                    type: "digest";
+                                    value: string;
+                                } | {
+                                    /** @constant */
+                                    type: "list";
+                                    value: components["schemas"]["QueryValue"][];
+                                } | {
+                                    /** @constant */
+                                    type: "map";
+                                    value: {
+                                        [key: string]: components["schemas"]["QueryValue"];
+                                    };
+                                };
+                            };
+                            subject?: {
+                                /**
+                                 * @description A canonical public identifier component.
+                                 *
+                                 *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                 *     labels are separate data and may use arbitrary Unicode.
+                                 */
+                                id: string;
+                                /**
+                                 * @description A canonical public identifier component.
+                                 *
+                                 *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                 *     labels are separate data and may use arbitrary Unicode.
+                                 */
+                                kind: string;
+                            } | null;
+                        } | {
+                            /**
+                             * @description A canonical public identifier component.
+                             *
+                             *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                             *     labels are separate data and may use arbitrary Unicode.
+                             */
+                            collection_id?: string | null;
+                            /**
+                             * @description A canonical public identifier component.
+                             *
+                             *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                             *     labels are separate data and may use arbitrary Unicode.
+                             */
+                            field: string;
+                            /** @constant */
+                            mutation: "put_vector";
+                            /** @default {} */
+                            properties: {
+                                [key: string]: {
+                                    /** @constant */
+                                    type: "null";
+                                } | {
+                                    /** @constant */
+                                    type: "bool";
+                                    value: boolean;
+                                } | {
+                                    /** @constant */
+                                    type: "integer";
+                                    /** Format: int64 */
+                                    value: number;
+                                } | {
+                                    /** @constant */
+                                    type: "unsigned";
+                                    /** Format: uint64 */
+                                    value: number;
+                                } | {
+                                    /** @constant */
+                                    type: "decimal";
+                                    value: string;
+                                } | {
+                                    /** @constant */
+                                    type: "string";
+                                    value: string;
+                                } | {
+                                    /** @constant */
+                                    type: "digest";
+                                    value: string;
+                                } | {
+                                    /** @constant */
+                                    type: "list";
+                                    value: components["schemas"]["QueryValue"][];
+                                } | {
+                                    /** @constant */
+                                    type: "map";
+                                    value: {
+                                        [key: string]: components["schemas"]["QueryValue"];
+                                    };
+                                };
+                            };
+                            provenance?: {
+                                /** Format: uint32 */
+                                dimensions: number;
+                                /** @default {} */
+                                generation_parameters: {
+                                    [key: string]: {
+                                        /** @constant */
+                                        type: "null";
+                                    } | {
+                                        /** @constant */
+                                        type: "bool";
+                                        value: boolean;
+                                    } | {
+                                        /** @constant */
+                                        type: "integer";
+                                        /** Format: int64 */
+                                        value: number;
+                                    } | {
+                                        /** @constant */
+                                        type: "unsigned";
+                                        /** Format: uint64 */
+                                        value: number;
+                                    } | {
+                                        /** @constant */
+                                        type: "decimal";
+                                        value: string;
+                                    } | {
+                                        /** @constant */
+                                        type: "string";
+                                        value: string;
+                                    } | {
+                                        /** @constant */
+                                        type: "digest";
+                                        value: string;
+                                    } | {
+                                        /** @constant */
+                                        type: "list";
+                                        value: components["schemas"]["QueryValue"][];
+                                    } | {
+                                        /** @constant */
+                                        type: "map";
+                                        value: {
+                                            [key: string]: components["schemas"]["QueryValue"];
+                                        };
+                                    };
+                                };
+                                model: string;
+                                model_sha256: string;
+                                /** @enum {string} */
+                                normalization: "none" | "unit_l2";
+                                source_sha256: string;
+                            } | null;
+                            reference: {
+                                /**
+                                 * @description A canonical public identifier component.
+                                 *
+                                 *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                 *     labels are separate data and may use arbitrary Unicode.
+                                 */
+                                id: string;
+                                /**
+                                 * @description A canonical public identifier component.
+                                 *
+                                 *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                 *     labels are separate data and may use arbitrary Unicode.
+                                 */
+                                kind: string;
+                            };
+                            subject: {
+                                /**
+                                 * @description A canonical public identifier component.
+                                 *
+                                 *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                 *     labels are separate data and may use arbitrary Unicode.
+                                 */
+                                id: string;
+                                /**
+                                 * @description A canonical public identifier component.
+                                 *
+                                 *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                 *     labels are separate data and may use arbitrary Unicode.
+                                 */
+                                kind: string;
+                            };
+                            /** Format: uint64 */
+                            valid_from: number;
+                            /** Format: uint64 */
+                            valid_to?: number | null;
+                            value: {
+                                /** @constant */
+                                kind: "dense";
+                                values: number[];
+                            } | {
+                                /** Format: uint32 */
+                                dimensions: number;
+                                indices: number[];
+                                /** @constant */
+                                kind: "sparse";
+                                values: number[];
+                            } | {
+                                /** Format: uint32 */
+                                dimensions: number;
+                                /** @constant */
+                                kind: "multi_dense";
+                                vectors: number[][];
+                            };
+                            /**
+                             * @description A canonical public identifier component.
+                             *
+                             *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                             *     labels are separate data and may use arbitrary Unicode.
+                             */
+                            vector_name?: string | null;
+                        } | {
+                            /** @constant */
+                            mutation: "append_series_sample";
+                            /** Format: uint64 */
+                            observed_at: number;
+                            /** @default {} */
+                            properties: {
+                                [key: string]: {
+                                    /** @constant */
+                                    type: "null";
+                                } | {
+                                    /** @constant */
+                                    type: "bool";
+                                    value: boolean;
+                                } | {
+                                    /** @constant */
+                                    type: "integer";
+                                    /** Format: int64 */
+                                    value: number;
+                                } | {
+                                    /** @constant */
+                                    type: "unsigned";
+                                    /** Format: uint64 */
+                                    value: number;
+                                } | {
+                                    /** @constant */
+                                    type: "decimal";
+                                    value: string;
+                                } | {
+                                    /** @constant */
+                                    type: "string";
+                                    value: string;
+                                } | {
+                                    /** @constant */
+                                    type: "digest";
+                                    value: string;
+                                } | {
+                                    /** @constant */
+                                    type: "list";
+                                    value: components["schemas"]["QueryValue"][];
+                                } | {
+                                    /** @constant */
+                                    type: "map";
+                                    value: {
+                                        [key: string]: components["schemas"]["QueryValue"];
+                                    };
+                                };
+                            };
+                            reference: {
+                                /**
+                                 * @description A canonical public identifier component.
+                                 *
+                                 *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                 *     labels are separate data and may use arbitrary Unicode.
+                                 */
+                                id: string;
+                                /**
+                                 * @description A canonical public identifier component.
+                                 *
+                                 *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                 *     labels are separate data and may use arbitrary Unicode.
+                                 */
+                                kind: string;
+                            };
+                            series: {
+                                /**
+                                 * @description A canonical public identifier component.
+                                 *
+                                 *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                 *     labels are separate data and may use arbitrary Unicode.
+                                 */
+                                id: string;
+                                /**
+                                 * @description A canonical public identifier component.
+                                 *
+                                 *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                 *     labels are separate data and may use arbitrary Unicode.
+                                 */
+                                kind: string;
+                            };
+                            value: {
+                                /** @constant */
+                                type: "integer";
+                                /** Format: int64 */
+                                value: number;
+                            } | {
+                                /** @constant */
+                                type: "unsigned";
+                                /** Format: uint64 */
+                                value: number;
+                            } | {
+                                /** @constant */
+                                type: "decimal";
+                                value: string;
+                            } | {
+                                /** @constant */
+                                type: "bool";
+                                value: boolean;
+                            } | {
+                                /** @constant */
+                                type: "string";
+                                value: string;
+                            };
+                        } | {
+                            /**
+                             * @description A canonical public identifier component.
+                             *
+                             *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                             *     labels are separate data and may use arbitrary Unicode.
+                             */
+                            field: string;
+                            /** @constant */
+                            mutation: "put_geo";
+                            /** @default {} */
+                            properties: {
+                                [key: string]: {
+                                    /** @constant */
+                                    type: "null";
+                                } | {
+                                    /** @constant */
+                                    type: "bool";
+                                    value: boolean;
+                                } | {
+                                    /** @constant */
+                                    type: "integer";
+                                    /** Format: int64 */
+                                    value: number;
+                                } | {
+                                    /** @constant */
+                                    type: "unsigned";
+                                    /** Format: uint64 */
+                                    value: number;
+                                } | {
+                                    /** @constant */
+                                    type: "decimal";
+                                    value: string;
+                                } | {
+                                    /** @constant */
+                                    type: "string";
+                                    value: string;
+                                } | {
+                                    /** @constant */
+                                    type: "digest";
+                                    value: string;
+                                } | {
+                                    /** @constant */
+                                    type: "list";
+                                    value: components["schemas"]["QueryValue"][];
+                                } | {
+                                    /** @constant */
+                                    type: "map";
+                                    value: {
+                                        [key: string]: components["schemas"]["QueryValue"];
+                                    };
+                                };
+                            };
+                            reference: {
+                                /**
+                                 * @description A canonical public identifier component.
+                                 *
+                                 *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                 *     labels are separate data and may use arbitrary Unicode.
+                                 */
+                                id: string;
+                                /**
+                                 * @description A canonical public identifier component.
+                                 *
+                                 *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                 *     labels are separate data and may use arbitrary Unicode.
+                                 */
+                                kind: string;
+                            };
+                            subject: {
+                                /**
+                                 * @description A canonical public identifier component.
+                                 *
+                                 *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                 *     labels are separate data and may use arbitrary Unicode.
+                                 */
+                                id: string;
+                                /**
+                                 * @description A canonical public identifier component.
+                                 *
+                                 *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                 *     labels are separate data and may use arbitrary Unicode.
+                                 */
+                                kind: string;
+                            };
+                            /** Format: uint64 */
+                            valid_from: number;
+                            /** Format: uint64 */
+                            valid_to?: number | null;
+                            value: {
+                                /** @constant */
+                                kind: "point";
+                                point: {
+                                    /** Format: double */
+                                    latitude: number;
+                                    /** Format: double */
+                                    longitude: number;
+                                };
+                            } | {
+                                /** @constant */
+                                kind: "bounding_box";
+                                northeast: {
+                                    /** Format: double */
+                                    latitude: number;
+                                    /** Format: double */
+                                    longitude: number;
+                                };
+                                southwest: {
+                                    /** Format: double */
+                                    latitude: number;
+                                    /** Format: double */
+                                    longitude: number;
+                                };
+                            };
+                        } | {
+                            /** Format: uint64 */
+                            length: number;
+                            media_type: string;
+                            /** @constant */
+                            mutation: "publish_object_reference";
+                            /** @default {} */
+                            properties: {
+                                [key: string]: {
+                                    /** @constant */
+                                    type: "null";
+                                } | {
+                                    /** @constant */
+                                    type: "bool";
+                                    value: boolean;
+                                } | {
+                                    /** @constant */
+                                    type: "integer";
+                                    /** Format: int64 */
+                                    value: number;
+                                } | {
+                                    /** @constant */
+                                    type: "unsigned";
+                                    /** Format: uint64 */
+                                    value: number;
+                                } | {
+                                    /** @constant */
+                                    type: "decimal";
+                                    value: string;
+                                } | {
+                                    /** @constant */
+                                    type: "string";
+                                    value: string;
+                                } | {
+                                    /** @constant */
+                                    type: "digest";
+                                    value: string;
+                                } | {
+                                    /** @constant */
+                                    type: "list";
+                                    value: components["schemas"]["QueryValue"][];
+                                } | {
+                                    /** @constant */
+                                    type: "map";
+                                    value: {
+                                        [key: string]: components["schemas"]["QueryValue"];
+                                    };
+                                };
+                            };
+                            receipt: {
+                                backend: string;
+                                etag?: string | null;
+                                key: string;
+                                version?: string | null;
+                            };
+                            reference: {
+                                /**
+                                 * @description A canonical public identifier component.
+                                 *
+                                 *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                 *     labels are separate data and may use arbitrary Unicode.
+                                 */
+                                id: string;
+                                /**
+                                 * @description A canonical public identifier component.
+                                 *
+                                 *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                 *     labels are separate data and may use arbitrary Unicode.
+                                 */
+                                kind: string;
+                            };
+                            sha256: string;
+                            subject?: {
+                                /**
+                                 * @description A canonical public identifier component.
+                                 *
+                                 *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                 *     labels are separate data and may use arbitrary Unicode.
+                                 */
+                                id: string;
+                                /**
+                                 * @description A canonical public identifier component.
+                                 *
+                                 *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                 *     labels are separate data and may use arbitrary Unicode.
+                                 */
+                                kind: string;
+                            } | null;
+                        } | {
+                            /** Format: uint64 */
+                            effective_at: number;
+                            /** @enum {string} */
+                            model: "document" | "relational" | "graph_node" | "graph_relation" | "key_value" | "vector" | "event" | "time_series" | "geo" | "object" | "reasoning_claim" | "reasoning_record" | "reasoning_event" | "lifecycle_record" | "lifecycle_event";
+                            /** @constant */
+                            mutation: "retire_data";
+                            /**
+                             * @description Stable target identity for CRUD and retirement. Append-only events are
+                             *     addressed by their authenticated-log cursor instead of a fabricated user
+                             *     identifier.
+                             */
+                            target: {
+                                /** @constant */
+                                identity: "reference";
+                                reference: {
+                                    /**
+                                     * @description A canonical public identifier component.
+                                     *
+                                     *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                     *     labels are separate data and may use arbitrary Unicode.
+                                     */
+                                    id: string;
+                                    /**
+                                     * @description A canonical public identifier component.
+                                     *
+                                     *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                     *     labels are separate data and may use arbitrary Unicode.
+                                     */
+                                    kind: string;
+                                };
+                            } | {
+                                /** Format: uint64 */
+                                cursor: number;
+                                /** @constant */
+                                identity: "event";
+                                /**
+                                 * @description A canonical public identifier component.
+                                 *
+                                 *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                 *     labels are separate data and may use arbitrary Unicode.
+                                 */
+                                kind: string;
+                            };
+                        };
+                    };
+                    previous_change_sha256?: string | null;
+                    scope: string;
+                }[];
+                has_more: boolean;
+                /** Format: uint64 */
+                head_cursor: number;
+                /** Format: uint64 */
+                requested_after_cursor: number;
+                /** Format: uint64 */
+                through_cursor: number;
+                validation: {
+                    /** Format: uint64 */
+                    change_reads: number;
+                    method: string;
+                    /** Format: uint16 */
+                    proof_nodes: number;
+                };
+            };
+            /** @constant */
+            type: "changefeed";
+        } | {
+            /** Format: uint64 */
+            connection_generation: number;
+            /** Format: uint64 */
+            delivery_sequence: number;
+            delta: {
+                added: {
+                    identity: string;
+                    values: {
+                        [key: string]: {
+                            /** @constant */
+                            type: "null";
+                        } | {
+                            /** @constant */
+                            type: "bool";
+                            value: boolean;
+                        } | {
+                            /** @constant */
+                            type: "integer";
+                            /** Format: int64 */
+                            value: number;
+                        } | {
+                            /** @constant */
+                            type: "unsigned";
+                            /** Format: uint64 */
+                            value: number;
+                        } | {
+                            /** @constant */
+                            type: "decimal";
+                            value: string;
+                        } | {
+                            /** @constant */
+                            type: "string";
+                            value: string;
+                        } | {
+                            /** @constant */
+                            type: "digest";
+                            value: string;
+                        } | {
+                            /** @constant */
+                            type: "list";
+                            value: components["schemas"]["QueryValue"][];
+                        } | {
+                            /** @constant */
+                            type: "map";
+                            value: {
+                                [key: string]: components["schemas"]["QueryValue"];
+                            };
+                        };
+                    };
+                }[];
+                /** Format: uint64 */
+                from_cursor: number;
+                /** Format: uint64 */
+                head_cursor: number;
+                query_sha256: string;
+                removed: {
+                    identity: string;
+                    values: {
+                        [key: string]: {
+                            /** @constant */
+                            type: "null";
+                        } | {
+                            /** @constant */
+                            type: "bool";
+                            value: boolean;
+                        } | {
+                            /** @constant */
+                            type: "integer";
+                            /** Format: int64 */
+                            value: number;
+                        } | {
+                            /** @constant */
+                            type: "unsigned";
+                            /** Format: uint64 */
+                            value: number;
+                        } | {
+                            /** @constant */
+                            type: "decimal";
+                            value: string;
+                        } | {
+                            /** @constant */
+                            type: "string";
+                            value: string;
+                        } | {
+                            /** @constant */
+                            type: "digest";
+                            value: string;
+                        } | {
+                            /** @constant */
+                            type: "list";
+                            value: components["schemas"]["QueryValue"][];
+                        } | {
+                            /** @constant */
+                            type: "map";
+                            value: {
+                                [key: string]: components["schemas"]["QueryValue"];
+                            };
+                        };
+                    };
+                }[];
+                /** Format: uint64 */
+                through_cursor: number;
+                timed_out: boolean;
+                updated: {
+                    after: {
+                        identity: string;
+                        values: {
+                            [key: string]: {
+                                /** @constant */
+                                type: "null";
+                            } | {
+                                /** @constant */
+                                type: "bool";
+                                value: boolean;
+                            } | {
+                                /** @constant */
+                                type: "integer";
+                                /** Format: int64 */
+                                value: number;
+                            } | {
+                                /** @constant */
+                                type: "unsigned";
+                                /** Format: uint64 */
+                                value: number;
+                            } | {
+                                /** @constant */
+                                type: "decimal";
+                                value: string;
+                            } | {
+                                /** @constant */
+                                type: "string";
+                                value: string;
+                            } | {
+                                /** @constant */
+                                type: "digest";
+                                value: string;
+                            } | {
+                                /** @constant */
+                                type: "list";
+                                value: components["schemas"]["QueryValue"][];
+                            } | {
+                                /** @constant */
+                                type: "map";
+                                value: {
+                                    [key: string]: components["schemas"]["QueryValue"];
+                                };
+                            };
+                        };
+                    };
+                    before: {
+                        identity: string;
+                        values: {
+                            [key: string]: {
+                                /** @constant */
+                                type: "null";
+                            } | {
+                                /** @constant */
+                                type: "bool";
+                                value: boolean;
+                            } | {
+                                /** @constant */
+                                type: "integer";
+                                /** Format: int64 */
+                                value: number;
+                            } | {
+                                /** @constant */
+                                type: "unsigned";
+                                /** Format: uint64 */
+                                value: number;
+                            } | {
+                                /** @constant */
+                                type: "decimal";
+                                value: string;
+                            } | {
+                                /** @constant */
+                                type: "string";
+                                value: string;
+                            } | {
+                                /** @constant */
+                                type: "digest";
+                                value: string;
+                            } | {
+                                /** @constant */
+                                type: "list";
+                                value: components["schemas"]["QueryValue"][];
+                            } | {
+                                /** @constant */
+                                type: "map";
+                                value: {
+                                    [key: string]: components["schemas"]["QueryValue"];
+                                };
+                            };
+                        };
+                    };
+                }[];
+                /** Format: uint64 */
+                waited_ms: number;
+            };
+            /** @constant */
+            type: "live_query";
+        } | {
+            /** Format: uint64 */
+            acknowledged_cursor: number;
+            /** Format: uint64 */
+            connection_generation: number;
+            /** Format: uint64 */
+            head_cursor: number;
+            /** Format: uint64 */
+            lease_expires_at_unix_ms: number;
+            /** @constant */
+            type: "heartbeat";
+        } | {
+            subscription: {
+                /** Format: uint64 */
+                acknowledged_cursor: number;
+                /** Format: uint64 */
+                batch_size: number;
+                /** Format: uint64 */
+                connection_generation: number;
+                /** Format: uint64 */
+                head_cursor: number;
+                /** Format: uint64 */
+                heartbeat_interval_ms: number;
+                /** Format: uint64 */
+                lease_expires_at_unix_ms: number;
+                /** Format: uint16 */
+                max_in_flight: number;
+                /** Format: uint64 */
+                retention_floor_cursor: number;
+                /** @enum {string} */
+                status: "open" | "closed";
+                stream_sha256: string;
+                subscription_id: string;
+            };
+            /** @constant */
+            type: "acknowledged";
+        } | {
+            /** Format: uint64 */
+            acknowledged_cursor: number;
+            error: {
+                /** @enum {string} */
+                code: "invalid_argument" | "not_found" | "already_exists" | "conflict" | "failed_precondition" | "unauthenticated" | "permission_denied" | "resource_exhausted" | "deadline_exceeded" | "cancelled" | "unavailable" | "corruption" | "unsupported_version" | "internal";
+                details?: {
+                    [key: string]: string;
+                };
+                message: string;
+                retryable: boolean;
+            };
+            /** @constant */
+            type: "error";
+        } | {
+            /** Format: uint64 */
+            acknowledged_cursor: number;
+            reason: string;
+            /** @constant */
+            type: "closed";
+        };
         /** VectorPayloadFilter */
         VectorPayloadFilter: {
             $defs: {
@@ -697,7 +1999,7 @@ export interface operations {
                             payload: {
                                 records: {
                                     /** @enum {string} */
-                                    action: "service_inspect" | "unknown_request" | "session_create" | "session_renew" | "session_close" | "query_execute" | "query_live_poll" | "query_index_ensure" | "query_index_list" | "transaction_begin" | "transaction_preview" | "transaction_commit" | "transaction_abort" | "changefeed_read" | "changefeed_follow" | "vector_collection_ensure" | "vector_collection_list" | "vector_point_retrieve" | "vector_point_scroll" | "vector_search" | "backup_create" | "backup_list" | "restore_create" | "estate_read" | "audit_read" | "diagnostics_read" | "security_admin" | "memory_context_read" | "memory_inspect" | "memory_recall" | "memory_retire" | "memory_write" | "lifecycle_apply" | "project_attune" | "project_route" | "reasoning_read" | "reasoning_write" | "work_plan_read" | "work_plan_control" | "work_plan_verify_execute" | "runtime_tool_catalogue_read";
+                                    action: "service_inspect" | "unknown_request" | "session_create" | "session_renew" | "session_close" | "query_execute" | "query_live_poll" | "query_index_ensure" | "query_index_list" | "transaction_begin" | "transaction_preview" | "transaction_commit" | "transaction_abort" | "changefeed_read" | "changefeed_follow" | "subscription_open" | "subscription_connect" | "subscription_ack" | "subscription_close" | "vector_collection_ensure" | "vector_collection_list" | "vector_point_retrieve" | "vector_point_scroll" | "vector_search" | "backup_create" | "backup_list" | "restore_create" | "estate_read" | "audit_read" | "diagnostics_read" | "security_admin" | "memory_context_read" | "memory_inspect" | "memory_recall" | "memory_retire" | "memory_write" | "lifecycle_apply" | "project_attune" | "project_route" | "reasoning_read" | "reasoning_write" | "work_plan_read" | "work_plan_control" | "work_plan_verify_execute" | "runtime_tool_catalogue_read";
                                     /** Format: uint64 */
                                     at_unix_ms: number;
                                     /**
@@ -783,7 +2085,7 @@ export interface operations {
                             payload: {
                                 records: {
                                     /** @enum {string} */
-                                    action: "service_inspect" | "unknown_request" | "session_create" | "session_renew" | "session_close" | "query_execute" | "query_live_poll" | "query_index_ensure" | "query_index_list" | "transaction_begin" | "transaction_preview" | "transaction_commit" | "transaction_abort" | "changefeed_read" | "changefeed_follow" | "vector_collection_ensure" | "vector_collection_list" | "vector_point_retrieve" | "vector_point_scroll" | "vector_search" | "backup_create" | "backup_list" | "restore_create" | "estate_read" | "audit_read" | "diagnostics_read" | "security_admin" | "memory_context_read" | "memory_inspect" | "memory_recall" | "memory_retire" | "memory_write" | "lifecycle_apply" | "project_attune" | "project_route" | "reasoning_read" | "reasoning_write" | "work_plan_read" | "work_plan_control" | "work_plan_verify_execute" | "runtime_tool_catalogue_read";
+                                    action: "service_inspect" | "unknown_request" | "session_create" | "session_renew" | "session_close" | "query_execute" | "query_live_poll" | "query_index_ensure" | "query_index_list" | "transaction_begin" | "transaction_preview" | "transaction_commit" | "transaction_abort" | "changefeed_read" | "changefeed_follow" | "subscription_open" | "subscription_connect" | "subscription_ack" | "subscription_close" | "vector_collection_ensure" | "vector_collection_list" | "vector_point_retrieve" | "vector_point_scroll" | "vector_search" | "backup_create" | "backup_list" | "restore_create" | "estate_read" | "audit_read" | "diagnostics_read" | "security_admin" | "memory_context_read" | "memory_inspect" | "memory_recall" | "memory_retire" | "memory_write" | "lifecycle_apply" | "project_attune" | "project_route" | "reasoning_read" | "reasoning_write" | "work_plan_read" | "work_plan_control" | "work_plan_verify_execute" | "runtime_tool_catalogue_read";
                                     /** Format: uint64 */
                                     at_unix_ms: number;
                                     /**
@@ -931,6 +2233,7 @@ export interface operations {
                                         format_version: number;
                                         /** Format: uint64 */
                                         payload_bytes: number;
+                                        runtime_audit_sha256?: string | null;
                                         /** Format: uint64 */
                                         runtime_commits: number;
                                         /** Format: uint64 */
@@ -1010,6 +2313,7 @@ export interface operations {
                                         format_version: number;
                                         /** Format: uint64 */
                                         payload_bytes: number;
+                                        runtime_audit_sha256?: string | null;
                                         /** Format: uint64 */
                                         runtime_commits: number;
                                         /** Format: uint64 */
@@ -1139,6 +2443,7 @@ export interface operations {
                                         format_version: number;
                                         /** Format: uint64 */
                                         payload_bytes: number;
+                                        runtime_audit_sha256?: string | null;
                                         /** Format: uint64 */
                                         runtime_commits: number;
                                         /** Format: uint64 */
@@ -1220,6 +2525,7 @@ export interface operations {
                                         format_version: number;
                                         /** Format: uint64 */
                                         payload_bytes: number;
+                                        runtime_audit_sha256?: string | null;
                                         /** Format: uint64 */
                                         runtime_commits: number;
                                         /** Format: uint64 */
@@ -1615,6 +2921,22 @@ export interface operations {
                                                 /** @constant */
                                                 mutation: "put_schema";
                                                 registry: {
+                                                    catalogue?: {
+                                                        /**
+                                                         * @description A canonical public identifier component.
+                                                         *
+                                                         *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                                         *     labels are separate data and may use arbitrary Unicode.
+                                                         */
+                                                        database: string;
+                                                        /**
+                                                         * @description A canonical public identifier component.
+                                                         *
+                                                         *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                                         *     labels are separate data and may use arbitrary Unicode.
+                                                         */
+                                                        namespace: string;
+                                                    };
                                                     /** @default {} */
                                                     events: {
                                                         [key: string]: {
@@ -1682,6 +3004,25 @@ export interface operations {
                                                     };
                                                     /** Format: uint64 */
                                                     revision: number;
+                                                    tables?: {
+                                                        [key: string]: {
+                                                            /** @default false */
+                                                            allow_additional_properties: boolean;
+                                                            /** @enum {string} */
+                                                            mode: "strict" | "schemaless";
+                                                            /** @enum {string} */
+                                                            model: "document" | "relational" | "graph_node" | "graph_relation" | "key_value" | "vector" | "event" | "time_series" | "geo" | "object" | "reasoning_claim" | "reasoning_record" | "reasoning_event" | "lifecycle_record" | "lifecycle_event";
+                                                            /** @default {} */
+                                                            properties: {
+                                                                [key: string]: {
+                                                                    /** @default false */
+                                                                    required: boolean;
+                                                                    /** @enum {string} */
+                                                                    value_type: "null" | "bool" | "integer" | "unsigned" | "decimal" | "string" | "digest" | "list" | "map";
+                                                                };
+                                                            };
+                                                        };
+                                                    };
                                                 };
                                             } | {
                                                 /** @constant */
@@ -2394,6 +3735,50 @@ export interface operations {
                                                      */
                                                     kind: string;
                                                 } | null;
+                                            } | {
+                                                /** Format: uint64 */
+                                                effective_at: number;
+                                                /** @enum {string} */
+                                                model: "document" | "relational" | "graph_node" | "graph_relation" | "key_value" | "vector" | "event" | "time_series" | "geo" | "object" | "reasoning_claim" | "reasoning_record" | "reasoning_event" | "lifecycle_record" | "lifecycle_event";
+                                                /** @constant */
+                                                mutation: "retire_data";
+                                                /**
+                                                 * @description Stable target identity for CRUD and retirement. Append-only events are
+                                                 *     addressed by their authenticated-log cursor instead of a fabricated user
+                                                 *     identifier.
+                                                 */
+                                                target: {
+                                                    /** @constant */
+                                                    identity: "reference";
+                                                    reference: {
+                                                        /**
+                                                         * @description A canonical public identifier component.
+                                                         *
+                                                         *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                                         *     labels are separate data and may use arbitrary Unicode.
+                                                         */
+                                                        id: string;
+                                                        /**
+                                                         * @description A canonical public identifier component.
+                                                         *
+                                                         *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                                         *     labels are separate data and may use arbitrary Unicode.
+                                                         */
+                                                        kind: string;
+                                                    };
+                                                } | {
+                                                    /** Format: uint64 */
+                                                    cursor: number;
+                                                    /** @constant */
+                                                    identity: "event";
+                                                    /**
+                                                     * @description A canonical public identifier component.
+                                                     *
+                                                     *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                                     *     labels are separate data and may use arbitrary Unicode.
+                                                     */
+                                                    kind: string;
+                                                };
                                             };
                                         };
                                         previous_change_sha256?: string | null;
@@ -2528,6 +3913,22 @@ export interface operations {
                                                 /** @constant */
                                                 mutation: "put_schema";
                                                 registry: {
+                                                    catalogue?: {
+                                                        /**
+                                                         * @description A canonical public identifier component.
+                                                         *
+                                                         *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                                         *     labels are separate data and may use arbitrary Unicode.
+                                                         */
+                                                        database: string;
+                                                        /**
+                                                         * @description A canonical public identifier component.
+                                                         *
+                                                         *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                                         *     labels are separate data and may use arbitrary Unicode.
+                                                         */
+                                                        namespace: string;
+                                                    };
                                                     /** @default {} */
                                                     events: {
                                                         [key: string]: {
@@ -2595,6 +3996,25 @@ export interface operations {
                                                     };
                                                     /** Format: uint64 */
                                                     revision: number;
+                                                    tables?: {
+                                                        [key: string]: {
+                                                            /** @default false */
+                                                            allow_additional_properties: boolean;
+                                                            /** @enum {string} */
+                                                            mode: "strict" | "schemaless";
+                                                            /** @enum {string} */
+                                                            model: "document" | "relational" | "graph_node" | "graph_relation" | "key_value" | "vector" | "event" | "time_series" | "geo" | "object" | "reasoning_claim" | "reasoning_record" | "reasoning_event" | "lifecycle_record" | "lifecycle_event";
+                                                            /** @default {} */
+                                                            properties: {
+                                                                [key: string]: {
+                                                                    /** @default false */
+                                                                    required: boolean;
+                                                                    /** @enum {string} */
+                                                                    value_type: "null" | "bool" | "integer" | "unsigned" | "decimal" | "string" | "digest" | "list" | "map";
+                                                                };
+                                                            };
+                                                        };
+                                                    };
                                                 };
                                             } | {
                                                 /** @constant */
@@ -3307,6 +4727,50 @@ export interface operations {
                                                      */
                                                     kind: string;
                                                 } | null;
+                                            } | {
+                                                /** Format: uint64 */
+                                                effective_at: number;
+                                                /** @enum {string} */
+                                                model: "document" | "relational" | "graph_node" | "graph_relation" | "key_value" | "vector" | "event" | "time_series" | "geo" | "object" | "reasoning_claim" | "reasoning_record" | "reasoning_event" | "lifecycle_record" | "lifecycle_event";
+                                                /** @constant */
+                                                mutation: "retire_data";
+                                                /**
+                                                 * @description Stable target identity for CRUD and retirement. Append-only events are
+                                                 *     addressed by their authenticated-log cursor instead of a fabricated user
+                                                 *     identifier.
+                                                 */
+                                                target: {
+                                                    /** @constant */
+                                                    identity: "reference";
+                                                    reference: {
+                                                        /**
+                                                         * @description A canonical public identifier component.
+                                                         *
+                                                         *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                                         *     labels are separate data and may use arbitrary Unicode.
+                                                         */
+                                                        id: string;
+                                                        /**
+                                                         * @description A canonical public identifier component.
+                                                         *
+                                                         *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                                         *     labels are separate data and may use arbitrary Unicode.
+                                                         */
+                                                        kind: string;
+                                                    };
+                                                } | {
+                                                    /** Format: uint64 */
+                                                    cursor: number;
+                                                    /** @constant */
+                                                    identity: "event";
+                                                    /**
+                                                     * @description A canonical public identifier component.
+                                                     *
+                                                     *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                                     *     labels are separate data and may use arbitrary Unicode.
+                                                     */
+                                                    kind: string;
+                                                };
                                             };
                                         };
                                         previous_change_sha256?: string | null;
@@ -3492,6 +4956,22 @@ export interface operations {
                                             /** @constant */
                                             mutation: "put_schema";
                                             registry: {
+                                                catalogue?: {
+                                                    /**
+                                                     * @description A canonical public identifier component.
+                                                     *
+                                                     *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                                     *     labels are separate data and may use arbitrary Unicode.
+                                                     */
+                                                    database: string;
+                                                    /**
+                                                     * @description A canonical public identifier component.
+                                                     *
+                                                     *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                                     *     labels are separate data and may use arbitrary Unicode.
+                                                     */
+                                                    namespace: string;
+                                                };
                                                 /** @default {} */
                                                 events: {
                                                     [key: string]: {
@@ -3559,6 +5039,25 @@ export interface operations {
                                                 };
                                                 /** Format: uint64 */
                                                 revision: number;
+                                                tables?: {
+                                                    [key: string]: {
+                                                        /** @default false */
+                                                        allow_additional_properties: boolean;
+                                                        /** @enum {string} */
+                                                        mode: "strict" | "schemaless";
+                                                        /** @enum {string} */
+                                                        model: "document" | "relational" | "graph_node" | "graph_relation" | "key_value" | "vector" | "event" | "time_series" | "geo" | "object" | "reasoning_claim" | "reasoning_record" | "reasoning_event" | "lifecycle_record" | "lifecycle_event";
+                                                        /** @default {} */
+                                                        properties: {
+                                                            [key: string]: {
+                                                                /** @default false */
+                                                                required: boolean;
+                                                                /** @enum {string} */
+                                                                value_type: "null" | "bool" | "integer" | "unsigned" | "decimal" | "string" | "digest" | "list" | "map";
+                                                            };
+                                                        };
+                                                    };
+                                                };
                                             };
                                         } | {
                                             /** @constant */
@@ -4271,6 +5770,50 @@ export interface operations {
                                                  */
                                                 kind: string;
                                             } | null;
+                                        } | {
+                                            /** Format: uint64 */
+                                            effective_at: number;
+                                            /** @enum {string} */
+                                            model: "document" | "relational" | "graph_node" | "graph_relation" | "key_value" | "vector" | "event" | "time_series" | "geo" | "object" | "reasoning_claim" | "reasoning_record" | "reasoning_event" | "lifecycle_record" | "lifecycle_event";
+                                            /** @constant */
+                                            mutation: "retire_data";
+                                            /**
+                                             * @description Stable target identity for CRUD and retirement. Append-only events are
+                                             *     addressed by their authenticated-log cursor instead of a fabricated user
+                                             *     identifier.
+                                             */
+                                            target: {
+                                                /** @constant */
+                                                identity: "reference";
+                                                reference: {
+                                                    /**
+                                                     * @description A canonical public identifier component.
+                                                     *
+                                                     *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                                     *     labels are separate data and may use arbitrary Unicode.
+                                                     */
+                                                    id: string;
+                                                    /**
+                                                     * @description A canonical public identifier component.
+                                                     *
+                                                     *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                                     *     labels are separate data and may use arbitrary Unicode.
+                                                     */
+                                                    kind: string;
+                                                };
+                                            } | {
+                                                /** Format: uint64 */
+                                                cursor: number;
+                                                /** @constant */
+                                                identity: "event";
+                                                /**
+                                                 * @description A canonical public identifier component.
+                                                 *
+                                                 *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                                 *     labels are separate data and may use arbitrary Unicode.
+                                                 */
+                                                kind: string;
+                                            };
                                         };
                                     };
                                     previous_change_sha256?: string | null;
@@ -4400,6 +5943,22 @@ export interface operations {
                                             /** @constant */
                                             mutation: "put_schema";
                                             registry: {
+                                                catalogue?: {
+                                                    /**
+                                                     * @description A canonical public identifier component.
+                                                     *
+                                                     *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                                     *     labels are separate data and may use arbitrary Unicode.
+                                                     */
+                                                    database: string;
+                                                    /**
+                                                     * @description A canonical public identifier component.
+                                                     *
+                                                     *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                                     *     labels are separate data and may use arbitrary Unicode.
+                                                     */
+                                                    namespace: string;
+                                                };
                                                 /** @default {} */
                                                 events: {
                                                     [key: string]: {
@@ -4467,6 +6026,25 @@ export interface operations {
                                                 };
                                                 /** Format: uint64 */
                                                 revision: number;
+                                                tables?: {
+                                                    [key: string]: {
+                                                        /** @default false */
+                                                        allow_additional_properties: boolean;
+                                                        /** @enum {string} */
+                                                        mode: "strict" | "schemaless";
+                                                        /** @enum {string} */
+                                                        model: "document" | "relational" | "graph_node" | "graph_relation" | "key_value" | "vector" | "event" | "time_series" | "geo" | "object" | "reasoning_claim" | "reasoning_record" | "reasoning_event" | "lifecycle_record" | "lifecycle_event";
+                                                        /** @default {} */
+                                                        properties: {
+                                                            [key: string]: {
+                                                                /** @default false */
+                                                                required: boolean;
+                                                                /** @enum {string} */
+                                                                value_type: "null" | "bool" | "integer" | "unsigned" | "decimal" | "string" | "digest" | "list" | "map";
+                                                            };
+                                                        };
+                                                    };
+                                                };
                                             };
                                         } | {
                                             /** @constant */
@@ -5179,6 +6757,50 @@ export interface operations {
                                                  */
                                                 kind: string;
                                             } | null;
+                                        } | {
+                                            /** Format: uint64 */
+                                            effective_at: number;
+                                            /** @enum {string} */
+                                            model: "document" | "relational" | "graph_node" | "graph_relation" | "key_value" | "vector" | "event" | "time_series" | "geo" | "object" | "reasoning_claim" | "reasoning_record" | "reasoning_event" | "lifecycle_record" | "lifecycle_event";
+                                            /** @constant */
+                                            mutation: "retire_data";
+                                            /**
+                                             * @description Stable target identity for CRUD and retirement. Append-only events are
+                                             *     addressed by their authenticated-log cursor instead of a fabricated user
+                                             *     identifier.
+                                             */
+                                            target: {
+                                                /** @constant */
+                                                identity: "reference";
+                                                reference: {
+                                                    /**
+                                                     * @description A canonical public identifier component.
+                                                     *
+                                                     *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                                     *     labels are separate data and may use arbitrary Unicode.
+                                                     */
+                                                    id: string;
+                                                    /**
+                                                     * @description A canonical public identifier component.
+                                                     *
+                                                     *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                                     *     labels are separate data and may use arbitrary Unicode.
+                                                     */
+                                                    kind: string;
+                                                };
+                                            } | {
+                                                /** Format: uint64 */
+                                                cursor: number;
+                                                /** @constant */
+                                                identity: "event";
+                                                /**
+                                                 * @description A canonical public identifier component.
+                                                 *
+                                                 *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                                 *     labels are separate data and may use arbitrary Unicode.
+                                                 */
+                                                kind: string;
+                                            };
                                         };
                                     };
                                     previous_change_sha256?: string | null;
@@ -5308,7 +6930,7 @@ export interface operations {
                                 audit: {
                                     records: {
                                         /** @enum {string} */
-                                        action: "service_inspect" | "unknown_request" | "session_create" | "session_renew" | "session_close" | "query_execute" | "query_live_poll" | "query_index_ensure" | "query_index_list" | "transaction_begin" | "transaction_preview" | "transaction_commit" | "transaction_abort" | "changefeed_read" | "changefeed_follow" | "vector_collection_ensure" | "vector_collection_list" | "vector_point_retrieve" | "vector_point_scroll" | "vector_search" | "backup_create" | "backup_list" | "restore_create" | "estate_read" | "audit_read" | "diagnostics_read" | "security_admin" | "memory_context_read" | "memory_inspect" | "memory_recall" | "memory_retire" | "memory_write" | "lifecycle_apply" | "project_attune" | "project_route" | "reasoning_read" | "reasoning_write" | "work_plan_read" | "work_plan_control" | "work_plan_verify_execute" | "runtime_tool_catalogue_read";
+                                        action: "service_inspect" | "unknown_request" | "session_create" | "session_renew" | "session_close" | "query_execute" | "query_live_poll" | "query_index_ensure" | "query_index_list" | "transaction_begin" | "transaction_preview" | "transaction_commit" | "transaction_abort" | "changefeed_read" | "changefeed_follow" | "subscription_open" | "subscription_connect" | "subscription_ack" | "subscription_close" | "vector_collection_ensure" | "vector_collection_list" | "vector_point_retrieve" | "vector_point_scroll" | "vector_search" | "backup_create" | "backup_list" | "restore_create" | "estate_read" | "audit_read" | "diagnostics_read" | "security_admin" | "memory_context_read" | "memory_inspect" | "memory_recall" | "memory_retire" | "memory_write" | "lifecycle_apply" | "project_attune" | "project_route" | "reasoning_read" | "reasoning_write" | "work_plan_read" | "work_plan_control" | "work_plan_verify_execute" | "runtime_tool_catalogue_read";
                                         /** Format: uint64 */
                                         at_unix_ms: number;
                                         /**
@@ -5438,6 +7060,22 @@ export interface operations {
                                                 /** @constant */
                                                 mutation: "put_schema";
                                                 registry: {
+                                                    catalogue?: {
+                                                        /**
+                                                         * @description A canonical public identifier component.
+                                                         *
+                                                         *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                                         *     labels are separate data and may use arbitrary Unicode.
+                                                         */
+                                                        database: string;
+                                                        /**
+                                                         * @description A canonical public identifier component.
+                                                         *
+                                                         *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                                         *     labels are separate data and may use arbitrary Unicode.
+                                                         */
+                                                        namespace: string;
+                                                    };
                                                     /** @default {} */
                                                     events: {
                                                         [key: string]: {
@@ -5505,6 +7143,25 @@ export interface operations {
                                                     };
                                                     /** Format: uint64 */
                                                     revision: number;
+                                                    tables?: {
+                                                        [key: string]: {
+                                                            /** @default false */
+                                                            allow_additional_properties: boolean;
+                                                            /** @enum {string} */
+                                                            mode: "strict" | "schemaless";
+                                                            /** @enum {string} */
+                                                            model: "document" | "relational" | "graph_node" | "graph_relation" | "key_value" | "vector" | "event" | "time_series" | "geo" | "object" | "reasoning_claim" | "reasoning_record" | "reasoning_event" | "lifecycle_record" | "lifecycle_event";
+                                                            /** @default {} */
+                                                            properties: {
+                                                                [key: string]: {
+                                                                    /** @default false */
+                                                                    required: boolean;
+                                                                    /** @enum {string} */
+                                                                    value_type: "null" | "bool" | "integer" | "unsigned" | "decimal" | "string" | "digest" | "list" | "map";
+                                                                };
+                                                            };
+                                                        };
+                                                    };
                                                 };
                                             } | {
                                                 /** @constant */
@@ -6217,6 +7874,50 @@ export interface operations {
                                                      */
                                                     kind: string;
                                                 } | null;
+                                            } | {
+                                                /** Format: uint64 */
+                                                effective_at: number;
+                                                /** @enum {string} */
+                                                model: "document" | "relational" | "graph_node" | "graph_relation" | "key_value" | "vector" | "event" | "time_series" | "geo" | "object" | "reasoning_claim" | "reasoning_record" | "reasoning_event" | "lifecycle_record" | "lifecycle_event";
+                                                /** @constant */
+                                                mutation: "retire_data";
+                                                /**
+                                                 * @description Stable target identity for CRUD and retirement. Append-only events are
+                                                 *     addressed by their authenticated-log cursor instead of a fabricated user
+                                                 *     identifier.
+                                                 */
+                                                target: {
+                                                    /** @constant */
+                                                    identity: "reference";
+                                                    reference: {
+                                                        /**
+                                                         * @description A canonical public identifier component.
+                                                         *
+                                                         *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                                         *     labels are separate data and may use arbitrary Unicode.
+                                                         */
+                                                        id: string;
+                                                        /**
+                                                         * @description A canonical public identifier component.
+                                                         *
+                                                         *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                                         *     labels are separate data and may use arbitrary Unicode.
+                                                         */
+                                                        kind: string;
+                                                    };
+                                                } | {
+                                                    /** Format: uint64 */
+                                                    cursor: number;
+                                                    /** @constant */
+                                                    identity: "event";
+                                                    /**
+                                                     * @description A canonical public identifier component.
+                                                     *
+                                                     *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                                     *     labels are separate data and may use arbitrary Unicode.
+                                                     */
+                                                    kind: string;
+                                                };
                                             };
                                         };
                                         previous_change_sha256?: string | null;
@@ -7105,12 +8806,57 @@ export interface operations {
                                 query_indexes: {
                                     indexes: {
                                         /** Format: uint64 */
+                                        analytics_group_count?: number | null;
+                                        /** Format: uint64 */
+                                        analytics_total_count?: number | null;
+                                        /** Format: uint64 */
                                         artifact_rows?: number | null;
                                         artifact_sha256: string;
                                         /** Format: uint64 */
                                         built_valid_at?: number | null;
                                         configuration_sha256: string;
                                         definition_query: string;
+                                        full_text?: {
+                                            /**
+                                             * @default unicode_lowercase
+                                             * @enum {string}
+                                             */
+                                            analyzer: "unicode_lowercase" | "unicode_case_sensitive";
+                                            /** @default false */
+                                            ascii_folding: boolean;
+                                            /**
+                                             * Format: uint32
+                                             * @default 750000
+                                             */
+                                            b_micros: number;
+                                            /**
+                                             * Format: uint32
+                                             * @default 1200000
+                                             */
+                                            k1_micros: number;
+                                            /**
+                                             * Format: uint16
+                                             * @default 40
+                                             */
+                                            max_token_chars: number;
+                                            /**
+                                             * Format: uint16
+                                             * @default 1
+                                             */
+                                            min_token_chars: number;
+                                            /**
+                                             * @default none
+                                             * @enum {string}
+                                             */
+                                            stemmer: "none" | "english";
+                                            /** @default [] */
+                                            stop_words: string[];
+                                            /**
+                                             * @default unicode_alphanumeric
+                                             * @enum {string}
+                                             */
+                                            tokenizer: "unicode_alphanumeric" | "whitespace";
+                                        } | null;
                                         /** Format: uint64 */
                                         generation: number;
                                         /**
@@ -7124,7 +8870,20 @@ export interface operations {
                                          * @default scalar
                                          * @enum {string}
                                          */
-                                        kind: "scalar" | "bm25";
+                                        kind: "scalar" | "count" | "geo" | "materialized_view" | "aggregate_count" | "bm25";
+                                        maintenance?: {
+                                            /** Format: uint64 */
+                                            inserted_rows: number;
+                                            mode: string;
+                                            /** Format: uint64 */
+                                            prior_source_cursor?: number | null;
+                                            /** Format: uint64 */
+                                            removed_rows: number;
+                                            /** Format: uint64 */
+                                            source_cursor: number;
+                                            /** Format: uint64 */
+                                            updated_rows: number;
+                                        } | null;
                                         /** Format: uint64 */
                                         source_cursor: number;
                                         /** @enum {string} */
@@ -7210,7 +8969,7 @@ export interface operations {
                                     protocol_version: number;
                                     tools: {
                                         /** @enum {string} */
-                                        action: "service_inspect" | "unknown_request" | "session_create" | "session_renew" | "session_close" | "query_execute" | "query_live_poll" | "query_index_ensure" | "query_index_list" | "transaction_begin" | "transaction_preview" | "transaction_commit" | "transaction_abort" | "changefeed_read" | "changefeed_follow" | "vector_collection_ensure" | "vector_collection_list" | "vector_point_retrieve" | "vector_point_scroll" | "vector_search" | "backup_create" | "backup_list" | "restore_create" | "estate_read" | "audit_read" | "diagnostics_read" | "security_admin" | "memory_context_read" | "memory_inspect" | "memory_recall" | "memory_retire" | "memory_write" | "lifecycle_apply" | "project_attune" | "project_route" | "reasoning_read" | "reasoning_write" | "work_plan_read" | "work_plan_control" | "work_plan_verify_execute" | "runtime_tool_catalogue_read";
+                                        action: "service_inspect" | "unknown_request" | "session_create" | "session_renew" | "session_close" | "query_execute" | "query_live_poll" | "query_index_ensure" | "query_index_list" | "transaction_begin" | "transaction_preview" | "transaction_commit" | "transaction_abort" | "changefeed_read" | "changefeed_follow" | "subscription_open" | "subscription_connect" | "subscription_ack" | "subscription_close" | "vector_collection_ensure" | "vector_collection_list" | "vector_point_retrieve" | "vector_point_scroll" | "vector_search" | "backup_create" | "backup_list" | "restore_create" | "estate_read" | "audit_read" | "diagnostics_read" | "security_admin" | "memory_context_read" | "memory_inspect" | "memory_recall" | "memory_retire" | "memory_write" | "lifecycle_apply" | "project_attune" | "project_route" | "reasoning_read" | "reasoning_write" | "work_plan_read" | "work_plan_control" | "work_plan_verify_execute" | "runtime_tool_catalogue_read";
                                         /** @enum {string} */
                                         authorization: "public" | "governed";
                                         /**
@@ -7234,6 +8993,22 @@ export interface operations {
                                     }[];
                                 };
                                 schema?: {
+                                    catalogue?: {
+                                        /**
+                                         * @description A canonical public identifier component.
+                                         *
+                                         *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                         *     labels are separate data and may use arbitrary Unicode.
+                                         */
+                                        database: string;
+                                        /**
+                                         * @description A canonical public identifier component.
+                                         *
+                                         *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                         *     labels are separate data and may use arbitrary Unicode.
+                                         */
+                                        namespace: string;
+                                    };
                                     /** @default {} */
                                     events: {
                                         [key: string]: {
@@ -7301,6 +9076,25 @@ export interface operations {
                                     };
                                     /** Format: uint64 */
                                     revision: number;
+                                    tables?: {
+                                        [key: string]: {
+                                            /** @default false */
+                                            allow_additional_properties: boolean;
+                                            /** @enum {string} */
+                                            mode: "strict" | "schemaless";
+                                            /** @enum {string} */
+                                            model: "document" | "relational" | "graph_node" | "graph_relation" | "key_value" | "vector" | "event" | "time_series" | "geo" | "object" | "reasoning_claim" | "reasoning_record" | "reasoning_event" | "lifecycle_record" | "lifecycle_event";
+                                            /** @default {} */
+                                            properties: {
+                                                [key: string]: {
+                                                    /** @default false */
+                                                    required: boolean;
+                                                    /** @enum {string} */
+                                                    value_type: "null" | "bool" | "integer" | "unsigned" | "decimal" | "string" | "digest" | "list" | "map";
+                                                };
+                                            };
+                                        };
+                                    };
                                 } | null;
                                 scope: string;
                                 sections: {
@@ -7454,7 +9248,7 @@ export interface operations {
                                 audit: {
                                     records: {
                                         /** @enum {string} */
-                                        action: "service_inspect" | "unknown_request" | "session_create" | "session_renew" | "session_close" | "query_execute" | "query_live_poll" | "query_index_ensure" | "query_index_list" | "transaction_begin" | "transaction_preview" | "transaction_commit" | "transaction_abort" | "changefeed_read" | "changefeed_follow" | "vector_collection_ensure" | "vector_collection_list" | "vector_point_retrieve" | "vector_point_scroll" | "vector_search" | "backup_create" | "backup_list" | "restore_create" | "estate_read" | "audit_read" | "diagnostics_read" | "security_admin" | "memory_context_read" | "memory_inspect" | "memory_recall" | "memory_retire" | "memory_write" | "lifecycle_apply" | "project_attune" | "project_route" | "reasoning_read" | "reasoning_write" | "work_plan_read" | "work_plan_control" | "work_plan_verify_execute" | "runtime_tool_catalogue_read";
+                                        action: "service_inspect" | "unknown_request" | "session_create" | "session_renew" | "session_close" | "query_execute" | "query_live_poll" | "query_index_ensure" | "query_index_list" | "transaction_begin" | "transaction_preview" | "transaction_commit" | "transaction_abort" | "changefeed_read" | "changefeed_follow" | "subscription_open" | "subscription_connect" | "subscription_ack" | "subscription_close" | "vector_collection_ensure" | "vector_collection_list" | "vector_point_retrieve" | "vector_point_scroll" | "vector_search" | "backup_create" | "backup_list" | "restore_create" | "estate_read" | "audit_read" | "diagnostics_read" | "security_admin" | "memory_context_read" | "memory_inspect" | "memory_recall" | "memory_retire" | "memory_write" | "lifecycle_apply" | "project_attune" | "project_route" | "reasoning_read" | "reasoning_write" | "work_plan_read" | "work_plan_control" | "work_plan_verify_execute" | "runtime_tool_catalogue_read";
                                         /** Format: uint64 */
                                         at_unix_ms: number;
                                         /**
@@ -7584,6 +9378,22 @@ export interface operations {
                                                 /** @constant */
                                                 mutation: "put_schema";
                                                 registry: {
+                                                    catalogue?: {
+                                                        /**
+                                                         * @description A canonical public identifier component.
+                                                         *
+                                                         *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                                         *     labels are separate data and may use arbitrary Unicode.
+                                                         */
+                                                        database: string;
+                                                        /**
+                                                         * @description A canonical public identifier component.
+                                                         *
+                                                         *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                                         *     labels are separate data and may use arbitrary Unicode.
+                                                         */
+                                                        namespace: string;
+                                                    };
                                                     /** @default {} */
                                                     events: {
                                                         [key: string]: {
@@ -7651,6 +9461,25 @@ export interface operations {
                                                     };
                                                     /** Format: uint64 */
                                                     revision: number;
+                                                    tables?: {
+                                                        [key: string]: {
+                                                            /** @default false */
+                                                            allow_additional_properties: boolean;
+                                                            /** @enum {string} */
+                                                            mode: "strict" | "schemaless";
+                                                            /** @enum {string} */
+                                                            model: "document" | "relational" | "graph_node" | "graph_relation" | "key_value" | "vector" | "event" | "time_series" | "geo" | "object" | "reasoning_claim" | "reasoning_record" | "reasoning_event" | "lifecycle_record" | "lifecycle_event";
+                                                            /** @default {} */
+                                                            properties: {
+                                                                [key: string]: {
+                                                                    /** @default false */
+                                                                    required: boolean;
+                                                                    /** @enum {string} */
+                                                                    value_type: "null" | "bool" | "integer" | "unsigned" | "decimal" | "string" | "digest" | "list" | "map";
+                                                                };
+                                                            };
+                                                        };
+                                                    };
                                                 };
                                             } | {
                                                 /** @constant */
@@ -8363,6 +10192,50 @@ export interface operations {
                                                      */
                                                     kind: string;
                                                 } | null;
+                                            } | {
+                                                /** Format: uint64 */
+                                                effective_at: number;
+                                                /** @enum {string} */
+                                                model: "document" | "relational" | "graph_node" | "graph_relation" | "key_value" | "vector" | "event" | "time_series" | "geo" | "object" | "reasoning_claim" | "reasoning_record" | "reasoning_event" | "lifecycle_record" | "lifecycle_event";
+                                                /** @constant */
+                                                mutation: "retire_data";
+                                                /**
+                                                 * @description Stable target identity for CRUD and retirement. Append-only events are
+                                                 *     addressed by their authenticated-log cursor instead of a fabricated user
+                                                 *     identifier.
+                                                 */
+                                                target: {
+                                                    /** @constant */
+                                                    identity: "reference";
+                                                    reference: {
+                                                        /**
+                                                         * @description A canonical public identifier component.
+                                                         *
+                                                         *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                                         *     labels are separate data and may use arbitrary Unicode.
+                                                         */
+                                                        id: string;
+                                                        /**
+                                                         * @description A canonical public identifier component.
+                                                         *
+                                                         *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                                         *     labels are separate data and may use arbitrary Unicode.
+                                                         */
+                                                        kind: string;
+                                                    };
+                                                } | {
+                                                    /** Format: uint64 */
+                                                    cursor: number;
+                                                    /** @constant */
+                                                    identity: "event";
+                                                    /**
+                                                     * @description A canonical public identifier component.
+                                                     *
+                                                     *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                                     *     labels are separate data and may use arbitrary Unicode.
+                                                     */
+                                                    kind: string;
+                                                };
                                             };
                                         };
                                         previous_change_sha256?: string | null;
@@ -9251,12 +11124,57 @@ export interface operations {
                                 query_indexes: {
                                     indexes: {
                                         /** Format: uint64 */
+                                        analytics_group_count?: number | null;
+                                        /** Format: uint64 */
+                                        analytics_total_count?: number | null;
+                                        /** Format: uint64 */
                                         artifact_rows?: number | null;
                                         artifact_sha256: string;
                                         /** Format: uint64 */
                                         built_valid_at?: number | null;
                                         configuration_sha256: string;
                                         definition_query: string;
+                                        full_text?: {
+                                            /**
+                                             * @default unicode_lowercase
+                                             * @enum {string}
+                                             */
+                                            analyzer: "unicode_lowercase" | "unicode_case_sensitive";
+                                            /** @default false */
+                                            ascii_folding: boolean;
+                                            /**
+                                             * Format: uint32
+                                             * @default 750000
+                                             */
+                                            b_micros: number;
+                                            /**
+                                             * Format: uint32
+                                             * @default 1200000
+                                             */
+                                            k1_micros: number;
+                                            /**
+                                             * Format: uint16
+                                             * @default 40
+                                             */
+                                            max_token_chars: number;
+                                            /**
+                                             * Format: uint16
+                                             * @default 1
+                                             */
+                                            min_token_chars: number;
+                                            /**
+                                             * @default none
+                                             * @enum {string}
+                                             */
+                                            stemmer: "none" | "english";
+                                            /** @default [] */
+                                            stop_words: string[];
+                                            /**
+                                             * @default unicode_alphanumeric
+                                             * @enum {string}
+                                             */
+                                            tokenizer: "unicode_alphanumeric" | "whitespace";
+                                        } | null;
                                         /** Format: uint64 */
                                         generation: number;
                                         /**
@@ -9270,7 +11188,20 @@ export interface operations {
                                          * @default scalar
                                          * @enum {string}
                                          */
-                                        kind: "scalar" | "bm25";
+                                        kind: "scalar" | "count" | "geo" | "materialized_view" | "aggregate_count" | "bm25";
+                                        maintenance?: {
+                                            /** Format: uint64 */
+                                            inserted_rows: number;
+                                            mode: string;
+                                            /** Format: uint64 */
+                                            prior_source_cursor?: number | null;
+                                            /** Format: uint64 */
+                                            removed_rows: number;
+                                            /** Format: uint64 */
+                                            source_cursor: number;
+                                            /** Format: uint64 */
+                                            updated_rows: number;
+                                        } | null;
                                         /** Format: uint64 */
                                         source_cursor: number;
                                         /** @enum {string} */
@@ -9356,7 +11287,7 @@ export interface operations {
                                     protocol_version: number;
                                     tools: {
                                         /** @enum {string} */
-                                        action: "service_inspect" | "unknown_request" | "session_create" | "session_renew" | "session_close" | "query_execute" | "query_live_poll" | "query_index_ensure" | "query_index_list" | "transaction_begin" | "transaction_preview" | "transaction_commit" | "transaction_abort" | "changefeed_read" | "changefeed_follow" | "vector_collection_ensure" | "vector_collection_list" | "vector_point_retrieve" | "vector_point_scroll" | "vector_search" | "backup_create" | "backup_list" | "restore_create" | "estate_read" | "audit_read" | "diagnostics_read" | "security_admin" | "memory_context_read" | "memory_inspect" | "memory_recall" | "memory_retire" | "memory_write" | "lifecycle_apply" | "project_attune" | "project_route" | "reasoning_read" | "reasoning_write" | "work_plan_read" | "work_plan_control" | "work_plan_verify_execute" | "runtime_tool_catalogue_read";
+                                        action: "service_inspect" | "unknown_request" | "session_create" | "session_renew" | "session_close" | "query_execute" | "query_live_poll" | "query_index_ensure" | "query_index_list" | "transaction_begin" | "transaction_preview" | "transaction_commit" | "transaction_abort" | "changefeed_read" | "changefeed_follow" | "subscription_open" | "subscription_connect" | "subscription_ack" | "subscription_close" | "vector_collection_ensure" | "vector_collection_list" | "vector_point_retrieve" | "vector_point_scroll" | "vector_search" | "backup_create" | "backup_list" | "restore_create" | "estate_read" | "audit_read" | "diagnostics_read" | "security_admin" | "memory_context_read" | "memory_inspect" | "memory_recall" | "memory_retire" | "memory_write" | "lifecycle_apply" | "project_attune" | "project_route" | "reasoning_read" | "reasoning_write" | "work_plan_read" | "work_plan_control" | "work_plan_verify_execute" | "runtime_tool_catalogue_read";
                                         /** @enum {string} */
                                         authorization: "public" | "governed";
                                         /**
@@ -9380,6 +11311,22 @@ export interface operations {
                                     }[];
                                 };
                                 schema?: {
+                                    catalogue?: {
+                                        /**
+                                         * @description A canonical public identifier component.
+                                         *
+                                         *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                         *     labels are separate data and may use arbitrary Unicode.
+                                         */
+                                        database: string;
+                                        /**
+                                         * @description A canonical public identifier component.
+                                         *
+                                         *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                         *     labels are separate data and may use arbitrary Unicode.
+                                         */
+                                        namespace: string;
+                                    };
                                     /** @default {} */
                                     events: {
                                         [key: string]: {
@@ -9447,6 +11394,25 @@ export interface operations {
                                     };
                                     /** Format: uint64 */
                                     revision: number;
+                                    tables?: {
+                                        [key: string]: {
+                                            /** @default false */
+                                            allow_additional_properties: boolean;
+                                            /** @enum {string} */
+                                            mode: "strict" | "schemaless";
+                                            /** @enum {string} */
+                                            model: "document" | "relational" | "graph_node" | "graph_relation" | "key_value" | "vector" | "event" | "time_series" | "geo" | "object" | "reasoning_claim" | "reasoning_record" | "reasoning_event" | "lifecycle_record" | "lifecycle_event";
+                                            /** @default {} */
+                                            properties: {
+                                                [key: string]: {
+                                                    /** @default false */
+                                                    required: boolean;
+                                                    /** @enum {string} */
+                                                    value_type: "null" | "bool" | "integer" | "unsigned" | "decimal" | "string" | "digest" | "list" | "map";
+                                                };
+                                            };
+                                        };
+                                    };
                                 } | null;
                                 scope: string;
                                 sections: {
@@ -10160,20 +12126,38 @@ export interface operations {
                         /**
                          * @default {
                          *       "max_batch_rows": 256,
+                         *       "max_elapsed_ms": 30000,
+                         *       "max_memory_bytes": 67108864,
                          *       "max_output_bytes": 524288,
                          *       "max_rows": 10000,
-                         *       "max_scanned_changes": 100000
+                         *       "max_scanned_changes": 100000,
+                         *       "max_spill_bytes": 268435456
                          *     }
                          */
                         budget?: {
                             /** Format: uint64 */
                             max_batch_rows: number;
+                            /**
+                             * Format: uint64
+                             * @default 30000
+                             */
+                            max_elapsed_ms?: number;
+                            /**
+                             * Format: uint64
+                             * @default 67108864
+                             */
+                            max_memory_bytes?: number;
                             /** Format: uint64 */
                             max_output_bytes: number;
                             /** Format: uint64 */
                             max_rows: number;
                             /** Format: uint64 */
                             max_scanned_changes: number;
+                            /**
+                             * Format: uint64
+                             * @default 268435456
+                             */
+                            max_spill_bytes?: number;
                         };
                         parameters?: {
                             [key: string]: {
@@ -10256,6 +12240,34 @@ export interface operations {
                             payload: {
                                 canonical_query: string;
                                 execution: {
+                                    analysis?: {
+                                        /** Format: uint64 */
+                                        elapsed_micros: number;
+                                        engine: string;
+                                        filter_pushdown: string;
+                                        /** Format: uint64 */
+                                        input_batches: number;
+                                        /** Format: uint64 */
+                                        input_memory_bytes: number;
+                                        /** Format: uint64 */
+                                        input_rows: number;
+                                        limit_pushdown: string;
+                                        /** Format: uint64 */
+                                        output_batches: number;
+                                        /** Format: uint64 */
+                                        peak_memory_bytes: number;
+                                        /** Format: uint64 */
+                                        physical_operators: number;
+                                        projection_pushdown: string;
+                                        /** Format: uint64 */
+                                        provider_scans: number;
+                                        /** Format: uint64 */
+                                        spill_count: number;
+                                        /** Format: uint64 */
+                                        spilled_bytes: number;
+                                        /** Format: uint64 */
+                                        spilled_rows: number;
+                                    } | null;
                                     /** Format: uint64 */
                                     output_bytes: number;
                                     /** Format: uint64 */
@@ -10367,6 +12379,34 @@ export interface operations {
                             payload: {
                                 canonical_query: string;
                                 execution: {
+                                    analysis?: {
+                                        /** Format: uint64 */
+                                        elapsed_micros: number;
+                                        engine: string;
+                                        filter_pushdown: string;
+                                        /** Format: uint64 */
+                                        input_batches: number;
+                                        /** Format: uint64 */
+                                        input_memory_bytes: number;
+                                        /** Format: uint64 */
+                                        input_rows: number;
+                                        limit_pushdown: string;
+                                        /** Format: uint64 */
+                                        output_batches: number;
+                                        /** Format: uint64 */
+                                        peak_memory_bytes: number;
+                                        /** Format: uint64 */
+                                        physical_operators: number;
+                                        projection_pushdown: string;
+                                        /** Format: uint64 */
+                                        provider_scans: number;
+                                        /** Format: uint64 */
+                                        spill_count: number;
+                                        /** Format: uint64 */
+                                        spilled_bytes: number;
+                                        /** Format: uint64 */
+                                        spilled_rows: number;
+                                    } | null;
                                     /** Format: uint64 */
                                     output_bytes: number;
                                     /** Format: uint64 */
@@ -10491,22 +12531,81 @@ export interface operations {
                         /**
                          * @default {
                          *       "max_batch_rows": 256,
+                         *       "max_elapsed_ms": 30000,
+                         *       "max_memory_bytes": 67108864,
                          *       "max_output_bytes": 524288,
                          *       "max_rows": 10000,
-                         *       "max_scanned_changes": 100000
+                         *       "max_scanned_changes": 100000,
+                         *       "max_spill_bytes": 268435456
                          *     }
                          */
                         budget?: {
                             /** Format: uint64 */
                             max_batch_rows: number;
+                            /**
+                             * Format: uint64
+                             * @default 30000
+                             */
+                            max_elapsed_ms?: number;
+                            /**
+                             * Format: uint64
+                             * @default 67108864
+                             */
+                            max_memory_bytes?: number;
                             /** Format: uint64 */
                             max_output_bytes: number;
                             /** Format: uint64 */
                             max_rows: number;
                             /** Format: uint64 */
                             max_scanned_changes: number;
+                            /**
+                             * Format: uint64
+                             * @default 268435456
+                             */
+                            max_spill_bytes?: number;
                         };
                         definition_query: string;
+                        full_text?: {
+                            /**
+                             * @default unicode_lowercase
+                             * @enum {string}
+                             */
+                            analyzer?: "unicode_lowercase" | "unicode_case_sensitive";
+                            /** @default false */
+                            ascii_folding?: boolean;
+                            /**
+                             * Format: uint32
+                             * @default 750000
+                             */
+                            b_micros?: number;
+                            /**
+                             * Format: uint32
+                             * @default 1200000
+                             */
+                            k1_micros?: number;
+                            /**
+                             * Format: uint16
+                             * @default 40
+                             */
+                            max_token_chars?: number;
+                            /**
+                             * Format: uint16
+                             * @default 1
+                             */
+                            min_token_chars?: number;
+                            /**
+                             * @default none
+                             * @enum {string}
+                             */
+                            stemmer?: "none" | "english";
+                            /** @default [] */
+                            stop_words?: string[];
+                            /**
+                             * @default unicode_alphanumeric
+                             * @enum {string}
+                             */
+                            tokenizer?: "unicode_alphanumeric" | "whitespace";
+                        } | null;
                         /**
                          * @description A canonical public identifier component.
                          *
@@ -10518,7 +12617,7 @@ export interface operations {
                          * @default scalar
                          * @enum {string}
                          */
-                        kind?: "scalar" | "bm25";
+                        kind?: "scalar" | "count" | "geo" | "materialized_view" | "aggregate_count" | "bm25";
                         scope: string;
                         /** @default false */
                         unique?: boolean;
@@ -10562,12 +12661,57 @@ export interface operations {
                                 idempotent_replay: boolean;
                                 index: {
                                     /** Format: uint64 */
+                                    analytics_group_count?: number | null;
+                                    /** Format: uint64 */
+                                    analytics_total_count?: number | null;
+                                    /** Format: uint64 */
                                     artifact_rows?: number | null;
                                     artifact_sha256: string;
                                     /** Format: uint64 */
                                     built_valid_at?: number | null;
                                     configuration_sha256: string;
                                     definition_query: string;
+                                    full_text?: {
+                                        /**
+                                         * @default unicode_lowercase
+                                         * @enum {string}
+                                         */
+                                        analyzer: "unicode_lowercase" | "unicode_case_sensitive";
+                                        /** @default false */
+                                        ascii_folding: boolean;
+                                        /**
+                                         * Format: uint32
+                                         * @default 750000
+                                         */
+                                        b_micros: number;
+                                        /**
+                                         * Format: uint32
+                                         * @default 1200000
+                                         */
+                                        k1_micros: number;
+                                        /**
+                                         * Format: uint16
+                                         * @default 40
+                                         */
+                                        max_token_chars: number;
+                                        /**
+                                         * Format: uint16
+                                         * @default 1
+                                         */
+                                        min_token_chars: number;
+                                        /**
+                                         * @default none
+                                         * @enum {string}
+                                         */
+                                        stemmer: "none" | "english";
+                                        /** @default [] */
+                                        stop_words: string[];
+                                        /**
+                                         * @default unicode_alphanumeric
+                                         * @enum {string}
+                                         */
+                                        tokenizer: "unicode_alphanumeric" | "whitespace";
+                                    } | null;
                                     /** Format: uint64 */
                                     generation: number;
                                     /**
@@ -10581,7 +12725,20 @@ export interface operations {
                                      * @default scalar
                                      * @enum {string}
                                      */
-                                    kind: "scalar" | "bm25";
+                                    kind: "scalar" | "count" | "geo" | "materialized_view" | "aggregate_count" | "bm25";
+                                    maintenance?: {
+                                        /** Format: uint64 */
+                                        inserted_rows: number;
+                                        mode: string;
+                                        /** Format: uint64 */
+                                        prior_source_cursor?: number | null;
+                                        /** Format: uint64 */
+                                        removed_rows: number;
+                                        /** Format: uint64 */
+                                        source_cursor: number;
+                                        /** Format: uint64 */
+                                        updated_rows: number;
+                                    } | null;
                                     /** Format: uint64 */
                                     source_cursor: number;
                                     /** @enum {string} */
@@ -10626,12 +12783,57 @@ export interface operations {
                                 idempotent_replay: boolean;
                                 index: {
                                     /** Format: uint64 */
+                                    analytics_group_count?: number | null;
+                                    /** Format: uint64 */
+                                    analytics_total_count?: number | null;
+                                    /** Format: uint64 */
                                     artifact_rows?: number | null;
                                     artifact_sha256: string;
                                     /** Format: uint64 */
                                     built_valid_at?: number | null;
                                     configuration_sha256: string;
                                     definition_query: string;
+                                    full_text?: {
+                                        /**
+                                         * @default unicode_lowercase
+                                         * @enum {string}
+                                         */
+                                        analyzer: "unicode_lowercase" | "unicode_case_sensitive";
+                                        /** @default false */
+                                        ascii_folding: boolean;
+                                        /**
+                                         * Format: uint32
+                                         * @default 750000
+                                         */
+                                        b_micros: number;
+                                        /**
+                                         * Format: uint32
+                                         * @default 1200000
+                                         */
+                                        k1_micros: number;
+                                        /**
+                                         * Format: uint16
+                                         * @default 40
+                                         */
+                                        max_token_chars: number;
+                                        /**
+                                         * Format: uint16
+                                         * @default 1
+                                         */
+                                        min_token_chars: number;
+                                        /**
+                                         * @default none
+                                         * @enum {string}
+                                         */
+                                        stemmer: "none" | "english";
+                                        /** @default [] */
+                                        stop_words: string[];
+                                        /**
+                                         * @default unicode_alphanumeric
+                                         * @enum {string}
+                                         */
+                                        tokenizer: "unicode_alphanumeric" | "whitespace";
+                                    } | null;
                                     /** Format: uint64 */
                                     generation: number;
                                     /**
@@ -10645,7 +12847,20 @@ export interface operations {
                                      * @default scalar
                                      * @enum {string}
                                      */
-                                    kind: "scalar" | "bm25";
+                                    kind: "scalar" | "count" | "geo" | "materialized_view" | "aggregate_count" | "bm25";
+                                    maintenance?: {
+                                        /** Format: uint64 */
+                                        inserted_rows: number;
+                                        mode: string;
+                                        /** Format: uint64 */
+                                        prior_source_cursor?: number | null;
+                                        /** Format: uint64 */
+                                        removed_rows: number;
+                                        /** Format: uint64 */
+                                        source_cursor: number;
+                                        /** Format: uint64 */
+                                        updated_rows: number;
+                                    } | null;
                                     /** Format: uint64 */
                                     source_cursor: number;
                                     /** @enum {string} */
@@ -10735,12 +12950,57 @@ export interface operations {
                             payload: {
                                 indexes: {
                                     /** Format: uint64 */
+                                    analytics_group_count?: number | null;
+                                    /** Format: uint64 */
+                                    analytics_total_count?: number | null;
+                                    /** Format: uint64 */
                                     artifact_rows?: number | null;
                                     artifact_sha256: string;
                                     /** Format: uint64 */
                                     built_valid_at?: number | null;
                                     configuration_sha256: string;
                                     definition_query: string;
+                                    full_text?: {
+                                        /**
+                                         * @default unicode_lowercase
+                                         * @enum {string}
+                                         */
+                                        analyzer: "unicode_lowercase" | "unicode_case_sensitive";
+                                        /** @default false */
+                                        ascii_folding: boolean;
+                                        /**
+                                         * Format: uint32
+                                         * @default 750000
+                                         */
+                                        b_micros: number;
+                                        /**
+                                         * Format: uint32
+                                         * @default 1200000
+                                         */
+                                        k1_micros: number;
+                                        /**
+                                         * Format: uint16
+                                         * @default 40
+                                         */
+                                        max_token_chars: number;
+                                        /**
+                                         * Format: uint16
+                                         * @default 1
+                                         */
+                                        min_token_chars: number;
+                                        /**
+                                         * @default none
+                                         * @enum {string}
+                                         */
+                                        stemmer: "none" | "english";
+                                        /** @default [] */
+                                        stop_words: string[];
+                                        /**
+                                         * @default unicode_alphanumeric
+                                         * @enum {string}
+                                         */
+                                        tokenizer: "unicode_alphanumeric" | "whitespace";
+                                    } | null;
                                     /** Format: uint64 */
                                     generation: number;
                                     /**
@@ -10754,7 +13014,20 @@ export interface operations {
                                      * @default scalar
                                      * @enum {string}
                                      */
-                                    kind: "scalar" | "bm25";
+                                    kind: "scalar" | "count" | "geo" | "materialized_view" | "aggregate_count" | "bm25";
+                                    maintenance?: {
+                                        /** Format: uint64 */
+                                        inserted_rows: number;
+                                        mode: string;
+                                        /** Format: uint64 */
+                                        prior_source_cursor?: number | null;
+                                        /** Format: uint64 */
+                                        removed_rows: number;
+                                        /** Format: uint64 */
+                                        source_cursor: number;
+                                        /** Format: uint64 */
+                                        updated_rows: number;
+                                    } | null;
                                     /** Format: uint64 */
                                     source_cursor: number;
                                     /** @enum {string} */
@@ -10799,12 +13072,57 @@ export interface operations {
                             payload: {
                                 indexes: {
                                     /** Format: uint64 */
+                                    analytics_group_count?: number | null;
+                                    /** Format: uint64 */
+                                    analytics_total_count?: number | null;
+                                    /** Format: uint64 */
                                     artifact_rows?: number | null;
                                     artifact_sha256: string;
                                     /** Format: uint64 */
                                     built_valid_at?: number | null;
                                     configuration_sha256: string;
                                     definition_query: string;
+                                    full_text?: {
+                                        /**
+                                         * @default unicode_lowercase
+                                         * @enum {string}
+                                         */
+                                        analyzer: "unicode_lowercase" | "unicode_case_sensitive";
+                                        /** @default false */
+                                        ascii_folding: boolean;
+                                        /**
+                                         * Format: uint32
+                                         * @default 750000
+                                         */
+                                        b_micros: number;
+                                        /**
+                                         * Format: uint32
+                                         * @default 1200000
+                                         */
+                                        k1_micros: number;
+                                        /**
+                                         * Format: uint16
+                                         * @default 40
+                                         */
+                                        max_token_chars: number;
+                                        /**
+                                         * Format: uint16
+                                         * @default 1
+                                         */
+                                        min_token_chars: number;
+                                        /**
+                                         * @default none
+                                         * @enum {string}
+                                         */
+                                        stemmer: "none" | "english";
+                                        /** @default [] */
+                                        stop_words: string[];
+                                        /**
+                                         * @default unicode_alphanumeric
+                                         * @enum {string}
+                                         */
+                                        tokenizer: "unicode_alphanumeric" | "whitespace";
+                                    } | null;
                                     /** Format: uint64 */
                                     generation: number;
                                     /**
@@ -10818,7 +13136,20 @@ export interface operations {
                                      * @default scalar
                                      * @enum {string}
                                      */
-                                    kind: "scalar" | "bm25";
+                                    kind: "scalar" | "count" | "geo" | "materialized_view" | "aggregate_count" | "bm25";
+                                    maintenance?: {
+                                        /** Format: uint64 */
+                                        inserted_rows: number;
+                                        mode: string;
+                                        /** Format: uint64 */
+                                        prior_source_cursor?: number | null;
+                                        /** Format: uint64 */
+                                        removed_rows: number;
+                                        /** Format: uint64 */
+                                        source_cursor: number;
+                                        /** Format: uint64 */
+                                        updated_rows: number;
+                                    } | null;
                                     /** Format: uint64 */
                                     source_cursor: number;
                                     /** @enum {string} */
@@ -10878,20 +13209,38 @@ export interface operations {
                         /**
                          * @default {
                          *       "max_batch_rows": 256,
+                         *       "max_elapsed_ms": 30000,
+                         *       "max_memory_bytes": 67108864,
                          *       "max_output_bytes": 524288,
                          *       "max_rows": 10000,
-                         *       "max_scanned_changes": 100000
+                         *       "max_scanned_changes": 100000,
+                         *       "max_spill_bytes": 268435456
                          *     }
                          */
                         budget?: {
                             /** Format: uint64 */
                             max_batch_rows: number;
+                            /**
+                             * Format: uint64
+                             * @default 30000
+                             */
+                            max_elapsed_ms?: number;
+                            /**
+                             * Format: uint64
+                             * @default 67108864
+                             */
+                            max_memory_bytes?: number;
                             /** Format: uint64 */
                             max_output_bytes: number;
                             /** Format: uint64 */
                             max_rows: number;
                             /** Format: uint64 */
                             max_scanned_changes: number;
+                            /**
+                             * Format: uint64
+                             * @default 268435456
+                             */
+                            max_spill_bytes?: number;
                         };
                         /** Format: uint64 */
                         max_delta_rows: number;
@@ -11500,6 +13849,7 @@ export interface operations {
                                     format_version: number;
                                     /** Format: uint64 */
                                     payload_bytes: number;
+                                    runtime_audit_sha256?: string | null;
                                     /** Format: uint64 */
                                     runtime_commits: number;
                                     /** Format: uint64 */
@@ -11564,6 +13914,7 @@ export interface operations {
                                     format_version: number;
                                     /** Format: uint64 */
                                     payload_bytes: number;
+                                    runtime_audit_sha256?: string | null;
                                     /** Format: uint64 */
                                     runtime_commits: number;
                                     /** Format: uint64 */
@@ -11823,7 +14174,7 @@ export interface operations {
                                 protocol_version: number;
                                 tools: {
                                     /** @enum {string} */
-                                    action: "service_inspect" | "unknown_request" | "session_create" | "session_renew" | "session_close" | "query_execute" | "query_live_poll" | "query_index_ensure" | "query_index_list" | "transaction_begin" | "transaction_preview" | "transaction_commit" | "transaction_abort" | "changefeed_read" | "changefeed_follow" | "vector_collection_ensure" | "vector_collection_list" | "vector_point_retrieve" | "vector_point_scroll" | "vector_search" | "backup_create" | "backup_list" | "restore_create" | "estate_read" | "audit_read" | "diagnostics_read" | "security_admin" | "memory_context_read" | "memory_inspect" | "memory_recall" | "memory_retire" | "memory_write" | "lifecycle_apply" | "project_attune" | "project_route" | "reasoning_read" | "reasoning_write" | "work_plan_read" | "work_plan_control" | "work_plan_verify_execute" | "runtime_tool_catalogue_read";
+                                    action: "service_inspect" | "unknown_request" | "session_create" | "session_renew" | "session_close" | "query_execute" | "query_live_poll" | "query_index_ensure" | "query_index_list" | "transaction_begin" | "transaction_preview" | "transaction_commit" | "transaction_abort" | "changefeed_read" | "changefeed_follow" | "subscription_open" | "subscription_connect" | "subscription_ack" | "subscription_close" | "vector_collection_ensure" | "vector_collection_list" | "vector_point_retrieve" | "vector_point_scroll" | "vector_search" | "backup_create" | "backup_list" | "restore_create" | "estate_read" | "audit_read" | "diagnostics_read" | "security_admin" | "memory_context_read" | "memory_inspect" | "memory_recall" | "memory_retire" | "memory_write" | "lifecycle_apply" | "project_attune" | "project_route" | "reasoning_read" | "reasoning_write" | "work_plan_read" | "work_plan_control" | "work_plan_verify_execute" | "runtime_tool_catalogue_read";
                                     /** @enum {string} */
                                     authorization: "public" | "governed";
                                     /**
@@ -11885,7 +14236,7 @@ export interface operations {
                                 protocol_version: number;
                                 tools: {
                                     /** @enum {string} */
-                                    action: "service_inspect" | "unknown_request" | "session_create" | "session_renew" | "session_close" | "query_execute" | "query_live_poll" | "query_index_ensure" | "query_index_list" | "transaction_begin" | "transaction_preview" | "transaction_commit" | "transaction_abort" | "changefeed_read" | "changefeed_follow" | "vector_collection_ensure" | "vector_collection_list" | "vector_point_retrieve" | "vector_point_scroll" | "vector_search" | "backup_create" | "backup_list" | "restore_create" | "estate_read" | "audit_read" | "diagnostics_read" | "security_admin" | "memory_context_read" | "memory_inspect" | "memory_recall" | "memory_retire" | "memory_write" | "lifecycle_apply" | "project_attune" | "project_route" | "reasoning_read" | "reasoning_write" | "work_plan_read" | "work_plan_control" | "work_plan_verify_execute" | "runtime_tool_catalogue_read";
+                                    action: "service_inspect" | "unknown_request" | "session_create" | "session_renew" | "session_close" | "query_execute" | "query_live_poll" | "query_index_ensure" | "query_index_list" | "transaction_begin" | "transaction_preview" | "transaction_commit" | "transaction_abort" | "changefeed_read" | "changefeed_follow" | "subscription_open" | "subscription_connect" | "subscription_ack" | "subscription_close" | "vector_collection_ensure" | "vector_collection_list" | "vector_point_retrieve" | "vector_point_scroll" | "vector_search" | "backup_create" | "backup_list" | "restore_create" | "estate_read" | "audit_read" | "diagnostics_read" | "security_admin" | "memory_context_read" | "memory_inspect" | "memory_recall" | "memory_retire" | "memory_write" | "lifecycle_apply" | "project_attune" | "project_route" | "reasoning_read" | "reasoning_write" | "work_plan_read" | "work_plan_control" | "work_plan_verify_execute" | "runtime_tool_catalogue_read";
                                     /** @enum {string} */
                                     authorization: "public" | "governed";
                                     /**
@@ -11961,7 +14312,7 @@ export interface operations {
                                      */
                                     action: {
                                         /** @enum {string} */
-                                        action: "service_inspect" | "unknown_request" | "session_create" | "session_renew" | "session_close" | "query_execute" | "query_live_poll" | "query_index_ensure" | "query_index_list" | "transaction_begin" | "transaction_preview" | "transaction_commit" | "transaction_abort" | "changefeed_read" | "changefeed_follow" | "vector_collection_ensure" | "vector_collection_list" | "vector_point_retrieve" | "vector_point_scroll" | "vector_search" | "backup_create" | "backup_list" | "restore_create" | "estate_read" | "audit_read" | "diagnostics_read" | "security_admin" | "memory_context_read" | "memory_inspect" | "memory_recall" | "memory_retire" | "memory_write" | "lifecycle_apply" | "project_attune" | "project_route" | "reasoning_read" | "reasoning_write" | "work_plan_read" | "work_plan_control" | "work_plan_verify_execute" | "runtime_tool_catalogue_read";
+                                        action: "service_inspect" | "unknown_request" | "session_create" | "session_renew" | "session_close" | "query_execute" | "query_live_poll" | "query_index_ensure" | "query_index_list" | "transaction_begin" | "transaction_preview" | "transaction_commit" | "transaction_abort" | "changefeed_read" | "changefeed_follow" | "subscription_open" | "subscription_connect" | "subscription_ack" | "subscription_close" | "vector_collection_ensure" | "vector_collection_list" | "vector_point_retrieve" | "vector_point_scroll" | "vector_search" | "backup_create" | "backup_list" | "restore_create" | "estate_read" | "audit_read" | "diagnostics_read" | "security_admin" | "memory_context_read" | "memory_inspect" | "memory_recall" | "memory_retire" | "memory_write" | "lifecycle_apply" | "project_attune" | "project_route" | "reasoning_read" | "reasoning_write" | "work_plan_read" | "work_plan_control" | "work_plan_verify_execute" | "runtime_tool_catalogue_read";
                                         /** @constant */
                                         source: "fixed";
                                     } | {
@@ -11987,6 +14338,22 @@ export interface operations {
                                 protocol: string;
                                 /** Format: uint16 */
                                 protocol_version: number;
+                                websocket_endpoints: {
+                                    /** @enum {string} */
+                                    authentication: "public" | "api_key" | "session_bearer";
+                                    client_frame_type: string;
+                                    /** @enum {string} */
+                                    connect_action: "service_inspect" | "unknown_request" | "session_create" | "session_renew" | "session_close" | "query_execute" | "query_live_poll" | "query_index_ensure" | "query_index_list" | "transaction_begin" | "transaction_preview" | "transaction_commit" | "transaction_abort" | "changefeed_read" | "changefeed_follow" | "subscription_open" | "subscription_connect" | "subscription_ack" | "subscription_close" | "vector_collection_ensure" | "vector_collection_list" | "vector_point_retrieve" | "vector_point_scroll" | "vector_search" | "backup_create" | "backup_list" | "restore_create" | "estate_read" | "audit_read" | "diagnostics_read" | "security_admin" | "memory_context_read" | "memory_inspect" | "memory_recall" | "memory_retire" | "memory_write" | "lifecycle_apply" | "project_attune" | "project_route" | "reasoning_read" | "reasoning_write" | "work_plan_read" | "work_plan_control" | "work_plan_verify_execute" | "runtime_tool_catalogue_read";
+                                    /**
+                                     * @description A canonical public identifier component.
+                                     *
+                                     *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                     *     labels are separate data and may use arbitrary Unicode.
+                                     */
+                                    operation: string;
+                                    path: string;
+                                    server_frame_type: string;
+                                }[];
                             };
                             /** @constant */
                             status: "ok";
@@ -12030,7 +14397,7 @@ export interface operations {
                                      */
                                     action: {
                                         /** @enum {string} */
-                                        action: "service_inspect" | "unknown_request" | "session_create" | "session_renew" | "session_close" | "query_execute" | "query_live_poll" | "query_index_ensure" | "query_index_list" | "transaction_begin" | "transaction_preview" | "transaction_commit" | "transaction_abort" | "changefeed_read" | "changefeed_follow" | "vector_collection_ensure" | "vector_collection_list" | "vector_point_retrieve" | "vector_point_scroll" | "vector_search" | "backup_create" | "backup_list" | "restore_create" | "estate_read" | "audit_read" | "diagnostics_read" | "security_admin" | "memory_context_read" | "memory_inspect" | "memory_recall" | "memory_retire" | "memory_write" | "lifecycle_apply" | "project_attune" | "project_route" | "reasoning_read" | "reasoning_write" | "work_plan_read" | "work_plan_control" | "work_plan_verify_execute" | "runtime_tool_catalogue_read";
+                                        action: "service_inspect" | "unknown_request" | "session_create" | "session_renew" | "session_close" | "query_execute" | "query_live_poll" | "query_index_ensure" | "query_index_list" | "transaction_begin" | "transaction_preview" | "transaction_commit" | "transaction_abort" | "changefeed_read" | "changefeed_follow" | "subscription_open" | "subscription_connect" | "subscription_ack" | "subscription_close" | "vector_collection_ensure" | "vector_collection_list" | "vector_point_retrieve" | "vector_point_scroll" | "vector_search" | "backup_create" | "backup_list" | "restore_create" | "estate_read" | "audit_read" | "diagnostics_read" | "security_admin" | "memory_context_read" | "memory_inspect" | "memory_recall" | "memory_retire" | "memory_write" | "lifecycle_apply" | "project_attune" | "project_route" | "reasoning_read" | "reasoning_write" | "work_plan_read" | "work_plan_control" | "work_plan_verify_execute" | "runtime_tool_catalogue_read";
                                         /** @constant */
                                         source: "fixed";
                                     } | {
@@ -12056,6 +14423,22 @@ export interface operations {
                                 protocol: string;
                                 /** Format: uint16 */
                                 protocol_version: number;
+                                websocket_endpoints: {
+                                    /** @enum {string} */
+                                    authentication: "public" | "api_key" | "session_bearer";
+                                    client_frame_type: string;
+                                    /** @enum {string} */
+                                    connect_action: "service_inspect" | "unknown_request" | "session_create" | "session_renew" | "session_close" | "query_execute" | "query_live_poll" | "query_index_ensure" | "query_index_list" | "transaction_begin" | "transaction_preview" | "transaction_commit" | "transaction_abort" | "changefeed_read" | "changefeed_follow" | "subscription_open" | "subscription_connect" | "subscription_ack" | "subscription_close" | "vector_collection_ensure" | "vector_collection_list" | "vector_point_retrieve" | "vector_point_scroll" | "vector_search" | "backup_create" | "backup_list" | "restore_create" | "estate_read" | "audit_read" | "diagnostics_read" | "security_admin" | "memory_context_read" | "memory_inspect" | "memory_recall" | "memory_retire" | "memory_write" | "lifecycle_apply" | "project_attune" | "project_route" | "reasoning_read" | "reasoning_write" | "work_plan_read" | "work_plan_control" | "work_plan_verify_execute" | "runtime_tool_catalogue_read";
+                                    /**
+                                     * @description A canonical public identifier component.
+                                     *
+                                     *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                     *     labels are separate data and may use arbitrary Unicode.
+                                     */
+                                    operation: string;
+                                    path: string;
+                                    server_frame_type: string;
+                                }[];
                             };
                             /** @constant */
                             status: "ok";
@@ -12605,6 +14988,433 @@ export interface operations {
             };
         };
     };
+    "subscription-close": {
+        parameters: {
+            query?: never;
+            header: {
+                "X-RRD-Session": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    context: {
+                        /** Format: uint64 */
+                        deadline_unix_ms?: number | null;
+                        idempotency_key?: string | null;
+                        operation_id: string;
+                        request_id: string;
+                    };
+                    payload: {
+                        subscription_id: string;
+                    };
+                    protocol: string;
+                    /** Format: uint16 */
+                    protocol_version: number;
+                    /**
+                     * @description A fully explicit hierarchical identity. No field is inferred from process
+                     *     cwd, connection state, or a human label.
+                     */
+                    resource: {
+                        segments: {
+                            /**
+                             * @description A canonical public identifier component.
+                             *
+                             *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                             *     labels are separate data and may use arbitrary Unicode.
+                             */
+                            id: string;
+                            /** @enum {string} */
+                            kind: "organization" | "estate" | "project" | "instance" | "tenant" | "namespace" | "database" | "table" | "collection" | "record" | "point" | "relation" | "alias" | "cluster" | "node" | "shard" | "replica" | "segment" | "transaction" | "snapshot" | "backup" | "operation";
+                        }[];
+                    };
+                };
+            };
+        };
+        responses: {
+            /** @description Typed RRD response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        operation_id: string;
+                        outcome: {
+                            payload: {
+                                idempotent_replay: boolean;
+                                subscription: {
+                                    /** Format: uint64 */
+                                    acknowledged_cursor: number;
+                                    /** Format: uint64 */
+                                    batch_size: number;
+                                    /** Format: uint64 */
+                                    connection_generation: number;
+                                    /** Format: uint64 */
+                                    head_cursor: number;
+                                    /** Format: uint64 */
+                                    heartbeat_interval_ms: number;
+                                    /** Format: uint64 */
+                                    lease_expires_at_unix_ms: number;
+                                    /** Format: uint16 */
+                                    max_in_flight: number;
+                                    /** Format: uint64 */
+                                    retention_floor_cursor: number;
+                                    /** @enum {string} */
+                                    status: "open" | "closed";
+                                    stream_sha256: string;
+                                    subscription_id: string;
+                                };
+                            };
+                            /** @constant */
+                            status: "ok";
+                        } | {
+                            error: {
+                                /** @enum {string} */
+                                code: "invalid_argument" | "not_found" | "already_exists" | "conflict" | "failed_precondition" | "unauthenticated" | "permission_denied" | "resource_exhausted" | "deadline_exceeded" | "cancelled" | "unavailable" | "corruption" | "unsupported_version" | "internal";
+                                details?: {
+                                    [key: string]: string;
+                                };
+                                message: string;
+                                retryable: boolean;
+                            };
+                            /** @constant */
+                            status: "error";
+                        };
+                        protocol: string;
+                        /** Format: uint16 */
+                        protocol_version: number;
+                        request_id: string;
+                    };
+                };
+            };
+            /** @description Typed RRD error response */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        operation_id: string;
+                        outcome: {
+                            payload: {
+                                idempotent_replay: boolean;
+                                subscription: {
+                                    /** Format: uint64 */
+                                    acknowledged_cursor: number;
+                                    /** Format: uint64 */
+                                    batch_size: number;
+                                    /** Format: uint64 */
+                                    connection_generation: number;
+                                    /** Format: uint64 */
+                                    head_cursor: number;
+                                    /** Format: uint64 */
+                                    heartbeat_interval_ms: number;
+                                    /** Format: uint64 */
+                                    lease_expires_at_unix_ms: number;
+                                    /** Format: uint16 */
+                                    max_in_flight: number;
+                                    /** Format: uint64 */
+                                    retention_floor_cursor: number;
+                                    /** @enum {string} */
+                                    status: "open" | "closed";
+                                    stream_sha256: string;
+                                    subscription_id: string;
+                                };
+                            };
+                            /** @constant */
+                            status: "ok";
+                        } | {
+                            error: {
+                                /** @enum {string} */
+                                code: "invalid_argument" | "not_found" | "already_exists" | "conflict" | "failed_precondition" | "unauthenticated" | "permission_denied" | "resource_exhausted" | "deadline_exceeded" | "cancelled" | "unavailable" | "corruption" | "unsupported_version" | "internal";
+                                details?: {
+                                    [key: string]: string;
+                                };
+                                message: string;
+                                retryable: boolean;
+                            };
+                            /** @constant */
+                            status: "error";
+                        };
+                        protocol: string;
+                        /** Format: uint16 */
+                        protocol_version: number;
+                        request_id: string;
+                    };
+                };
+            };
+        };
+    };
+    "subscription-open": {
+        parameters: {
+            query?: never;
+            header: {
+                "X-RRD-Session": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    context: {
+                        /** Format: uint64 */
+                        deadline_unix_ms?: number | null;
+                        idempotency_key?: string | null;
+                        operation_id: string;
+                        request_id: string;
+                    };
+                    payload: {
+                        /** Format: uint64 */
+                        after_cursor: number;
+                        /** Format: uint64 */
+                        batch_size: number;
+                        /** Format: uint64 */
+                        heartbeat_interval_ms: number;
+                        /** Format: uint64 */
+                        lease_ms: number;
+                        /** Format: uint16 */
+                        max_in_flight: number;
+                        /** Format: uint64 */
+                        retention_cursor_window: number;
+                        /**
+                         * @description The immutable source definition owned by a durable push subscription.
+                         *     Delivery state is deliberately separate: reconnecting never changes which
+                         *     data a subscription means.
+                         */
+                        stream: {
+                            scope: string;
+                            /** @constant */
+                            stream: "changefeed";
+                        } | {
+                            /**
+                             * @default {
+                             *       "max_batch_rows": 256,
+                             *       "max_elapsed_ms": 30000,
+                             *       "max_memory_bytes": 67108864,
+                             *       "max_output_bytes": 524288,
+                             *       "max_rows": 10000,
+                             *       "max_scanned_changes": 100000,
+                             *       "max_spill_bytes": 268435456
+                             *     }
+                             */
+                            budget?: {
+                                /** Format: uint64 */
+                                max_batch_rows: number;
+                                /**
+                                 * Format: uint64
+                                 * @default 30000
+                                 */
+                                max_elapsed_ms?: number;
+                                /**
+                                 * Format: uint64
+                                 * @default 67108864
+                                 */
+                                max_memory_bytes?: number;
+                                /** Format: uint64 */
+                                max_output_bytes: number;
+                                /** Format: uint64 */
+                                max_rows: number;
+                                /** Format: uint64 */
+                                max_scanned_changes: number;
+                                /**
+                                 * Format: uint64
+                                 * @default 268435456
+                                 */
+                                max_spill_bytes?: number;
+                            };
+                            /** Format: uint64 */
+                            max_delta_rows: number;
+                            parameters?: {
+                                [key: string]: {
+                                    /** @constant */
+                                    type: "null";
+                                } | {
+                                    /** @constant */
+                                    type: "bool";
+                                    value: boolean;
+                                } | {
+                                    /** @constant */
+                                    type: "integer";
+                                    /** Format: int64 */
+                                    value: number;
+                                } | {
+                                    /** @constant */
+                                    type: "unsigned";
+                                    /** Format: uint64 */
+                                    value: number;
+                                } | {
+                                    /** @constant */
+                                    type: "decimal";
+                                    value: string;
+                                } | {
+                                    /** @constant */
+                                    type: "string";
+                                    value: string;
+                                } | {
+                                    /** @constant */
+                                    type: "digest";
+                                    value: string;
+                                } | {
+                                    /** @constant */
+                                    type: "list";
+                                    value: components["schemas"]["QueryValue"][];
+                                } | {
+                                    /** @constant */
+                                    type: "map";
+                                    value: {
+                                        [key: string]: components["schemas"]["QueryValue"];
+                                    };
+                                };
+                            };
+                            query: string;
+                            scope: string;
+                            /** @constant */
+                            stream: "live_query";
+                        };
+                        subscription_id: string;
+                    };
+                    protocol: string;
+                    /** Format: uint16 */
+                    protocol_version: number;
+                    /**
+                     * @description A fully explicit hierarchical identity. No field is inferred from process
+                     *     cwd, connection state, or a human label.
+                     */
+                    resource: {
+                        segments: {
+                            /**
+                             * @description A canonical public identifier component.
+                             *
+                             *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                             *     labels are separate data and may use arbitrary Unicode.
+                             */
+                            id: string;
+                            /** @enum {string} */
+                            kind: "organization" | "estate" | "project" | "instance" | "tenant" | "namespace" | "database" | "table" | "collection" | "record" | "point" | "relation" | "alias" | "cluster" | "node" | "shard" | "replica" | "segment" | "transaction" | "snapshot" | "backup" | "operation";
+                        }[];
+                    };
+                };
+            };
+        };
+        responses: {
+            /** @description Typed RRD response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        operation_id: string;
+                        outcome: {
+                            payload: {
+                                idempotent_replay: boolean;
+                                subscription: {
+                                    /** Format: uint64 */
+                                    acknowledged_cursor: number;
+                                    /** Format: uint64 */
+                                    batch_size: number;
+                                    /** Format: uint64 */
+                                    connection_generation: number;
+                                    /** Format: uint64 */
+                                    head_cursor: number;
+                                    /** Format: uint64 */
+                                    heartbeat_interval_ms: number;
+                                    /** Format: uint64 */
+                                    lease_expires_at_unix_ms: number;
+                                    /** Format: uint16 */
+                                    max_in_flight: number;
+                                    /** Format: uint64 */
+                                    retention_floor_cursor: number;
+                                    /** @enum {string} */
+                                    status: "open" | "closed";
+                                    stream_sha256: string;
+                                    subscription_id: string;
+                                };
+                            };
+                            /** @constant */
+                            status: "ok";
+                        } | {
+                            error: {
+                                /** @enum {string} */
+                                code: "invalid_argument" | "not_found" | "already_exists" | "conflict" | "failed_precondition" | "unauthenticated" | "permission_denied" | "resource_exhausted" | "deadline_exceeded" | "cancelled" | "unavailable" | "corruption" | "unsupported_version" | "internal";
+                                details?: {
+                                    [key: string]: string;
+                                };
+                                message: string;
+                                retryable: boolean;
+                            };
+                            /** @constant */
+                            status: "error";
+                        };
+                        protocol: string;
+                        /** Format: uint16 */
+                        protocol_version: number;
+                        request_id: string;
+                    };
+                };
+            };
+            /** @description Typed RRD error response */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        operation_id: string;
+                        outcome: {
+                            payload: {
+                                idempotent_replay: boolean;
+                                subscription: {
+                                    /** Format: uint64 */
+                                    acknowledged_cursor: number;
+                                    /** Format: uint64 */
+                                    batch_size: number;
+                                    /** Format: uint64 */
+                                    connection_generation: number;
+                                    /** Format: uint64 */
+                                    head_cursor: number;
+                                    /** Format: uint64 */
+                                    heartbeat_interval_ms: number;
+                                    /** Format: uint64 */
+                                    lease_expires_at_unix_ms: number;
+                                    /** Format: uint16 */
+                                    max_in_flight: number;
+                                    /** Format: uint64 */
+                                    retention_floor_cursor: number;
+                                    /** @enum {string} */
+                                    status: "open" | "closed";
+                                    stream_sha256: string;
+                                    subscription_id: string;
+                                };
+                            };
+                            /** @constant */
+                            status: "ok";
+                        } | {
+                            error: {
+                                /** @enum {string} */
+                                code: "invalid_argument" | "not_found" | "already_exists" | "conflict" | "failed_precondition" | "unauthenticated" | "permission_denied" | "resource_exhausted" | "deadline_exceeded" | "cancelled" | "unavailable" | "corruption" | "unsupported_version" | "internal";
+                                details?: {
+                                    [key: string]: string;
+                                };
+                                message: string;
+                                retryable: boolean;
+                            };
+                            /** @constant */
+                            status: "error";
+                        };
+                        protocol: string;
+                        /** Format: uint16 */
+                        protocol_version: number;
+                        request_id: string;
+                    };
+                };
+            };
+        };
+    };
     "transaction-begin": {
         parameters: {
             query?: never;
@@ -12958,6 +15768,22 @@ export interface operations {
                             /** @constant */
                             mutation: "put_schema";
                             registry: {
+                                catalogue?: {
+                                    /**
+                                     * @description A canonical public identifier component.
+                                     *
+                                     *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                     *     labels are separate data and may use arbitrary Unicode.
+                                     */
+                                    database: string;
+                                    /**
+                                     * @description A canonical public identifier component.
+                                     *
+                                     *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                     *     labels are separate data and may use arbitrary Unicode.
+                                     */
+                                    namespace: string;
+                                };
                                 /** @default {} */
                                 events?: {
                                     [key: string]: {
@@ -13025,6 +15851,25 @@ export interface operations {
                                 };
                                 /** Format: uint64 */
                                 revision: number;
+                                tables?: {
+                                    [key: string]: {
+                                        /** @default false */
+                                        allow_additional_properties?: boolean;
+                                        /** @enum {string} */
+                                        mode: "strict" | "schemaless";
+                                        /** @enum {string} */
+                                        model: "document" | "relational" | "graph_node" | "graph_relation" | "key_value" | "vector" | "event" | "time_series" | "geo" | "object" | "reasoning_claim" | "reasoning_record" | "reasoning_event" | "lifecycle_record" | "lifecycle_event";
+                                        /** @default {} */
+                                        properties?: {
+                                            [key: string]: {
+                                                /** @default false */
+                                                required?: boolean;
+                                                /** @enum {string} */
+                                                value_type: "null" | "bool" | "integer" | "unsigned" | "decimal" | "string" | "digest" | "list" | "map";
+                                            };
+                                        };
+                                    };
+                                };
                             };
                         } | {
                             /** @constant */
@@ -13737,6 +16582,50 @@ export interface operations {
                                  */
                                 kind: string;
                             } | null;
+                        } | {
+                            /** Format: uint64 */
+                            effective_at: number;
+                            /** @enum {string} */
+                            model: "document" | "relational" | "graph_node" | "graph_relation" | "key_value" | "vector" | "event" | "time_series" | "geo" | "object" | "reasoning_claim" | "reasoning_record" | "reasoning_event" | "lifecycle_record" | "lifecycle_event";
+                            /** @constant */
+                            mutation: "retire_data";
+                            /**
+                             * @description Stable target identity for CRUD and retirement. Append-only events are
+                             *     addressed by their authenticated-log cursor instead of a fabricated user
+                             *     identifier.
+                             */
+                            target: {
+                                /** @constant */
+                                identity: "reference";
+                                reference: {
+                                    /**
+                                     * @description A canonical public identifier component.
+                                     *
+                                     *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                     *     labels are separate data and may use arbitrary Unicode.
+                                     */
+                                    id: string;
+                                    /**
+                                     * @description A canonical public identifier component.
+                                     *
+                                     *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                     *     labels are separate data and may use arbitrary Unicode.
+                                     */
+                                    kind: string;
+                                };
+                            } | {
+                                /** Format: uint64 */
+                                cursor: number;
+                                /** @constant */
+                                identity: "event";
+                                /**
+                                 * @description A canonical public identifier component.
+                                 *
+                                 *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                 *     labels are separate data and may use arbitrary Unicode.
+                                 */
+                                kind: string;
+                            };
                         })[];
                         operation_sha256: string;
                     };
@@ -13886,6 +16775,11 @@ export interface operations {
                         request_id: string;
                     };
                     payload: {
+                        /**
+                         * Format: uint32
+                         * @default 10000
+                         */
+                        max_scanned_changes?: number;
                         mutations: ({
                             /** Format: float */
                             confidence?: number | null;
@@ -13921,6 +16815,22 @@ export interface operations {
                             /** @constant */
                             mutation: "put_schema";
                             registry: {
+                                catalogue?: {
+                                    /**
+                                     * @description A canonical public identifier component.
+                                     *
+                                     *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                     *     labels are separate data and may use arbitrary Unicode.
+                                     */
+                                    database: string;
+                                    /**
+                                     * @description A canonical public identifier component.
+                                     *
+                                     *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                     *     labels are separate data and may use arbitrary Unicode.
+                                     */
+                                    namespace: string;
+                                };
                                 /** @default {} */
                                 events?: {
                                     [key: string]: {
@@ -13988,6 +16898,25 @@ export interface operations {
                                 };
                                 /** Format: uint64 */
                                 revision: number;
+                                tables?: {
+                                    [key: string]: {
+                                        /** @default false */
+                                        allow_additional_properties?: boolean;
+                                        /** @enum {string} */
+                                        mode: "strict" | "schemaless";
+                                        /** @enum {string} */
+                                        model: "document" | "relational" | "graph_node" | "graph_relation" | "key_value" | "vector" | "event" | "time_series" | "geo" | "object" | "reasoning_claim" | "reasoning_record" | "reasoning_event" | "lifecycle_record" | "lifecycle_event";
+                                        /** @default {} */
+                                        properties?: {
+                                            [key: string]: {
+                                                /** @default false */
+                                                required?: boolean;
+                                                /** @enum {string} */
+                                                value_type: "null" | "bool" | "integer" | "unsigned" | "decimal" | "string" | "digest" | "list" | "map";
+                                            };
+                                        };
+                                    };
+                                };
                             };
                         } | {
                             /** @constant */
@@ -14700,7 +17629,58 @@ export interface operations {
                                  */
                                 kind: string;
                             } | null;
+                        } | {
+                            /** Format: uint64 */
+                            effective_at: number;
+                            /** @enum {string} */
+                            model: "document" | "relational" | "graph_node" | "graph_relation" | "key_value" | "vector" | "event" | "time_series" | "geo" | "object" | "reasoning_claim" | "reasoning_record" | "reasoning_event" | "lifecycle_record" | "lifecycle_event";
+                            /** @constant */
+                            mutation: "retire_data";
+                            /**
+                             * @description Stable target identity for CRUD and retirement. Append-only events are
+                             *     addressed by their authenticated-log cursor instead of a fabricated user
+                             *     identifier.
+                             */
+                            target: {
+                                /** @constant */
+                                identity: "reference";
+                                reference: {
+                                    /**
+                                     * @description A canonical public identifier component.
+                                     *
+                                     *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                     *     labels are separate data and may use arbitrary Unicode.
+                                     */
+                                    id: string;
+                                    /**
+                                     * @description A canonical public identifier component.
+                                     *
+                                     *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                     *     labels are separate data and may use arbitrary Unicode.
+                                     */
+                                    kind: string;
+                                };
+                            } | {
+                                /** Format: uint64 */
+                                cursor: number;
+                                /** @constant */
+                                identity: "event";
+                                /**
+                                 * @description A canonical public identifier component.
+                                 *
+                                 *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                 *     labels are separate data and may use arbitrary Unicode.
+                                 */
+                                kind: string;
+                            };
                         })[];
+                        /**
+                         * Format: uint64
+                         * @description Valid-time coordinate for the prospective read-your-writes snapshot.
+                         *     Omission preserves the pre-G05 request shape and selects the server's
+                         *     single request time.
+                         */
+                        valid_at?: number | null;
                     };
                     protocol: string;
                     /** Format: uint16 */
@@ -14736,6 +17716,7 @@ export interface operations {
                         operation_id: string;
                         outcome: {
                             payload: {
+                                idempotent_replay: boolean;
                                 mutations: ({
                                     /** Format: float */
                                     confidence?: number | null;
@@ -14771,6 +17752,22 @@ export interface operations {
                                     /** @constant */
                                     mutation: "put_schema";
                                     registry: {
+                                        catalogue?: {
+                                            /**
+                                             * @description A canonical public identifier component.
+                                             *
+                                             *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                             *     labels are separate data and may use arbitrary Unicode.
+                                             */
+                                            database: string;
+                                            /**
+                                             * @description A canonical public identifier component.
+                                             *
+                                             *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                             *     labels are separate data and may use arbitrary Unicode.
+                                             */
+                                            namespace: string;
+                                        };
                                         /** @default {} */
                                         events: {
                                             [key: string]: {
@@ -14838,6 +17835,25 @@ export interface operations {
                                         };
                                         /** Format: uint64 */
                                         revision: number;
+                                        tables?: {
+                                            [key: string]: {
+                                                /** @default false */
+                                                allow_additional_properties: boolean;
+                                                /** @enum {string} */
+                                                mode: "strict" | "schemaless";
+                                                /** @enum {string} */
+                                                model: "document" | "relational" | "graph_node" | "graph_relation" | "key_value" | "vector" | "event" | "time_series" | "geo" | "object" | "reasoning_claim" | "reasoning_record" | "reasoning_event" | "lifecycle_record" | "lifecycle_event";
+                                                /** @default {} */
+                                                properties: {
+                                                    [key: string]: {
+                                                        /** @default false */
+                                                        required: boolean;
+                                                        /** @enum {string} */
+                                                        value_type: "null" | "bool" | "integer" | "unsigned" | "decimal" | "string" | "digest" | "list" | "map";
+                                                    };
+                                                };
+                                            };
+                                        };
                                     };
                                 } | {
                                     /** @constant */
@@ -15550,8 +18566,1001 @@ export interface operations {
                                          */
                                         kind: string;
                                     } | null;
+                                } | {
+                                    /** Format: uint64 */
+                                    effective_at: number;
+                                    /** @enum {string} */
+                                    model: "document" | "relational" | "graph_node" | "graph_relation" | "key_value" | "vector" | "event" | "time_series" | "geo" | "object" | "reasoning_claim" | "reasoning_record" | "reasoning_event" | "lifecycle_record" | "lifecycle_event";
+                                    /** @constant */
+                                    mutation: "retire_data";
+                                    /**
+                                     * @description Stable target identity for CRUD and retirement. Append-only events are
+                                     *     addressed by their authenticated-log cursor instead of a fabricated user
+                                     *     identifier.
+                                     */
+                                    target: {
+                                        /** @constant */
+                                        identity: "reference";
+                                        reference: {
+                                            /**
+                                             * @description A canonical public identifier component.
+                                             *
+                                             *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                             *     labels are separate data and may use arbitrary Unicode.
+                                             */
+                                            id: string;
+                                            /**
+                                             * @description A canonical public identifier component.
+                                             *
+                                             *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                             *     labels are separate data and may use arbitrary Unicode.
+                                             */
+                                            kind: string;
+                                        };
+                                    } | {
+                                        /** Format: uint64 */
+                                        cursor: number;
+                                        /** @constant */
+                                        identity: "event";
+                                        /**
+                                         * @description A canonical public identifier component.
+                                         *
+                                         *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                         *     labels are separate data and may use arbitrary Unicode.
+                                         */
+                                        kind: string;
+                                    };
                                 })[];
                                 operation_sha256: string;
+                                prospective: {
+                                    entries: {
+                                        /** @enum {string} */
+                                        model: "document" | "relational" | "graph_node" | "graph_relation" | "key_value" | "vector" | "event" | "time_series" | "geo" | "object" | "reasoning_claim" | "reasoning_record" | "reasoning_event" | "lifecycle_record" | "lifecycle_event";
+                                        /**
+                                         * @description Stable target identity for CRUD and retirement. Append-only events are
+                                         *     addressed by their authenticated-log cursor instead of a fabricated user
+                                         *     identifier.
+                                         */
+                                        target: {
+                                            /** @constant */
+                                            identity: "reference";
+                                            reference: {
+                                                /**
+                                                 * @description A canonical public identifier component.
+                                                 *
+                                                 *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                                 *     labels are separate data and may use arbitrary Unicode.
+                                                 */
+                                                id: string;
+                                                /**
+                                                 * @description A canonical public identifier component.
+                                                 *
+                                                 *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                                 *     labels are separate data and may use arbitrary Unicode.
+                                                 */
+                                                kind: string;
+                                            };
+                                        } | {
+                                            /** Format: uint64 */
+                                            cursor: number;
+                                            /** @constant */
+                                            identity: "event";
+                                            /**
+                                             * @description A canonical public identifier component.
+                                             *
+                                             *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                             *     labels are separate data and may use arbitrary Unicode.
+                                             */
+                                            kind: string;
+                                        };
+                                        /**
+                                         * @description Public multi-model mutation vocabulary. It is deliberately independent of
+                                         *     `rrd_core`; adapters lower these values into the authoritative runtime.
+                                         */
+                                        value: {
+                                            /** Format: float */
+                                            confidence?: number | null;
+                                            /** @constant */
+                                            mutation: "assert_claim";
+                                            object: string;
+                                            /**
+                                             * @description A canonical public identifier component.
+                                             *
+                                             *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                             *     labels are separate data and may use arbitrary Unicode.
+                                             */
+                                            predicate: string;
+                                            /**
+                                             * @description A canonical public identifier component.
+                                             *
+                                             *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                             *     labels are separate data and may use arbitrary Unicode.
+                                             */
+                                            producer: string;
+                                            /**
+                                             * @description A canonical public identifier component.
+                                             *
+                                             *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                             *     labels are separate data and may use arbitrary Unicode.
+                                             */
+                                            subject: string;
+                                            /** Format: uint64 */
+                                            tx_time: number;
+                                            /** Format: uint64 */
+                                            valid_from: number;
+                                        } | {
+                                            /** @constant */
+                                            mutation: "put_schema";
+                                            registry: {
+                                                catalogue?: {
+                                                    /**
+                                                     * @description A canonical public identifier component.
+                                                     *
+                                                     *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                                     *     labels are separate data and may use arbitrary Unicode.
+                                                     */
+                                                    database: string;
+                                                    /**
+                                                     * @description A canonical public identifier component.
+                                                     *
+                                                     *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                                     *     labels are separate data and may use arbitrary Unicode.
+                                                     */
+                                                    namespace: string;
+                                                };
+                                                /** @default {} */
+                                                events: {
+                                                    [key: string]: {
+                                                        /** @default false */
+                                                        allow_additional_properties: boolean;
+                                                        /** @default {} */
+                                                        properties: {
+                                                            [key: string]: {
+                                                                /** @default false */
+                                                                required: boolean;
+                                                                /** @enum {string} */
+                                                                value_type: "null" | "bool" | "integer" | "unsigned" | "decimal" | "string" | "digest" | "list" | "map";
+                                                            };
+                                                        };
+                                                        /** @default false */
+                                                        subject_required: boolean;
+                                                        /** @default [] */
+                                                        subject_types: string[];
+                                                    };
+                                                };
+                                                migration: string;
+                                                /** @default {} */
+                                                records: {
+                                                    [key: string]: {
+                                                        /** @default false */
+                                                        allow_additional_properties: boolean;
+                                                        /** @default {} */
+                                                        properties: {
+                                                            [key: string]: {
+                                                                /** @default false */
+                                                                required: boolean;
+                                                                /** @enum {string} */
+                                                                value_type: "null" | "bool" | "integer" | "unsigned" | "decimal" | "string" | "digest" | "list" | "map";
+                                                            };
+                                                        };
+                                                        /** @default [] */
+                                                        unique_properties: string[];
+                                                    };
+                                                };
+                                                /** @default {} */
+                                                relations: {
+                                                    [key: string]: {
+                                                        /** @default false */
+                                                        allow_additional_properties: boolean;
+                                                        /** @default [] */
+                                                        from: string[];
+                                                        /** Format: uint64 */
+                                                        max_incoming?: number | null;
+                                                        /** Format: uint64 */
+                                                        max_outgoing?: number | null;
+                                                        /** @default {} */
+                                                        properties: {
+                                                            [key: string]: {
+                                                                /** @default false */
+                                                                required: boolean;
+                                                                /** @enum {string} */
+                                                                value_type: "null" | "bool" | "integer" | "unsigned" | "decimal" | "string" | "digest" | "list" | "map";
+                                                            };
+                                                        };
+                                                        /** @default [] */
+                                                        to: string[];
+                                                        /** @default false */
+                                                        unique_pair: boolean;
+                                                    };
+                                                };
+                                                /** Format: uint64 */
+                                                revision: number;
+                                                tables?: {
+                                                    [key: string]: {
+                                                        /** @default false */
+                                                        allow_additional_properties: boolean;
+                                                        /** @enum {string} */
+                                                        mode: "strict" | "schemaless";
+                                                        /** @enum {string} */
+                                                        model: "document" | "relational" | "graph_node" | "graph_relation" | "key_value" | "vector" | "event" | "time_series" | "geo" | "object" | "reasoning_claim" | "reasoning_record" | "reasoning_event" | "lifecycle_record" | "lifecycle_event";
+                                                        /** @default {} */
+                                                        properties: {
+                                                            [key: string]: {
+                                                                /** @default false */
+                                                                required: boolean;
+                                                                /** @enum {string} */
+                                                                value_type: "null" | "bool" | "integer" | "unsigned" | "decimal" | "string" | "digest" | "list" | "map";
+                                                            };
+                                                        };
+                                                    };
+                                                };
+                                            };
+                                        } | {
+                                            /** @constant */
+                                            mutation: "put_record";
+                                            /** @default {} */
+                                            properties: {
+                                                [key: string]: {
+                                                    /** @constant */
+                                                    type: "null";
+                                                } | {
+                                                    /** @constant */
+                                                    type: "bool";
+                                                    value: boolean;
+                                                } | {
+                                                    /** @constant */
+                                                    type: "integer";
+                                                    /** Format: int64 */
+                                                    value: number;
+                                                } | {
+                                                    /** @constant */
+                                                    type: "unsigned";
+                                                    /** Format: uint64 */
+                                                    value: number;
+                                                } | {
+                                                    /** @constant */
+                                                    type: "decimal";
+                                                    value: string;
+                                                } | {
+                                                    /** @constant */
+                                                    type: "string";
+                                                    value: string;
+                                                } | {
+                                                    /** @constant */
+                                                    type: "digest";
+                                                    value: string;
+                                                } | {
+                                                    /** @constant */
+                                                    type: "list";
+                                                    value: components["schemas"]["QueryValue"][];
+                                                } | {
+                                                    /** @constant */
+                                                    type: "map";
+                                                    value: {
+                                                        [key: string]: components["schemas"]["QueryValue"];
+                                                    };
+                                                };
+                                            };
+                                            reference: {
+                                                /**
+                                                 * @description A canonical public identifier component.
+                                                 *
+                                                 *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                                 *     labels are separate data and may use arbitrary Unicode.
+                                                 */
+                                                id: string;
+                                                /**
+                                                 * @description A canonical public identifier component.
+                                                 *
+                                                 *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                                 *     labels are separate data and may use arbitrary Unicode.
+                                                 */
+                                                kind: string;
+                                            };
+                                            /** Format: uint64 */
+                                            valid_from: number;
+                                            /** Format: uint64 */
+                                            valid_to?: number | null;
+                                        } | {
+                                            from: {
+                                                /**
+                                                 * @description A canonical public identifier component.
+                                                 *
+                                                 *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                                 *     labels are separate data and may use arbitrary Unicode.
+                                                 */
+                                                id: string;
+                                                /**
+                                                 * @description A canonical public identifier component.
+                                                 *
+                                                 *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                                 *     labels are separate data and may use arbitrary Unicode.
+                                                 */
+                                                kind: string;
+                                            };
+                                            /** @constant */
+                                            mutation: "put_relation";
+                                            /** @default {} */
+                                            properties: {
+                                                [key: string]: {
+                                                    /** @constant */
+                                                    type: "null";
+                                                } | {
+                                                    /** @constant */
+                                                    type: "bool";
+                                                    value: boolean;
+                                                } | {
+                                                    /** @constant */
+                                                    type: "integer";
+                                                    /** Format: int64 */
+                                                    value: number;
+                                                } | {
+                                                    /** @constant */
+                                                    type: "unsigned";
+                                                    /** Format: uint64 */
+                                                    value: number;
+                                                } | {
+                                                    /** @constant */
+                                                    type: "decimal";
+                                                    value: string;
+                                                } | {
+                                                    /** @constant */
+                                                    type: "string";
+                                                    value: string;
+                                                } | {
+                                                    /** @constant */
+                                                    type: "digest";
+                                                    value: string;
+                                                } | {
+                                                    /** @constant */
+                                                    type: "list";
+                                                    value: components["schemas"]["QueryValue"][];
+                                                } | {
+                                                    /** @constant */
+                                                    type: "map";
+                                                    value: {
+                                                        [key: string]: components["schemas"]["QueryValue"];
+                                                    };
+                                                };
+                                            };
+                                            reference: {
+                                                /**
+                                                 * @description A canonical public identifier component.
+                                                 *
+                                                 *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                                 *     labels are separate data and may use arbitrary Unicode.
+                                                 */
+                                                id: string;
+                                                /**
+                                                 * @description A canonical public identifier component.
+                                                 *
+                                                 *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                                 *     labels are separate data and may use arbitrary Unicode.
+                                                 */
+                                                kind: string;
+                                            };
+                                            to: {
+                                                /**
+                                                 * @description A canonical public identifier component.
+                                                 *
+                                                 *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                                 *     labels are separate data and may use arbitrary Unicode.
+                                                 */
+                                                id: string;
+                                                /**
+                                                 * @description A canonical public identifier component.
+                                                 *
+                                                 *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                                 *     labels are separate data and may use arbitrary Unicode.
+                                                 */
+                                                kind: string;
+                                            };
+                                            /** Format: uint64 */
+                                            valid_from: number;
+                                            /** Format: uint64 */
+                                            valid_to?: number | null;
+                                        } | {
+                                            /**
+                                             * @description A canonical public identifier component.
+                                             *
+                                             *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                             *     labels are separate data and may use arbitrary Unicode.
+                                             */
+                                            kind: string;
+                                            /** @constant */
+                                            mutation: "append_event";
+                                            /** @default {} */
+                                            properties: {
+                                                [key: string]: {
+                                                    /** @constant */
+                                                    type: "null";
+                                                } | {
+                                                    /** @constant */
+                                                    type: "bool";
+                                                    value: boolean;
+                                                } | {
+                                                    /** @constant */
+                                                    type: "integer";
+                                                    /** Format: int64 */
+                                                    value: number;
+                                                } | {
+                                                    /** @constant */
+                                                    type: "unsigned";
+                                                    /** Format: uint64 */
+                                                    value: number;
+                                                } | {
+                                                    /** @constant */
+                                                    type: "decimal";
+                                                    value: string;
+                                                } | {
+                                                    /** @constant */
+                                                    type: "string";
+                                                    value: string;
+                                                } | {
+                                                    /** @constant */
+                                                    type: "digest";
+                                                    value: string;
+                                                } | {
+                                                    /** @constant */
+                                                    type: "list";
+                                                    value: components["schemas"]["QueryValue"][];
+                                                } | {
+                                                    /** @constant */
+                                                    type: "map";
+                                                    value: {
+                                                        [key: string]: components["schemas"]["QueryValue"];
+                                                    };
+                                                };
+                                            };
+                                            subject?: {
+                                                /**
+                                                 * @description A canonical public identifier component.
+                                                 *
+                                                 *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                                 *     labels are separate data and may use arbitrary Unicode.
+                                                 */
+                                                id: string;
+                                                /**
+                                                 * @description A canonical public identifier component.
+                                                 *
+                                                 *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                                 *     labels are separate data and may use arbitrary Unicode.
+                                                 */
+                                                kind: string;
+                                            } | null;
+                                        } | {
+                                            /**
+                                             * @description A canonical public identifier component.
+                                             *
+                                             *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                             *     labels are separate data and may use arbitrary Unicode.
+                                             */
+                                            collection_id?: string | null;
+                                            /**
+                                             * @description A canonical public identifier component.
+                                             *
+                                             *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                             *     labels are separate data and may use arbitrary Unicode.
+                                             */
+                                            field: string;
+                                            /** @constant */
+                                            mutation: "put_vector";
+                                            /** @default {} */
+                                            properties: {
+                                                [key: string]: {
+                                                    /** @constant */
+                                                    type: "null";
+                                                } | {
+                                                    /** @constant */
+                                                    type: "bool";
+                                                    value: boolean;
+                                                } | {
+                                                    /** @constant */
+                                                    type: "integer";
+                                                    /** Format: int64 */
+                                                    value: number;
+                                                } | {
+                                                    /** @constant */
+                                                    type: "unsigned";
+                                                    /** Format: uint64 */
+                                                    value: number;
+                                                } | {
+                                                    /** @constant */
+                                                    type: "decimal";
+                                                    value: string;
+                                                } | {
+                                                    /** @constant */
+                                                    type: "string";
+                                                    value: string;
+                                                } | {
+                                                    /** @constant */
+                                                    type: "digest";
+                                                    value: string;
+                                                } | {
+                                                    /** @constant */
+                                                    type: "list";
+                                                    value: components["schemas"]["QueryValue"][];
+                                                } | {
+                                                    /** @constant */
+                                                    type: "map";
+                                                    value: {
+                                                        [key: string]: components["schemas"]["QueryValue"];
+                                                    };
+                                                };
+                                            };
+                                            provenance?: {
+                                                /** Format: uint32 */
+                                                dimensions: number;
+                                                /** @default {} */
+                                                generation_parameters: {
+                                                    [key: string]: {
+                                                        /** @constant */
+                                                        type: "null";
+                                                    } | {
+                                                        /** @constant */
+                                                        type: "bool";
+                                                        value: boolean;
+                                                    } | {
+                                                        /** @constant */
+                                                        type: "integer";
+                                                        /** Format: int64 */
+                                                        value: number;
+                                                    } | {
+                                                        /** @constant */
+                                                        type: "unsigned";
+                                                        /** Format: uint64 */
+                                                        value: number;
+                                                    } | {
+                                                        /** @constant */
+                                                        type: "decimal";
+                                                        value: string;
+                                                    } | {
+                                                        /** @constant */
+                                                        type: "string";
+                                                        value: string;
+                                                    } | {
+                                                        /** @constant */
+                                                        type: "digest";
+                                                        value: string;
+                                                    } | {
+                                                        /** @constant */
+                                                        type: "list";
+                                                        value: components["schemas"]["QueryValue"][];
+                                                    } | {
+                                                        /** @constant */
+                                                        type: "map";
+                                                        value: {
+                                                            [key: string]: components["schemas"]["QueryValue"];
+                                                        };
+                                                    };
+                                                };
+                                                model: string;
+                                                model_sha256: string;
+                                                /** @enum {string} */
+                                                normalization: "none" | "unit_l2";
+                                                source_sha256: string;
+                                            } | null;
+                                            reference: {
+                                                /**
+                                                 * @description A canonical public identifier component.
+                                                 *
+                                                 *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                                 *     labels are separate data and may use arbitrary Unicode.
+                                                 */
+                                                id: string;
+                                                /**
+                                                 * @description A canonical public identifier component.
+                                                 *
+                                                 *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                                 *     labels are separate data and may use arbitrary Unicode.
+                                                 */
+                                                kind: string;
+                                            };
+                                            subject: {
+                                                /**
+                                                 * @description A canonical public identifier component.
+                                                 *
+                                                 *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                                 *     labels are separate data and may use arbitrary Unicode.
+                                                 */
+                                                id: string;
+                                                /**
+                                                 * @description A canonical public identifier component.
+                                                 *
+                                                 *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                                 *     labels are separate data and may use arbitrary Unicode.
+                                                 */
+                                                kind: string;
+                                            };
+                                            /** Format: uint64 */
+                                            valid_from: number;
+                                            /** Format: uint64 */
+                                            valid_to?: number | null;
+                                            value: {
+                                                /** @constant */
+                                                kind: "dense";
+                                                values: number[];
+                                            } | {
+                                                /** Format: uint32 */
+                                                dimensions: number;
+                                                indices: number[];
+                                                /** @constant */
+                                                kind: "sparse";
+                                                values: number[];
+                                            } | {
+                                                /** Format: uint32 */
+                                                dimensions: number;
+                                                /** @constant */
+                                                kind: "multi_dense";
+                                                vectors: number[][];
+                                            };
+                                            /**
+                                             * @description A canonical public identifier component.
+                                             *
+                                             *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                             *     labels are separate data and may use arbitrary Unicode.
+                                             */
+                                            vector_name?: string | null;
+                                        } | {
+                                            /** @constant */
+                                            mutation: "append_series_sample";
+                                            /** Format: uint64 */
+                                            observed_at: number;
+                                            /** @default {} */
+                                            properties: {
+                                                [key: string]: {
+                                                    /** @constant */
+                                                    type: "null";
+                                                } | {
+                                                    /** @constant */
+                                                    type: "bool";
+                                                    value: boolean;
+                                                } | {
+                                                    /** @constant */
+                                                    type: "integer";
+                                                    /** Format: int64 */
+                                                    value: number;
+                                                } | {
+                                                    /** @constant */
+                                                    type: "unsigned";
+                                                    /** Format: uint64 */
+                                                    value: number;
+                                                } | {
+                                                    /** @constant */
+                                                    type: "decimal";
+                                                    value: string;
+                                                } | {
+                                                    /** @constant */
+                                                    type: "string";
+                                                    value: string;
+                                                } | {
+                                                    /** @constant */
+                                                    type: "digest";
+                                                    value: string;
+                                                } | {
+                                                    /** @constant */
+                                                    type: "list";
+                                                    value: components["schemas"]["QueryValue"][];
+                                                } | {
+                                                    /** @constant */
+                                                    type: "map";
+                                                    value: {
+                                                        [key: string]: components["schemas"]["QueryValue"];
+                                                    };
+                                                };
+                                            };
+                                            reference: {
+                                                /**
+                                                 * @description A canonical public identifier component.
+                                                 *
+                                                 *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                                 *     labels are separate data and may use arbitrary Unicode.
+                                                 */
+                                                id: string;
+                                                /**
+                                                 * @description A canonical public identifier component.
+                                                 *
+                                                 *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                                 *     labels are separate data and may use arbitrary Unicode.
+                                                 */
+                                                kind: string;
+                                            };
+                                            series: {
+                                                /**
+                                                 * @description A canonical public identifier component.
+                                                 *
+                                                 *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                                 *     labels are separate data and may use arbitrary Unicode.
+                                                 */
+                                                id: string;
+                                                /**
+                                                 * @description A canonical public identifier component.
+                                                 *
+                                                 *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                                 *     labels are separate data and may use arbitrary Unicode.
+                                                 */
+                                                kind: string;
+                                            };
+                                            value: {
+                                                /** @constant */
+                                                type: "integer";
+                                                /** Format: int64 */
+                                                value: number;
+                                            } | {
+                                                /** @constant */
+                                                type: "unsigned";
+                                                /** Format: uint64 */
+                                                value: number;
+                                            } | {
+                                                /** @constant */
+                                                type: "decimal";
+                                                value: string;
+                                            } | {
+                                                /** @constant */
+                                                type: "bool";
+                                                value: boolean;
+                                            } | {
+                                                /** @constant */
+                                                type: "string";
+                                                value: string;
+                                            };
+                                        } | {
+                                            /**
+                                             * @description A canonical public identifier component.
+                                             *
+                                             *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                             *     labels are separate data and may use arbitrary Unicode.
+                                             */
+                                            field: string;
+                                            /** @constant */
+                                            mutation: "put_geo";
+                                            /** @default {} */
+                                            properties: {
+                                                [key: string]: {
+                                                    /** @constant */
+                                                    type: "null";
+                                                } | {
+                                                    /** @constant */
+                                                    type: "bool";
+                                                    value: boolean;
+                                                } | {
+                                                    /** @constant */
+                                                    type: "integer";
+                                                    /** Format: int64 */
+                                                    value: number;
+                                                } | {
+                                                    /** @constant */
+                                                    type: "unsigned";
+                                                    /** Format: uint64 */
+                                                    value: number;
+                                                } | {
+                                                    /** @constant */
+                                                    type: "decimal";
+                                                    value: string;
+                                                } | {
+                                                    /** @constant */
+                                                    type: "string";
+                                                    value: string;
+                                                } | {
+                                                    /** @constant */
+                                                    type: "digest";
+                                                    value: string;
+                                                } | {
+                                                    /** @constant */
+                                                    type: "list";
+                                                    value: components["schemas"]["QueryValue"][];
+                                                } | {
+                                                    /** @constant */
+                                                    type: "map";
+                                                    value: {
+                                                        [key: string]: components["schemas"]["QueryValue"];
+                                                    };
+                                                };
+                                            };
+                                            reference: {
+                                                /**
+                                                 * @description A canonical public identifier component.
+                                                 *
+                                                 *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                                 *     labels are separate data and may use arbitrary Unicode.
+                                                 */
+                                                id: string;
+                                                /**
+                                                 * @description A canonical public identifier component.
+                                                 *
+                                                 *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                                 *     labels are separate data and may use arbitrary Unicode.
+                                                 */
+                                                kind: string;
+                                            };
+                                            subject: {
+                                                /**
+                                                 * @description A canonical public identifier component.
+                                                 *
+                                                 *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                                 *     labels are separate data and may use arbitrary Unicode.
+                                                 */
+                                                id: string;
+                                                /**
+                                                 * @description A canonical public identifier component.
+                                                 *
+                                                 *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                                 *     labels are separate data and may use arbitrary Unicode.
+                                                 */
+                                                kind: string;
+                                            };
+                                            /** Format: uint64 */
+                                            valid_from: number;
+                                            /** Format: uint64 */
+                                            valid_to?: number | null;
+                                            value: {
+                                                /** @constant */
+                                                kind: "point";
+                                                point: {
+                                                    /** Format: double */
+                                                    latitude: number;
+                                                    /** Format: double */
+                                                    longitude: number;
+                                                };
+                                            } | {
+                                                /** @constant */
+                                                kind: "bounding_box";
+                                                northeast: {
+                                                    /** Format: double */
+                                                    latitude: number;
+                                                    /** Format: double */
+                                                    longitude: number;
+                                                };
+                                                southwest: {
+                                                    /** Format: double */
+                                                    latitude: number;
+                                                    /** Format: double */
+                                                    longitude: number;
+                                                };
+                                            };
+                                        } | {
+                                            /** Format: uint64 */
+                                            length: number;
+                                            media_type: string;
+                                            /** @constant */
+                                            mutation: "publish_object_reference";
+                                            /** @default {} */
+                                            properties: {
+                                                [key: string]: {
+                                                    /** @constant */
+                                                    type: "null";
+                                                } | {
+                                                    /** @constant */
+                                                    type: "bool";
+                                                    value: boolean;
+                                                } | {
+                                                    /** @constant */
+                                                    type: "integer";
+                                                    /** Format: int64 */
+                                                    value: number;
+                                                } | {
+                                                    /** @constant */
+                                                    type: "unsigned";
+                                                    /** Format: uint64 */
+                                                    value: number;
+                                                } | {
+                                                    /** @constant */
+                                                    type: "decimal";
+                                                    value: string;
+                                                } | {
+                                                    /** @constant */
+                                                    type: "string";
+                                                    value: string;
+                                                } | {
+                                                    /** @constant */
+                                                    type: "digest";
+                                                    value: string;
+                                                } | {
+                                                    /** @constant */
+                                                    type: "list";
+                                                    value: components["schemas"]["QueryValue"][];
+                                                } | {
+                                                    /** @constant */
+                                                    type: "map";
+                                                    value: {
+                                                        [key: string]: components["schemas"]["QueryValue"];
+                                                    };
+                                                };
+                                            };
+                                            receipt: {
+                                                backend: string;
+                                                etag?: string | null;
+                                                key: string;
+                                                version?: string | null;
+                                            };
+                                            reference: {
+                                                /**
+                                                 * @description A canonical public identifier component.
+                                                 *
+                                                 *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                                 *     labels are separate data and may use arbitrary Unicode.
+                                                 */
+                                                id: string;
+                                                /**
+                                                 * @description A canonical public identifier component.
+                                                 *
+                                                 *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                                 *     labels are separate data and may use arbitrary Unicode.
+                                                 */
+                                                kind: string;
+                                            };
+                                            sha256: string;
+                                            subject?: {
+                                                /**
+                                                 * @description A canonical public identifier component.
+                                                 *
+                                                 *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                                 *     labels are separate data and may use arbitrary Unicode.
+                                                 */
+                                                id: string;
+                                                /**
+                                                 * @description A canonical public identifier component.
+                                                 *
+                                                 *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                                 *     labels are separate data and may use arbitrary Unicode.
+                                                 */
+                                                kind: string;
+                                            } | null;
+                                        } | {
+                                            /** Format: uint64 */
+                                            effective_at: number;
+                                            /** @enum {string} */
+                                            model: "document" | "relational" | "graph_node" | "graph_relation" | "key_value" | "vector" | "event" | "time_series" | "geo" | "object" | "reasoning_claim" | "reasoning_record" | "reasoning_event" | "lifecycle_record" | "lifecycle_event";
+                                            /** @constant */
+                                            mutation: "retire_data";
+                                            /**
+                                             * @description Stable target identity for CRUD and retirement. Append-only events are
+                                             *     addressed by their authenticated-log cursor instead of a fabricated user
+                                             *     identifier.
+                                             */
+                                            target: {
+                                                /** @constant */
+                                                identity: "reference";
+                                                reference: {
+                                                    /**
+                                                     * @description A canonical public identifier component.
+                                                     *
+                                                     *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                                     *     labels are separate data and may use arbitrary Unicode.
+                                                     */
+                                                    id: string;
+                                                    /**
+                                                     * @description A canonical public identifier component.
+                                                     *
+                                                     *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                                     *     labels are separate data and may use arbitrary Unicode.
+                                                     */
+                                                    kind: string;
+                                                };
+                                            } | {
+                                                /** Format: uint64 */
+                                                cursor: number;
+                                                /** @constant */
+                                                identity: "event";
+                                                /**
+                                                 * @description A canonical public identifier component.
+                                                 *
+                                                 *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                                 *     labels are separate data and may use arbitrary Unicode.
+                                                 */
+                                                kind: string;
+                                            };
+                                        };
+                                    }[];
+                                    /** Format: uint64 */
+                                    known_at_cursor: number;
+                                    read_manifest_sha256: string;
+                                    /** Format: uint64 */
+                                    schema_revision: number;
+                                    scope: string;
+                                    /** Format: uint64 */
+                                    valid_at: number;
+                                };
                                 /** Format: uint64 */
                                 read_cursor: number;
                                 transaction_id: string;
@@ -15588,6 +19597,7 @@ export interface operations {
                         operation_id: string;
                         outcome: {
                             payload: {
+                                idempotent_replay: boolean;
                                 mutations: ({
                                     /** Format: float */
                                     confidence?: number | null;
@@ -15623,6 +19633,22 @@ export interface operations {
                                     /** @constant */
                                     mutation: "put_schema";
                                     registry: {
+                                        catalogue?: {
+                                            /**
+                                             * @description A canonical public identifier component.
+                                             *
+                                             *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                             *     labels are separate data and may use arbitrary Unicode.
+                                             */
+                                            database: string;
+                                            /**
+                                             * @description A canonical public identifier component.
+                                             *
+                                             *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                             *     labels are separate data and may use arbitrary Unicode.
+                                             */
+                                            namespace: string;
+                                        };
                                         /** @default {} */
                                         events: {
                                             [key: string]: {
@@ -15690,6 +19716,25 @@ export interface operations {
                                         };
                                         /** Format: uint64 */
                                         revision: number;
+                                        tables?: {
+                                            [key: string]: {
+                                                /** @default false */
+                                                allow_additional_properties: boolean;
+                                                /** @enum {string} */
+                                                mode: "strict" | "schemaless";
+                                                /** @enum {string} */
+                                                model: "document" | "relational" | "graph_node" | "graph_relation" | "key_value" | "vector" | "event" | "time_series" | "geo" | "object" | "reasoning_claim" | "reasoning_record" | "reasoning_event" | "lifecycle_record" | "lifecycle_event";
+                                                /** @default {} */
+                                                properties: {
+                                                    [key: string]: {
+                                                        /** @default false */
+                                                        required: boolean;
+                                                        /** @enum {string} */
+                                                        value_type: "null" | "bool" | "integer" | "unsigned" | "decimal" | "string" | "digest" | "list" | "map";
+                                                    };
+                                                };
+                                            };
+                                        };
                                     };
                                 } | {
                                     /** @constant */
@@ -16402,8 +20447,1001 @@ export interface operations {
                                          */
                                         kind: string;
                                     } | null;
+                                } | {
+                                    /** Format: uint64 */
+                                    effective_at: number;
+                                    /** @enum {string} */
+                                    model: "document" | "relational" | "graph_node" | "graph_relation" | "key_value" | "vector" | "event" | "time_series" | "geo" | "object" | "reasoning_claim" | "reasoning_record" | "reasoning_event" | "lifecycle_record" | "lifecycle_event";
+                                    /** @constant */
+                                    mutation: "retire_data";
+                                    /**
+                                     * @description Stable target identity for CRUD and retirement. Append-only events are
+                                     *     addressed by their authenticated-log cursor instead of a fabricated user
+                                     *     identifier.
+                                     */
+                                    target: {
+                                        /** @constant */
+                                        identity: "reference";
+                                        reference: {
+                                            /**
+                                             * @description A canonical public identifier component.
+                                             *
+                                             *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                             *     labels are separate data and may use arbitrary Unicode.
+                                             */
+                                            id: string;
+                                            /**
+                                             * @description A canonical public identifier component.
+                                             *
+                                             *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                             *     labels are separate data and may use arbitrary Unicode.
+                                             */
+                                            kind: string;
+                                        };
+                                    } | {
+                                        /** Format: uint64 */
+                                        cursor: number;
+                                        /** @constant */
+                                        identity: "event";
+                                        /**
+                                         * @description A canonical public identifier component.
+                                         *
+                                         *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                         *     labels are separate data and may use arbitrary Unicode.
+                                         */
+                                        kind: string;
+                                    };
                                 })[];
                                 operation_sha256: string;
+                                prospective: {
+                                    entries: {
+                                        /** @enum {string} */
+                                        model: "document" | "relational" | "graph_node" | "graph_relation" | "key_value" | "vector" | "event" | "time_series" | "geo" | "object" | "reasoning_claim" | "reasoning_record" | "reasoning_event" | "lifecycle_record" | "lifecycle_event";
+                                        /**
+                                         * @description Stable target identity for CRUD and retirement. Append-only events are
+                                         *     addressed by their authenticated-log cursor instead of a fabricated user
+                                         *     identifier.
+                                         */
+                                        target: {
+                                            /** @constant */
+                                            identity: "reference";
+                                            reference: {
+                                                /**
+                                                 * @description A canonical public identifier component.
+                                                 *
+                                                 *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                                 *     labels are separate data and may use arbitrary Unicode.
+                                                 */
+                                                id: string;
+                                                /**
+                                                 * @description A canonical public identifier component.
+                                                 *
+                                                 *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                                 *     labels are separate data and may use arbitrary Unicode.
+                                                 */
+                                                kind: string;
+                                            };
+                                        } | {
+                                            /** Format: uint64 */
+                                            cursor: number;
+                                            /** @constant */
+                                            identity: "event";
+                                            /**
+                                             * @description A canonical public identifier component.
+                                             *
+                                             *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                             *     labels are separate data and may use arbitrary Unicode.
+                                             */
+                                            kind: string;
+                                        };
+                                        /**
+                                         * @description Public multi-model mutation vocabulary. It is deliberately independent of
+                                         *     `rrd_core`; adapters lower these values into the authoritative runtime.
+                                         */
+                                        value: {
+                                            /** Format: float */
+                                            confidence?: number | null;
+                                            /** @constant */
+                                            mutation: "assert_claim";
+                                            object: string;
+                                            /**
+                                             * @description A canonical public identifier component.
+                                             *
+                                             *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                             *     labels are separate data and may use arbitrary Unicode.
+                                             */
+                                            predicate: string;
+                                            /**
+                                             * @description A canonical public identifier component.
+                                             *
+                                             *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                             *     labels are separate data and may use arbitrary Unicode.
+                                             */
+                                            producer: string;
+                                            /**
+                                             * @description A canonical public identifier component.
+                                             *
+                                             *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                             *     labels are separate data and may use arbitrary Unicode.
+                                             */
+                                            subject: string;
+                                            /** Format: uint64 */
+                                            tx_time: number;
+                                            /** Format: uint64 */
+                                            valid_from: number;
+                                        } | {
+                                            /** @constant */
+                                            mutation: "put_schema";
+                                            registry: {
+                                                catalogue?: {
+                                                    /**
+                                                     * @description A canonical public identifier component.
+                                                     *
+                                                     *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                                     *     labels are separate data and may use arbitrary Unicode.
+                                                     */
+                                                    database: string;
+                                                    /**
+                                                     * @description A canonical public identifier component.
+                                                     *
+                                                     *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                                     *     labels are separate data and may use arbitrary Unicode.
+                                                     */
+                                                    namespace: string;
+                                                };
+                                                /** @default {} */
+                                                events: {
+                                                    [key: string]: {
+                                                        /** @default false */
+                                                        allow_additional_properties: boolean;
+                                                        /** @default {} */
+                                                        properties: {
+                                                            [key: string]: {
+                                                                /** @default false */
+                                                                required: boolean;
+                                                                /** @enum {string} */
+                                                                value_type: "null" | "bool" | "integer" | "unsigned" | "decimal" | "string" | "digest" | "list" | "map";
+                                                            };
+                                                        };
+                                                        /** @default false */
+                                                        subject_required: boolean;
+                                                        /** @default [] */
+                                                        subject_types: string[];
+                                                    };
+                                                };
+                                                migration: string;
+                                                /** @default {} */
+                                                records: {
+                                                    [key: string]: {
+                                                        /** @default false */
+                                                        allow_additional_properties: boolean;
+                                                        /** @default {} */
+                                                        properties: {
+                                                            [key: string]: {
+                                                                /** @default false */
+                                                                required: boolean;
+                                                                /** @enum {string} */
+                                                                value_type: "null" | "bool" | "integer" | "unsigned" | "decimal" | "string" | "digest" | "list" | "map";
+                                                            };
+                                                        };
+                                                        /** @default [] */
+                                                        unique_properties: string[];
+                                                    };
+                                                };
+                                                /** @default {} */
+                                                relations: {
+                                                    [key: string]: {
+                                                        /** @default false */
+                                                        allow_additional_properties: boolean;
+                                                        /** @default [] */
+                                                        from: string[];
+                                                        /** Format: uint64 */
+                                                        max_incoming?: number | null;
+                                                        /** Format: uint64 */
+                                                        max_outgoing?: number | null;
+                                                        /** @default {} */
+                                                        properties: {
+                                                            [key: string]: {
+                                                                /** @default false */
+                                                                required: boolean;
+                                                                /** @enum {string} */
+                                                                value_type: "null" | "bool" | "integer" | "unsigned" | "decimal" | "string" | "digest" | "list" | "map";
+                                                            };
+                                                        };
+                                                        /** @default [] */
+                                                        to: string[];
+                                                        /** @default false */
+                                                        unique_pair: boolean;
+                                                    };
+                                                };
+                                                /** Format: uint64 */
+                                                revision: number;
+                                                tables?: {
+                                                    [key: string]: {
+                                                        /** @default false */
+                                                        allow_additional_properties: boolean;
+                                                        /** @enum {string} */
+                                                        mode: "strict" | "schemaless";
+                                                        /** @enum {string} */
+                                                        model: "document" | "relational" | "graph_node" | "graph_relation" | "key_value" | "vector" | "event" | "time_series" | "geo" | "object" | "reasoning_claim" | "reasoning_record" | "reasoning_event" | "lifecycle_record" | "lifecycle_event";
+                                                        /** @default {} */
+                                                        properties: {
+                                                            [key: string]: {
+                                                                /** @default false */
+                                                                required: boolean;
+                                                                /** @enum {string} */
+                                                                value_type: "null" | "bool" | "integer" | "unsigned" | "decimal" | "string" | "digest" | "list" | "map";
+                                                            };
+                                                        };
+                                                    };
+                                                };
+                                            };
+                                        } | {
+                                            /** @constant */
+                                            mutation: "put_record";
+                                            /** @default {} */
+                                            properties: {
+                                                [key: string]: {
+                                                    /** @constant */
+                                                    type: "null";
+                                                } | {
+                                                    /** @constant */
+                                                    type: "bool";
+                                                    value: boolean;
+                                                } | {
+                                                    /** @constant */
+                                                    type: "integer";
+                                                    /** Format: int64 */
+                                                    value: number;
+                                                } | {
+                                                    /** @constant */
+                                                    type: "unsigned";
+                                                    /** Format: uint64 */
+                                                    value: number;
+                                                } | {
+                                                    /** @constant */
+                                                    type: "decimal";
+                                                    value: string;
+                                                } | {
+                                                    /** @constant */
+                                                    type: "string";
+                                                    value: string;
+                                                } | {
+                                                    /** @constant */
+                                                    type: "digest";
+                                                    value: string;
+                                                } | {
+                                                    /** @constant */
+                                                    type: "list";
+                                                    value: components["schemas"]["QueryValue"][];
+                                                } | {
+                                                    /** @constant */
+                                                    type: "map";
+                                                    value: {
+                                                        [key: string]: components["schemas"]["QueryValue"];
+                                                    };
+                                                };
+                                            };
+                                            reference: {
+                                                /**
+                                                 * @description A canonical public identifier component.
+                                                 *
+                                                 *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                                 *     labels are separate data and may use arbitrary Unicode.
+                                                 */
+                                                id: string;
+                                                /**
+                                                 * @description A canonical public identifier component.
+                                                 *
+                                                 *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                                 *     labels are separate data and may use arbitrary Unicode.
+                                                 */
+                                                kind: string;
+                                            };
+                                            /** Format: uint64 */
+                                            valid_from: number;
+                                            /** Format: uint64 */
+                                            valid_to?: number | null;
+                                        } | {
+                                            from: {
+                                                /**
+                                                 * @description A canonical public identifier component.
+                                                 *
+                                                 *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                                 *     labels are separate data and may use arbitrary Unicode.
+                                                 */
+                                                id: string;
+                                                /**
+                                                 * @description A canonical public identifier component.
+                                                 *
+                                                 *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                                 *     labels are separate data and may use arbitrary Unicode.
+                                                 */
+                                                kind: string;
+                                            };
+                                            /** @constant */
+                                            mutation: "put_relation";
+                                            /** @default {} */
+                                            properties: {
+                                                [key: string]: {
+                                                    /** @constant */
+                                                    type: "null";
+                                                } | {
+                                                    /** @constant */
+                                                    type: "bool";
+                                                    value: boolean;
+                                                } | {
+                                                    /** @constant */
+                                                    type: "integer";
+                                                    /** Format: int64 */
+                                                    value: number;
+                                                } | {
+                                                    /** @constant */
+                                                    type: "unsigned";
+                                                    /** Format: uint64 */
+                                                    value: number;
+                                                } | {
+                                                    /** @constant */
+                                                    type: "decimal";
+                                                    value: string;
+                                                } | {
+                                                    /** @constant */
+                                                    type: "string";
+                                                    value: string;
+                                                } | {
+                                                    /** @constant */
+                                                    type: "digest";
+                                                    value: string;
+                                                } | {
+                                                    /** @constant */
+                                                    type: "list";
+                                                    value: components["schemas"]["QueryValue"][];
+                                                } | {
+                                                    /** @constant */
+                                                    type: "map";
+                                                    value: {
+                                                        [key: string]: components["schemas"]["QueryValue"];
+                                                    };
+                                                };
+                                            };
+                                            reference: {
+                                                /**
+                                                 * @description A canonical public identifier component.
+                                                 *
+                                                 *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                                 *     labels are separate data and may use arbitrary Unicode.
+                                                 */
+                                                id: string;
+                                                /**
+                                                 * @description A canonical public identifier component.
+                                                 *
+                                                 *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                                 *     labels are separate data and may use arbitrary Unicode.
+                                                 */
+                                                kind: string;
+                                            };
+                                            to: {
+                                                /**
+                                                 * @description A canonical public identifier component.
+                                                 *
+                                                 *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                                 *     labels are separate data and may use arbitrary Unicode.
+                                                 */
+                                                id: string;
+                                                /**
+                                                 * @description A canonical public identifier component.
+                                                 *
+                                                 *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                                 *     labels are separate data and may use arbitrary Unicode.
+                                                 */
+                                                kind: string;
+                                            };
+                                            /** Format: uint64 */
+                                            valid_from: number;
+                                            /** Format: uint64 */
+                                            valid_to?: number | null;
+                                        } | {
+                                            /**
+                                             * @description A canonical public identifier component.
+                                             *
+                                             *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                             *     labels are separate data and may use arbitrary Unicode.
+                                             */
+                                            kind: string;
+                                            /** @constant */
+                                            mutation: "append_event";
+                                            /** @default {} */
+                                            properties: {
+                                                [key: string]: {
+                                                    /** @constant */
+                                                    type: "null";
+                                                } | {
+                                                    /** @constant */
+                                                    type: "bool";
+                                                    value: boolean;
+                                                } | {
+                                                    /** @constant */
+                                                    type: "integer";
+                                                    /** Format: int64 */
+                                                    value: number;
+                                                } | {
+                                                    /** @constant */
+                                                    type: "unsigned";
+                                                    /** Format: uint64 */
+                                                    value: number;
+                                                } | {
+                                                    /** @constant */
+                                                    type: "decimal";
+                                                    value: string;
+                                                } | {
+                                                    /** @constant */
+                                                    type: "string";
+                                                    value: string;
+                                                } | {
+                                                    /** @constant */
+                                                    type: "digest";
+                                                    value: string;
+                                                } | {
+                                                    /** @constant */
+                                                    type: "list";
+                                                    value: components["schemas"]["QueryValue"][];
+                                                } | {
+                                                    /** @constant */
+                                                    type: "map";
+                                                    value: {
+                                                        [key: string]: components["schemas"]["QueryValue"];
+                                                    };
+                                                };
+                                            };
+                                            subject?: {
+                                                /**
+                                                 * @description A canonical public identifier component.
+                                                 *
+                                                 *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                                 *     labels are separate data and may use arbitrary Unicode.
+                                                 */
+                                                id: string;
+                                                /**
+                                                 * @description A canonical public identifier component.
+                                                 *
+                                                 *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                                 *     labels are separate data and may use arbitrary Unicode.
+                                                 */
+                                                kind: string;
+                                            } | null;
+                                        } | {
+                                            /**
+                                             * @description A canonical public identifier component.
+                                             *
+                                             *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                             *     labels are separate data and may use arbitrary Unicode.
+                                             */
+                                            collection_id?: string | null;
+                                            /**
+                                             * @description A canonical public identifier component.
+                                             *
+                                             *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                             *     labels are separate data and may use arbitrary Unicode.
+                                             */
+                                            field: string;
+                                            /** @constant */
+                                            mutation: "put_vector";
+                                            /** @default {} */
+                                            properties: {
+                                                [key: string]: {
+                                                    /** @constant */
+                                                    type: "null";
+                                                } | {
+                                                    /** @constant */
+                                                    type: "bool";
+                                                    value: boolean;
+                                                } | {
+                                                    /** @constant */
+                                                    type: "integer";
+                                                    /** Format: int64 */
+                                                    value: number;
+                                                } | {
+                                                    /** @constant */
+                                                    type: "unsigned";
+                                                    /** Format: uint64 */
+                                                    value: number;
+                                                } | {
+                                                    /** @constant */
+                                                    type: "decimal";
+                                                    value: string;
+                                                } | {
+                                                    /** @constant */
+                                                    type: "string";
+                                                    value: string;
+                                                } | {
+                                                    /** @constant */
+                                                    type: "digest";
+                                                    value: string;
+                                                } | {
+                                                    /** @constant */
+                                                    type: "list";
+                                                    value: components["schemas"]["QueryValue"][];
+                                                } | {
+                                                    /** @constant */
+                                                    type: "map";
+                                                    value: {
+                                                        [key: string]: components["schemas"]["QueryValue"];
+                                                    };
+                                                };
+                                            };
+                                            provenance?: {
+                                                /** Format: uint32 */
+                                                dimensions: number;
+                                                /** @default {} */
+                                                generation_parameters: {
+                                                    [key: string]: {
+                                                        /** @constant */
+                                                        type: "null";
+                                                    } | {
+                                                        /** @constant */
+                                                        type: "bool";
+                                                        value: boolean;
+                                                    } | {
+                                                        /** @constant */
+                                                        type: "integer";
+                                                        /** Format: int64 */
+                                                        value: number;
+                                                    } | {
+                                                        /** @constant */
+                                                        type: "unsigned";
+                                                        /** Format: uint64 */
+                                                        value: number;
+                                                    } | {
+                                                        /** @constant */
+                                                        type: "decimal";
+                                                        value: string;
+                                                    } | {
+                                                        /** @constant */
+                                                        type: "string";
+                                                        value: string;
+                                                    } | {
+                                                        /** @constant */
+                                                        type: "digest";
+                                                        value: string;
+                                                    } | {
+                                                        /** @constant */
+                                                        type: "list";
+                                                        value: components["schemas"]["QueryValue"][];
+                                                    } | {
+                                                        /** @constant */
+                                                        type: "map";
+                                                        value: {
+                                                            [key: string]: components["schemas"]["QueryValue"];
+                                                        };
+                                                    };
+                                                };
+                                                model: string;
+                                                model_sha256: string;
+                                                /** @enum {string} */
+                                                normalization: "none" | "unit_l2";
+                                                source_sha256: string;
+                                            } | null;
+                                            reference: {
+                                                /**
+                                                 * @description A canonical public identifier component.
+                                                 *
+                                                 *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                                 *     labels are separate data and may use arbitrary Unicode.
+                                                 */
+                                                id: string;
+                                                /**
+                                                 * @description A canonical public identifier component.
+                                                 *
+                                                 *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                                 *     labels are separate data and may use arbitrary Unicode.
+                                                 */
+                                                kind: string;
+                                            };
+                                            subject: {
+                                                /**
+                                                 * @description A canonical public identifier component.
+                                                 *
+                                                 *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                                 *     labels are separate data and may use arbitrary Unicode.
+                                                 */
+                                                id: string;
+                                                /**
+                                                 * @description A canonical public identifier component.
+                                                 *
+                                                 *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                                 *     labels are separate data and may use arbitrary Unicode.
+                                                 */
+                                                kind: string;
+                                            };
+                                            /** Format: uint64 */
+                                            valid_from: number;
+                                            /** Format: uint64 */
+                                            valid_to?: number | null;
+                                            value: {
+                                                /** @constant */
+                                                kind: "dense";
+                                                values: number[];
+                                            } | {
+                                                /** Format: uint32 */
+                                                dimensions: number;
+                                                indices: number[];
+                                                /** @constant */
+                                                kind: "sparse";
+                                                values: number[];
+                                            } | {
+                                                /** Format: uint32 */
+                                                dimensions: number;
+                                                /** @constant */
+                                                kind: "multi_dense";
+                                                vectors: number[][];
+                                            };
+                                            /**
+                                             * @description A canonical public identifier component.
+                                             *
+                                             *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                             *     labels are separate data and may use arbitrary Unicode.
+                                             */
+                                            vector_name?: string | null;
+                                        } | {
+                                            /** @constant */
+                                            mutation: "append_series_sample";
+                                            /** Format: uint64 */
+                                            observed_at: number;
+                                            /** @default {} */
+                                            properties: {
+                                                [key: string]: {
+                                                    /** @constant */
+                                                    type: "null";
+                                                } | {
+                                                    /** @constant */
+                                                    type: "bool";
+                                                    value: boolean;
+                                                } | {
+                                                    /** @constant */
+                                                    type: "integer";
+                                                    /** Format: int64 */
+                                                    value: number;
+                                                } | {
+                                                    /** @constant */
+                                                    type: "unsigned";
+                                                    /** Format: uint64 */
+                                                    value: number;
+                                                } | {
+                                                    /** @constant */
+                                                    type: "decimal";
+                                                    value: string;
+                                                } | {
+                                                    /** @constant */
+                                                    type: "string";
+                                                    value: string;
+                                                } | {
+                                                    /** @constant */
+                                                    type: "digest";
+                                                    value: string;
+                                                } | {
+                                                    /** @constant */
+                                                    type: "list";
+                                                    value: components["schemas"]["QueryValue"][];
+                                                } | {
+                                                    /** @constant */
+                                                    type: "map";
+                                                    value: {
+                                                        [key: string]: components["schemas"]["QueryValue"];
+                                                    };
+                                                };
+                                            };
+                                            reference: {
+                                                /**
+                                                 * @description A canonical public identifier component.
+                                                 *
+                                                 *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                                 *     labels are separate data and may use arbitrary Unicode.
+                                                 */
+                                                id: string;
+                                                /**
+                                                 * @description A canonical public identifier component.
+                                                 *
+                                                 *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                                 *     labels are separate data and may use arbitrary Unicode.
+                                                 */
+                                                kind: string;
+                                            };
+                                            series: {
+                                                /**
+                                                 * @description A canonical public identifier component.
+                                                 *
+                                                 *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                                 *     labels are separate data and may use arbitrary Unicode.
+                                                 */
+                                                id: string;
+                                                /**
+                                                 * @description A canonical public identifier component.
+                                                 *
+                                                 *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                                 *     labels are separate data and may use arbitrary Unicode.
+                                                 */
+                                                kind: string;
+                                            };
+                                            value: {
+                                                /** @constant */
+                                                type: "integer";
+                                                /** Format: int64 */
+                                                value: number;
+                                            } | {
+                                                /** @constant */
+                                                type: "unsigned";
+                                                /** Format: uint64 */
+                                                value: number;
+                                            } | {
+                                                /** @constant */
+                                                type: "decimal";
+                                                value: string;
+                                            } | {
+                                                /** @constant */
+                                                type: "bool";
+                                                value: boolean;
+                                            } | {
+                                                /** @constant */
+                                                type: "string";
+                                                value: string;
+                                            };
+                                        } | {
+                                            /**
+                                             * @description A canonical public identifier component.
+                                             *
+                                             *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                             *     labels are separate data and may use arbitrary Unicode.
+                                             */
+                                            field: string;
+                                            /** @constant */
+                                            mutation: "put_geo";
+                                            /** @default {} */
+                                            properties: {
+                                                [key: string]: {
+                                                    /** @constant */
+                                                    type: "null";
+                                                } | {
+                                                    /** @constant */
+                                                    type: "bool";
+                                                    value: boolean;
+                                                } | {
+                                                    /** @constant */
+                                                    type: "integer";
+                                                    /** Format: int64 */
+                                                    value: number;
+                                                } | {
+                                                    /** @constant */
+                                                    type: "unsigned";
+                                                    /** Format: uint64 */
+                                                    value: number;
+                                                } | {
+                                                    /** @constant */
+                                                    type: "decimal";
+                                                    value: string;
+                                                } | {
+                                                    /** @constant */
+                                                    type: "string";
+                                                    value: string;
+                                                } | {
+                                                    /** @constant */
+                                                    type: "digest";
+                                                    value: string;
+                                                } | {
+                                                    /** @constant */
+                                                    type: "list";
+                                                    value: components["schemas"]["QueryValue"][];
+                                                } | {
+                                                    /** @constant */
+                                                    type: "map";
+                                                    value: {
+                                                        [key: string]: components["schemas"]["QueryValue"];
+                                                    };
+                                                };
+                                            };
+                                            reference: {
+                                                /**
+                                                 * @description A canonical public identifier component.
+                                                 *
+                                                 *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                                 *     labels are separate data and may use arbitrary Unicode.
+                                                 */
+                                                id: string;
+                                                /**
+                                                 * @description A canonical public identifier component.
+                                                 *
+                                                 *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                                 *     labels are separate data and may use arbitrary Unicode.
+                                                 */
+                                                kind: string;
+                                            };
+                                            subject: {
+                                                /**
+                                                 * @description A canonical public identifier component.
+                                                 *
+                                                 *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                                 *     labels are separate data and may use arbitrary Unicode.
+                                                 */
+                                                id: string;
+                                                /**
+                                                 * @description A canonical public identifier component.
+                                                 *
+                                                 *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                                 *     labels are separate data and may use arbitrary Unicode.
+                                                 */
+                                                kind: string;
+                                            };
+                                            /** Format: uint64 */
+                                            valid_from: number;
+                                            /** Format: uint64 */
+                                            valid_to?: number | null;
+                                            value: {
+                                                /** @constant */
+                                                kind: "point";
+                                                point: {
+                                                    /** Format: double */
+                                                    latitude: number;
+                                                    /** Format: double */
+                                                    longitude: number;
+                                                };
+                                            } | {
+                                                /** @constant */
+                                                kind: "bounding_box";
+                                                northeast: {
+                                                    /** Format: double */
+                                                    latitude: number;
+                                                    /** Format: double */
+                                                    longitude: number;
+                                                };
+                                                southwest: {
+                                                    /** Format: double */
+                                                    latitude: number;
+                                                    /** Format: double */
+                                                    longitude: number;
+                                                };
+                                            };
+                                        } | {
+                                            /** Format: uint64 */
+                                            length: number;
+                                            media_type: string;
+                                            /** @constant */
+                                            mutation: "publish_object_reference";
+                                            /** @default {} */
+                                            properties: {
+                                                [key: string]: {
+                                                    /** @constant */
+                                                    type: "null";
+                                                } | {
+                                                    /** @constant */
+                                                    type: "bool";
+                                                    value: boolean;
+                                                } | {
+                                                    /** @constant */
+                                                    type: "integer";
+                                                    /** Format: int64 */
+                                                    value: number;
+                                                } | {
+                                                    /** @constant */
+                                                    type: "unsigned";
+                                                    /** Format: uint64 */
+                                                    value: number;
+                                                } | {
+                                                    /** @constant */
+                                                    type: "decimal";
+                                                    value: string;
+                                                } | {
+                                                    /** @constant */
+                                                    type: "string";
+                                                    value: string;
+                                                } | {
+                                                    /** @constant */
+                                                    type: "digest";
+                                                    value: string;
+                                                } | {
+                                                    /** @constant */
+                                                    type: "list";
+                                                    value: components["schemas"]["QueryValue"][];
+                                                } | {
+                                                    /** @constant */
+                                                    type: "map";
+                                                    value: {
+                                                        [key: string]: components["schemas"]["QueryValue"];
+                                                    };
+                                                };
+                                            };
+                                            receipt: {
+                                                backend: string;
+                                                etag?: string | null;
+                                                key: string;
+                                                version?: string | null;
+                                            };
+                                            reference: {
+                                                /**
+                                                 * @description A canonical public identifier component.
+                                                 *
+                                                 *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                                 *     labels are separate data and may use arbitrary Unicode.
+                                                 */
+                                                id: string;
+                                                /**
+                                                 * @description A canonical public identifier component.
+                                                 *
+                                                 *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                                 *     labels are separate data and may use arbitrary Unicode.
+                                                 */
+                                                kind: string;
+                                            };
+                                            sha256: string;
+                                            subject?: {
+                                                /**
+                                                 * @description A canonical public identifier component.
+                                                 *
+                                                 *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                                 *     labels are separate data and may use arbitrary Unicode.
+                                                 */
+                                                id: string;
+                                                /**
+                                                 * @description A canonical public identifier component.
+                                                 *
+                                                 *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                                 *     labels are separate data and may use arbitrary Unicode.
+                                                 */
+                                                kind: string;
+                                            } | null;
+                                        } | {
+                                            /** Format: uint64 */
+                                            effective_at: number;
+                                            /** @enum {string} */
+                                            model: "document" | "relational" | "graph_node" | "graph_relation" | "key_value" | "vector" | "event" | "time_series" | "geo" | "object" | "reasoning_claim" | "reasoning_record" | "reasoning_event" | "lifecycle_record" | "lifecycle_event";
+                                            /** @constant */
+                                            mutation: "retire_data";
+                                            /**
+                                             * @description Stable target identity for CRUD and retirement. Append-only events are
+                                             *     addressed by their authenticated-log cursor instead of a fabricated user
+                                             *     identifier.
+                                             */
+                                            target: {
+                                                /** @constant */
+                                                identity: "reference";
+                                                reference: {
+                                                    /**
+                                                     * @description A canonical public identifier component.
+                                                     *
+                                                     *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                                     *     labels are separate data and may use arbitrary Unicode.
+                                                     */
+                                                    id: string;
+                                                    /**
+                                                     * @description A canonical public identifier component.
+                                                     *
+                                                     *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                                     *     labels are separate data and may use arbitrary Unicode.
+                                                     */
+                                                    kind: string;
+                                                };
+                                            } | {
+                                                /** Format: uint64 */
+                                                cursor: number;
+                                                /** @constant */
+                                                identity: "event";
+                                                /**
+                                                 * @description A canonical public identifier component.
+                                                 *
+                                                 *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                                 *     labels are separate data and may use arbitrary Unicode.
+                                                 */
+                                                kind: string;
+                                            };
+                                        };
+                                    }[];
+                                    /** Format: uint64 */
+                                    known_at_cursor: number;
+                                    read_manifest_sha256: string;
+                                    /** Format: uint64 */
+                                    schema_revision: number;
+                                    scope: string;
+                                    /** Format: uint64 */
+                                    valid_at: number;
+                                };
                                 /** Format: uint64 */
                                 read_cursor: number;
                                 transaction_id: string;

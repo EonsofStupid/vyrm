@@ -21,8 +21,33 @@ use std::io::{Read, Write};
 use std::net::{Shutdown, SocketAddr, TcpStream};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command};
+use std::sync::{Condvar, Mutex};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
+
+const MAX_CONCURRENT_SERVER_FIXTURES: usize = 4;
+const INTEGRATION_IO_TIMEOUT: Duration = Duration::from_secs(30);
+static ACTIVE_SERVER_FIXTURES: Mutex<usize> = Mutex::new(0);
+static SERVER_FIXTURE_AVAILABLE: Condvar = Condvar::new();
+
+struct ServerFixturePermit;
+
+fn acquire_server_fixture() -> ServerFixturePermit {
+    let mut active = ACTIVE_SERVER_FIXTURES.lock().unwrap();
+    while *active >= MAX_CONCURRENT_SERVER_FIXTURES {
+        active = SERVER_FIXTURE_AVAILABLE.wait(active).unwrap();
+    }
+    *active += 1;
+    ServerFixturePermit
+}
+
+impl Drop for ServerFixturePermit {
+    fn drop(&mut self) {
+        let mut active = ACTIVE_SERVER_FIXTURES.lock().unwrap();
+        *active -= 1;
+        SERVER_FIXTURE_AVAILABLE.notify_one();
+    }
+}
 
 fn estate_context(at: u64, operation: &str) -> rrd_estate::MutationContext {
     rrd_estate::MutationContext {
@@ -37,6 +62,7 @@ struct RunningServer {
     address: SocketAddr,
     shutdown: Option<tokio::sync::oneshot::Sender<()>>,
     thread: Option<JoinHandle<std::result::Result<(), HttpError>>>,
+    _fixture: ServerFixturePermit,
 }
 
 struct RunningServerProcess {
@@ -49,7 +75,7 @@ struct RunningServerProcess {
 impl RunningServerProcess {
     fn stop(mut self) {
         std::fs::write(&self.shutdown_request, b"stop\n").unwrap();
-        let deadline = Instant::now() + Duration::from_secs(5);
+        let deadline = Instant::now() + INTEGRATION_IO_TIMEOUT;
         let status = loop {
             if let Some(status) = self.child.as_mut().unwrap().try_wait().unwrap() {
                 break status;
@@ -100,6 +126,7 @@ impl Drop for RunningServer {
 }
 
 fn start(root: &Path) -> RunningServer {
+    let fixture = acquire_server_fixture();
     let token_key = load_or_create_token_key(&root.join("RRD.SERVER.SECRET")).unwrap();
     let engine =
         RrdEngine::open(root, CanonicalId::new("socket-test").unwrap(), token_key).unwrap();
@@ -107,7 +134,9 @@ fn start(root: &Path) -> RunningServer {
     let address = server.local_addr();
     let (shutdown, receiver) = tokio::sync::oneshot::channel();
     let thread = std::thread::spawn(move || {
-        tokio::runtime::Runtime::new()
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
             .unwrap()
             .block_on(server.serve_until(async move {
                 let _ = receiver.await;
@@ -117,6 +146,7 @@ fn start(root: &Path) -> RunningServer {
         address,
         shutdown: Some(shutdown),
         thread: Some(thread),
+        _fixture: fixture,
     }
 }
 
@@ -146,7 +176,7 @@ fn http(
 ) -> (u16, Value) {
     let mut stream = TcpStream::connect(address).unwrap();
     stream
-        .set_read_timeout(Some(Duration::from_secs(5)))
+        .set_read_timeout(Some(INTEGRATION_IO_TIMEOUT))
         .unwrap();
     write!(
         stream,
@@ -217,6 +247,30 @@ fn post_with_api_key(
         ],
         &body,
     )
+}
+
+fn assert_tree_excludes(root: &Path, secrets: &[&str]) {
+    let mut pending = vec![root.to_path_buf()];
+    while let Some(path) = pending.pop() {
+        for entry in std::fs::read_dir(path).unwrap() {
+            let entry = entry.unwrap();
+            let file_type = entry.file_type().unwrap();
+            if file_type.is_dir() {
+                pending.push(entry.path());
+            } else if file_type.is_file() {
+                let bytes = std::fs::read(entry.path()).unwrap();
+                for secret in secrets {
+                    assert!(
+                        !bytes
+                            .windows(secret.len())
+                            .any(|window| window == secret.as_bytes()),
+                        "raw credential reached {}",
+                        entry.path().display()
+                    );
+                }
+            }
+        }
+    }
 }
 
 fn delete(
@@ -447,7 +501,7 @@ fn initialized_security_authority_binds_sessions_and_denies_ungranted_routes() {
                 "max_batch_rows": 10
             }
         }),
-        None,
+        Some("prepare-data"),
         None,
     );
     let (status, response) = post(&server, "/v1/query", &query, Some((session, token)));
@@ -522,6 +576,8 @@ fn initialized_security_authority_binds_sessions_and_denies_ungranted_routes() {
     let encoded = serde_json::to_string(&journal).unwrap();
     assert!(!encoded.contains("local-api-key"));
     assert!(!encoded.contains("ApiKey"));
+    drop(reopened);
+    assert_tree_excludes(&root, &["local-api-key", token]);
 }
 
 #[test]
@@ -616,7 +672,7 @@ fn bounded_changefeed_follow_wakes_on_a_commit_and_times_out_at_the_same_cursor(
                 "after_cursor": 2,
                 "limit": 8
             },
-            "wait_timeout_ms": 1_000
+            "wait_timeout_ms": 5_000
         }),
         None,
         None,
@@ -727,7 +783,7 @@ fn bounded_changefeed_follow_wakes_on_a_commit_and_times_out_at_the_same_cursor(
                 "max_batch_rows": 10
             },
             "max_delta_rows": 10,
-            "wait_timeout_ms": 1_000
+            "wait_timeout_ms": 5_000
         }),
         None,
         None,
@@ -1149,6 +1205,65 @@ fn data_transaction_atomically_commits_every_public_model_and_replays_after_rest
         }
     ]);
     let typed: Vec<TransactionMutation> = serde_json::from_value(mutations.clone()).unwrap();
+    let preview = envelope(
+        json!({
+            "mutations": mutations.clone(),
+            "valid_at": u64::MAX,
+            "max_scanned_changes": 100
+        }),
+        Some("prepare-data"),
+        None,
+    );
+    let preview_path = format!("/v1/transactions/{transaction_id}/preview");
+    let (status, previewed) = post(
+        &server,
+        &preview_path,
+        &preview,
+        Some((&session_id, &token)),
+    );
+    assert_eq!(status, 200, "{previewed}");
+    assert_eq!(payload(&previewed)["read_cursor"], 0);
+    assert_eq!(payload(&previewed)["idempotent_replay"], false);
+    assert_eq!(payload(&previewed)["prospective"]["known_at_cursor"], 11);
+    assert_eq!(payload(&previewed)["prospective"]["schema_revision"], 1);
+    assert_eq!(
+        payload(&previewed)["prospective"]["entries"]
+            .as_array()
+            .unwrap()
+            .len(),
+        9
+    );
+    let prospective = payload(&previewed)["prospective"].clone();
+    let (status, ready) = http(server.address, "GET", "/v1/health/ready", &[], &[]);
+    assert_eq!(status, 200, "{ready}");
+    assert_eq!(payload(&ready)["runtime_cursor"], 0);
+
+    let mut substituted_preview = preview.clone();
+    substituted_preview["payload"]["mutations"][2]["properties"]["title"]["value"] =
+        json!("Substituted");
+    let (status, conflict) = post(
+        &server,
+        &preview_path,
+        &substituted_preview,
+        Some((&session_id, &token)),
+    );
+    assert_eq!(status, 409, "{conflict}");
+    server.stop();
+
+    let server = start(&root);
+    let (status, replayed_preview) = post(
+        &server,
+        &preview_path,
+        &preview,
+        Some((&session_id, &token)),
+    );
+    assert_eq!(status, 200, "{replayed_preview}");
+    assert_eq!(payload(&replayed_preview)["idempotent_replay"], true);
+    assert_eq!(payload(&replayed_preview)["prospective"], prospective);
+    let (status, ready) = http(server.address, "GET", "/v1/health/ready", &[], &[]);
+    assert_eq!(status, 200, "{ready}");
+    assert_eq!(payload(&ready)["runtime_cursor"], 0);
+
     let operation_sha256 = transaction_operation_sha256(&typed);
     let commit = envelope(
         json!({
@@ -1784,6 +1899,7 @@ fn binary_refuses_remote_bind() {
 
 #[test]
 fn standalone_daemon_process_passes_the_shared_corpus_and_exclusively_owns_its_root() {
+    let _fixture = acquire_server_fixture();
     let temporary = tempfile::tempdir().unwrap();
     let project = temporary.path().join("project");
     std::fs::create_dir(&project).unwrap();
@@ -1808,7 +1924,7 @@ fn standalone_daemon_process_passes_the_shared_corpus_and_exclusively_owns_its_r
         ])
         .spawn()
         .unwrap();
-    let deadline = Instant::now() + Duration::from_secs(5);
+    let deadline = Instant::now() + INTEGRATION_IO_TIMEOUT;
     while !ready.is_file() {
         if let Some(status) = child.try_wait().unwrap() {
             panic!("rrd-server child exited before readiness: {status}");
@@ -2084,7 +2200,11 @@ fn real_socket_exercises_lifecycle_commit_and_restart_replay() {
         "producer": "socket-test",
         "confidence": 0.95,
     }]);
-    let preview = envelope(json!({"mutations": mutations.clone()}), None, None);
+    let preview = envelope(
+        json!({"mutations": mutations.clone()}),
+        Some("prepare-claims"),
+        None,
+    );
     let (status, previewed) = post(
         &server,
         &format!("/v1/transactions/{transaction_id}/preview"),
@@ -2433,8 +2553,8 @@ fn concurrent_same_commit_is_single_acceptance_and_retry_converges() {
 }
 
 #[test]
-fn disconnect_after_commit_send_converges_on_durable_retry() {
-    let (_temporary, _root, server) = start_root();
+fn cancelled_data_commit_restarts_and_converges_on_durable_retry() {
+    let (_temporary, root, server) = start_root();
     let create = envelope(
         json!({
             "limits": {
@@ -2450,7 +2570,7 @@ fn disconnect_after_commit_send_converges_on_durable_retry() {
     let session_id = payload(&created)["session_id"].as_str().unwrap().to_owned();
     let token = payload(&created)["token"].as_str().unwrap().to_owned();
     let begin = envelope(
-        json!({"scope": "claims", "timeout_ms": 60_000}),
+        json!({"scope": "data", "timeout_ms": 60_000}),
         Some("begin-key"),
         None,
     );
@@ -2464,16 +2584,8 @@ fn disconnect_after_commit_send_converges_on_durable_retry() {
         .as_str()
         .unwrap()
         .to_owned();
-    let mutations = json!([{
-        "mutation": "assert_claim",
-        "subject": "document-1",
-        "predicate": "contains",
-        "object": "disconnect",
-        "valid_from": 1,
-        "tx_time": 1,
-        "producer": "socket-test"
-    }]);
-    let typed: Vec<TransactionMutation> = serde_json::from_value(mutations.clone()).unwrap();
+    let typed = deployment_mutations();
+    let mutations = serde_json::to_value(&typed).unwrap();
     let commit = envelope(
         json!({
             "operation_sha256": transaction_operation_sha256(&typed),
@@ -2496,9 +2608,11 @@ fn disconnect_after_commit_send_converges_on_durable_retry() {
     stream.write_all(&body).unwrap();
     stream.flush().unwrap();
     stream.shutdown(Shutdown::Write).unwrap();
-    std::thread::sleep(Duration::from_millis(20));
+    std::thread::sleep(Duration::from_millis(50));
     drop(stream);
+    server.stop();
 
+    let server = start(&root);
     let (status, first_retry) = post(&server, &commit_path, &commit, Some((&session_id, &token)));
     assert_eq!(status, 200);
     assert!(payload(&first_retry)["idempotent_replay"].is_boolean());
@@ -2506,5 +2620,6 @@ fn disconnect_after_commit_send_converges_on_durable_retry() {
     assert_eq!(status, 200);
     assert_eq!(payload(&converged)["idempotent_replay"], true);
     let (_, ready) = http(server.address, "GET", "/v1/health/ready", &[], &[]);
-    assert_eq!(payload(&ready)["claim_sequence"], 1);
+    assert_eq!(payload(&ready)["runtime_cursor"], 3);
+    assert_eq!(payload(&ready)["claim_sequence"], 0);
 }

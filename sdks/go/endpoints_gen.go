@@ -27,6 +27,8 @@ const (
 	OperationSessionClose             OperationID = "session-close"
 	OperationSessionCreate            OperationID = "session-create"
 	OperationSessionRenew             OperationID = "session-renew"
+	OperationSubscriptionClose        OperationID = "subscription-close"
+	OperationSubscriptionOpen         OperationID = "subscription-open"
 	OperationTransactionAbort         OperationID = "transaction-abort"
 	OperationTransactionBegin         OperationID = "transaction-begin"
 	OperationTransactionCommit        OperationID = "transaction-commit"
@@ -61,10 +63,12 @@ var endpoints = map[OperationID]Endpoint{
 	OperationSessionClose:             {Method: "DELETE", Path: "/v1/sessions/{session}", Authentication: "session_bearer", Mutation: true},
 	OperationSessionCreate:            {Method: "POST", Path: "/v1/sessions", Authentication: "api_key", Mutation: true},
 	OperationSessionRenew:             {Method: "POST", Path: "/v1/sessions/{session}/renew", Authentication: "session_bearer", Mutation: true},
+	OperationSubscriptionClose:        {Method: "POST", Path: "/v1/subscriptions/close", Authentication: "session_bearer", Mutation: true},
+	OperationSubscriptionOpen:         {Method: "POST", Path: "/v1/subscriptions/open", Authentication: "session_bearer", Mutation: true},
 	OperationTransactionAbort:         {Method: "DELETE", Path: "/v1/transactions/{transaction}", Authentication: "session_bearer", Mutation: true},
 	OperationTransactionBegin:         {Method: "POST", Path: "/v1/transactions", Authentication: "session_bearer", Mutation: true},
 	OperationTransactionCommit:        {Method: "POST", Path: "/v1/transactions/{transaction}/commit", Authentication: "session_bearer", Mutation: true},
-	OperationTransactionPreview:       {Method: "POST", Path: "/v1/transactions/{transaction}/preview", Authentication: "session_bearer", Mutation: false},
+	OperationTransactionPreview:       {Method: "POST", Path: "/v1/transactions/{transaction}/preview", Authentication: "session_bearer", Mutation: true},
 	OperationVectorCollectionEnsure:   {Method: "POST", Path: "/v1/vector/collections/ensure", Authentication: "session_bearer", Mutation: true},
 	OperationVectorCollectionList:     {Method: "POST", Path: "/v1/vector/collections/list", Authentication: "session_bearer", Mutation: false},
 	OperationVectorPointRetrieve:      {Method: "POST", Path: "/v1/vector/points/retrieve", Authentication: "session_bearer", Mutation: false},

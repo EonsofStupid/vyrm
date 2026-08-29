@@ -23,7 +23,7 @@ const raw = execFileSync(
   { encoding: "utf8", maxBuffer: 16 * 1024 * 1024 },
 );
 const document: unknown = JSON.parse(raw);
-const generatedSchema = `${astToString(await openapiTS(document as never))}\n`;
+const generatedSchema = `${astToString(await openapiTS(document as never)).trimEnd()}\n`;
 const source = document as {
   paths: Record<
     string,
