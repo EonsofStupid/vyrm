@@ -332,6 +332,14 @@ from the same stamped generation.
 
 The vector path is one branch of the RRD plan, not a side database:
 
+The versioned v1 collection, point, payload-index, and deletion semantics are
+specified in [`rrd-vector-collections-v1.md`](rrd-vector-collections-v1.md).
+Collection and payload-index transitions use the same scope catalogue/CAS
+authority; batch point upsert and valid-time retirement use the shared runtime
+transaction coordinator. Deletion cannot remove a collection while any latest
+point version remains live or future-effective, or while a named vector still
+owns an active HNSW/TurboQuant artifact.
+
 ```text
 database catalogue
   → resolve collection or same-kind alias

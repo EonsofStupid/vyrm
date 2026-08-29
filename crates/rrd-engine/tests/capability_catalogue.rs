@@ -91,7 +91,6 @@ fn required_unimplemented_foundation_is_visible_and_not_falsely_available() {
         "semantic-code-search",
         "schema-administration",
         "graph-administration",
-        "vector-collection-delete",
         "full-text-search",
         "deployment-in-memory",
         "deployment-wasm-browser",
@@ -170,6 +169,33 @@ fn required_unimplemented_foundation_is_visible_and_not_falsely_available() {
                     .as_deref()
                     .is_some_and(|reason| reason.contains("G06")))
     }));
+
+    for id in [
+        "vector-collection-delete",
+        "vector-payload-index-administration",
+    ] {
+        let capability = catalogue
+            .capabilities
+            .iter()
+            .find(|capability| capability.id == id)
+            .unwrap_or_else(|| panic!("missing vector engine capability {id}"));
+        let engine = capability
+            .bindings
+            .iter()
+            .find(|binding| binding.surface == ProductSurface::Engine)
+            .unwrap();
+        assert_eq!(engine.disposition, SurfaceDisposition::Available);
+        assert!(!engine.entrypoints.is_empty());
+        assert!(capability.bindings.iter().all(|binding| {
+            binding.surface == ProductSurface::Engine
+                || (binding.disposition == SurfaceDisposition::Planned
+                    && binding.entrypoints.is_empty()
+                    && binding
+                        .reason
+                        .as_deref()
+                        .is_some_and(|reason| reason.contains("G06")))
+        }));
+    }
 }
 
 #[test]

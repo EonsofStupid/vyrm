@@ -32,9 +32,10 @@ pub use catalog::{
     VECTOR_ARTIFACT_CATALOG_VERSION, VECTOR_ARTIFACT_RECORD_TYPE,
 };
 pub use collection::{
-    CollectionCatalogue, CollectionEntry, CollectionError, CollectionMutationContext,
-    CollectionOperationReceipt, NamedVectorConfig, VectorCollectionDefinition,
-    VectorCollectionRepository, VectorMemoryTier, VectorValueKind,
+    CollectionCatalogue, CollectionDeletionReceipt, CollectionEntry, CollectionError,
+    CollectionMutationContext, CollectionOperationReceipt, NamedVectorConfig,
+    PayloadIndexDefinition, PayloadIndexEntry, PayloadIndexKind, PayloadIndexOperationReceipt,
+    VectorCollectionDefinition, VectorCollectionRepository, VectorMemoryTier, VectorValueKind,
     VECTOR_COLLECTION_CATALOGUE_VERSION,
 };
 pub use compact::{

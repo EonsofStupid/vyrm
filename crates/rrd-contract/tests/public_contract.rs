@@ -2,24 +2,25 @@ use rrd_contract::{
     transaction_operation_sha256, BeginTransaction, CanonicalId, CapabilityDescriptor,
     CapabilityStatus, CloseSession, CommitReceipt, CommitTransaction, CorrelationId,
     CreateInstanceBackup, DataCatalogueIdentity, DataLogicalModel, DataRecordSchema, DataReference,
-    DataSchemaMode, DataSchemaRegistry, DataSnapshot, DataTableSchema, DataTarget, DeploymentMode,
-    EnsureQueryIndex, EnsureVectorCollection, EnsureVectorIndex, ErrorBody, ErrorCode,
+    DataSchemaMode, DataSchemaRegistry, DataSnapshot, DataTableSchema, DataTarget,
+    DeleteVectorCollection, DeleteVectorPayloadIndex, DeploymentMode, EnsureQueryIndex,
+    EnsureVectorCollection, EnsureVectorIndex, EnsureVectorPayloadIndex, ErrorBody, ErrorCode,
     EstateActivityPolicySnapshot, EstateBackupJobSnapshot, EstateBackupJobState,
     EstateBackupJobsSnapshot, EstateMutationResult, EstateSnapshot, ExecuteQuery,
     ExecuteQueryTransaction, FollowChangefeed, ForwardRollbackCounts, ForwardRollbackRequest,
-    HybridFusion, IdempotencyBinding, ListQueryIndexes, ListVectorCollections, Liveness,
-    NamedVectorDefinition, PollLiveQuery, PreviewTransaction, ProductCapability,
-    ProductCapabilityCatalogue, ProductSurface, QueryBudget, QueryExecutionAnalysisSnapshot,
-    QueryExecutionSnapshot, QueryIndexKind, QueryPlanCandidate, QueryPlanSnapshot, QueryResult,
-    QueryRowSnapshot, QueryValue, ReadAudit, ReadChangefeed, ReadDataSnapshot, ReadEstate,
-    Readiness, RenewSession, RequestContext, RequestEnvelope, ResourceId, ResourceKind,
-    ResourcePath, ResponseEnvelope, ResponseOutcome, RestoreInstanceBackup, SearchHybrid,
-    SearchVectors, ServiceCapabilities, SessionEndState, SessionLease, SessionLimits,
-    SessionTermination, SurfaceBinding, SurfaceDisposition, TransactionMutation,
-    TransactionPreview, TransactionState, VectorIndexConfiguration, VectorMemoryTier,
-    VectorPayloadCondition, VectorPayloadFilter, VectorPayloadOperator, VectorQuantizationBits,
-    VectorSearchMetric, VectorSearchMode, VectorSearchQuery, VectorValueKind, PROTOCOL,
-    PROTOCOL_VERSION,
+    HybridFusion, IdempotencyBinding, ListQueryIndexes, ListVectorCollections,
+    ListVectorPayloadIndexes, Liveness, NamedVectorDefinition, PollLiveQuery, PreviewTransaction,
+    ProductCapability, ProductCapabilityCatalogue, ProductSurface, QueryBudget,
+    QueryExecutionAnalysisSnapshot, QueryExecutionSnapshot, QueryIndexKind, QueryPlanCandidate,
+    QueryPlanSnapshot, QueryResult, QueryRowSnapshot, QueryValue, ReadAudit, ReadChangefeed,
+    ReadDataSnapshot, ReadEstate, Readiness, RenewSession, RequestContext, RequestEnvelope,
+    ResourceId, ResourceKind, ResourcePath, ResponseEnvelope, ResponseOutcome,
+    RestoreInstanceBackup, SearchHybrid, SearchVectors, ServiceCapabilities, SessionEndState,
+    SessionLease, SessionLimits, SessionTermination, SurfaceBinding, SurfaceDisposition,
+    TransactionMutation, TransactionPreview, TransactionState, VectorIndexConfiguration,
+    VectorMemoryTier, VectorPayloadCondition, VectorPayloadFilter, VectorPayloadIndexKind,
+    VectorPayloadOperator, VectorQuantizationBits, VectorSearchMetric, VectorSearchMode,
+    VectorSearchQuery, VectorValueKind, PROTOCOL, PROTOCOL_VERSION,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -612,6 +613,43 @@ fn vector_collection_contract_is_named_bounded_and_search_addressable() {
     }
     .validate()
     .unwrap();
+    EnsureVectorPayloadIndex {
+        scope: "instance:project-alpha".into(),
+        collection_id: CanonicalId::new("documents").unwrap(),
+        field: CanonicalId::new("tenant").unwrap(),
+        kind: VectorPayloadIndexKind::Keyword,
+    }
+    .validate()
+    .unwrap();
+    ListVectorPayloadIndexes {
+        scope: "instance:project-alpha".into(),
+        collection_id: CanonicalId::new("documents").unwrap(),
+    }
+    .validate()
+    .unwrap();
+    DeleteVectorPayloadIndex {
+        scope: "instance:project-alpha".into(),
+        collection_id: CanonicalId::new("documents").unwrap(),
+        field: CanonicalId::new("tenant").unwrap(),
+    }
+    .validate()
+    .unwrap();
+    DeleteVectorCollection {
+        scope: "instance:project-alpha".into(),
+        collection_id: CanonicalId::new("documents").unwrap(),
+        valid_at: 42,
+        max_scanned_changes: 10_000,
+    }
+    .validate()
+    .unwrap();
+    assert!(DeleteVectorCollection {
+        scope: "instance:project-alpha".into(),
+        collection_id: CanonicalId::new("documents").unwrap(),
+        valid_at: 0,
+        max_scanned_changes: 10_000,
+    }
+    .validate()
+    .is_err());
     EnsureVectorIndex {
         scope: "instance:project-alpha".into(),
         collection_id: CanonicalId::new("documents").unwrap(),

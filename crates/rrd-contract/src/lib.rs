@@ -67,7 +67,7 @@ use std::fmt;
 pub const PROTOCOL: &str = "rrd";
 pub const PROTOCOL_VERSION: u16 = 1;
 pub const OPENAPI_DOCUMENT_SHA256: &str =
-    "3d8a057d9c89a82ab190bf2fe1f5839945dd3943006cbf297c03264312616be2";
+    "bbf2f27f80e47091a56df67b3383b965cbd0aabdcf5a60af1a4f66fb4aa753ed";
 pub const MAX_ID_BYTES: usize = 128;
 pub const MAX_MESSAGE_BYTES: usize = 4_096;
 pub const MAX_CAPABILITIES: usize = 512;
@@ -796,6 +796,8 @@ impl ListVectorCollections {
 pub struct VectorCollectionSnapshot {
     pub collection_id: CanonicalId,
     pub vectors: Vec<NamedVectorDefinition>,
+    #[serde(default)]
+    pub payload_indexes: Vec<VectorPayloadIndexSnapshot>,
     pub generation: u64,
     pub created_at_unix_ms: u64,
     pub updated_at_unix_ms: u64,
@@ -814,6 +816,132 @@ pub struct VectorCollectionCatalogueSnapshot {
 #[serde(deny_unknown_fields)]
 pub struct EnsureVectorCollectionResult {
     pub collection: VectorCollectionSnapshot,
+    pub catalogue_revision: u64,
+    pub idempotent_replay: bool,
+}
+
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum VectorPayloadIndexKind {
+    Boolean,
+    Integer,
+    Unsigned,
+    Decimal,
+    Keyword,
+    Digest,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct VectorPayloadIndexSnapshot {
+    pub field: CanonicalId,
+    pub kind: VectorPayloadIndexKind,
+    pub generation: u64,
+    pub created_at_unix_ms: u64,
+    pub updated_at_unix_ms: u64,
+    pub configuration_sha256: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct EnsureVectorPayloadIndex {
+    pub scope: String,
+    pub collection_id: CanonicalId,
+    pub field: CanonicalId,
+    pub kind: VectorPayloadIndexKind,
+}
+
+impl EnsureVectorPayloadIndex {
+    pub fn validate(&self) -> Result<()> {
+        validate_vector_scope(&self.scope)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct DeleteVectorPayloadIndex {
+    pub scope: String,
+    pub collection_id: CanonicalId,
+    pub field: CanonicalId,
+}
+
+impl DeleteVectorPayloadIndex {
+    pub fn validate(&self) -> Result<()> {
+        validate_vector_scope(&self.scope)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ListVectorPayloadIndexes {
+    pub scope: String,
+    pub collection_id: CanonicalId,
+}
+
+impl ListVectorPayloadIndexes {
+    pub fn validate(&self) -> Result<()> {
+        validate_vector_scope(&self.scope)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct VectorPayloadIndexCatalogueSnapshot {
+    pub scope: String,
+    pub collection_id: CanonicalId,
+    pub collection_generation: u64,
+    pub catalogue_revision: u64,
+    pub indexes: Vec<VectorPayloadIndexSnapshot>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct EnsureVectorPayloadIndexResult {
+    pub collection: VectorCollectionSnapshot,
+    pub index: VectorPayloadIndexSnapshot,
+    pub catalogue_revision: u64,
+    pub idempotent_replay: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct DeleteVectorPayloadIndexResult {
+    pub collection: VectorCollectionSnapshot,
+    pub deleted_index: VectorPayloadIndexSnapshot,
+    pub catalogue_revision: u64,
+    pub idempotent_replay: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct DeleteVectorCollection {
+    pub scope: String,
+    pub collection_id: CanonicalId,
+    pub valid_at: u64,
+    pub max_scanned_changes: u64,
+}
+
+impl DeleteVectorCollection {
+    pub fn validate(&self) -> Result<()> {
+        validate_vector_scope(&self.scope)?;
+        if self.valid_at == 0 {
+            return invalid("vector collection delete valid_at must be greater than zero");
+        }
+        if self.max_scanned_changes == 0 || self.max_scanned_changes > MAX_VECTOR_SEARCH_CHANGES {
+            return invalid(format!(
+                "vector collection delete max_scanned_changes must be in 1..={MAX_VECTOR_SEARCH_CHANGES}"
+            ));
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct DeleteVectorCollectionResult {
+    pub deleted_collection: VectorCollectionSnapshot,
     pub catalogue_revision: u64,
     pub idempotent_replay: bool,
 }
@@ -1927,6 +2055,10 @@ pub enum SecurityAction {
     SubscriptionClose,
     VectorCollectionEnsure,
     VectorCollectionList,
+    VectorCollectionDelete,
+    VectorPayloadIndexEnsure,
+    VectorPayloadIndexList,
+    VectorPayloadIndexDelete,
     VectorPointRetrieve,
     VectorPointScroll,
     VectorSearch,

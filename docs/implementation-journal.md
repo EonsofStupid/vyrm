@@ -3415,3 +3415,34 @@ index.
   and audit tests. The engine-only capability is published honestly; generated
   outward surfaces remain owned by G06. The reviewed OpenAPI digest advances to
   `3d8a057d9c89a82ab190bf2fe1f5839945dd3943006cbf297c03264312616be2`.
+
+## 2026-08-29 — G04-W01 cohesive vector administration candidate
+
+- Retained one data authority: `CommitTransaction` batches collection-bound
+  dense, sparse, and multi-dense point upserts alongside every other model;
+  `retire_data` batches point deletion as valid-time facts. Retrieve, scroll,
+  search, and deletion preflight reduce the same authenticated runtime history.
+- Extended the CAS-protected per-scope collection catalogue with typed boolean,
+  integer, unsigned, decimal, keyword, and digest payload indexes. Ensure and
+  delete advance exact generations/revisions, retain configuration digests and
+  timestamps, enter the authenticated control journal, and converge on durable
+  idempotency receipts after conflict or reopen. Present indexed payload values
+  are type-checked before any transaction mutation commits.
+- Added recoverable collection deletion receipts and an engine deletion gate.
+  Metadata cannot be removed while a latest point version is live or
+  future-effective at the deletion coordinate, while the declared scan bound
+  cannot prove completeness, or while any named vector retains an active HNSW
+  or TurboQuant artifact. Historical point mutations remain in the runtime
+  log; collection deletion does not rewrite history.
+- Added distinct deny-by-default collection-delete and payload-index
+  ensure/list/delete actions. HNSW/TurboQuant filter properties now require an
+  active collection payload index instead of accepting an ungoverned label.
+- Added native catalogue lifecycle/replay/collision evidence and one cohesive
+  engine test covering all three vector shapes, two payload indexes, atomic
+  batch upsert, indexed-type rejection, restart retrieve, live-delete denial,
+  atomic batch retirement, payload-index deletion, collection deletion, and
+  post-delete reopen/replay. Generated HTTP/MCP/CLI/SDK administration bindings
+  remain G06 ownership; online filtered HNSW is G04-W02. The additive
+  collection snapshot and security-action schema advance the reviewed OpenAPI
+  digest to
+  `bbf2f27f80e47091a56df67b3383b965cbd0aabdcf5a60af1a4f66fb4aa753ed`.

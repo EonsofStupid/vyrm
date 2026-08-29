@@ -26,6 +26,10 @@ pub enum RrdOperation {
     VectorSearch,
     VectorCollectionEnsure,
     VectorCollectionList,
+    VectorCollectionDelete,
+    VectorPayloadIndexEnsure,
+    VectorPayloadIndexList,
+    VectorPayloadIndexDelete,
     VectorPointScroll,
     VectorPointRetrieve,
     ChangefeedRead,
@@ -77,6 +81,9 @@ impl RrdOperation {
                 | Self::RestoreCreate
                 | Self::FunctionCatalogueWrite
                 | Self::VectorCollectionEnsure
+                | Self::VectorCollectionDelete
+                | Self::VectorPayloadIndexEnsure
+                | Self::VectorPayloadIndexDelete
                 | Self::MemoryRetire
                 | Self::MemoryWrite
                 | Self::LifecycleApply
@@ -111,6 +118,10 @@ impl RrdOperation {
             Self::VectorSearch => SecurityAction::VectorSearch,
             Self::VectorCollectionEnsure => SecurityAction::VectorCollectionEnsure,
             Self::VectorCollectionList => SecurityAction::VectorCollectionList,
+            Self::VectorCollectionDelete => SecurityAction::VectorCollectionDelete,
+            Self::VectorPayloadIndexEnsure => SecurityAction::VectorPayloadIndexEnsure,
+            Self::VectorPayloadIndexList => SecurityAction::VectorPayloadIndexList,
+            Self::VectorPayloadIndexDelete => SecurityAction::VectorPayloadIndexDelete,
             Self::VectorPointScroll => SecurityAction::VectorPointScroll,
             Self::VectorPointRetrieve => SecurityAction::VectorPointRetrieve,
             Self::ChangefeedRead => SecurityAction::ChangefeedRead,

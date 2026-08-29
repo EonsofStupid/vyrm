@@ -2157,7 +2157,7 @@ export interface operations {
                                 chain_head_sha256?: string | null;
                                 records: {
                                     /** @enum {string} */
-                                    action: "service_inspect" | "unknown_request" | "session_create" | "session_renew" | "session_close" | "query_execute" | "query_live_poll" | "query_index_ensure" | "query_index_list" | "transaction_begin" | "transaction_preview" | "transaction_commit" | "transaction_abort" | "changefeed_read" | "changefeed_follow" | "subscription_open" | "subscription_connect" | "subscription_ack" | "subscription_close" | "vector_collection_ensure" | "vector_collection_list" | "vector_point_retrieve" | "vector_point_scroll" | "vector_search" | "backup_create" | "backup_list" | "restore_create" | "estate_read" | "estate_admin" | "audit_read" | "audit_export" | "function_catalogue_read" | "function_catalogue_write" | "function_execute" | "diagnostics_read" | "security_admin" | "memory_context_read" | "memory_inspect" | "memory_recall" | "memory_retire" | "memory_write" | "lifecycle_apply" | "project_attune" | "project_route" | "reasoning_read" | "reasoning_write" | "work_plan_read" | "work_plan_control" | "work_plan_verify_execute" | "runtime_tool_catalogue_read";
+                                    action: "service_inspect" | "unknown_request" | "session_create" | "session_renew" | "session_close" | "query_execute" | "query_live_poll" | "query_index_ensure" | "query_index_list" | "transaction_begin" | "transaction_preview" | "transaction_commit" | "transaction_abort" | "changefeed_read" | "changefeed_follow" | "subscription_open" | "subscription_connect" | "subscription_ack" | "subscription_close" | "vector_collection_ensure" | "vector_collection_list" | "vector_collection_delete" | "vector_payload_index_ensure" | "vector_payload_index_list" | "vector_payload_index_delete" | "vector_point_retrieve" | "vector_point_scroll" | "vector_search" | "backup_create" | "backup_list" | "restore_create" | "estate_read" | "estate_admin" | "audit_read" | "audit_export" | "function_catalogue_read" | "function_catalogue_write" | "function_execute" | "diagnostics_read" | "security_admin" | "memory_context_read" | "memory_inspect" | "memory_recall" | "memory_retire" | "memory_write" | "lifecycle_apply" | "project_attune" | "project_route" | "reasoning_read" | "reasoning_write" | "work_plan_read" | "work_plan_control" | "work_plan_verify_execute" | "runtime_tool_catalogue_read";
                                     /** Format: uint64 */
                                     at_unix_ms: number;
                                     /**
@@ -2247,7 +2247,7 @@ export interface operations {
                                 chain_head_sha256?: string | null;
                                 records: {
                                     /** @enum {string} */
-                                    action: "service_inspect" | "unknown_request" | "session_create" | "session_renew" | "session_close" | "query_execute" | "query_live_poll" | "query_index_ensure" | "query_index_list" | "transaction_begin" | "transaction_preview" | "transaction_commit" | "transaction_abort" | "changefeed_read" | "changefeed_follow" | "subscription_open" | "subscription_connect" | "subscription_ack" | "subscription_close" | "vector_collection_ensure" | "vector_collection_list" | "vector_point_retrieve" | "vector_point_scroll" | "vector_search" | "backup_create" | "backup_list" | "restore_create" | "estate_read" | "estate_admin" | "audit_read" | "audit_export" | "function_catalogue_read" | "function_catalogue_write" | "function_execute" | "diagnostics_read" | "security_admin" | "memory_context_read" | "memory_inspect" | "memory_recall" | "memory_retire" | "memory_write" | "lifecycle_apply" | "project_attune" | "project_route" | "reasoning_read" | "reasoning_write" | "work_plan_read" | "work_plan_control" | "work_plan_verify_execute" | "runtime_tool_catalogue_read";
+                                    action: "service_inspect" | "unknown_request" | "session_create" | "session_renew" | "session_close" | "query_execute" | "query_live_poll" | "query_index_ensure" | "query_index_list" | "transaction_begin" | "transaction_preview" | "transaction_commit" | "transaction_abort" | "changefeed_read" | "changefeed_follow" | "subscription_open" | "subscription_connect" | "subscription_ack" | "subscription_close" | "vector_collection_ensure" | "vector_collection_list" | "vector_collection_delete" | "vector_payload_index_ensure" | "vector_payload_index_list" | "vector_payload_index_delete" | "vector_point_retrieve" | "vector_point_scroll" | "vector_search" | "backup_create" | "backup_list" | "restore_create" | "estate_read" | "estate_admin" | "audit_read" | "audit_export" | "function_catalogue_read" | "function_catalogue_write" | "function_execute" | "diagnostics_read" | "security_admin" | "memory_context_read" | "memory_inspect" | "memory_recall" | "memory_retire" | "memory_write" | "lifecycle_apply" | "project_attune" | "project_route" | "reasoning_read" | "reasoning_write" | "work_plan_read" | "work_plan_control" | "work_plan_verify_execute" | "runtime_tool_catalogue_read";
                                     /** Format: uint64 */
                                     at_unix_ms: number;
                                     /**
@@ -7096,7 +7096,7 @@ export interface operations {
                                     chain_head_sha256?: string | null;
                                     records: {
                                         /** @enum {string} */
-                                        action: "service_inspect" | "unknown_request" | "session_create" | "session_renew" | "session_close" | "query_execute" | "query_live_poll" | "query_index_ensure" | "query_index_list" | "transaction_begin" | "transaction_preview" | "transaction_commit" | "transaction_abort" | "changefeed_read" | "changefeed_follow" | "subscription_open" | "subscription_connect" | "subscription_ack" | "subscription_close" | "vector_collection_ensure" | "vector_collection_list" | "vector_point_retrieve" | "vector_point_scroll" | "vector_search" | "backup_create" | "backup_list" | "restore_create" | "estate_read" | "estate_admin" | "audit_read" | "audit_export" | "function_catalogue_read" | "function_catalogue_write" | "function_execute" | "diagnostics_read" | "security_admin" | "memory_context_read" | "memory_inspect" | "memory_recall" | "memory_retire" | "memory_write" | "lifecycle_apply" | "project_attune" | "project_route" | "reasoning_read" | "reasoning_write" | "work_plan_read" | "work_plan_control" | "work_plan_verify_execute" | "runtime_tool_catalogue_read";
+                                        action: "service_inspect" | "unknown_request" | "session_create" | "session_renew" | "session_close" | "query_execute" | "query_live_poll" | "query_index_ensure" | "query_index_list" | "transaction_begin" | "transaction_preview" | "transaction_commit" | "transaction_abort" | "changefeed_read" | "changefeed_follow" | "subscription_open" | "subscription_connect" | "subscription_ack" | "subscription_close" | "vector_collection_ensure" | "vector_collection_list" | "vector_collection_delete" | "vector_payload_index_ensure" | "vector_payload_index_list" | "vector_payload_index_delete" | "vector_point_retrieve" | "vector_point_scroll" | "vector_search" | "backup_create" | "backup_list" | "restore_create" | "estate_read" | "estate_admin" | "audit_read" | "audit_export" | "function_catalogue_read" | "function_catalogue_write" | "function_execute" | "diagnostics_read" | "security_admin" | "memory_context_read" | "memory_inspect" | "memory_recall" | "memory_retire" | "memory_write" | "lifecycle_apply" | "project_attune" | "project_route" | "reasoning_read" | "reasoning_write" | "work_plan_read" | "work_plan_control" | "work_plan_verify_execute" | "runtime_tool_catalogue_read";
                                         /** Format: uint64 */
                                         at_unix_ms: number;
                                         /**
@@ -9137,7 +9137,7 @@ export interface operations {
                                     protocol_version: number;
                                     tools: {
                                         /** @enum {string} */
-                                        action: "service_inspect" | "unknown_request" | "session_create" | "session_renew" | "session_close" | "query_execute" | "query_live_poll" | "query_index_ensure" | "query_index_list" | "transaction_begin" | "transaction_preview" | "transaction_commit" | "transaction_abort" | "changefeed_read" | "changefeed_follow" | "subscription_open" | "subscription_connect" | "subscription_ack" | "subscription_close" | "vector_collection_ensure" | "vector_collection_list" | "vector_point_retrieve" | "vector_point_scroll" | "vector_search" | "backup_create" | "backup_list" | "restore_create" | "estate_read" | "estate_admin" | "audit_read" | "audit_export" | "function_catalogue_read" | "function_catalogue_write" | "function_execute" | "diagnostics_read" | "security_admin" | "memory_context_read" | "memory_inspect" | "memory_recall" | "memory_retire" | "memory_write" | "lifecycle_apply" | "project_attune" | "project_route" | "reasoning_read" | "reasoning_write" | "work_plan_read" | "work_plan_control" | "work_plan_verify_execute" | "runtime_tool_catalogue_read";
+                                        action: "service_inspect" | "unknown_request" | "session_create" | "session_renew" | "session_close" | "query_execute" | "query_live_poll" | "query_index_ensure" | "query_index_list" | "transaction_begin" | "transaction_preview" | "transaction_commit" | "transaction_abort" | "changefeed_read" | "changefeed_follow" | "subscription_open" | "subscription_connect" | "subscription_ack" | "subscription_close" | "vector_collection_ensure" | "vector_collection_list" | "vector_collection_delete" | "vector_payload_index_ensure" | "vector_payload_index_list" | "vector_payload_index_delete" | "vector_point_retrieve" | "vector_point_scroll" | "vector_search" | "backup_create" | "backup_list" | "restore_create" | "estate_read" | "estate_admin" | "audit_read" | "audit_export" | "function_catalogue_read" | "function_catalogue_write" | "function_execute" | "diagnostics_read" | "security_admin" | "memory_context_read" | "memory_inspect" | "memory_recall" | "memory_retire" | "memory_write" | "lifecycle_apply" | "project_attune" | "project_route" | "reasoning_read" | "reasoning_write" | "work_plan_read" | "work_plan_control" | "work_plan_verify_execute" | "runtime_tool_catalogue_read";
                                         /** @enum {string} */
                                         authorization: "public" | "governed";
                                         /**
@@ -9339,6 +9339,25 @@ export interface operations {
                                         created_at_unix_ms: number;
                                         /** Format: uint64 */
                                         generation: number;
+                                        /** @default [] */
+                                        payload_indexes: {
+                                            configuration_sha256: string;
+                                            /** Format: uint64 */
+                                            created_at_unix_ms: number;
+                                            /**
+                                             * @description A canonical public identifier component.
+                                             *
+                                             *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                             *     labels are separate data and may use arbitrary Unicode.
+                                             */
+                                            field: string;
+                                            /** Format: uint64 */
+                                            generation: number;
+                                            /** @enum {string} */
+                                            kind: "boolean" | "integer" | "unsigned" | "decimal" | "keyword" | "digest";
+                                            /** Format: uint64 */
+                                            updated_at_unix_ms: number;
+                                        }[];
                                         /** Format: uint64 */
                                         updated_at_unix_ms: number;
                                         vectors: {
@@ -9418,7 +9437,7 @@ export interface operations {
                                     chain_head_sha256?: string | null;
                                     records: {
                                         /** @enum {string} */
-                                        action: "service_inspect" | "unknown_request" | "session_create" | "session_renew" | "session_close" | "query_execute" | "query_live_poll" | "query_index_ensure" | "query_index_list" | "transaction_begin" | "transaction_preview" | "transaction_commit" | "transaction_abort" | "changefeed_read" | "changefeed_follow" | "subscription_open" | "subscription_connect" | "subscription_ack" | "subscription_close" | "vector_collection_ensure" | "vector_collection_list" | "vector_point_retrieve" | "vector_point_scroll" | "vector_search" | "backup_create" | "backup_list" | "restore_create" | "estate_read" | "estate_admin" | "audit_read" | "audit_export" | "function_catalogue_read" | "function_catalogue_write" | "function_execute" | "diagnostics_read" | "security_admin" | "memory_context_read" | "memory_inspect" | "memory_recall" | "memory_retire" | "memory_write" | "lifecycle_apply" | "project_attune" | "project_route" | "reasoning_read" | "reasoning_write" | "work_plan_read" | "work_plan_control" | "work_plan_verify_execute" | "runtime_tool_catalogue_read";
+                                        action: "service_inspect" | "unknown_request" | "session_create" | "session_renew" | "session_close" | "query_execute" | "query_live_poll" | "query_index_ensure" | "query_index_list" | "transaction_begin" | "transaction_preview" | "transaction_commit" | "transaction_abort" | "changefeed_read" | "changefeed_follow" | "subscription_open" | "subscription_connect" | "subscription_ack" | "subscription_close" | "vector_collection_ensure" | "vector_collection_list" | "vector_collection_delete" | "vector_payload_index_ensure" | "vector_payload_index_list" | "vector_payload_index_delete" | "vector_point_retrieve" | "vector_point_scroll" | "vector_search" | "backup_create" | "backup_list" | "restore_create" | "estate_read" | "estate_admin" | "audit_read" | "audit_export" | "function_catalogue_read" | "function_catalogue_write" | "function_execute" | "diagnostics_read" | "security_admin" | "memory_context_read" | "memory_inspect" | "memory_recall" | "memory_retire" | "memory_write" | "lifecycle_apply" | "project_attune" | "project_route" | "reasoning_read" | "reasoning_write" | "work_plan_read" | "work_plan_control" | "work_plan_verify_execute" | "runtime_tool_catalogue_read";
                                         /** Format: uint64 */
                                         at_unix_ms: number;
                                         /**
@@ -11459,7 +11478,7 @@ export interface operations {
                                     protocol_version: number;
                                     tools: {
                                         /** @enum {string} */
-                                        action: "service_inspect" | "unknown_request" | "session_create" | "session_renew" | "session_close" | "query_execute" | "query_live_poll" | "query_index_ensure" | "query_index_list" | "transaction_begin" | "transaction_preview" | "transaction_commit" | "transaction_abort" | "changefeed_read" | "changefeed_follow" | "subscription_open" | "subscription_connect" | "subscription_ack" | "subscription_close" | "vector_collection_ensure" | "vector_collection_list" | "vector_point_retrieve" | "vector_point_scroll" | "vector_search" | "backup_create" | "backup_list" | "restore_create" | "estate_read" | "estate_admin" | "audit_read" | "audit_export" | "function_catalogue_read" | "function_catalogue_write" | "function_execute" | "diagnostics_read" | "security_admin" | "memory_context_read" | "memory_inspect" | "memory_recall" | "memory_retire" | "memory_write" | "lifecycle_apply" | "project_attune" | "project_route" | "reasoning_read" | "reasoning_write" | "work_plan_read" | "work_plan_control" | "work_plan_verify_execute" | "runtime_tool_catalogue_read";
+                                        action: "service_inspect" | "unknown_request" | "session_create" | "session_renew" | "session_close" | "query_execute" | "query_live_poll" | "query_index_ensure" | "query_index_list" | "transaction_begin" | "transaction_preview" | "transaction_commit" | "transaction_abort" | "changefeed_read" | "changefeed_follow" | "subscription_open" | "subscription_connect" | "subscription_ack" | "subscription_close" | "vector_collection_ensure" | "vector_collection_list" | "vector_collection_delete" | "vector_payload_index_ensure" | "vector_payload_index_list" | "vector_payload_index_delete" | "vector_point_retrieve" | "vector_point_scroll" | "vector_search" | "backup_create" | "backup_list" | "restore_create" | "estate_read" | "estate_admin" | "audit_read" | "audit_export" | "function_catalogue_read" | "function_catalogue_write" | "function_execute" | "diagnostics_read" | "security_admin" | "memory_context_read" | "memory_inspect" | "memory_recall" | "memory_retire" | "memory_write" | "lifecycle_apply" | "project_attune" | "project_route" | "reasoning_read" | "reasoning_write" | "work_plan_read" | "work_plan_control" | "work_plan_verify_execute" | "runtime_tool_catalogue_read";
                                         /** @enum {string} */
                                         authorization: "public" | "governed";
                                         /**
@@ -11661,6 +11680,25 @@ export interface operations {
                                         created_at_unix_ms: number;
                                         /** Format: uint64 */
                                         generation: number;
+                                        /** @default [] */
+                                        payload_indexes: {
+                                            configuration_sha256: string;
+                                            /** Format: uint64 */
+                                            created_at_unix_ms: number;
+                                            /**
+                                             * @description A canonical public identifier component.
+                                             *
+                                             *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                             *     labels are separate data and may use arbitrary Unicode.
+                                             */
+                                            field: string;
+                                            /** Format: uint64 */
+                                            generation: number;
+                                            /** @enum {string} */
+                                            kind: "boolean" | "integer" | "unsigned" | "decimal" | "keyword" | "digest";
+                                            /** Format: uint64 */
+                                            updated_at_unix_ms: number;
+                                        }[];
                                         /** Format: uint64 */
                                         updated_at_unix_ms: number;
                                         vectors: {
@@ -14360,7 +14398,7 @@ export interface operations {
                                 protocol_version: number;
                                 tools: {
                                     /** @enum {string} */
-                                    action: "service_inspect" | "unknown_request" | "session_create" | "session_renew" | "session_close" | "query_execute" | "query_live_poll" | "query_index_ensure" | "query_index_list" | "transaction_begin" | "transaction_preview" | "transaction_commit" | "transaction_abort" | "changefeed_read" | "changefeed_follow" | "subscription_open" | "subscription_connect" | "subscription_ack" | "subscription_close" | "vector_collection_ensure" | "vector_collection_list" | "vector_point_retrieve" | "vector_point_scroll" | "vector_search" | "backup_create" | "backup_list" | "restore_create" | "estate_read" | "estate_admin" | "audit_read" | "audit_export" | "function_catalogue_read" | "function_catalogue_write" | "function_execute" | "diagnostics_read" | "security_admin" | "memory_context_read" | "memory_inspect" | "memory_recall" | "memory_retire" | "memory_write" | "lifecycle_apply" | "project_attune" | "project_route" | "reasoning_read" | "reasoning_write" | "work_plan_read" | "work_plan_control" | "work_plan_verify_execute" | "runtime_tool_catalogue_read";
+                                    action: "service_inspect" | "unknown_request" | "session_create" | "session_renew" | "session_close" | "query_execute" | "query_live_poll" | "query_index_ensure" | "query_index_list" | "transaction_begin" | "transaction_preview" | "transaction_commit" | "transaction_abort" | "changefeed_read" | "changefeed_follow" | "subscription_open" | "subscription_connect" | "subscription_ack" | "subscription_close" | "vector_collection_ensure" | "vector_collection_list" | "vector_collection_delete" | "vector_payload_index_ensure" | "vector_payload_index_list" | "vector_payload_index_delete" | "vector_point_retrieve" | "vector_point_scroll" | "vector_search" | "backup_create" | "backup_list" | "restore_create" | "estate_read" | "estate_admin" | "audit_read" | "audit_export" | "function_catalogue_read" | "function_catalogue_write" | "function_execute" | "diagnostics_read" | "security_admin" | "memory_context_read" | "memory_inspect" | "memory_recall" | "memory_retire" | "memory_write" | "lifecycle_apply" | "project_attune" | "project_route" | "reasoning_read" | "reasoning_write" | "work_plan_read" | "work_plan_control" | "work_plan_verify_execute" | "runtime_tool_catalogue_read";
                                     /** @enum {string} */
                                     authorization: "public" | "governed";
                                     /**
@@ -14422,7 +14460,7 @@ export interface operations {
                                 protocol_version: number;
                                 tools: {
                                     /** @enum {string} */
-                                    action: "service_inspect" | "unknown_request" | "session_create" | "session_renew" | "session_close" | "query_execute" | "query_live_poll" | "query_index_ensure" | "query_index_list" | "transaction_begin" | "transaction_preview" | "transaction_commit" | "transaction_abort" | "changefeed_read" | "changefeed_follow" | "subscription_open" | "subscription_connect" | "subscription_ack" | "subscription_close" | "vector_collection_ensure" | "vector_collection_list" | "vector_point_retrieve" | "vector_point_scroll" | "vector_search" | "backup_create" | "backup_list" | "restore_create" | "estate_read" | "estate_admin" | "audit_read" | "audit_export" | "function_catalogue_read" | "function_catalogue_write" | "function_execute" | "diagnostics_read" | "security_admin" | "memory_context_read" | "memory_inspect" | "memory_recall" | "memory_retire" | "memory_write" | "lifecycle_apply" | "project_attune" | "project_route" | "reasoning_read" | "reasoning_write" | "work_plan_read" | "work_plan_control" | "work_plan_verify_execute" | "runtime_tool_catalogue_read";
+                                    action: "service_inspect" | "unknown_request" | "session_create" | "session_renew" | "session_close" | "query_execute" | "query_live_poll" | "query_index_ensure" | "query_index_list" | "transaction_begin" | "transaction_preview" | "transaction_commit" | "transaction_abort" | "changefeed_read" | "changefeed_follow" | "subscription_open" | "subscription_connect" | "subscription_ack" | "subscription_close" | "vector_collection_ensure" | "vector_collection_list" | "vector_collection_delete" | "vector_payload_index_ensure" | "vector_payload_index_list" | "vector_payload_index_delete" | "vector_point_retrieve" | "vector_point_scroll" | "vector_search" | "backup_create" | "backup_list" | "restore_create" | "estate_read" | "estate_admin" | "audit_read" | "audit_export" | "function_catalogue_read" | "function_catalogue_write" | "function_execute" | "diagnostics_read" | "security_admin" | "memory_context_read" | "memory_inspect" | "memory_recall" | "memory_retire" | "memory_write" | "lifecycle_apply" | "project_attune" | "project_route" | "reasoning_read" | "reasoning_write" | "work_plan_read" | "work_plan_control" | "work_plan_verify_execute" | "runtime_tool_catalogue_read";
                                     /** @enum {string} */
                                     authorization: "public" | "governed";
                                     /**
@@ -14498,7 +14536,7 @@ export interface operations {
                                      */
                                     action: {
                                         /** @enum {string} */
-                                        action: "service_inspect" | "unknown_request" | "session_create" | "session_renew" | "session_close" | "query_execute" | "query_live_poll" | "query_index_ensure" | "query_index_list" | "transaction_begin" | "transaction_preview" | "transaction_commit" | "transaction_abort" | "changefeed_read" | "changefeed_follow" | "subscription_open" | "subscription_connect" | "subscription_ack" | "subscription_close" | "vector_collection_ensure" | "vector_collection_list" | "vector_point_retrieve" | "vector_point_scroll" | "vector_search" | "backup_create" | "backup_list" | "restore_create" | "estate_read" | "estate_admin" | "audit_read" | "audit_export" | "function_catalogue_read" | "function_catalogue_write" | "function_execute" | "diagnostics_read" | "security_admin" | "memory_context_read" | "memory_inspect" | "memory_recall" | "memory_retire" | "memory_write" | "lifecycle_apply" | "project_attune" | "project_route" | "reasoning_read" | "reasoning_write" | "work_plan_read" | "work_plan_control" | "work_plan_verify_execute" | "runtime_tool_catalogue_read";
+                                        action: "service_inspect" | "unknown_request" | "session_create" | "session_renew" | "session_close" | "query_execute" | "query_live_poll" | "query_index_ensure" | "query_index_list" | "transaction_begin" | "transaction_preview" | "transaction_commit" | "transaction_abort" | "changefeed_read" | "changefeed_follow" | "subscription_open" | "subscription_connect" | "subscription_ack" | "subscription_close" | "vector_collection_ensure" | "vector_collection_list" | "vector_collection_delete" | "vector_payload_index_ensure" | "vector_payload_index_list" | "vector_payload_index_delete" | "vector_point_retrieve" | "vector_point_scroll" | "vector_search" | "backup_create" | "backup_list" | "restore_create" | "estate_read" | "estate_admin" | "audit_read" | "audit_export" | "function_catalogue_read" | "function_catalogue_write" | "function_execute" | "diagnostics_read" | "security_admin" | "memory_context_read" | "memory_inspect" | "memory_recall" | "memory_retire" | "memory_write" | "lifecycle_apply" | "project_attune" | "project_route" | "reasoning_read" | "reasoning_write" | "work_plan_read" | "work_plan_control" | "work_plan_verify_execute" | "runtime_tool_catalogue_read";
                                         /** @constant */
                                         source: "fixed";
                                     } | {
@@ -14529,7 +14567,7 @@ export interface operations {
                                     authentication: "public" | "api_key" | "session_bearer";
                                     client_frame_type: string;
                                     /** @enum {string} */
-                                    connect_action: "service_inspect" | "unknown_request" | "session_create" | "session_renew" | "session_close" | "query_execute" | "query_live_poll" | "query_index_ensure" | "query_index_list" | "transaction_begin" | "transaction_preview" | "transaction_commit" | "transaction_abort" | "changefeed_read" | "changefeed_follow" | "subscription_open" | "subscription_connect" | "subscription_ack" | "subscription_close" | "vector_collection_ensure" | "vector_collection_list" | "vector_point_retrieve" | "vector_point_scroll" | "vector_search" | "backup_create" | "backup_list" | "restore_create" | "estate_read" | "estate_admin" | "audit_read" | "audit_export" | "function_catalogue_read" | "function_catalogue_write" | "function_execute" | "diagnostics_read" | "security_admin" | "memory_context_read" | "memory_inspect" | "memory_recall" | "memory_retire" | "memory_write" | "lifecycle_apply" | "project_attune" | "project_route" | "reasoning_read" | "reasoning_write" | "work_plan_read" | "work_plan_control" | "work_plan_verify_execute" | "runtime_tool_catalogue_read";
+                                    connect_action: "service_inspect" | "unknown_request" | "session_create" | "session_renew" | "session_close" | "query_execute" | "query_live_poll" | "query_index_ensure" | "query_index_list" | "transaction_begin" | "transaction_preview" | "transaction_commit" | "transaction_abort" | "changefeed_read" | "changefeed_follow" | "subscription_open" | "subscription_connect" | "subscription_ack" | "subscription_close" | "vector_collection_ensure" | "vector_collection_list" | "vector_collection_delete" | "vector_payload_index_ensure" | "vector_payload_index_list" | "vector_payload_index_delete" | "vector_point_retrieve" | "vector_point_scroll" | "vector_search" | "backup_create" | "backup_list" | "restore_create" | "estate_read" | "estate_admin" | "audit_read" | "audit_export" | "function_catalogue_read" | "function_catalogue_write" | "function_execute" | "diagnostics_read" | "security_admin" | "memory_context_read" | "memory_inspect" | "memory_recall" | "memory_retire" | "memory_write" | "lifecycle_apply" | "project_attune" | "project_route" | "reasoning_read" | "reasoning_write" | "work_plan_read" | "work_plan_control" | "work_plan_verify_execute" | "runtime_tool_catalogue_read";
                                     /**
                                      * @description A canonical public identifier component.
                                      *
@@ -14583,7 +14621,7 @@ export interface operations {
                                      */
                                     action: {
                                         /** @enum {string} */
-                                        action: "service_inspect" | "unknown_request" | "session_create" | "session_renew" | "session_close" | "query_execute" | "query_live_poll" | "query_index_ensure" | "query_index_list" | "transaction_begin" | "transaction_preview" | "transaction_commit" | "transaction_abort" | "changefeed_read" | "changefeed_follow" | "subscription_open" | "subscription_connect" | "subscription_ack" | "subscription_close" | "vector_collection_ensure" | "vector_collection_list" | "vector_point_retrieve" | "vector_point_scroll" | "vector_search" | "backup_create" | "backup_list" | "restore_create" | "estate_read" | "estate_admin" | "audit_read" | "audit_export" | "function_catalogue_read" | "function_catalogue_write" | "function_execute" | "diagnostics_read" | "security_admin" | "memory_context_read" | "memory_inspect" | "memory_recall" | "memory_retire" | "memory_write" | "lifecycle_apply" | "project_attune" | "project_route" | "reasoning_read" | "reasoning_write" | "work_plan_read" | "work_plan_control" | "work_plan_verify_execute" | "runtime_tool_catalogue_read";
+                                        action: "service_inspect" | "unknown_request" | "session_create" | "session_renew" | "session_close" | "query_execute" | "query_live_poll" | "query_index_ensure" | "query_index_list" | "transaction_begin" | "transaction_preview" | "transaction_commit" | "transaction_abort" | "changefeed_read" | "changefeed_follow" | "subscription_open" | "subscription_connect" | "subscription_ack" | "subscription_close" | "vector_collection_ensure" | "vector_collection_list" | "vector_collection_delete" | "vector_payload_index_ensure" | "vector_payload_index_list" | "vector_payload_index_delete" | "vector_point_retrieve" | "vector_point_scroll" | "vector_search" | "backup_create" | "backup_list" | "restore_create" | "estate_read" | "estate_admin" | "audit_read" | "audit_export" | "function_catalogue_read" | "function_catalogue_write" | "function_execute" | "diagnostics_read" | "security_admin" | "memory_context_read" | "memory_inspect" | "memory_recall" | "memory_retire" | "memory_write" | "lifecycle_apply" | "project_attune" | "project_route" | "reasoning_read" | "reasoning_write" | "work_plan_read" | "work_plan_control" | "work_plan_verify_execute" | "runtime_tool_catalogue_read";
                                         /** @constant */
                                         source: "fixed";
                                     } | {
@@ -14614,7 +14652,7 @@ export interface operations {
                                     authentication: "public" | "api_key" | "session_bearer";
                                     client_frame_type: string;
                                     /** @enum {string} */
-                                    connect_action: "service_inspect" | "unknown_request" | "session_create" | "session_renew" | "session_close" | "query_execute" | "query_live_poll" | "query_index_ensure" | "query_index_list" | "transaction_begin" | "transaction_preview" | "transaction_commit" | "transaction_abort" | "changefeed_read" | "changefeed_follow" | "subscription_open" | "subscription_connect" | "subscription_ack" | "subscription_close" | "vector_collection_ensure" | "vector_collection_list" | "vector_point_retrieve" | "vector_point_scroll" | "vector_search" | "backup_create" | "backup_list" | "restore_create" | "estate_read" | "estate_admin" | "audit_read" | "audit_export" | "function_catalogue_read" | "function_catalogue_write" | "function_execute" | "diagnostics_read" | "security_admin" | "memory_context_read" | "memory_inspect" | "memory_recall" | "memory_retire" | "memory_write" | "lifecycle_apply" | "project_attune" | "project_route" | "reasoning_read" | "reasoning_write" | "work_plan_read" | "work_plan_control" | "work_plan_verify_execute" | "runtime_tool_catalogue_read";
+                                    connect_action: "service_inspect" | "unknown_request" | "session_create" | "session_renew" | "session_close" | "query_execute" | "query_live_poll" | "query_index_ensure" | "query_index_list" | "transaction_begin" | "transaction_preview" | "transaction_commit" | "transaction_abort" | "changefeed_read" | "changefeed_follow" | "subscription_open" | "subscription_connect" | "subscription_ack" | "subscription_close" | "vector_collection_ensure" | "vector_collection_list" | "vector_collection_delete" | "vector_payload_index_ensure" | "vector_payload_index_list" | "vector_payload_index_delete" | "vector_point_retrieve" | "vector_point_scroll" | "vector_search" | "backup_create" | "backup_list" | "restore_create" | "estate_read" | "estate_admin" | "audit_read" | "audit_export" | "function_catalogue_read" | "function_catalogue_write" | "function_execute" | "diagnostics_read" | "security_admin" | "memory_context_read" | "memory_inspect" | "memory_recall" | "memory_retire" | "memory_write" | "lifecycle_apply" | "project_attune" | "project_route" | "reasoning_read" | "reasoning_write" | "work_plan_read" | "work_plan_control" | "work_plan_verify_execute" | "runtime_tool_catalogue_read";
                                     /**
                                      * @description A canonical public identifier component.
                                      *
@@ -21762,6 +21800,25 @@ export interface operations {
                                     created_at_unix_ms: number;
                                     /** Format: uint64 */
                                     generation: number;
+                                    /** @default [] */
+                                    payload_indexes: {
+                                        configuration_sha256: string;
+                                        /** Format: uint64 */
+                                        created_at_unix_ms: number;
+                                        /**
+                                         * @description A canonical public identifier component.
+                                         *
+                                         *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                         *     labels are separate data and may use arbitrary Unicode.
+                                         */
+                                        field: string;
+                                        /** Format: uint64 */
+                                        generation: number;
+                                        /** @enum {string} */
+                                        kind: "boolean" | "integer" | "unsigned" | "decimal" | "keyword" | "digest";
+                                        /** Format: uint64 */
+                                        updated_at_unix_ms: number;
+                                    }[];
                                     /** Format: uint64 */
                                     updated_at_unix_ms: number;
                                     vectors: {
@@ -21842,6 +21899,25 @@ export interface operations {
                                     created_at_unix_ms: number;
                                     /** Format: uint64 */
                                     generation: number;
+                                    /** @default [] */
+                                    payload_indexes: {
+                                        configuration_sha256: string;
+                                        /** Format: uint64 */
+                                        created_at_unix_ms: number;
+                                        /**
+                                         * @description A canonical public identifier component.
+                                         *
+                                         *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                         *     labels are separate data and may use arbitrary Unicode.
+                                         */
+                                        field: string;
+                                        /** Format: uint64 */
+                                        generation: number;
+                                        /** @enum {string} */
+                                        kind: "boolean" | "integer" | "unsigned" | "decimal" | "keyword" | "digest";
+                                        /** Format: uint64 */
+                                        updated_at_unix_ms: number;
+                                    }[];
                                     /** Format: uint64 */
                                     updated_at_unix_ms: number;
                                     vectors: {
@@ -21968,6 +22044,25 @@ export interface operations {
                                     created_at_unix_ms: number;
                                     /** Format: uint64 */
                                     generation: number;
+                                    /** @default [] */
+                                    payload_indexes: {
+                                        configuration_sha256: string;
+                                        /** Format: uint64 */
+                                        created_at_unix_ms: number;
+                                        /**
+                                         * @description A canonical public identifier component.
+                                         *
+                                         *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                         *     labels are separate data and may use arbitrary Unicode.
+                                         */
+                                        field: string;
+                                        /** Format: uint64 */
+                                        generation: number;
+                                        /** @enum {string} */
+                                        kind: "boolean" | "integer" | "unsigned" | "decimal" | "keyword" | "digest";
+                                        /** Format: uint64 */
+                                        updated_at_unix_ms: number;
+                                    }[];
                                     /** Format: uint64 */
                                     updated_at_unix_ms: number;
                                     vectors: {
@@ -22048,6 +22143,25 @@ export interface operations {
                                     created_at_unix_ms: number;
                                     /** Format: uint64 */
                                     generation: number;
+                                    /** @default [] */
+                                    payload_indexes: {
+                                        configuration_sha256: string;
+                                        /** Format: uint64 */
+                                        created_at_unix_ms: number;
+                                        /**
+                                         * @description A canonical public identifier component.
+                                         *
+                                         *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                         *     labels are separate data and may use arbitrary Unicode.
+                                         */
+                                        field: string;
+                                        /** Format: uint64 */
+                                        generation: number;
+                                        /** @enum {string} */
+                                        kind: "boolean" | "integer" | "unsigned" | "decimal" | "keyword" | "digest";
+                                        /** Format: uint64 */
+                                        updated_at_unix_ms: number;
+                                    }[];
                                     /** Format: uint64 */
                                     updated_at_unix_ms: number;
                                     vectors: {

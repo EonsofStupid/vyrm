@@ -94,10 +94,10 @@ and [files](https://surrealdb.com/docs/learn/schema-management/files/working-wit
 | Geospatial geometry/geography values, predicates, distances and indexes | **Partial** — WGS84 values exist; geometry families and spatial indexes/query functions are absent |
 | Dense vector values | **Verified locally** |
 | Sparse vector values | **Verified locally** for exact storage/search |
-| Multiple named vectors per logical object | **Partial** — values can coexist; collection-style named-vector administration is absent |
+| Multiple named vectors per logical object | **Verified locally** — revisioned collection administration persists named dense, sparse, and multi-dense contracts; point batches, payload indexes, retrieve/scroll, valid-time deletion, and guarded collection deletion share the RRD engine authority |
 | Multivectors | **Verified locally** for exact storage/oracle |
-| Full-text documents and analyzers | **Absent** |
-| Hybrid full-text/vector retrieval and rank fusion | **Absent** as one query operator |
+| Full-text documents and analyzers | **Verified locally** — content-addressed BM25 v2 artifacts retain analyzer, positions, offsets, relevance, and highlighting evidence |
+| Hybrid full-text/vector retrieval and rank fusion | **Partial** — one-stamp BM25 plus dense/sparse vector RRF executes in the engine; broader multistage/reranking algebra remains G04-W03 |
 | Key-value access patterns | **Verified internally**; not a supported public KV API |
 | First-class file pointers and buckets | **Partial** — content-addressed object references/stores exist; file namespace and full operations do not |
 | Memory/filesystem bucket backends | **Partial** — local immutable objects only |

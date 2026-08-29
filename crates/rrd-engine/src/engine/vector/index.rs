@@ -50,6 +50,23 @@ impl RrdEngine {
                     request.vector_name, request.collection_id
                 ))
             })?;
+        let filter_properties = match &request.configuration {
+            VectorIndexConfiguration::Hnsw {
+                filter_properties, ..
+            }
+            | VectorIndexConfiguration::TurboQuant {
+                filter_properties, ..
+            } => filter_properties,
+        };
+        for property in filter_properties {
+            let field = ProjectionId::new(property.as_str()).map_err(core_vector)?;
+            if !collection.payload_indexes.contains_key(&field) {
+                return Err(ServiceError::Vector(format!(
+                    "vector filter property {property} has no active payload index in collection {}",
+                    request.collection_id
+                )));
+            }
+        }
         if vector.kind != rrd_vector::VectorValueKind::Dense {
             return Err(ServiceError::Vector(
                 "approximate indexing currently requires a dense named vector".into(),

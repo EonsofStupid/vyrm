@@ -263,6 +263,39 @@ pub fn product_capability_catalogue() -> ProductCapabilityCatalogue {
         });
     }
 
+    if let Some(capability) = capabilities
+        .iter_mut()
+        .find(|capability| capability.id == "vector-collection-delete")
+    {
+        capability.summary = "Delete an empty collection through a durable idempotent engine operation after proving no live/future points or active approximate artifacts can be orphaned.".into();
+        expose(
+            binding(capability, ProductSurface::Engine),
+            "rrd-engine:RrdEngine::delete_vector_collection",
+        );
+        for outward in capability
+            .bindings
+            .iter_mut()
+            .filter(|binding| binding.surface != ProductSurface::Engine)
+        {
+            let surface = outward.surface;
+            *outward = planned(ENGINE_SURFACE_PLAN_REASON);
+            outward.surface = surface;
+        }
+    }
+    capabilities.push(ProductCapability {
+        id: "vector-payload-index-administration".into(),
+        label: "Vector payload index administration".into(),
+        category: "vector".into(),
+        summary: "Ensure, list, and delete typed collection payload indexes through the revisioned RRD vector catalogue.".into(),
+        bindings: bindings(
+            available("rrd-engine:RrdEngine::ensure_vector_payload_index,list_vector_payload_indexes,delete_vector_payload_index"),
+            planned(ENGINE_SURFACE_PLAN_REASON),
+            planned(ENGINE_SURFACE_PLAN_REASON),
+            planned(ENGINE_SURFACE_PLAN_REASON),
+            planned(ENGINE_SURFACE_PLAN_REASON),
+        ),
+    });
+
     capabilities.sort_by(|left, right| left.id.cmp(&right.id));
     ProductCapabilityCatalogue {
         contract_version: PROTOCOL_VERSION,
@@ -334,6 +367,8 @@ const FOUNDATION_PLAN_REASON: &str =
     "Scheduled by the checked-in RRFlow foundation work plan; no executable implementation is available yet.";
 const FUNCTION_SURFACE_PLAN_REASON: &str =
     "The engine implementation is available; generated HTTP, MCP, CLI, SDK, and Connectome bindings are owned by G06.";
+const ENGINE_SURFACE_PLAN_REASON: &str =
+    "The engine implementation is available; generated outward bindings are owned by G06.";
 
 fn category(id: &str) -> &str {
     id.split_once('-').map_or("service", |(prefix, _)| prefix)

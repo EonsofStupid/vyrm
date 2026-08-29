@@ -168,7 +168,7 @@ claimed from a UI card, type, or isolated physical component:
 |---|---|---|
 | Concurrent document, relational, native graph-edge, vector, event, time-series and geo storage | One typed RRD transaction can atomically create, update, retire and recreate every logical family; bounded RRFlowQL transaction programs bind the same mutations and delegate to that authority | Complete public administration, indexes, query/search parity and cross-model transaction qualification |
 | Real-time live queries and changefeeds | Engine-owned durable subscriptions provide authenticated WebSocket push, cumulative ACK, bounded in-flight windows, retained resume floors, fenced reconnect/restart replay, semantic query deltas, and one global cursor/hash-chain order across writers; HTTP/MCP poll/read/follow remain bounded fallbacks | Cross-region fan-out placement and managed gateway scale qualification under later topology work |
-| Vector and full-text retrieval | Dense/sparse/multi-dense storage plus MCP collection, point and exact-search paths exist; HNSW/TurboQuant engine artifacts also exist | Collection-bound approximate serving, full-text engine/index implementation, hybrid planner and production recall/latency evidence |
+| Vector and full-text retrieval | Revisioned dense/sparse/multi-dense collections, ACID batch point upsert/retirement, exact retrieve/scroll/search, typed payload-index lifecycle, guarded collection deletion, content-addressed BM25 v2, hybrid RRF, and persistent HNSW/TurboQuant artifacts share the engine authority | Complete online filtered HNSW qualification, broad multistage/reranking algebra, codec/tier/inference/GPU lifecycles, generated administration bindings, and production recall/latency evidence |
 | Time travel and rollback | RRFlowQL binds schema, source watermarks, claims, index selection and authoritative replay to one valid-time/known-at coordinate across memory, Fjall, native and reopen; `rrflow_data_rollback` appends idempotent record/relation compensations plus immutable evidence through the normal audited transaction | Extend selected-state rollback beyond records/relations without rewriting append-only event, series, object, schema, vector, geo or security-audit history; qualify the complete public-surface matrix |
 | Object and tiered persistence | Authenticated capability admission, resumable/checksummed/conditional S3 multipart archive and artifact transfer, version-bound ranged recovery, and native mmap/io_uring/bounded segment I/O share the existing RRD storage authority with measured physical/cache separation | Certify named provider transports/endpoints and extend qualified hot/cold policy to vector artifacts under G04 |
 | In-memory, embedded, single-node, browser/WASM, mobile/edge and distributed modes | One strict corpus now passes the full logical engine in memory and embedded compositions, a real local-daemon process and Rust client, the remote mTLS client face, and the bounded mmap/offline edge retrieval subset; native root exclusion and reopen are executable | Browser/WASM and mobile packaging plus consensus-backed distributed placement, failover, and platform-specific resource qualification remain; edge does not claim unsupported mutation parity |
@@ -747,19 +747,25 @@ remain per-capability, never one synthetic “database score.”
 
 ### F7 — complete the Qdrant-class vector surface
 
-**Status:** in progress. The first public vertical persists collection and
+**Status:** in progress. The engine foundation persists collection and
 named-vector definitions under control-state CAS with stable generations,
 idempotency receipts, and journal history. Definitions bind field, dense/
 sparse/multi-dense kind, dimensions, metric, optional model digest, and
-pinned/cached/cold policy. Authenticated ensure/list routes have distinct
-actions, all six SDK route catalogues discover them, and collection-addressed
-exact search enforces the definition. Atomic vector writes can bind the same
+pinned/cached/cold policy. Collection-addressed exact search enforces the
+definition. Atomic vector writes bind the same
 collection/name and validate field, kind, dimensions, and model provenance
-before committing payload properties with the unified transaction. Native
-reopen plus real-process denial, replay, collision, list, bound point commit,
-mismatch, and search tests pass. First-class point deletion and batch-mutation
-APIs, payload indexes, physical tier enforcement, filtered persisted ANN, and public
-inference administration remain open. A deterministic MSE TurboQuant codec and
+before committing payload properties with the unified transaction. That same
+transaction is the batch upsert/delete authority through `put_vector` and
+valid-time `retire_data`; no parallel point store or write coordinator exists.
+Typed payload-index ensure/list/delete transitions have distinct authorization,
+generation, digest, CAS, journal, idempotency, and reopen semantics. Indexed
+payload values are type-checked before the entire point batch commits.
+Collection deletion replays across restart and refuses to orphan live/future
+points or active HNSW/TurboQuant artifacts. Native reopen plus denial, replay,
+collision, dense/sparse/multi-dense commit/retrieve/scroll/retirement, mismatch,
+and deletion tests pass. Physical tier enforcement, filtered persisted ANN,
+generated administration bindings, and public inference administration remain
+open. A deterministic MSE TurboQuant codec and
 authenticated binary artifact now implement seeded rotation, fixed
 distribution-matched 4/2/1.5/1-bit packing, norm-corrected asymmetric scoring,
 catalogue/planner selection, corruption denial, and exact-f32 reranking. Public
@@ -770,14 +776,15 @@ matching/non-matching real-process evidence. Authenticated point scroll now
 shares exact visibility semantics with search and returns bounded
 reference-ordered vector/provenance/payload pages with resume evidence. Direct
 batch retrieve returns found points in request order plus explicit missing
-identities. First-class delete remains open.
+identities.
 
 **Deliverables**
 
 - Collections/points/named-vector/payload administration. Collection and
-  named-vector ensure/list, collection-bound atomic vector/payload writes, and
-  deterministic point scroll, and direct batch retrieval are implemented;
-  first-class delete and payload-index administration remain open.
+  named-vector ensure/list/delete, collection-bound atomic batch vector/payload
+  upsert/retirement, deterministic point scroll, direct batch retrieval, and
+  typed payload-index ensure/list/delete are implemented in the engine;
+  generated transport/SDK administration bindings remain G06 work.
 - Compact mutable dense HNSW and sparse index lifecycle.
 - Typed payload indexes and true one-stage filtered traversal; ACORN-quality
   restrictive-filter path evaluated on fixed selectivity corpora.
