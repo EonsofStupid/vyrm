@@ -354,6 +354,25 @@ impl RuntimeSchemaRegistry {
         for mutation in &mutations {
             match mutation {
                 RuntimeMutation::Claim { .. } | RuntimeMutation::Schema { .. } => {}
+                RuntimeMutation::Retire { retirement } => {
+                    let table = tables.get(&retirement.reference.kind).ok_or_else(|| {
+                        Error::InvalidRuntime {
+                            reason: format!(
+                                "retirement table type {} is not registered in the catalogue",
+                                retirement.reference.kind
+                            ),
+                        }
+                    })?;
+                    if table.model != retirement.model {
+                        return invalid(format!(
+                            "retirement target {}/{} is declared {:?}, not {:?}",
+                            retirement.reference.kind,
+                            retirement.reference.id,
+                            table.model,
+                            retirement.model
+                        ));
+                    }
+                }
                 RuntimeMutation::Record { record } => self.validate_record(record, &tables)?,
                 RuntimeMutation::Relation { relation } => {
                     self.validate_relation(relation, &tables)?
@@ -416,7 +435,8 @@ impl RuntimeSchemaRegistry {
                 | RuntimeMutation::Vector { .. }
                 | RuntimeMutation::SeriesSample { .. }
                 | RuntimeMutation::Geo { .. }
-                | RuntimeMutation::Object { .. } => {}
+                | RuntimeMutation::Object { .. }
+                | RuntimeMutation::Retire { .. } => {}
             }
         }
         self.validate_record_uniqueness(records.values())?;
@@ -641,6 +661,25 @@ enum RuntimeMutationFamily {
 }
 
 impl RuntimeLogicalModel {
+    pub const fn is_record_like(self) -> bool {
+        matches!(
+            self,
+            Self::Document
+                | Self::Relational
+                | Self::GraphNode
+                | Self::KeyValue
+                | Self::ReasoningRecord
+                | Self::LifecycleRecord
+        )
+    }
+
+    pub const fn is_event_like(self) -> bool {
+        matches!(
+            self,
+            Self::Event | Self::ReasoningEvent | Self::LifecycleEvent
+        )
+    }
+
     fn family(self) -> RuntimeMutationFamily {
         match self {
             Self::Document
@@ -659,6 +698,17 @@ impl RuntimeLogicalModel {
             Self::Object => RuntimeMutationFamily::Object,
             Self::ReasoningClaim => RuntimeMutationFamily::Claim,
         }
+    }
+}
+
+impl RuntimeSchemaRegistry {
+    pub fn logical_model(&self, kind: &RuntimeType) -> Result<RuntimeLogicalModel> {
+        self.catalogue_tables()?
+            .get(kind)
+            .map(|table| table.model)
+            .ok_or_else(|| Error::InvalidRuntime {
+                reason: format!("table type {kind} is not registered in the catalogue"),
+            })
     }
 }
 

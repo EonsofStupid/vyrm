@@ -4,8 +4,8 @@
 
 The foundation is not complete, but progress is now recorded against one
 enforced 65-item board rather than an informal checklist. G00-W01 through
-G00-W05, G01-W01 through G01-W04, and G02-W01 through G02-W06 are verified:
-15/65. G03-W01 is active. The repository contains substantial executable
+G00-W05, G01-W01 through G01-W04, G02-W01 through G02-W06, and G03-W01 are
+verified: 16/65. G03-W02 is active. The repository contains substantial executable
 storage, query, vector, reasoning, server, security, SDK, estate, and
 Connectome code under one `RrdEngine` composition root. Connectome is
 client-only, the CLI opens `RrdEngine`, and the security and estate product
@@ -95,7 +95,10 @@ the end-to-end execution/implementation map is owned only by
   and positional fallback, with operation/byte/request/fallback evidence kept
   separate from decoded block-cache residency. Local loss, remote transient
   failure, remote corruption, archive transfer, and backend-parity tests pass.
-- G03-W01 currently has a locally green unified-catalogue candidate. The
+- G03-W01 is locally committed at
+  `223cad92f809247636143ebef2f7a8ec6468d5ed` and verified as
+  `c1628e8c9268940bd113bb5462492f37a3df711a6653231ba59ff1786dff03da`.
+  The
   authoritative `RuntimeSchemaRegistry` now carries one namespace/database
   identity and a revisioned table map covering document, relational, graph,
   key-value, vector, event, time-series, geo, object, reasoning, and lifecycle
@@ -104,6 +107,15 @@ the end-to-end execution/implementation map is owned only by
   catalogue admission for every non-claim mutation, while pre-G03 registries
   remain an exact readable migration form. Cross-model migration failure/retry
   and Memory/Fjall/native/reopen parity tests pass.
+- G03-W02 has a locally green implementation candidate. One typed retirement
+  mutation now covers document, key-value, record, relation/native edge,
+  event, series, geo, vector, and object identities without erasing history.
+  `RuntimeDataSnapshot` reduces every family at one valid time, authenticated
+  cursor, schema revision, and manifest; the public engine exposes the same
+  bounded snapshot and preserves event cursor and named-vector identities.
+  Mixed-model create/update/retire/recreate, failed-batch atomicity,
+  concurrent-writer fencing, historical visibility, and Fjall/native reopen
+  parity are covered locally. Qualification and commit are still in progress.
 - Development doctor report v3 records 14 passing checks and five blockers. It
   now distinguishes MCP's clean engine dependency boundary from actual daemon
   readiness: MCP's embedded mode opens `RrdEngine`, while its mutually

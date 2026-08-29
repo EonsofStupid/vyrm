@@ -155,6 +155,18 @@ pub struct RuntimeEvent {
     pub properties: RuntimeProperties,
 }
 
+/// One catalogue-bound retirement fact.
+///
+/// Retirement is appended to the authenticated runtime log. Backends may
+/// remove the target from their current-state materialization, but historical
+/// reads continue to reconstruct the value before `effective_at`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RuntimeRetirement {
+    pub model: crate::RuntimeLogicalModel,
+    pub reference: RuntimeRef,
+    pub effective_at: Millis,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "mutation", rename_all = "snake_case")]
 pub enum RuntimeMutation {
@@ -187,6 +199,9 @@ pub enum RuntimeMutation {
     },
     Object {
         object: ObjectReference,
+    },
+    Retire {
+        retirement: RuntimeRetirement,
     },
 }
 
@@ -265,6 +280,24 @@ impl RuntimeCommit {
                     validate_properties(&object.properties)?;
                     if !identities.insert(("object", object.reference.clone())) {
                         return duplicate_identity("object", &object.reference);
+                    }
+                }
+                RuntimeMutation::Retire { retirement } => {
+                    if retirement.effective_at == 0 {
+                        return Err(Error::InvalidRuntime {
+                            reason: "runtime retirement effective_at must be greater than zero"
+                                .into(),
+                        });
+                    }
+                    if retirement.model == crate::RuntimeLogicalModel::ReasoningClaim {
+                        return Err(Error::InvalidRuntime {
+                            reason:
+                                "reasoning claims retire through their bitemporal claim contract"
+                                    .into(),
+                        });
+                    }
+                    if !identities.insert(("retirement", retirement.reference.clone())) {
+                        return duplicate_identity("retirement", &retirement.reference);
                     }
                 }
             }
@@ -801,6 +834,11 @@ impl DataTransaction {
                         );
                     }
                 }
+                RuntimeMutation::Retire { retirement }
+                    if retirement.effective_at <= base.valid_at =>
+                {
+                    retire_graph_identity(&mut records, &mut relations, retirement);
+                }
                 RuntimeMutation::Claim { .. }
                 | RuntimeMutation::Schema { .. }
                 | RuntimeMutation::Record { .. }
@@ -808,7 +846,8 @@ impl DataTransaction {
                 | RuntimeMutation::Vector { .. }
                 | RuntimeMutation::SeriesSample { .. }
                 | RuntimeMutation::Geo { .. }
-                | RuntimeMutation::Object { .. } => {}
+                | RuntimeMutation::Object { .. }
+                | RuntimeMutation::Retire { .. } => {}
             }
         }
         let records = records
@@ -1054,6 +1093,23 @@ pub fn projection_family(mutation: &RuntimeMutation) -> Option<ProjectionFamily>
         RuntimeMutation::SeriesSample { .. } => Some(ProjectionFamily::TimeSeries),
         RuntimeMutation::Geo { .. } => Some(ProjectionFamily::Geo),
         RuntimeMutation::Object { .. } => Some(ProjectionFamily::Object),
+        RuntimeMutation::Retire { retirement } => match retirement.model {
+            crate::RuntimeLogicalModel::Document
+            | crate::RuntimeLogicalModel::Relational
+            | crate::RuntimeLogicalModel::GraphNode
+            | crate::RuntimeLogicalModel::KeyValue
+            | crate::RuntimeLogicalModel::ReasoningRecord
+            | crate::RuntimeLogicalModel::LifecycleRecord => Some(ProjectionFamily::Scalar),
+            crate::RuntimeLogicalModel::GraphRelation
+            | crate::RuntimeLogicalModel::Event
+            | crate::RuntimeLogicalModel::ReasoningEvent
+            | crate::RuntimeLogicalModel::LifecycleEvent => Some(ProjectionFamily::Graph),
+            crate::RuntimeLogicalModel::Vector => Some(ProjectionFamily::Vector),
+            crate::RuntimeLogicalModel::TimeSeries => Some(ProjectionFamily::TimeSeries),
+            crate::RuntimeLogicalModel::Geo => Some(ProjectionFamily::Geo),
+            crate::RuntimeLogicalModel::Object => Some(ProjectionFamily::Object),
+            crate::RuntimeLogicalModel::ReasoningClaim => None,
+        },
         RuntimeMutation::Claim { .. } | RuntimeMutation::Schema { .. } => None,
     }
 }
@@ -1272,6 +1328,377 @@ pub struct RuntimeGraphSnapshot {
     pub relations: Vec<RuntimeRelation>,
 }
 
+/// One canonical value paired with the logical model selected by the same
+/// catalogue snapshot as the read.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RuntimeModelValue<T> {
+    pub model: crate::RuntimeLogicalModel,
+    pub value: T,
+}
+
+/// Stable identity assigned to an append-only event by its authenticated-log
+/// cursor. A correction retires this identity and appends a replacement event
+/// in the same transaction; stored event bytes are never rewritten.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RuntimeEventValue {
+    pub reference: RuntimeRef,
+    pub occurred_at: Millis,
+    pub event: RuntimeEvent,
+}
+
+/// Complete current logical data view at one valid time and one transaction
+/// cursor. Every family is reduced from the same authenticated runtime log and
+/// tagged by the same schema revision.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RuntimeDataSnapshot {
+    pub scope: ScopeId,
+    pub valid_at: Millis,
+    pub known_at_cursor: u64,
+    pub schema_revision: u64,
+    pub records: Vec<RuntimeModelValue<RuntimeRecord>>,
+    pub relations: Vec<RuntimeModelValue<RuntimeRelation>>,
+    pub events: Vec<RuntimeModelValue<RuntimeEventValue>>,
+    pub vectors: Vec<RuntimeModelValue<RuntimeVector>>,
+    pub series: Vec<RuntimeModelValue<RuntimeSeriesSample>>,
+    pub geo: Vec<RuntimeModelValue<RuntimeGeo>>,
+    pub objects: Vec<RuntimeModelValue<ObjectReference>>,
+}
+
+impl RuntimeDataSnapshot {
+    pub fn contains(&self, model: crate::RuntimeLogicalModel, reference: &RuntimeRef) -> bool {
+        if model.is_record_like() {
+            self.records
+                .iter()
+                .any(|entry| entry.model == model && &entry.value.reference == reference)
+        } else if model == crate::RuntimeLogicalModel::GraphRelation {
+            self.relations
+                .iter()
+                .any(|entry| entry.model == model && &entry.value.reference == reference)
+        } else if model.is_event_like() {
+            self.events
+                .iter()
+                .any(|entry| entry.model == model && &entry.value.reference == reference)
+        } else {
+            match model {
+                crate::RuntimeLogicalModel::Vector => self
+                    .vectors
+                    .iter()
+                    .any(|entry| &entry.value.reference == reference),
+                crate::RuntimeLogicalModel::TimeSeries => self
+                    .series
+                    .iter()
+                    .any(|entry| &entry.value.reference == reference),
+                crate::RuntimeLogicalModel::Geo => self
+                    .geo
+                    .iter()
+                    .any(|entry| &entry.value.reference == reference),
+                crate::RuntimeLogicalModel::Object => self
+                    .objects
+                    .iter()
+                    .any(|entry| &entry.value.reference == reference),
+                crate::RuntimeLogicalModel::ReasoningClaim
+                | crate::RuntimeLogicalModel::Document
+                | crate::RuntimeLogicalModel::Relational
+                | crate::RuntimeLogicalModel::GraphNode
+                | crate::RuntimeLogicalModel::GraphRelation
+                | crate::RuntimeLogicalModel::KeyValue
+                | crate::RuntimeLogicalModel::Event
+                | crate::RuntimeLogicalModel::ReasoningRecord
+                | crate::RuntimeLogicalModel::ReasoningEvent
+                | crate::RuntimeLogicalModel::LifecycleRecord
+                | crate::RuntimeLogicalModel::LifecycleEvent => false,
+            }
+        }
+    }
+
+    pub fn from_changes(
+        changes: &[RuntimeChange],
+        schema: &RuntimeSchemaRegistry,
+        scope: ScopeId,
+        valid_at: Millis,
+        known_at_cursor: u64,
+    ) -> Result<Self> {
+        schema.validate()?;
+        let tables = schema.catalogue_tables()?;
+        let model_for = |reference: &RuntimeRef,
+                         legacy_model: crate::RuntimeLogicalModel|
+         -> Result<crate::RuntimeLogicalModel> {
+            if let Some(table) = tables.get(&reference.kind) {
+                Ok(table.model)
+            } else if schema.tables.is_empty() {
+                Ok(legacy_model)
+            } else {
+                Err(Error::InvalidRuntime {
+                    reason: format!(
+                        "runtime value type {} is absent from schema revision {}",
+                        reference.kind, schema.revision
+                    ),
+                })
+            }
+        };
+
+        let mut records = BTreeMap::<RuntimeRef, RuntimeModelValue<RuntimeRecord>>::new();
+        let mut relations = BTreeMap::<RuntimeRef, RuntimeModelValue<RuntimeRelation>>::new();
+        let mut events = BTreeMap::<RuntimeRef, RuntimeModelValue<RuntimeEventValue>>::new();
+        let mut vectors = BTreeMap::<RuntimeRef, RuntimeModelValue<RuntimeVector>>::new();
+        let mut series = BTreeMap::<RuntimeRef, RuntimeModelValue<RuntimeSeriesSample>>::new();
+        let mut geo = BTreeMap::<RuntimeRef, RuntimeModelValue<RuntimeGeo>>::new();
+        let mut objects = BTreeMap::<RuntimeRef, RuntimeModelValue<ObjectReference>>::new();
+
+        for change in changes
+            .iter()
+            .filter(|change| change.cursor <= known_at_cursor && change.scope == scope)
+        {
+            match &change.mutation {
+                RuntimeMutation::Record { record } if record.valid_from <= valid_at => {
+                    let model =
+                        model_for(&record.reference, crate::RuntimeLogicalModel::Relational)?;
+                    if !model.is_record_like() {
+                        return data_snapshot_model_error(&record.reference, model, "record");
+                    }
+                    records.insert(
+                        record.reference.clone(),
+                        RuntimeModelValue {
+                            model,
+                            value: record.clone(),
+                        },
+                    );
+                }
+                RuntimeMutation::Relation { relation } if relation.valid_from <= valid_at => {
+                    let model = model_for(
+                        &relation.reference,
+                        crate::RuntimeLogicalModel::GraphRelation,
+                    )?;
+                    if model != crate::RuntimeLogicalModel::GraphRelation {
+                        return data_snapshot_model_error(
+                            &relation.reference,
+                            model,
+                            "graph relation",
+                        );
+                    }
+                    relations.insert(
+                        relation.reference.clone(),
+                        RuntimeModelValue {
+                            model,
+                            value: relation.clone(),
+                        },
+                    );
+                }
+                RuntimeMutation::Event { event } if change.at <= valid_at => {
+                    let reference = runtime_event_reference(event, change.cursor);
+                    let model = model_for(&reference, crate::RuntimeLogicalModel::Event)?;
+                    if !model.is_event_like() {
+                        return data_snapshot_model_error(&reference, model, "event");
+                    }
+                    events.insert(
+                        reference.clone(),
+                        RuntimeModelValue {
+                            model,
+                            value: RuntimeEventValue {
+                                reference,
+                                occurred_at: change.at,
+                                event: event.clone(),
+                            },
+                        },
+                    );
+                }
+                RuntimeMutation::Vector { vector } if vector.valid_from <= valid_at => {
+                    let model = model_for(&vector.reference, crate::RuntimeLogicalModel::Vector)?;
+                    if model != crate::RuntimeLogicalModel::Vector {
+                        return data_snapshot_model_error(&vector.reference, model, "vector");
+                    }
+                    vectors.insert(
+                        vector.reference.clone(),
+                        RuntimeModelValue {
+                            model,
+                            value: vector.clone(),
+                        },
+                    );
+                }
+                RuntimeMutation::SeriesSample { sample } if sample.observed_at <= valid_at => {
+                    let model =
+                        model_for(&sample.reference, crate::RuntimeLogicalModel::TimeSeries)?;
+                    if model != crate::RuntimeLogicalModel::TimeSeries {
+                        return data_snapshot_model_error(
+                            &sample.reference,
+                            model,
+                            "time-series sample",
+                        );
+                    }
+                    series.insert(
+                        sample.reference.clone(),
+                        RuntimeModelValue {
+                            model,
+                            value: sample.clone(),
+                        },
+                    );
+                }
+                RuntimeMutation::Geo { geo: value } if value.valid_from <= valid_at => {
+                    let model = model_for(&value.reference, crate::RuntimeLogicalModel::Geo)?;
+                    if model != crate::RuntimeLogicalModel::Geo {
+                        return data_snapshot_model_error(&value.reference, model, "geo value");
+                    }
+                    geo.insert(
+                        value.reference.clone(),
+                        RuntimeModelValue {
+                            model,
+                            value: value.clone(),
+                        },
+                    );
+                }
+                RuntimeMutation::Object { object } if change.at <= valid_at => {
+                    let model = model_for(&object.reference, crate::RuntimeLogicalModel::Object)?;
+                    if model != crate::RuntimeLogicalModel::Object {
+                        return data_snapshot_model_error(
+                            &object.reference,
+                            model,
+                            "object reference",
+                        );
+                    }
+                    objects.insert(
+                        object.reference.clone(),
+                        RuntimeModelValue {
+                            model,
+                            value: object.clone(),
+                        },
+                    );
+                }
+                RuntimeMutation::Retire { retirement } if retirement.effective_at <= valid_at => {
+                    let actual = model_for(&retirement.reference, retirement.model)?;
+                    if actual != retirement.model {
+                        return data_snapshot_model_error(
+                            &retirement.reference,
+                            actual,
+                            "retirement",
+                        );
+                    }
+                    retire_data_identity(
+                        retirement,
+                        &mut records,
+                        &mut relations,
+                        &mut events,
+                        &mut vectors,
+                        &mut series,
+                        &mut geo,
+                        &mut objects,
+                    );
+                }
+                RuntimeMutation::Claim { .. }
+                | RuntimeMutation::Schema { .. }
+                | RuntimeMutation::Record { .. }
+                | RuntimeMutation::Relation { .. }
+                | RuntimeMutation::Event { .. }
+                | RuntimeMutation::Vector { .. }
+                | RuntimeMutation::SeriesSample { .. }
+                | RuntimeMutation::Geo { .. }
+                | RuntimeMutation::Object { .. }
+                | RuntimeMutation::Retire { .. } => {}
+            }
+        }
+
+        Ok(Self {
+            scope,
+            valid_at,
+            known_at_cursor,
+            schema_revision: schema.revision,
+            records: records
+                .into_values()
+                .filter(|record| {
+                    valid_at_window(record.value.valid_from, record.value.valid_to, valid_at)
+                })
+                .collect(),
+            relations: relations
+                .into_values()
+                .filter(|relation| {
+                    valid_at_window(relation.value.valid_from, relation.value.valid_to, valid_at)
+                })
+                .collect(),
+            events: events.into_values().collect(),
+            vectors: vectors
+                .into_values()
+                .filter(|vector| {
+                    valid_at_window(vector.value.valid_from, vector.value.valid_to, valid_at)
+                })
+                .collect(),
+            series: series.into_values().collect(),
+            geo: geo
+                .into_values()
+                .filter(|value| {
+                    valid_at_window(value.value.valid_from, value.value.valid_to, valid_at)
+                })
+                .collect(),
+            objects: objects.into_values().collect(),
+        })
+    }
+}
+
+fn runtime_event_reference(event: &RuntimeEvent, cursor: u64) -> RuntimeRef {
+    RuntimeRef {
+        kind: event.kind.clone(),
+        id: RuntimeId::new(format!("cursor:{cursor}")).expect("cursor event id is valid"),
+    }
+}
+
+fn data_snapshot_model_error<T>(
+    reference: &RuntimeRef,
+    model: crate::RuntimeLogicalModel,
+    expected: &str,
+) -> Result<T> {
+    Err(Error::InvalidRuntime {
+        reason: format!(
+            "catalogue model {model:?} for {}/{} cannot be read as {expected}",
+            reference.kind, reference.id
+        ),
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
+fn retire_data_identity(
+    retirement: &RuntimeRetirement,
+    records: &mut BTreeMap<RuntimeRef, RuntimeModelValue<RuntimeRecord>>,
+    relations: &mut BTreeMap<RuntimeRef, RuntimeModelValue<RuntimeRelation>>,
+    events: &mut BTreeMap<RuntimeRef, RuntimeModelValue<RuntimeEventValue>>,
+    vectors: &mut BTreeMap<RuntimeRef, RuntimeModelValue<RuntimeVector>>,
+    series: &mut BTreeMap<RuntimeRef, RuntimeModelValue<RuntimeSeriesSample>>,
+    geo: &mut BTreeMap<RuntimeRef, RuntimeModelValue<RuntimeGeo>>,
+    objects: &mut BTreeMap<RuntimeRef, RuntimeModelValue<ObjectReference>>,
+) {
+    let reference = &retirement.reference;
+    if retirement.model.is_record_like() {
+        records.remove(reference);
+    } else if retirement.model == crate::RuntimeLogicalModel::GraphRelation {
+        relations.remove(reference);
+    } else if retirement.model.is_event_like() {
+        events.remove(reference);
+    } else {
+        match retirement.model {
+            crate::RuntimeLogicalModel::Vector => {
+                vectors.remove(reference);
+            }
+            crate::RuntimeLogicalModel::TimeSeries => {
+                series.remove(reference);
+            }
+            crate::RuntimeLogicalModel::Geo => {
+                geo.remove(reference);
+            }
+            crate::RuntimeLogicalModel::Object => {
+                objects.remove(reference);
+            }
+            crate::RuntimeLogicalModel::ReasoningClaim
+            | crate::RuntimeLogicalModel::Document
+            | crate::RuntimeLogicalModel::Relational
+            | crate::RuntimeLogicalModel::GraphNode
+            | crate::RuntimeLogicalModel::GraphRelation
+            | crate::RuntimeLogicalModel::KeyValue
+            | crate::RuntimeLogicalModel::Event
+            | crate::RuntimeLogicalModel::ReasoningRecord
+            | crate::RuntimeLogicalModel::ReasoningEvent
+            | crate::RuntimeLogicalModel::LifecycleRecord
+            | crate::RuntimeLogicalModel::LifecycleEvent => {}
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RuntimeRecordChange {
     pub before: RuntimeRecord,
@@ -1360,12 +1787,16 @@ impl RuntimeGraphSnapshot {
                         );
                     }
                 }
+                RuntimeMutation::Retire { retirement } if retirement.effective_at <= valid_at => {
+                    retire_graph_identity(&mut records, &mut relations, retirement);
+                }
                 RuntimeMutation::Claim { .. }
                 | RuntimeMutation::Schema { .. }
                 | RuntimeMutation::Vector { .. }
                 | RuntimeMutation::SeriesSample { .. }
                 | RuntimeMutation::Geo { .. }
-                | RuntimeMutation::Object { .. } => {}
+                | RuntimeMutation::Object { .. }
+                | RuntimeMutation::Retire { .. } => {}
             }
         }
         let records = records
@@ -1493,6 +1924,41 @@ impl RuntimeGraphSnapshot {
                 })
                 .collect(),
         }
+    }
+}
+
+fn retire_graph_identity(
+    records: &mut BTreeMap<RuntimeRef, RuntimeRecord>,
+    relations: &mut BTreeMap<RuntimeRef, RuntimeRelation>,
+    retirement: &RuntimeRetirement,
+) {
+    match retirement.model {
+        crate::RuntimeLogicalModel::Document
+        | crate::RuntimeLogicalModel::Relational
+        | crate::RuntimeLogicalModel::GraphNode
+        | crate::RuntimeLogicalModel::KeyValue
+        | crate::RuntimeLogicalModel::ReasoningRecord
+        | crate::RuntimeLogicalModel::LifecycleRecord => {
+            records.remove(&retirement.reference);
+        }
+        crate::RuntimeLogicalModel::GraphRelation => {
+            relations.remove(&retirement.reference);
+        }
+        crate::RuntimeLogicalModel::Event
+        | crate::RuntimeLogicalModel::ReasoningEvent
+        | crate::RuntimeLogicalModel::LifecycleEvent => {
+            records.remove(&retirement.reference);
+            let emitted = RuntimeRef {
+                kind: RuntimeType::new("emitted").expect("static runtime type is valid"),
+                id: retirement.reference.id.clone(),
+            };
+            relations.remove(&emitted);
+        }
+        crate::RuntimeLogicalModel::Vector
+        | crate::RuntimeLogicalModel::TimeSeries
+        | crate::RuntimeLogicalModel::Geo
+        | crate::RuntimeLogicalModel::Object
+        | crate::RuntimeLogicalModel::ReasoningClaim => {}
     }
 }
 
@@ -1741,6 +2207,32 @@ fn encode_mutation(out: &mut Vec<u8>, mutation: &RuntimeMutation) {
             optional_text(out, object.receipt.etag.as_deref());
             encode_properties(out, &object.properties);
         }
+        RuntimeMutation::Retire { retirement } => {
+            out.push(9);
+            out.push(runtime_logical_model_tag(retirement.model));
+            encode_ref(out, &retirement.reference);
+            out.extend_from_slice(&retirement.effective_at.to_be_bytes());
+        }
+    }
+}
+
+fn runtime_logical_model_tag(model: crate::RuntimeLogicalModel) -> u8 {
+    match model {
+        crate::RuntimeLogicalModel::Document => 0,
+        crate::RuntimeLogicalModel::Relational => 1,
+        crate::RuntimeLogicalModel::GraphNode => 2,
+        crate::RuntimeLogicalModel::GraphRelation => 3,
+        crate::RuntimeLogicalModel::KeyValue => 4,
+        crate::RuntimeLogicalModel::Vector => 5,
+        crate::RuntimeLogicalModel::Event => 6,
+        crate::RuntimeLogicalModel::TimeSeries => 7,
+        crate::RuntimeLogicalModel::Geo => 8,
+        crate::RuntimeLogicalModel::Object => 9,
+        crate::RuntimeLogicalModel::ReasoningRecord => 10,
+        crate::RuntimeLogicalModel::ReasoningEvent => 11,
+        crate::RuntimeLogicalModel::LifecycleRecord => 12,
+        crate::RuntimeLogicalModel::LifecycleEvent => 13,
+        crate::RuntimeLogicalModel::ReasoningClaim => 14,
     }
 }
 

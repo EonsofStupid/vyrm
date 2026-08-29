@@ -687,8 +687,12 @@ identity/digest revalidation; stale queries use the authoritative log. See
 
 - Mutating RRFlowQL and multi-statement transactions.
 - Dedicated document/key-value/record/edge CRUD and retirement surfaces. The
-  revisioned namespace/database catalogue and explicit strict/schemaless table
-  policy are implemented; G03-W02 owns complete mutation/read administration.
+  engine now has one typed mutation and exact-stamp read contract across all
+  catalogue models, including history-preserving retirement, event-cursor
+  correction, mixed-model atomicity, and reopen parity. Mutating RRFlowQL and
+  the dedicated HTTP/MCP administration adapters remain G03-W03 and G06 work;
+  the internal G03-W02 engine contract is an implementation candidate pending
+  qualification.
 - Relational links, richer graph/path algebra, and spatial operators.
 - Materialized ordinary/compound/unique/count, spatial and full-text indexes;
   exact scalar snapshot artifacts now execute and authenticated ensure/list

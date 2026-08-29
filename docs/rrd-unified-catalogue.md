@@ -52,6 +52,18 @@ archives, replication entries, public transaction/changefeed contract, and
 native database. Memory, Fjall compatibility, native RRD LSM, and both
 persistent reopen paths return the same registry revision and table map.
 
-G03-W02 builds complete document/key-value/record/relation CRUD and retirement
-operations on these identities. G03-W03 and G03-W04 bind RRFlowQL and
-Arrow/DataFusion to this exact immutable catalogue snapshot.
+G03-W02 adds one atomic mutation/read vocabulary over these identities.
+Document, key-value, record, relation/native-edge, event, vector, time-series,
+geo, and object values can be created, updated, retired at an explicit valid
+time, and recreated without erasing their authenticated history. Event targets
+use their immutable log cursor; every other target uses its typed reference.
+Reasoning claims retain their separate bi-temporal retirement contract.
+
+`RuntimeDataSnapshot` reduces all model families through one catalogue
+revision, valid-time instant, authenticated transaction cursor, and read
+manifest. Retirement-target validation observes the same pre-commit cursor and
+the backend compare-and-swap remains the final race authority, so a missing
+target or competing writer cannot partially publish a mixed-model batch.
+Memory, Fjall, native RRD LSM, and persistent reopen fixtures execute the same
+contract. G03-W03 and G03-W04 bind mutating RRFlowQL and Arrow/DataFusion to
+this exact immutable catalogue snapshot.

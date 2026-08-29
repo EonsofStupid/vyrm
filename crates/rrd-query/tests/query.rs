@@ -1,9 +1,10 @@
 use rrd_core::{
     Claim, GeoPoint, GeoValue, Predicate, Producer, RuntimeCommit, RuntimeEvent,
-    RuntimeEventSchema, RuntimeGeo, RuntimeGraphSnapshot, RuntimeMutation, RuntimeProperties,
-    RuntimePropertySchema, RuntimeRecord, RuntimeRecordSchema, RuntimeRef, RuntimeRelation,
-    RuntimeRelationSchema, RuntimeSchemaRegistry, RuntimeSeriesSample, RuntimeType, RuntimeValue,
-    RuntimeValueType, ScopeId, SeriesValue, Subject,
+    RuntimeEventSchema, RuntimeGeo, RuntimeGraphSnapshot, RuntimeLogicalModel, RuntimeMutation,
+    RuntimeProperties, RuntimePropertySchema, RuntimeRecord, RuntimeRecordSchema, RuntimeRef,
+    RuntimeRelation, RuntimeRelationSchema, RuntimeRetirement, RuntimeSchemaRegistry,
+    RuntimeSeriesSample, RuntimeType, RuntimeValue, RuntimeValueType, ScopeId, SeriesValue,
+    Subject,
 };
 use rrd_query::{
     bind, execute, plan, Catalog, Error, ExecutionBudget, Parameters, PhysicalOperator,
@@ -722,4 +723,37 @@ fn binding_and_budget_fail_closed() {
         !result.truncated,
         "a semantic LIMIT is not budget truncation"
     );
+}
+
+#[test]
+fn event_queries_honor_cursor_typed_retirement_at_valid_time() {
+    let engine = MemoryEngine::new();
+    let initial = engine.commit_runtime(&fixture_commit()).unwrap();
+    engine
+        .commit_runtime(&RuntimeCommit {
+            scope: ScopeId::new("instance:test").unwrap(),
+            at: 101,
+            actor: "agent:event-retirement".into(),
+            expected_cursor: initial.last_cursor,
+            mutations: vec![RuntimeMutation::Retire {
+                retirement: RuntimeRetirement {
+                    model: RuntimeLogicalModel::Event,
+                    reference: RuntimeRef::new("tool_result", "cursor:5").unwrap(),
+                    effective_at: 101,
+                },
+            }],
+        })
+        .unwrap();
+    let before = execute_text(
+        &engine,
+        "FROM event:tool_result AT VALID 100 KNOWN HEAD PROJECT cursor",
+    )
+    .1;
+    let after = execute_text(
+        &engine,
+        "FROM event:tool_result AT VALID 101 KNOWN HEAD PROJECT cursor",
+    )
+    .1;
+    assert_eq!(before.returned_rows, 1);
+    assert_eq!(after.returned_rows, 0);
 }

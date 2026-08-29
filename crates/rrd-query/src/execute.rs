@@ -534,11 +534,15 @@ fn rows_for_source(
                 .into_iter()
                 .filter(|record| &record.reference.kind == kind)
                 .map(|record| {
-                    let identity = format!("record:{}:{}", record.reference.kind, record.reference.id);
+                    let identity =
+                        format!("record:{}:{}", record.reference.kind, record.reference.id);
                     let mut values = record.properties;
                     values.insert("id".into(), string(record.reference.id.to_string()));
                     values.insert("kind".into(), string(record.reference.kind.to_string()));
-                    values.insert("valid_from".into(), RuntimeValue::Unsigned(record.valid_from));
+                    values.insert(
+                        "valid_from".into(),
+                        RuntimeValue::Unsigned(record.valid_from),
+                    );
                     values.insert("valid_to".into(), optional_u64(record.valid_to));
                     QueryRow { identity, values }
                 })
@@ -567,81 +571,120 @@ fn rows_for_source(
                     values.insert("from_id".into(), string(relation.from.id.to_string()));
                     values.insert("to_kind".into(), string(relation.to.kind.to_string()));
                     values.insert("to_id".into(), string(relation.to.id.to_string()));
-                    values.insert("valid_from".into(), RuntimeValue::Unsigned(relation.valid_from));
+                    values.insert(
+                        "valid_from".into(),
+                        RuntimeValue::Unsigned(relation.valid_from),
+                    );
                     values.insert("valid_to".into(), optional_u64(relation.valid_to));
                     QueryRow { identity, values }
                 })
                 .collect()
         }
-        Source::Event { kind } => changes
-            .iter()
-            .filter(|change| {
-                change.cursor <= known_at_cursor
-                    && &change.scope == scope
-                    && change.at <= valid_at
-                    && matches!(&change.mutation, RuntimeMutation::Event { event } if &event.kind == kind)
-            })
-            .filter_map(|change| {
-                let RuntimeMutation::Event { event } = &change.mutation else {
-                    return None;
-                };
-                let mut values = event.properties.clone();
-                values.insert("cursor".into(), RuntimeValue::Unsigned(change.cursor));
-                values.insert("kind".into(), string(event.kind.to_string()));
-                values.insert("at".into(), RuntimeValue::Unsigned(change.at));
-                values.insert("actor".into(), string(change.actor.clone()));
-                values.insert(
-                    "subject_kind".into(),
-                    event
-                        .subject
-                        .as_ref()
-                        .map_or(RuntimeValue::Null, |subject| string(subject.kind.to_string())),
-                );
-                values.insert(
-                    "subject_id".into(),
-                    event
-                        .subject
-                        .as_ref()
-                        .map_or(RuntimeValue::Null, |subject| string(subject.id.to_string())),
-                );
-                Some(QueryRow {
-                    identity: format!("event:{}:{}", event.kind, change.cursor),
-                    values,
-                })
-            })
-            .collect(),
-        Source::Series { kind } => changes
-            .iter()
-            .filter(|change| change.cursor <= known_at_cursor && &change.scope == scope)
-            .filter_map(|change| {
-                let RuntimeMutation::SeriesSample { sample } = &change.mutation else {
-                    return None;
-                };
-                if &sample.series.kind != kind || sample.observed_at > valid_at {
-                    return None;
+        Source::Event { kind } => {
+            let mut active = BTreeMap::new();
+            for change in changes
+                .iter()
+                .filter(|change| change.cursor <= known_at_cursor && &change.scope == scope)
+            {
+                match &change.mutation {
+                    RuntimeMutation::Event { event }
+                        if &event.kind == kind && change.at <= valid_at =>
+                    {
+                        let reference = rrd_core::RuntimeRef::new(
+                            event.kind.to_string(),
+                            format!("cursor:{}", change.cursor),
+                        )
+                        .expect("persisted event reference is valid");
+                        active.insert(reference, (change, event));
+                    }
+                    RuntimeMutation::Retire { retirement }
+                        if retirement.model.is_event_like()
+                            && &retirement.reference.kind == kind
+                            && retirement.effective_at <= valid_at =>
+                    {
+                        active.remove(&retirement.reference);
+                    }
+                    _ => {}
                 }
-                let mut values = sample.properties.clone();
-                values.insert("id".into(), string(sample.reference.id.to_string()));
-                values.insert("kind".into(), string(sample.reference.kind.to_string()));
-                values.insert("series_kind".into(), string(sample.series.kind.to_string()));
-                values.insert("series_id".into(), string(sample.series.id.to_string()));
-                values.insert(
-                    "observed_at".into(),
-                    RuntimeValue::Unsigned(sample.observed_at),
-                );
-                values.insert("value".into(), series_value(&sample.value));
-                Some(QueryRow {
-                    identity: format!(
-                        "series:{}:{}:{}:{}",
-                        sample.series.kind,
-                        sample.series.id,
-                        sample.observed_at,
-                        sample.reference.id
-                    ),
-                    values,
+            }
+            active
+                .into_values()
+                .map(|(change, event)| {
+                    let mut values = event.properties.clone();
+                    values.insert("cursor".into(), RuntimeValue::Unsigned(change.cursor));
+                    values.insert("kind".into(), string(event.kind.to_string()));
+                    values.insert("at".into(), RuntimeValue::Unsigned(change.at));
+                    values.insert("actor".into(), string(change.actor.clone()));
+                    values.insert(
+                        "subject_kind".into(),
+                        event
+                            .subject
+                            .as_ref()
+                            .map_or(RuntimeValue::Null, |subject| {
+                                string(subject.kind.to_string())
+                            }),
+                    );
+                    values.insert(
+                        "subject_id".into(),
+                        event
+                            .subject
+                            .as_ref()
+                            .map_or(RuntimeValue::Null, |subject| string(subject.id.to_string())),
+                    );
+                    QueryRow {
+                        identity: format!("event:{}:{}", event.kind, change.cursor),
+                        values,
+                    }
                 })
-            })
-            .collect(),
+                .collect()
+        }
+        Source::Series { kind } => {
+            let mut active = BTreeMap::new();
+            for change in changes
+                .iter()
+                .filter(|change| change.cursor <= known_at_cursor && &change.scope == scope)
+            {
+                match &change.mutation {
+                    RuntimeMutation::SeriesSample { sample }
+                        if &sample.series.kind == kind && sample.observed_at <= valid_at =>
+                    {
+                        active.insert(sample.reference.clone(), sample);
+                    }
+                    RuntimeMutation::Retire { retirement }
+                        if retirement.model == rrd_core::RuntimeLogicalModel::TimeSeries
+                            && retirement.effective_at <= valid_at =>
+                    {
+                        active.remove(&retirement.reference);
+                    }
+                    _ => {}
+                }
+            }
+            active
+                .into_values()
+                .map(|sample| {
+                    let mut values = sample.properties.clone();
+                    values.insert("id".into(), string(sample.reference.id.to_string()));
+                    values.insert("kind".into(), string(sample.reference.kind.to_string()));
+                    values.insert("series_kind".into(), string(sample.series.kind.to_string()));
+                    values.insert("series_id".into(), string(sample.series.id.to_string()));
+                    values.insert(
+                        "observed_at".into(),
+                        RuntimeValue::Unsigned(sample.observed_at),
+                    );
+                    values.insert("value".into(), series_value(&sample.value));
+                    QueryRow {
+                        identity: format!(
+                            "series:{}:{}:{}:{}",
+                            sample.series.kind,
+                            sample.series.id,
+                            sample.observed_at,
+                            sample.reference.id
+                        ),
+                        values,
+                    }
+                })
+                .collect()
+        }
         Source::Geo { kind } => geo_rows(changes, scope, kind, valid_at, known_at_cursor),
         Source::Traversal {
             relation,
@@ -771,21 +814,28 @@ fn geo_rows(
         .iter()
         .filter(|change| change.cursor <= known_at_cursor && &change.scope == scope)
     {
-        let RuntimeMutation::Geo { geo } = &change.mutation else {
-            continue;
-        };
-        if &geo.reference.kind != kind
-            || geo.valid_from > valid_at
-            || geo.valid_to.is_some_and(|end| valid_at >= end)
-        {
-            continue;
-        }
-        let replace = active.get(&geo.reference).is_none_or(|(cursor, current)| {
-            geo.valid_from > current.valid_from
-                || (geo.valid_from == current.valid_from && change.cursor > *cursor)
-        });
-        if replace {
-            active.insert(geo.reference.clone(), (change.cursor, geo.clone()));
+        match &change.mutation {
+            RuntimeMutation::Geo { geo }
+                if &geo.reference.kind == kind
+                    && geo.valid_from <= valid_at
+                    && geo.valid_to.is_none_or(|end| valid_at < end) =>
+            {
+                let replace = active.get(&geo.reference).is_none_or(|(cursor, current)| {
+                    geo.valid_from > current.valid_from
+                        || (geo.valid_from == current.valid_from && change.cursor > *cursor)
+                });
+                if replace {
+                    active.insert(geo.reference.clone(), (change.cursor, geo.clone()));
+                }
+            }
+            RuntimeMutation::Retire { retirement }
+                if retirement.model == rrd_core::RuntimeLogicalModel::Geo
+                    && &retirement.reference.kind == kind
+                    && retirement.effective_at <= valid_at =>
+            {
+                active.remove(&retirement.reference);
+            }
+            _ => {}
         }
     }
     active

@@ -1,23 +1,24 @@
 use rrd_contract::{
     transaction_operation_sha256, BeginTransaction, CanonicalId, CapabilityDescriptor,
     CapabilityStatus, CloseSession, CommitReceipt, CommitTransaction, CorrelationId,
-    CreateInstanceBackup, DataCatalogueIdentity, DataLogicalModel, DataRecordSchema,
-    DataSchemaMode, DataSchemaRegistry, DataTableSchema, DeploymentMode, EnsureQueryIndex,
-    EnsureVectorCollection, EnsureVectorIndex, ErrorBody, ErrorCode, EstateActivityPolicySnapshot,
-    EstateBackupJobSnapshot, EstateBackupJobState, EstateBackupJobsSnapshot, EstateMutationResult,
-    EstateSnapshot, ExecuteQuery, FollowChangefeed, ForwardRollbackCounts, ForwardRollbackRequest,
-    HybridFusion, IdempotencyBinding, ListQueryIndexes, ListVectorCollections, Liveness,
-    NamedVectorDefinition, PollLiveQuery, PreviewTransaction, ProductCapability,
-    ProductCapabilityCatalogue, ProductSurface, QueryBudget, QueryExecutionSnapshot,
-    QueryIndexKind, QueryPlanCandidate, QueryPlanSnapshot, QueryResult, QueryRowSnapshot,
-    QueryValue, ReadAudit, ReadChangefeed, ReadEstate, Readiness, RenewSession, RequestContext,
-    RequestEnvelope, ResourceId, ResourceKind, ResourcePath, ResponseEnvelope, ResponseOutcome,
-    RestoreInstanceBackup, SearchHybrid, SearchVectors, ServiceCapabilities, SessionEndState,
-    SessionLease, SessionLimits, SessionTermination, SurfaceBinding, SurfaceDisposition,
-    TransactionMutation, TransactionPreview, TransactionState, VectorIndexConfiguration,
-    VectorMemoryTier, VectorPayloadCondition, VectorPayloadFilter, VectorPayloadOperator,
-    VectorQuantizationBits, VectorSearchMetric, VectorSearchMode, VectorSearchQuery,
-    VectorValueKind, PROTOCOL, PROTOCOL_VERSION,
+    CreateInstanceBackup, DataCatalogueIdentity, DataLogicalModel, DataRecordSchema, DataReference,
+    DataSchemaMode, DataSchemaRegistry, DataTableSchema, DataTarget, DeploymentMode,
+    EnsureQueryIndex, EnsureVectorCollection, EnsureVectorIndex, ErrorBody, ErrorCode,
+    EstateActivityPolicySnapshot, EstateBackupJobSnapshot, EstateBackupJobState,
+    EstateBackupJobsSnapshot, EstateMutationResult, EstateSnapshot, ExecuteQuery, FollowChangefeed,
+    ForwardRollbackCounts, ForwardRollbackRequest, HybridFusion, IdempotencyBinding,
+    ListQueryIndexes, ListVectorCollections, Liveness, NamedVectorDefinition, PollLiveQuery,
+    PreviewTransaction, ProductCapability, ProductCapabilityCatalogue, ProductSurface, QueryBudget,
+    QueryExecutionSnapshot, QueryIndexKind, QueryPlanCandidate, QueryPlanSnapshot, QueryResult,
+    QueryRowSnapshot, QueryValue, ReadAudit, ReadChangefeed, ReadDataSnapshot, ReadEstate,
+    Readiness, RenewSession, RequestContext, RequestEnvelope, ResourceId, ResourceKind,
+    ResourcePath, ResponseEnvelope, ResponseOutcome, RestoreInstanceBackup, SearchHybrid,
+    SearchVectors, ServiceCapabilities, SessionEndState, SessionLease, SessionLimits,
+    SessionTermination, SurfaceBinding, SurfaceDisposition, TransactionMutation,
+    TransactionPreview, TransactionState, VectorIndexConfiguration, VectorMemoryTier,
+    VectorPayloadCondition, VectorPayloadFilter, VectorPayloadOperator, VectorQuantizationBits,
+    VectorSearchMetric, VectorSearchMode, VectorSearchQuery, VectorValueKind, PROTOCOL,
+    PROTOCOL_VERSION,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -1082,4 +1083,65 @@ fn unified_catalogue_is_strict_round_trippable_and_rejects_mode_confusion() {
     assert!(TransactionMutation::PutSchema { registry }
         .validate()
         .is_err());
+}
+
+#[test]
+fn data_retirement_targets_are_model_typed_and_event_cursor_addressed() {
+    let document = DataTarget::Reference {
+        reference: DataReference {
+            kind: CanonicalId::new("document").unwrap(),
+            id: CanonicalId::new("alpha").unwrap(),
+        },
+    };
+    TransactionMutation::RetireData {
+        model: DataLogicalModel::Document,
+        target: document.clone(),
+        effective_at: 10,
+    }
+    .validate()
+    .unwrap();
+    let event = DataTarget::Event {
+        kind: CanonicalId::new("observed").unwrap(),
+        cursor: 7,
+    };
+    let retirement = TransactionMutation::RetireData {
+        model: DataLogicalModel::Event,
+        target: event,
+        effective_at: 10,
+    };
+    retirement.validate().unwrap();
+    assert_eq!(
+        serde_json::from_value::<TransactionMutation>(serde_json::to_value(&retirement).unwrap())
+            .unwrap(),
+        retirement
+    );
+    assert!(TransactionMutation::RetireData {
+        model: DataLogicalModel::Event,
+        target: document,
+        effective_at: 10,
+    }
+    .validate()
+    .is_err());
+    assert!(TransactionMutation::RetireData {
+        model: DataLogicalModel::Vector,
+        target: DataTarget::Event {
+            kind: CanonicalId::new("observed").unwrap(),
+            cursor: 7,
+        },
+        effective_at: 10,
+    }
+    .validate()
+    .is_err());
+    assert!(ReadDataSnapshot {
+        valid_at: 10,
+        max_scanned_changes: 1,
+    }
+    .validate()
+    .is_ok());
+    assert!(ReadDataSnapshot {
+        valid_at: 0,
+        max_scanned_changes: 0,
+    }
+    .validate()
+    .is_err());
 }

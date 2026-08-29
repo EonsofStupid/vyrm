@@ -480,7 +480,10 @@ As of 2026-08-29:
   logical catalogue through G03/G04 rather than becoming authorities;
 - the SurrealDB-shaped namespace/database hierarchy now has canonical public
   resource terms and a persisted, revisioned multi-model table catalogue;
-  complete CRUD and query integration remain open. Executable multi-project
+  one runtime transaction and exact-stamp snapshot now cover CRUD and
+  history-preserving retirement across document, key-value, relational/graph,
+  event, vector, series, geo, and object models. Mutating RRFlowQL and dedicated
+  protocol administration remain open. Executable multi-project
   instance topology has been removed while
   an explicit successor-format migration is still required to persist the
   environment identity without invalidating format-1 authority digests;

@@ -79,6 +79,23 @@ registry.
 The exact contract and migration boundary are in
 [`rrd-unified-catalogue.md`](rrd-unified-catalogue.md).
 
+## Unified CRUD, retirement, and read stamp
+
+One `RuntimeCommit` can create or update document, key-value, record,
+relation/native-edge, event, vector, time-series, geo, and object values. A
+typed retirement mutation closes any of those identities at an explicit valid
+time while retaining the append-only change history. Event retirement targets
+the immutable event cursor; other families target their typed runtime
+reference. Reasoning claims continue to use their dedicated bi-temporal
+correction contract.
+
+`RuntimeDataSnapshot` reconstructs every model family at one valid-time instant
+and one authenticated cursor under one catalogue revision and read manifest.
+The public `RrdEngine` data snapshot returns the same write vocabulary, which
+makes create/read/update/retire and reopen comparison lossless, including named
+vector collection addresses. Retirement validation and the final backend
+cursor compare-and-swap make a mixed-model batch all-or-nothing.
+
 ## Replay and graph views
 
 `Engine::runtime_changes_since(after, limit, scope)` returns a bounded page with:

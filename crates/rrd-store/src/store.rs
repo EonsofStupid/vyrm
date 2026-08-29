@@ -458,6 +458,7 @@ impl Store {
         read: Option<&ReadStamp>,
     ) -> Result<RuntimeCommitOutcome> {
         commit.validate()?;
+        crate::engine::validate_retirement_targets(self, commit)?;
         let commit_id = commit.digest();
         let mut tx = self
             .db
@@ -582,7 +583,8 @@ impl Store {
                 RuntimeMutation::Object { object } => object.subject.iter().collect(),
                 RuntimeMutation::Claim { .. }
                 | RuntimeMutation::Schema { .. }
-                | RuntimeMutation::Record { .. } => Vec::new(),
+                | RuntimeMutation::Record { .. }
+                | RuntimeMutation::Retire { .. } => Vec::new(),
             };
             for reference in references {
                 if !new_records.contains(reference)
@@ -713,6 +715,40 @@ impl Store {
                     runtime_identity_key(&commit.scope, &object.reference),
                     serde_json::to_vec(&object)?,
                 ),
+                RuntimeMutation::Retire { retirement } => {
+                    let key = runtime_identity_key(&commit.scope, &retirement.reference);
+                    if retirement.model.is_record_like() {
+                        tx.remove(&self.runtime_records, key);
+                    } else if retirement.model == rrd_core::RuntimeLogicalModel::GraphRelation {
+                        tx.remove(&self.runtime_relations, key);
+                    } else {
+                        match retirement.model {
+                            rrd_core::RuntimeLogicalModel::Vector => {
+                                tx.remove(&self.runtime_vectors, key);
+                            }
+                            rrd_core::RuntimeLogicalModel::TimeSeries => {
+                                tx.remove(&self.runtime_series, key);
+                            }
+                            rrd_core::RuntimeLogicalModel::Geo => {
+                                tx.remove(&self.runtime_geo, key);
+                            }
+                            rrd_core::RuntimeLogicalModel::Object => {
+                                tx.remove(&self.runtime_objects, key);
+                            }
+                            rrd_core::RuntimeLogicalModel::ReasoningClaim
+                            | rrd_core::RuntimeLogicalModel::Document
+                            | rrd_core::RuntimeLogicalModel::Relational
+                            | rrd_core::RuntimeLogicalModel::GraphNode
+                            | rrd_core::RuntimeLogicalModel::GraphRelation
+                            | rrd_core::RuntimeLogicalModel::KeyValue
+                            | rrd_core::RuntimeLogicalModel::Event
+                            | rrd_core::RuntimeLogicalModel::ReasoningRecord
+                            | rrd_core::RuntimeLogicalModel::ReasoningEvent
+                            | rrd_core::RuntimeLogicalModel::LifecycleRecord
+                            | rrd_core::RuntimeLogicalModel::LifecycleEvent => {}
+                        }
+                    }
+                }
                 RuntimeMutation::Claim { .. } | RuntimeMutation::Event { .. } => {}
             }
             previous_digest = Some(change.digest);

@@ -10,13 +10,14 @@ use rrd_contract::{
     DataCatalogueIdentity, DataEmbeddingProvenance, DataEventSchema, DataGeoPoint, DataGeoValue,
     DataLogicalModel, DataObjectReceipt, DataProperties, DataPropertySchema, DataRecordSchema,
     DataReference, DataRelationSchema, DataSchemaMode, DataSchemaRegistry, DataSeriesValue,
-    DataTableSchema, DataValueType, DataVectorNormalization, DataVectorValue, DiagnosticAuthority,
-    DiagnosticCoverage, DiagnosticGraphDifference, DiagnosticGraphRecordChange,
-    DiagnosticGraphRecordSnapshot, DiagnosticGraphRelationChange, DiagnosticGraphRelationSnapshot,
-    DiagnosticGraphSnapshot, DiagnosticModelCatalogueSnapshot, DiagnosticModelKind,
-    DiagnosticModelSnapshot, DiagnosticReadStamp, DiagnosticRetentionPin,
-    DiagnosticRetentionSnapshot, DiagnosticRuntimeReference, DiagnosticSectionSnapshot,
-    DiagnosticSnapshot, DiagnosticSnapshotLease, DiagnosticVectorArtifactCatalogueSnapshot,
+    DataSnapshot, DataSnapshotEntry, DataTableSchema, DataTarget, DataValueType,
+    DataVectorNormalization, DataVectorValue, DiagnosticAuthority, DiagnosticCoverage,
+    DiagnosticGraphDifference, DiagnosticGraphRecordChange, DiagnosticGraphRecordSnapshot,
+    DiagnosticGraphRelationChange, DiagnosticGraphRelationSnapshot, DiagnosticGraphSnapshot,
+    DiagnosticModelCatalogueSnapshot, DiagnosticModelKind, DiagnosticModelSnapshot,
+    DiagnosticReadStamp, DiagnosticRetentionPin, DiagnosticRetentionSnapshot,
+    DiagnosticRuntimeReference, DiagnosticSectionSnapshot, DiagnosticSnapshot,
+    DiagnosticSnapshotLease, DiagnosticVectorArtifactCatalogueSnapshot,
     DiagnosticVectorArtifactKind, DiagnosticVectorArtifactSnapshot, EnsureQueryIndex,
     EnsureQueryIndexResult, EnsureVectorCollection, EnsureVectorCollectionResult,
     EnsureVectorIndex, EnsureVectorIndexResult, ExecuteQuery, FollowChangefeed,
@@ -26,16 +27,16 @@ use rrd_contract::{
     LiveQueryRowChange, LogicalArchiveSnapshot, NamedVectorDefinition, PollLiveQuery,
     PreviewTransaction, QueryExecutionSnapshot, QueryIndexCatalogueSnapshot, QueryIndexKind,
     QueryIndexSnapshot, QueryIndexState, QueryPlanCandidate, QueryPlanSnapshot, QueryResult,
-    QueryRowSnapshot, QueryValue, ReadAudit, ReadChangefeed, ReadDiagnosticSnapshot, Readiness,
-    RenewSession, RequestContext, ResourceId, ResourceKind, ResourcePath, RestoreInstanceBackup,
-    RestoreInstanceBackupResult, RetrieveVectorPoints, RuntimeChangeSnapshot, ScrollVectorPoints,
-    SearchHybrid, SearchVectors, SecurityAction, SessionEndState, SessionLease, SessionLimits,
-    SessionTermination, TransactionLease, TransactionMutation, TransactionPreview,
-    TransactionState, VectorCollectionCatalogueSnapshot, VectorCollectionSnapshot,
-    VectorEmbeddingModel, VectorIndexConfiguration, VectorIndexSnapshot, VectorMemoryTier,
-    VectorPayloadFilter, VectorPayloadOperator, VectorPointBatch, VectorPointPage,
-    VectorPointSnapshot, VectorSearchHit, VectorSearchMetric, VectorSearchMode, VectorSearchQuery,
-    VectorSearchResult, VectorValueKind, DIAGNOSTIC_SNAPSHOT_FORMAT_VERSION,
+    QueryRowSnapshot, QueryValue, ReadAudit, ReadChangefeed, ReadDataSnapshot,
+    ReadDiagnosticSnapshot, Readiness, RenewSession, RequestContext, ResourceId, ResourceKind,
+    ResourcePath, RestoreInstanceBackup, RestoreInstanceBackupResult, RetrieveVectorPoints,
+    RuntimeChangeSnapshot, ScrollVectorPoints, SearchHybrid, SearchVectors, SecurityAction,
+    SessionEndState, SessionLease, SessionLimits, SessionTermination, TransactionLease,
+    TransactionMutation, TransactionPreview, TransactionState, VectorCollectionCatalogueSnapshot,
+    VectorCollectionSnapshot, VectorEmbeddingModel, VectorIndexConfiguration, VectorIndexSnapshot,
+    VectorMemoryTier, VectorPayloadFilter, VectorPayloadOperator, VectorPointBatch,
+    VectorPointPage, VectorPointSnapshot, VectorSearchHit, VectorSearchMetric, VectorSearchMode,
+    VectorSearchQuery, VectorSearchResult, VectorValueKind, DIAGNOSTIC_SNAPSHOT_FORMAT_VERSION,
 };
 use rrd_core::{
     digest, Claim, DataTransaction, EmbeddingProvenance, GeoPoint, GeoValue, ObjectReceipt,
@@ -60,6 +61,7 @@ mod backup;
 mod changefeed;
 mod control;
 mod core;
+mod data;
 mod diagnostic;
 mod error;
 mod estate;

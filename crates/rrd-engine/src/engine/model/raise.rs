@@ -82,8 +82,16 @@ pub(in crate::engine) fn public_data_mutation(
         RuntimeMutation::Vector { vector } => TransactionMutation::PutVector {
             reference: public_change_ref(&vector.reference)?,
             subject: public_change_ref(&vector.subject)?,
-            collection_id: None,
-            vector_name: None,
+            collection_id: vector
+                .collection
+                .as_ref()
+                .map(|collection| public_change_id(&collection.collection_id))
+                .transpose()?,
+            vector_name: vector
+                .collection
+                .as_ref()
+                .map(|collection| public_change_id(&collection.vector_name))
+                .transpose()?,
             field: public_change_id(&vector.field)?,
             valid_from: vector.valid_from,
             valid_to: vector.valid_to,
@@ -143,7 +151,35 @@ pub(in crate::engine) fn public_data_mutation(
             },
             properties: public_properties(&object.properties)?,
         },
+        RuntimeMutation::Retire { retirement } => TransactionMutation::RetireData {
+            model: public_logical_model(retirement.model),
+            target: public_data_target(retirement.model, &retirement.reference)?,
+            effective_at: retirement.effective_at,
+        },
     })
+}
+
+pub(in crate::engine) fn public_data_target(
+    model: RuntimeLogicalModel,
+    reference: &RuntimeRef,
+) -> Result<DataTarget> {
+    if model.is_event_like() {
+        let cursor = reference
+            .id
+            .as_str()
+            .strip_prefix("cursor:")
+            .ok_or_else(|| ServiceError::Changefeed("event identity lacks cursor prefix".into()))?
+            .parse::<u64>()
+            .map_err(|_| ServiceError::Changefeed("event identity has invalid cursor".into()))?;
+        Ok(DataTarget::Event {
+            kind: public_change_id(reference.kind.as_str())?,
+            cursor,
+        })
+    } else {
+        Ok(DataTarget::Reference {
+            reference: public_change_ref(reference)?,
+        })
+    }
 }
 
 pub(in crate::engine) fn public_change_id(value: &str) -> Result<CanonicalId> {
@@ -256,7 +292,7 @@ pub(in crate::engine) fn public_schema(
     })
 }
 
-fn public_logical_model(model: RuntimeLogicalModel) -> DataLogicalModel {
+pub(in crate::engine) fn public_logical_model(model: RuntimeLogicalModel) -> DataLogicalModel {
     match model {
         RuntimeLogicalModel::Document => DataLogicalModel::Document,
         RuntimeLogicalModel::Relational => DataLogicalModel::Relational,

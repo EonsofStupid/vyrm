@@ -927,6 +927,8 @@ impl Engine for NativeEngine {
         commit: &RuntimeCommit,
         read: Option<&ReadStamp>,
     ) -> Result<RuntimeCommitOutcome> {
+        commit.validate()?;
+        crate::engine::validate_retirement_targets(self, commit)?;
         let mut database = self.lock()?;
         let plan = prepare_native_runtime_commit_at_read(&database, commit, read, None)?;
         let (outcome, operations) = plan.into_parts();
@@ -1210,7 +1212,8 @@ fn prepare_native_runtime_commit_at_read(
             RuntimeMutation::Object { object } => object.subject.iter().collect(),
             RuntimeMutation::Claim { .. }
             | RuntimeMutation::Schema { .. }
-            | RuntimeMutation::Record { .. } => Vec::new(),
+            | RuntimeMutation::Record { .. }
+            | RuntimeMutation::Retire { .. } => Vec::new(),
         };
         for reference in references {
             if !new_records.contains(reference)
@@ -1377,6 +1380,37 @@ fn prepare_native_runtime_commit_at_read(
                 &runtime_identity_key(&commit.scope, &object.reference),
                 serde_json::to_vec(&object)?,
             ),
+            RuntimeMutation::Retire { retirement } => {
+                let key = runtime_identity_key(&commit.scope, &retirement.reference);
+                let space = if retirement.model.is_record_like() {
+                    Some(keyspaces::RUNTIME_RECORDS)
+                } else {
+                    match retirement.model {
+                        rrd_core::RuntimeLogicalModel::GraphRelation => {
+                            Some(keyspaces::RUNTIME_RELATIONS)
+                        }
+                        rrd_core::RuntimeLogicalModel::Vector => Some(keyspaces::RUNTIME_VECTORS),
+                        rrd_core::RuntimeLogicalModel::TimeSeries => {
+                            Some(keyspaces::RUNTIME_SERIES)
+                        }
+                        rrd_core::RuntimeLogicalModel::Geo => Some(keyspaces::RUNTIME_GEO),
+                        rrd_core::RuntimeLogicalModel::Object => Some(keyspaces::RUNTIME_OBJECTS),
+                        rrd_core::RuntimeLogicalModel::ReasoningClaim
+                        | rrd_core::RuntimeLogicalModel::Document
+                        | rrd_core::RuntimeLogicalModel::Relational
+                        | rrd_core::RuntimeLogicalModel::GraphNode
+                        | rrd_core::RuntimeLogicalModel::KeyValue
+                        | rrd_core::RuntimeLogicalModel::Event
+                        | rrd_core::RuntimeLogicalModel::ReasoningRecord
+                        | rrd_core::RuntimeLogicalModel::ReasoningEvent
+                        | rrd_core::RuntimeLogicalModel::LifecycleRecord
+                        | rrd_core::RuntimeLogicalModel::LifecycleEvent => None,
+                    }
+                };
+                if let Some(space) = space {
+                    delete(&mut operations, space, &key);
+                }
+            }
             RuntimeMutation::Claim { .. } | RuntimeMutation::Event { .. } => {}
         }
         previous_digest = Some(change.digest);
@@ -2244,6 +2278,12 @@ fn put(operations: &mut Vec<Mutation>, space: &str, key: &[u8], value: Vec<u8>) 
     operations.push(Mutation::Put {
         key: storage_key(space, key),
         value,
+    });
+}
+
+fn delete(operations: &mut Vec<Mutation>, space: &str, key: &[u8]) {
+    operations.push(Mutation::Delete {
+        key: storage_key(space, key),
     });
 }
 

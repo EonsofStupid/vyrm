@@ -3122,3 +3122,30 @@ index.
 - Differential tests cover one mixed catalogue, strict and schemaless records,
   graph relation, events, vector, series, geo, object, reasoning/lifecycle
   identities, atomic migration failure/retry, and exact Fjall/native reopen.
+
+## 2026-08-29 — G03-W02 unified multi-model CRUD candidate
+
+- Added `RuntimeRetirement`, a model-tagged, valid-time mutation that closes
+  document, key-value, record, relation/native-edge, event, vector, series,
+  geo, and object identities without deleting their authenticated history.
+  Event corrections use immutable cursor targets; reasoning claims continue to
+  use the existing bi-temporal claim contract.
+- Added one `RuntimeDataSnapshot` reducer across every model family. It returns
+  the exact catalogue revision, valid time, known transaction cursor, and read
+  manifest used by the operation. The authenticated public engine read exposes
+  the same transaction-mutation vocabulary and retains named-vector collection
+  identity losslessly. Schema selection is replayed and revision-checked from
+  the same authenticated prefix, so a concurrent catalogue commit cannot tear
+  the snapshot.
+- Retirement targets are validated against the observed pre-commit snapshot;
+  the backend cursor compare-and-swap remains the final concurrency authority.
+  A missing target or racing writer therefore cannot partially publish a
+  mixed-model commit. Physical current-state rows are removed atomically while
+  immutable log replay retains historical reads and supports recreation.
+- Differential fixtures exercise create, read, update, retirement, recreation,
+  event correction, failed-batch atomicity, and Memory/Fjall/native parity.
+  Persistent backends reopen to an identical exact-stamp snapshot and two
+  same-cursor writers yield exactly one successful commit.
+- Protocol review: typed `DataTarget` and `RetireData` intentionally advance
+  the generated transaction schema in the OpenAPI digest to
+  `394d4bb27669512b6eecafdede793f43c5b7f70ce3a84bd9f97de4601af8dbc0`.

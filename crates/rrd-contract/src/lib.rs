@@ -57,11 +57,12 @@ use std::fmt;
 pub const PROTOCOL: &str = "rrd";
 pub const PROTOCOL_VERSION: u16 = 1;
 pub const OPENAPI_DOCUMENT_SHA256: &str =
-    "3d3848f74205c56c4fb3dff00070d3c2f4df5a92addd0b7e83a9b122594231f5";
+    "394d4bb27669512b6eecafdede793f43c5b7f70ce3a84bd9f97de4601af8dbc0";
 pub const MAX_ID_BYTES: usize = 128;
 pub const MAX_MESSAGE_BYTES: usize = 4_096;
 pub const MAX_CAPABILITIES: usize = 512;
 pub const MAX_TRANSACTION_CLAIMS: usize = 4_096;
+pub const MAX_DATA_SNAPSHOT_CHANGES: u32 = 1_000_000;
 pub const MAX_VECTOR_DIMENSIONS: usize = 1_048_576;
 pub const MAX_QUERY_BYTES: usize = 64 * 1024;
 pub const MAX_QUERY_PARAMETERS: usize = 128;
@@ -3326,6 +3327,16 @@ pub struct DataReference {
     pub id: CanonicalId,
 }
 
+/// Stable target identity for CRUD and retirement. Append-only events are
+/// addressed by their authenticated-log cursor instead of a fabricated user
+/// identifier.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "identity", rename_all = "snake_case", deny_unknown_fields)]
+pub enum DataTarget {
+    Reference { reference: DataReference },
+    Event { kind: CanonicalId, cursor: u64 },
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum DataValueType {
@@ -3466,6 +3477,51 @@ pub struct DataSchemaRegistry {
     pub relations: BTreeMap<CanonicalId, DataRelationSchema>,
     #[serde(default)]
     pub events: BTreeMap<CanonicalId, DataEventSchema>,
+}
+
+/// Bounded request for one all-model snapshot at the engine's current
+/// authenticated transaction cursor.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ReadDataSnapshot {
+    pub valid_at: u64,
+    pub max_scanned_changes: u32,
+}
+
+impl ReadDataSnapshot {
+    pub fn validate(&self) -> Result<()> {
+        if self.valid_at == 0 {
+            return invalid("data snapshot valid_at must be greater than zero");
+        }
+        if self.max_scanned_changes == 0 || self.max_scanned_changes > MAX_DATA_SNAPSHOT_CHANGES {
+            return invalid(format!(
+                "data snapshot max_scanned_changes must be in 1..={MAX_DATA_SNAPSHOT_CHANGES}"
+            ));
+        }
+        Ok(())
+    }
+}
+
+/// One current value in an all-model snapshot. `value` uses the same exact
+/// typed vocabulary as writes; the wrapper supplies the catalogue model and
+/// stable reference (including cursor-derived event identities).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct DataSnapshotEntry {
+    pub model: DataLogicalModel,
+    pub target: DataTarget,
+    pub value: TransactionMutation,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct DataSnapshot {
+    pub scope: String,
+    pub valid_at: u64,
+    pub known_at_cursor: u64,
+    pub schema_revision: u64,
+    pub read_manifest_sha256: String,
+    pub entries: Vec<DataSnapshotEntry>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -3634,6 +3690,14 @@ pub enum TransactionMutation {
         #[serde(default)]
         properties: DataProperties,
     },
+    /// Retire one currently live catalogue identity at modeled valid time.
+    /// Event correction is expressed as this mutation plus one replacement
+    /// `append_event` in the same transaction.
+    RetireData {
+        model: DataLogicalModel,
+        target: DataTarget,
+        effective_at: u64,
+    },
 }
 
 impl TransactionMutation {
@@ -3745,6 +3809,35 @@ impl TransactionMutation {
                     );
                 }
                 validate_data_properties(properties)
+            }
+            Self::RetireData {
+                model,
+                target,
+                effective_at,
+                ..
+            } => {
+                if *model == DataLogicalModel::ReasoningClaim {
+                    return invalid(
+                        "reasoning claims retire through their bitemporal claim contract",
+                    );
+                }
+                if *effective_at == 0 {
+                    return invalid("data retirement effective_at must be greater than zero");
+                }
+                match (data_model_is_event(*model), target) {
+                    (true, DataTarget::Event { cursor, .. }) if *cursor > 0 => {}
+                    (false, DataTarget::Reference { .. }) => {}
+                    (true, DataTarget::Event { .. }) => {
+                        return invalid("event retirement cursor must be greater than zero");
+                    }
+                    (true, DataTarget::Reference { .. }) => {
+                        return invalid("event models retire by authenticated event cursor");
+                    }
+                    (false, DataTarget::Event { .. }) => {
+                        return invalid("non-event models retire by canonical reference");
+                    }
+                }
+                Ok(())
             }
         }
     }
@@ -3870,6 +3963,15 @@ fn data_model_family(model: DataLogicalModel) -> &'static str {
         DataLogicalModel::Object => "object",
         DataLogicalModel::ReasoningClaim => "claim",
     }
+}
+
+fn data_model_is_event(model: DataLogicalModel) -> bool {
+    matches!(
+        model,
+        DataLogicalModel::Event
+            | DataLogicalModel::ReasoningEvent
+            | DataLogicalModel::LifecycleEvent
+    )
 }
 
 fn validate_specialized_data_table(

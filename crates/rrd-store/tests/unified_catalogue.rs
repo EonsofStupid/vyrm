@@ -4,9 +4,9 @@ use rrd_core::{
     digest, GeoPoint, GeoValue, ObjectReceipt, ObjectReference, RuntimeCatalogueIdentity,
     RuntimeCommit, RuntimeEvent, RuntimeEventSchema, RuntimeGeo, RuntimeLogicalModel,
     RuntimeMutation, RuntimeProperties, RuntimePropertySchema, RuntimeRecord, RuntimeRecordSchema,
-    RuntimeRef, RuntimeRelation, RuntimeRelationSchema, RuntimeSchemaMode, RuntimeSchemaRegistry,
-    RuntimeSeriesSample, RuntimeTableSchema, RuntimeType, RuntimeValue, RuntimeValueType,
-    RuntimeVector, ScopeId, SeriesValue, VectorValue,
+    RuntimeRef, RuntimeRelation, RuntimeRelationSchema, RuntimeRetirement, RuntimeSchemaMode,
+    RuntimeSchemaRegistry, RuntimeSeriesSample, RuntimeTableSchema, RuntimeType, RuntimeValue,
+    RuntimeValueType, RuntimeVector, ScopeId, SeriesValue, VectorValue,
 };
 use rrd_store::{Engine, MemoryEngine, NativeEngine, Store};
 
@@ -147,9 +147,18 @@ fn catalogue(revision: u64, vector_quality_required: bool) -> RuntimeSchemaRegis
 }
 
 fn record(kind: &str, id: &str, properties: RuntimeProperties) -> RuntimeRecord {
+    record_at(kind, id, 100, properties)
+}
+
+fn record_at(
+    kind: &str,
+    id: &str,
+    valid_from: u64,
+    properties: RuntimeProperties,
+) -> RuntimeRecord {
     RuntimeRecord {
         reference: reference(kind, id),
-        valid_from: 100,
+        valid_from,
         valid_to: None,
         properties,
     }
@@ -174,7 +183,10 @@ fn vector(quality: Option<u64>) -> RuntimeVector {
 }
 
 fn object() -> ObjectReference {
-    let bytes = b"catalogued object";
+    object_version(b"catalogued object", "1")
+}
+
+fn object_version(bytes: &[u8], version: &str) -> ObjectReference {
     let sha256 = digest::sha256_hex(bytes);
     let mut object = ObjectReference::for_bytes(
         "artifact",
@@ -184,7 +196,7 @@ fn object() -> ObjectReference {
         ObjectReceipt {
             backend: "fixture".into(),
             key: ObjectReference::canonical_key(&sha256).unwrap(),
-            version: Some("1".into()),
+            version: Some(version.into()),
             etag: None,
         },
     )
@@ -193,6 +205,16 @@ fn object() -> ObjectReference {
         .properties
         .insert("class".into(), RuntimeValue::String("evidence".into()));
     object
+}
+
+fn retire(model: RuntimeLogicalModel, kind: &str, id: &str, effective_at: u64) -> RuntimeMutation {
+    RuntimeMutation::Retire {
+        retirement: RuntimeRetirement {
+            model,
+            reference: reference(kind, id),
+            effective_at,
+        },
+    }
 }
 
 fn initial_mutations() -> Vec<RuntimeMutation> {
@@ -395,4 +417,301 @@ fn unified_catalogue_survives_compatibility_and_native_reopen() {
         reopened.runtime_schema(&scope).unwrap().unwrap(),
         catalogue(2, true)
     );
+}
+
+fn exercise_crud(engine: &dyn Engine) -> (ScopeId, u64, rrd_core::RuntimeDataSnapshot) {
+    let (scope, cursor) = exercise(engine);
+    let mut updated_vector = vector(Some(101));
+    updated_vector.valid_from = 103;
+    let update_mutations = vec![
+        RuntimeMutation::Record {
+            record: record_at(
+                "entity",
+                "a",
+                103,
+                BTreeMap::from([("name".into(), RuntimeValue::String("beta".into()))]),
+            ),
+        },
+        RuntimeMutation::Record {
+            record: record_at(
+                "document",
+                "doc-a",
+                103,
+                BTreeMap::from([("revision".into(), RuntimeValue::Unsigned(2))]),
+            ),
+        },
+        RuntimeMutation::Record {
+            record: record_at(
+                "kv",
+                "feature-flag",
+                103,
+                BTreeMap::from([("value".into(), RuntimeValue::String("off".into()))]),
+            ),
+        },
+        RuntimeMutation::Relation {
+            relation: RuntimeRelation {
+                reference: reference("links", "a-doc"),
+                from: reference("entity", "a"),
+                to: reference("document", "doc-a"),
+                valid_from: 103,
+                valid_to: None,
+                properties: RuntimeProperties::new(),
+            },
+        },
+        retire(RuntimeLogicalModel::Event, "observed", "cursor:7", 103),
+        RuntimeMutation::Event {
+            event: RuntimeEvent {
+                kind: kind("observed"),
+                subject: Some(reference("entity", "a")),
+                properties: BTreeMap::from([(
+                    "stage".into(),
+                    RuntimeValue::String("corrected".into()),
+                )]),
+            },
+        },
+        RuntimeMutation::Vector {
+            vector: updated_vector,
+        },
+        RuntimeMutation::SeriesSample {
+            sample: RuntimeSeriesSample {
+                reference: reference("sample", "temperature-100"),
+                series: reference("entity", "a"),
+                observed_at: 103,
+                value: SeriesValue::Decimal("22.0".into()),
+                properties: BTreeMap::from([(
+                    "unit".into(),
+                    RuntimeValue::String("celsius".into()),
+                )]),
+            },
+        },
+        RuntimeMutation::Geo {
+            geo: RuntimeGeo {
+                reference: reference("location", "current"),
+                subject: reference("entity", "a"),
+                field: "position".into(),
+                valid_from: 103,
+                valid_to: None,
+                value: GeoValue::Point {
+                    point: GeoPoint {
+                        longitude: -73.9857,
+                        latitude: 40.7484,
+                    },
+                },
+                properties: RuntimeProperties::new(),
+            },
+        },
+        RuntimeMutation::Object {
+            object: object_version(b"catalogued object revision two", "2"),
+        },
+    ];
+    let update = RuntimeCommit {
+        scope: scope.clone(),
+        at: 103,
+        actor: "agent:crud-test".into(),
+        expected_cursor: cursor,
+        mutations: update_mutations,
+    };
+    let updated = engine.commit_runtime(&update).unwrap();
+    let replacement_event_cursor = cursor + 6;
+    let (_, snapshot) = engine.runtime_data_snapshot(&scope, 103, 4_096).unwrap();
+    assert_eq!(snapshot.records.len(), 4);
+    assert_eq!(snapshot.relations.len(), 1);
+    assert_eq!(snapshot.events.len(), 2);
+    assert_eq!(snapshot.vectors.len(), 1);
+    assert_eq!(snapshot.series.len(), 1);
+    assert_eq!(snapshot.geo.len(), 1);
+    assert_eq!(snapshot.objects.len(), 1);
+    assert!(snapshot.contains(
+        RuntimeLogicalModel::Event,
+        &reference("observed", &format!("cursor:{replacement_event_cursor}"))
+    ));
+    assert!(!snapshot.contains(
+        RuntimeLogicalModel::Event,
+        &reference("observed", "cursor:7")
+    ));
+
+    let retirements = vec![
+        retire(RuntimeLogicalModel::Relational, "entity", "a", 104),
+        retire(RuntimeLogicalModel::Document, "document", "doc-a", 104),
+        retire(RuntimeLogicalModel::KeyValue, "kv", "feature-flag", 104),
+        retire(
+            RuntimeLogicalModel::ReasoningRecord,
+            "reasoning",
+            "run-a",
+            104,
+        ),
+        retire(RuntimeLogicalModel::GraphRelation, "links", "a-doc", 104),
+        retire(
+            RuntimeLogicalModel::Event,
+            "observed",
+            &format!("cursor:{replacement_event_cursor}"),
+            104,
+        ),
+        retire(
+            RuntimeLogicalModel::LifecycleEvent,
+            "lifecycle",
+            "cursor:12",
+            104,
+        ),
+        retire(
+            RuntimeLogicalModel::Vector,
+            "embedding",
+            "entity-a-title",
+            104,
+        ),
+        retire(
+            RuntimeLogicalModel::TimeSeries,
+            "sample",
+            "temperature-100",
+            104,
+        ),
+        retire(RuntimeLogicalModel::Geo, "location", "current", 104),
+        retire(RuntimeLogicalModel::Object, "object", "artifact", 104),
+    ];
+    let retired = engine
+        .commit_runtime(&RuntimeCommit {
+            scope: scope.clone(),
+            at: 104,
+            actor: "agent:crud-test".into(),
+            expected_cursor: updated.last_cursor,
+            mutations: retirements,
+        })
+        .unwrap();
+    let (_, empty) = engine.runtime_data_snapshot(&scope, 104, 4_096).unwrap();
+    assert!(empty.records.is_empty());
+    assert!(empty.relations.is_empty());
+    assert!(empty.events.is_empty());
+    assert!(empty.vectors.is_empty());
+    assert!(empty.series.is_empty());
+    assert!(empty.geo.is_empty());
+    assert!(empty.objects.is_empty());
+
+    let (_, historical) = engine.runtime_data_snapshot(&scope, 103, 4_096).unwrap();
+    assert_eq!(historical.records.len(), 4);
+    assert_eq!(historical.events.len(), 2);
+
+    let recreated = engine
+        .commit_runtime(&RuntimeCommit {
+            scope: scope.clone(),
+            at: 105,
+            actor: "agent:crud-test".into(),
+            expected_cursor: retired.last_cursor,
+            mutations: vec![RuntimeMutation::Record {
+                record: record_at(
+                    "document",
+                    "doc-a",
+                    105,
+                    BTreeMap::from([("revision".into(), RuntimeValue::Unsigned(3))]),
+                ),
+            }],
+        })
+        .unwrap();
+
+    let rejected = RuntimeCommit {
+        scope: scope.clone(),
+        at: 106,
+        actor: "agent:crud-test".into(),
+        expected_cursor: recreated.last_cursor,
+        mutations: vec![
+            RuntimeMutation::Record {
+                record: record_at(
+                    "document",
+                    "doc-a",
+                    106,
+                    BTreeMap::from([("revision".into(), RuntimeValue::Unsigned(4))]),
+                ),
+            },
+            retire(RuntimeLogicalModel::Document, "document", "missing", 106),
+        ],
+    };
+    assert!(engine.commit_runtime(&rejected).is_err());
+    assert_eq!(engine.runtime_cursor().unwrap(), recreated.last_cursor);
+    let (_, final_snapshot) = engine.runtime_data_snapshot(&scope, 106, 4_096).unwrap();
+    assert_eq!(final_snapshot.records.len(), 1);
+    assert_eq!(
+        final_snapshot.records[0].value.properties["revision"],
+        RuntimeValue::Unsigned(3)
+    );
+    (scope, recreated.last_cursor, final_snapshot)
+}
+
+#[test]
+fn multi_model_create_update_retire_and_recreate_are_identical_across_engines() {
+    let (_, _, memory) = exercise_crud(&MemoryEngine::new());
+
+    let compatibility = tempfile::tempdir().unwrap();
+    let (_, _, fjall) = exercise_crud(&Store::open(compatibility.path()).unwrap());
+    assert_eq!(memory, fjall);
+
+    let native = tempfile::tempdir().unwrap();
+    let (_, _, native) = exercise_crud(&NativeEngine::open(native.path()).unwrap());
+    assert_eq!(memory, native);
+}
+
+#[test]
+fn mixed_model_crud_snapshot_is_exact_after_fjall_and_native_reopen() {
+    let compatibility = tempfile::tempdir().unwrap();
+    let (scope, cursor, expected) = {
+        let engine = Store::open(compatibility.path()).unwrap();
+        exercise_crud(&engine)
+    };
+    let reopened = Store::open(compatibility.path()).unwrap();
+    assert_eq!(reopened.runtime_cursor().unwrap(), cursor);
+    assert_eq!(
+        reopened
+            .runtime_data_snapshot(&scope, 106, 4_096)
+            .unwrap()
+            .1,
+        expected
+    );
+
+    let native = tempfile::tempdir().unwrap();
+    let path = native.path().join("native");
+    let (scope, cursor, expected) = {
+        let engine = NativeEngine::open(&path).unwrap();
+        exercise_crud(&engine)
+    };
+    let reopened = NativeEngine::open(&path).unwrap();
+    assert_eq!(reopened.runtime_cursor().unwrap(), cursor);
+    assert_eq!(
+        reopened
+            .runtime_data_snapshot(&scope, 106, 4_096)
+            .unwrap()
+            .1,
+        expected
+    );
+}
+
+#[test]
+fn concurrent_updates_from_one_read_stamp_allow_exactly_one_writer() {
+    let engine = std::sync::Arc::new(MemoryEngine::new());
+    let (scope, cursor) = exercise(engine.as_ref());
+    let commits = ["writer-a", "writer-b"].map(|actor| RuntimeCommit {
+        scope: scope.clone(),
+        at: 103,
+        actor: actor.into(),
+        expected_cursor: cursor,
+        mutations: vec![RuntimeMutation::Record {
+            record: record_at(
+                "document",
+                "doc-a",
+                103,
+                BTreeMap::from([("writer".into(), RuntimeValue::String(actor.into()))]),
+            ),
+        }],
+    });
+    let results = std::thread::scope(|threads| {
+        commits
+            .into_iter()
+            .map(|commit| {
+                let engine = engine.clone();
+                threads.spawn(move || engine.commit_runtime(&commit))
+            })
+            .collect::<Vec<_>>()
+            .into_iter()
+            .map(|thread| thread.join().unwrap())
+            .collect::<Vec<_>>()
+    });
+    assert_eq!(results.iter().filter(|result| result.is_ok()).count(), 1);
+    assert_eq!(results.iter().filter(|result| result.is_err()).count(), 1);
 }

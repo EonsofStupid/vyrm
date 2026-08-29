@@ -66,10 +66,11 @@ pub use runtime::{
     projection_family, AuditDecision, AuditEnvelope, DataTransaction, DataTransactionView,
     OutboxId, ProjectionFamily, ProjectionId, ProjectionStamp, ProjectionState, ProjectionWork,
     ReadStamp, RetentionPin, RetentionPinId, RuntimeChange, RuntimeChangePage, RuntimeCommit,
-    RuntimeCommitOutcome, RuntimeEvent, RuntimeGraphDiff, RuntimeGraphSnapshot, RuntimeId,
-    RuntimeMutation, RuntimeProperties, RuntimeReadValidation, RuntimeRecord, RuntimeRecordChange,
-    RuntimeRef, RuntimeRelation, RuntimeRelationChange, RuntimeType, RuntimeValue, ScopeId,
-    SnapshotHandle, SnapshotId, DATA_RUNTIME_CONTRACT_VERSION,
+    RuntimeCommitOutcome, RuntimeDataSnapshot, RuntimeEvent, RuntimeEventValue, RuntimeGraphDiff,
+    RuntimeGraphSnapshot, RuntimeId, RuntimeModelValue, RuntimeMutation, RuntimeProperties,
+    RuntimeReadValidation, RuntimeRecord, RuntimeRecordChange, RuntimeRef, RuntimeRelation,
+    RuntimeRelationChange, RuntimeRetirement, RuntimeType, RuntimeValue, ScopeId, SnapshotHandle,
+    SnapshotId, DATA_RUNTIME_CONTRACT_VERSION,
 };
 pub use schema::{
     RuntimeCatalogueIdentity, RuntimeEventSchema, RuntimeLogicalModel, RuntimePropertySchema,

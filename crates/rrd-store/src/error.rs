@@ -28,6 +28,8 @@ pub enum Error {
     ControlConflict(String),
     /// A relation or event named a record that is not present in its scope.
     DanglingRuntimeReference(String),
+    /// A catalogue-bound retirement named no live value at its effective time.
+    RuntimeTargetNotFound(String),
     /// A typed write was attempted before its scope installed a registry.
     RuntimeSchemaMissing(String),
     /// A schema update skipped or repeated a persisted revision.
@@ -84,6 +86,9 @@ impl fmt::Display for Error {
             Error::ControlConflict(key) => write!(f, "control state changed concurrently: {key}"),
             Error::DanglingRuntimeReference(reference) => {
                 write!(f, "dangling runtime reference: {reference}")
+            }
+            Error::RuntimeTargetNotFound(reference) => {
+                write!(f, "runtime retirement target is not live: {reference}")
             }
             Error::RuntimeSchemaMissing(scope) => {
                 write!(f, "runtime schema is not installed for scope {scope}")

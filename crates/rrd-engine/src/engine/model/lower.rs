@@ -230,7 +230,27 @@ pub(in crate::engine) fn public_runtime_mutation(
                 properties: runtime_properties(properties)?,
             },
         },
+        TransactionMutation::RetireData {
+            model,
+            target,
+            effective_at,
+        } => RuntimeMutation::Retire {
+            retirement: rrd_core::RuntimeRetirement {
+                model: runtime_logical_model(*model),
+                reference: runtime_data_target(target)?,
+                effective_at: *effective_at,
+            },
+        },
     })
+}
+
+fn runtime_data_target(target: &DataTarget) -> Result<RuntimeRef> {
+    match target {
+        DataTarget::Reference { reference } => runtime_ref(reference),
+        DataTarget::Event { kind, cursor } => {
+            RuntimeRef::new(kind.as_str(), format!("cursor:{cursor}")).map_err(core_contract)
+        }
+    }
 }
 
 pub(in crate::engine) fn runtime_ref(reference: &DataReference) -> Result<RuntimeRef> {

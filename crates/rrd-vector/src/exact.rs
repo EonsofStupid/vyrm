@@ -6,25 +6,57 @@ use rrd_core::{Result, RuntimeChange, RuntimeMutation, RuntimeRef, ScopeId, Vect
 use std::collections::{BTreeMap, BTreeSet};
 
 pub fn candidates_from_changes(changes: &[RuntimeChange], scope: &ScopeId) -> Vec<VectorCandidate> {
-    changes
+    candidates_from_changes_at(changes, scope, u64::MAX)
+}
+
+fn candidates_from_changes_at(
+    changes: &[RuntimeChange],
+    scope: &ScopeId,
+    known_at_cursor: u64,
+) -> Vec<VectorCandidate> {
+    let mut candidates = Vec::<VectorCandidate>::new();
+    for change in changes
         .iter()
-        .filter(|change| &change.scope == scope)
-        .filter_map(|change| match &change.mutation {
-            RuntimeMutation::Vector { vector } => Some(VectorCandidate {
+        .filter(|change| &change.scope == scope && change.cursor <= known_at_cursor)
+    {
+        match &change.mutation {
+            RuntimeMutation::Vector { vector } => candidates.push(VectorCandidate {
                 scope: change.scope.clone(),
                 source_cursor: change.cursor,
                 vector: vector.clone(),
             }),
-            _ => None,
-        })
-        .collect()
+            RuntimeMutation::Retire { retirement }
+                if retirement.model == rrd_core::RuntimeLogicalModel::Vector =>
+            {
+                if let Some(candidate) = candidates
+                    .iter_mut()
+                    .rev()
+                    .find(|candidate| candidate.vector.reference == retirement.reference)
+                {
+                    candidate.vector.valid_to = Some(
+                        candidate
+                            .vector
+                            .valid_to
+                            .map_or(retirement.effective_at, |current| {
+                                current.min(retirement.effective_at)
+                            }),
+                    );
+                }
+            }
+            _ => {}
+        }
+    }
+    candidates
 }
 
 pub fn search_changes_exact(
     request: &SearchRequest,
     changes: &[RuntimeChange],
 ) -> Result<Vec<SearchHit>> {
-    search_exact(request, candidates_from_changes(changes, &request.scope))
+    search_exact(
+        request,
+        candidates_from_changes_at(changes, &request.scope, request.read.commit_cursor),
+    )
 }
 
 /// Deterministic exact oracle over canonical vector versions.
@@ -332,7 +364,10 @@ fn score_sparse(
 mod tests {
     use super::*;
     use crate::SearchMode;
-    use rrd_core::{RuntimeProperties, RuntimeValue, ScopeId};
+    use rrd_core::{
+        RuntimeCommit, RuntimeLogicalModel, RuntimeMutation, RuntimeProperties, RuntimeRetirement,
+        RuntimeValue, ScopeId,
+    };
 
     fn stamp(scope: &ScopeId, cursor: u64) -> rrd_core::ReadStamp {
         rrd_core::ReadStamp::new(scope.clone(), None, 0, cursor, Some("11".repeat(32))).unwrap()
@@ -458,5 +493,77 @@ mod tests {
             filter: None,
         };
         assert!(search_exact(&request, [duplicate.clone(), duplicate]).is_err());
+    }
+
+    #[test]
+    fn authenticated_retirement_hides_vectors_only_at_its_effective_time() {
+        let scope = ScopeId::new("instance:retired-vector").unwrap();
+        let vector = candidate(&scope, 1, "retired", vec![1.0, 0.0], 1).vector;
+        let retirement = RuntimeRetirement {
+            model: RuntimeLogicalModel::Vector,
+            reference: vector.reference.clone(),
+            effective_at: 5,
+        };
+        let commit = RuntimeCommit {
+            scope: scope.clone(),
+            at: 2,
+            actor: "agent:vector-retirement".into(),
+            expected_cursor: 0,
+            mutations: vec![
+                RuntimeMutation::Vector {
+                    vector: vector.clone(),
+                },
+                RuntimeMutation::Retire {
+                    retirement: retirement.clone(),
+                },
+            ],
+        };
+        let first = RuntimeChange::committed(
+            1,
+            &commit,
+            &commit.digest(),
+            0,
+            RuntimeMutation::Vector { vector },
+            None,
+        );
+        let second = RuntimeChange::committed(
+            2,
+            &commit,
+            &commit.digest(),
+            1,
+            RuntimeMutation::Retire { retirement },
+            Some(first.digest.clone()),
+        );
+        let changes = vec![first, second];
+        let request = |valid_at, known_at_cursor| SearchRequest {
+            scope: scope.clone(),
+            read: stamp(&scope, known_at_cursor),
+            valid_at,
+            field: "body".into(),
+            query: VectorQuery::Dense {
+                values: vec![1.0, 0.0],
+            },
+            metric: ScoreMetric::Dot,
+            embedding_model: None,
+            top_k: 1,
+            mode: SearchMode::Exact,
+            filter: None,
+        };
+        assert_eq!(
+            search_changes_exact(&request(4, 2), &changes)
+                .unwrap()
+                .len(),
+            1
+        );
+        assert!(search_changes_exact(&request(5, 2), &changes)
+            .unwrap()
+            .is_empty());
+        assert_eq!(
+            search_changes_exact(&request(5, 1), &changes)
+                .unwrap()
+                .len(),
+            1,
+            "a retirement beyond the known cursor must not rewrite history"
+        );
     }
 }

@@ -81,6 +81,7 @@ fn commit_request(object: &str) -> CommitTransaction {
 }
 
 mod catalogue;
+mod data_crud;
 mod lifecycle;
 mod recovery;
 mod security;

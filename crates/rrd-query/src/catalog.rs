@@ -1,6 +1,6 @@
 use crate::{Error, IndexCatalogue, IndexCatalogueRepository, Result, Source};
 use rrd_core::{
-    Predicate, ReadStamp, RuntimeMutation, RuntimeSchemaRegistry, RuntimeType, ScopeId,
+    Predicate, ReadStamp, RuntimeMutation, RuntimeRef, RuntimeSchemaRegistry, RuntimeType, ScopeId,
 };
 use rrd_store::Engine;
 use serde::{Deserialize, Serialize};
@@ -31,6 +31,9 @@ pub struct SourceWatermarks {
     pub series: BTreeMap<RuntimeType, u64>,
     pub geo: BTreeMap<RuntimeType, u64>,
     pub claims: BTreeMap<Predicate, u64>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    #[doc(hidden)]
+    pub series_targets: BTreeMap<RuntimeRef, RuntimeType>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     #[doc(hidden)]
     pub schema_history: Vec<u64>,
@@ -89,6 +92,8 @@ impl SourceWatermarks {
                     .push(cursor);
             }
             RuntimeMutation::SeriesSample { sample } => {
+                self.series_targets
+                    .insert(sample.reference.clone(), sample.series.kind.clone());
                 self.series.insert(sample.series.kind.clone(), cursor);
                 self.series_history
                     .entry(sample.series.kind.clone())
@@ -108,6 +113,43 @@ impl SourceWatermarks {
                     .entry(claim.predicate.clone())
                     .or_default()
                     .push(cursor);
+            }
+            RuntimeMutation::Retire { retirement } => {
+                if retirement.model.is_record_like() {
+                    self.any_record = cursor;
+                    self.records
+                        .insert(retirement.reference.kind.clone(), cursor);
+                    self.any_record_history.push(cursor);
+                    self.record_history
+                        .entry(retirement.reference.kind.clone())
+                        .or_default()
+                        .push(cursor);
+                } else if retirement.model == rrd_core::RuntimeLogicalModel::GraphRelation {
+                    self.relations
+                        .insert(retirement.reference.kind.clone(), cursor);
+                    self.relation_history
+                        .entry(retirement.reference.kind.clone())
+                        .or_default()
+                        .push(cursor);
+                } else if retirement.model.is_event_like() {
+                    self.events
+                        .insert(retirement.reference.kind.clone(), cursor);
+                    self.event_history
+                        .entry(retirement.reference.kind.clone())
+                        .or_default()
+                        .push(cursor);
+                } else if retirement.model == rrd_core::RuntimeLogicalModel::TimeSeries {
+                    if let Some(kind) = self.series_targets.get(&retirement.reference).cloned() {
+                        self.series.insert(kind.clone(), cursor);
+                        self.series_history.entry(kind).or_default().push(cursor);
+                    }
+                } else if retirement.model == rrd_core::RuntimeLogicalModel::Geo {
+                    self.geo.insert(retirement.reference.kind.clone(), cursor);
+                    self.geo_history
+                        .entry(retirement.reference.kind.clone())
+                        .or_default()
+                        .push(cursor);
+                }
             }
             RuntimeMutation::Vector { .. } | RuntimeMutation::Object { .. } => {}
         }

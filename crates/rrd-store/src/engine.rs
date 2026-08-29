@@ -36,9 +36,9 @@ use rrd_core::{
     projection_family, resolve_as_of, AuditEnvelope, Claim, ClaimSource, DataTransaction,
     DataTransactionView, Millis, ObjectReference, Predicate, ProjectionWork, ReadStamp, Reader,
     RetentionPin, RuntimeChange, RuntimeChangePage, RuntimeCommit, RuntimeCommitOutcome,
-    RuntimeGeo, RuntimeGraphSnapshot, RuntimeLogAccumulator, RuntimeMutation, RuntimeRecord,
-    RuntimeRef, RuntimeRelation, RuntimeSchemaRegistry, RuntimeSeriesSample, RuntimeVector,
-    ScopeId, SnapshotHandle, SnapshotId, Subject,
+    RuntimeDataSnapshot, RuntimeGeo, RuntimeGraphSnapshot, RuntimeLogAccumulator, RuntimeMutation,
+    RuntimeRecord, RuntimeRef, RuntimeRelation, RuntimeSchemaRegistry, RuntimeSeriesSample,
+    RuntimeVector, ScopeId, SnapshotHandle, SnapshotId, Subject,
 };
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Mutex;
@@ -285,6 +285,37 @@ pub trait Engine: ClaimSource<Error = Error> {
         limit: usize,
     ) -> Result<RuntimeChangePage>;
 
+    /// Reduces every logical model through one authenticated read stamp. The
+    /// replay bound fails closed instead of returning a partial snapshot.
+    fn runtime_data_snapshot(
+        &self,
+        scope: &ScopeId,
+        valid_at: Millis,
+        replay_limit: usize,
+    ) -> Result<(ReadStamp, RuntimeDataSnapshot)> {
+        if replay_limit == 0 {
+            return Err(Error::Substrate(
+                "runtime data snapshot replay limit must be greater than zero".into(),
+            ));
+        }
+        let read = self.runtime_read_stamp(scope)?;
+        let page = self.runtime_read_changes(&read, 0, replay_limit)?;
+        if page.through_cursor != read.commit_cursor || page.has_more() {
+            return Err(Error::Substrate(format!(
+                "runtime data snapshot requires more than {replay_limit} retained changes"
+            )));
+        }
+        let schema = schema_at_read(&read, &page)?;
+        let snapshot = RuntimeDataSnapshot::from_changes(
+            &page.changes,
+            &schema,
+            scope.clone(),
+            valid_at,
+            read.commit_cursor,
+        )?;
+        Ok((read, snapshot))
+    }
+
     /// Backend primitive that atomically commits typed runtime mutations and,
     /// for a data transaction, persists the exact validated read stamp in the
     /// accepted audit envelope. Callers use commit_runtime or
@@ -493,6 +524,93 @@ pub trait Engine: ClaimSource<Error = Error> {
             applied,
         })
     }
+}
+
+/// Validate every retirement against one pre-commit authenticated snapshot.
+/// The backend cursor CAS remains the final authority if another writer
+/// advances after this read and before the physical transaction begins.
+pub(crate) fn validate_retirement_targets<E: Engine + ?Sized>(
+    engine: &E,
+    commit: &RuntimeCommit,
+) -> Result<()> {
+    let retirements = commit
+        .mutations
+        .iter()
+        .filter_map(|mutation| match mutation {
+            RuntimeMutation::Retire { retirement } => Some(retirement),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    if retirements.is_empty() {
+        return Ok(());
+    }
+
+    let read = engine.runtime_read_stamp(&commit.scope)?;
+    if read.commit_cursor != commit.expected_cursor {
+        return Err(Error::RuntimeConflict {
+            expected: commit.expected_cursor,
+            actual: read.commit_cursor,
+        });
+    }
+    let page = engine.runtime_read_changes(&read, 0, usize::MAX)?;
+    if page.through_cursor != read.commit_cursor || page.has_more() {
+        return Err(Error::ReadStampUnavailable(format!(
+            "retirement validation for {}",
+            commit.scope
+        )));
+    }
+    let schema = schema_at_read(&read, &page)?;
+    let mut snapshots = BTreeMap::new();
+    for retirement in retirements {
+        let snapshot = match snapshots.entry(retirement.effective_at) {
+            std::collections::btree_map::Entry::Occupied(entry) => entry.into_mut(),
+            std::collections::btree_map::Entry::Vacant(entry) => entry.insert(
+                RuntimeDataSnapshot::from_changes(
+                    &page.changes,
+                    &schema,
+                    commit.scope.clone(),
+                    retirement.effective_at,
+                    read.commit_cursor,
+                )
+                .map_err(Error::from)?,
+            ),
+        };
+        if !snapshot.contains(retirement.model, &retirement.reference) {
+            return Err(Error::RuntimeTargetNotFound(format!(
+                "{:?} {}/{} at {} in scope {}",
+                retirement.model,
+                retirement.reference.kind,
+                retirement.reference.id,
+                retirement.effective_at,
+                commit.scope
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn schema_at_read(read: &ReadStamp, page: &RuntimeChangePage) -> Result<RuntimeSchemaRegistry> {
+    let expected_revision = read
+        .schema_revision
+        .ok_or_else(|| Error::RuntimeSchemaMissing(read.scope.to_string()))?;
+    let schema = page
+        .changes
+        .iter()
+        .filter(|change| change.scope == read.scope && change.cursor <= read.commit_cursor)
+        .filter_map(|change| match &change.mutation {
+            RuntimeMutation::Schema { registry } => Some(registry),
+            _ => None,
+        })
+        .next_back()
+        .cloned()
+        .ok_or_else(|| Error::RuntimeSchemaMissing(read.scope.to_string()))?;
+    if schema.revision != expected_revision {
+        return Err(Error::ReadStampUnavailable(format!(
+            "schema revision {} for scope {} at cursor {}",
+            expected_revision, read.scope, read.commit_cursor
+        )));
+    }
+    Ok(schema)
 }
 
 impl Engine for Store {
@@ -1062,6 +1180,7 @@ impl Engine for MemoryEngine {
         read: Option<&ReadStamp>,
     ) -> Result<RuntimeCommitOutcome> {
         commit.validate()?;
+        validate_retirement_targets(self, commit)?;
         let mut inner = self.inner.lock().expect("engine mutex");
         if let Some(read) = read {
             memory_validate_read_stamp(&inner, read)?;
@@ -1146,7 +1265,8 @@ impl Engine for MemoryEngine {
                 RuntimeMutation::Object { object } => object.subject.iter().collect(),
                 RuntimeMutation::Claim { .. }
                 | RuntimeMutation::Schema { .. }
-                | RuntimeMutation::Record { .. } => Vec::new(),
+                | RuntimeMutation::Record { .. }
+                | RuntimeMutation::Retire { .. } => Vec::new(),
             };
             for reference in references {
                 if !new_records.contains(reference)
@@ -1259,6 +1379,40 @@ impl Engine for MemoryEngine {
                         (commit.scope.clone(), object.reference.clone()),
                         object.clone(),
                     );
+                }
+                RuntimeMutation::Retire { retirement } => {
+                    let key = (commit.scope.clone(), retirement.reference.clone());
+                    if retirement.model.is_record_like() {
+                        inner.runtime_records.remove(&key);
+                    } else if retirement.model == rrd_core::RuntimeLogicalModel::GraphRelation {
+                        inner.runtime_relations.remove(&key);
+                    } else {
+                        match retirement.model {
+                            rrd_core::RuntimeLogicalModel::Vector => {
+                                inner.runtime_vectors.remove(&key);
+                            }
+                            rrd_core::RuntimeLogicalModel::TimeSeries => {
+                                inner.runtime_series.remove(&key);
+                            }
+                            rrd_core::RuntimeLogicalModel::Geo => {
+                                inner.runtime_geo.remove(&key);
+                            }
+                            rrd_core::RuntimeLogicalModel::Object => {
+                                inner.runtime_objects.remove(&key);
+                            }
+                            rrd_core::RuntimeLogicalModel::ReasoningClaim
+                            | rrd_core::RuntimeLogicalModel::Document
+                            | rrd_core::RuntimeLogicalModel::Relational
+                            | rrd_core::RuntimeLogicalModel::GraphNode
+                            | rrd_core::RuntimeLogicalModel::GraphRelation
+                            | rrd_core::RuntimeLogicalModel::KeyValue
+                            | rrd_core::RuntimeLogicalModel::Event
+                            | rrd_core::RuntimeLogicalModel::ReasoningRecord
+                            | rrd_core::RuntimeLogicalModel::ReasoningEvent
+                            | rrd_core::RuntimeLogicalModel::LifecycleRecord
+                            | rrd_core::RuntimeLogicalModel::LifecycleEvent => {}
+                        }
+                    }
                 }
                 RuntimeMutation::Claim { .. } | RuntimeMutation::Event { .. } => {}
             }

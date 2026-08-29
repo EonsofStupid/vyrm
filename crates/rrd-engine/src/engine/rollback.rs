@@ -46,7 +46,9 @@ impl RrdEngine {
             .filter(|change| {
                 matches!(
                     &change.mutation,
-                    RuntimeMutation::Record { .. } | RuntimeMutation::Relation { .. }
+                    RuntimeMutation::Record { .. }
+                        | RuntimeMutation::Relation { .. }
+                        | RuntimeMutation::Retire { .. }
                 )
             })
             .collect::<Vec<_>>();
