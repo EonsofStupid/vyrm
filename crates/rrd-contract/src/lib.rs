@@ -57,7 +57,7 @@ use std::fmt;
 pub const PROTOCOL: &str = "rrd";
 pub const PROTOCOL_VERSION: u16 = 1;
 pub const OPENAPI_DOCUMENT_SHA256: &str =
-    "394d4bb27669512b6eecafdede793f43c5b7f70ce3a84bd9f97de4601af8dbc0";
+    "882e5896e390a8f208941beb85ef3577deab5984ac03ddda441b3e46549d6f5c";
 pub const MAX_ID_BYTES: usize = 128;
 pub const MAX_MESSAGE_BYTES: usize = 4_096;
 pub const MAX_CAPABILITIES: usize = 512;
@@ -71,6 +71,9 @@ pub const MAX_QUERY_SCANNED_CHANGES: u64 = 1_000_000;
 pub const MAX_QUERY_ROWS: u64 = 100_000;
 pub const MAX_QUERY_OUTPUT_BYTES: u64 = 768 * 1024;
 pub const MAX_QUERY_BATCH_ROWS: u64 = 1_024;
+pub const MAX_QUERY_MEMORY_BYTES: u64 = 1024 * 1024 * 1024;
+pub const MAX_QUERY_SPILL_BYTES: u64 = 8 * 1024 * 1024 * 1024;
+pub const MAX_QUERY_ELAPSED_MS: u64 = 300_000;
 pub const MAX_QUERY_TRANSACTION_MUTATIONS: usize = 256;
 pub const MAX_QUERY_TRANSACTION_BINDING_BYTES: usize = 1024 * 1024;
 pub const MAX_LIVE_QUERY_DELTA_ROWS: u64 = 100_000;
@@ -104,6 +107,12 @@ pub struct QueryBudget {
     pub max_rows: u64,
     pub max_output_bytes: u64,
     pub max_batch_rows: u64,
+    #[serde(default = "default_query_memory_bytes")]
+    pub max_memory_bytes: u64,
+    #[serde(default = "default_query_spill_bytes")]
+    pub max_spill_bytes: u64,
+    #[serde(default = "default_query_elapsed_ms")]
+    pub max_elapsed_ms: u64,
 }
 
 impl Default for QueryBudget {
@@ -113,6 +122,9 @@ impl Default for QueryBudget {
             max_rows: 10_000,
             max_output_bytes: 512 * 1024,
             max_batch_rows: 256,
+            max_memory_bytes: default_query_memory_bytes(),
+            max_spill_bytes: default_query_spill_bytes(),
+            max_elapsed_ms: default_query_elapsed_ms(),
         }
     }
 }
@@ -132,6 +144,17 @@ impl QueryBudget {
                 MAX_QUERY_OUTPUT_BYTES,
             ),
             ("max_batch_rows", self.max_batch_rows, MAX_QUERY_BATCH_ROWS),
+            (
+                "max_memory_bytes",
+                self.max_memory_bytes,
+                MAX_QUERY_MEMORY_BYTES,
+            ),
+            (
+                "max_spill_bytes",
+                self.max_spill_bytes,
+                MAX_QUERY_SPILL_BYTES,
+            ),
+            ("max_elapsed_ms", self.max_elapsed_ms, MAX_QUERY_ELAPSED_MS),
         ] {
             if value == 0 || value > maximum {
                 return invalid(format!("query {name} must be in 1..={maximum}"));
@@ -139,6 +162,18 @@ impl QueryBudget {
         }
         Ok(())
     }
+}
+
+const fn default_query_memory_bytes() -> u64 {
+    64 * 1024 * 1024
+}
+
+const fn default_query_spill_bytes() -> u64 {
+    256 * 1024 * 1024
+}
+
+const fn default_query_elapsed_ms() -> u64 {
+    30_000
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -303,6 +338,28 @@ pub struct QueryExecutionSnapshot {
     pub returned_rows: u64,
     pub output_bytes: u64,
     pub truncated: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub analysis: Option<QueryExecutionAnalysisSnapshot>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct QueryExecutionAnalysisSnapshot {
+    pub engine: String,
+    pub provider_scans: u64,
+    pub input_rows: u64,
+    pub input_batches: u64,
+    pub input_memory_bytes: u64,
+    pub output_batches: u64,
+    pub projection_pushdown: String,
+    pub filter_pushdown: String,
+    pub limit_pushdown: String,
+    pub physical_operators: u64,
+    pub peak_memory_bytes: u64,
+    pub spill_count: u64,
+    pub spilled_bytes: u64,
+    pub spilled_rows: u64,
+    pub elapsed_micros: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]

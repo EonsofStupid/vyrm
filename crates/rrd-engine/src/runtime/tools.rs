@@ -1259,6 +1259,7 @@ fn execute_runtime_tool(
                 max_batch_rows: arg_u64(args, "max_batch_rows")
                     .unwrap_or(256)
                     .clamp(1, 4_096) as usize,
+                ..ExecutionBudget::default()
             };
             let result = execute_traced_query(
                 store,

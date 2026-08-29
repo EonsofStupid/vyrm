@@ -16,7 +16,10 @@ mod live;
 mod plan;
 mod syntax;
 
-pub use arrow::{record_batch_to_rows, rows_to_record_batch};
+pub use arrow::{
+    record_batch_to_rows, rows_to_arrow_snapshot, rows_to_record_batch, ArrowReadStamp,
+    ArrowSnapshot,
+};
 pub use bm25::{
     Bm25Analyzer, Bm25Artifact, Bm25Config, Bm25Document, Bm25Hit, Bm25Posting,
     BM25_ARTIFACT_CONTRACT_VERSION,
@@ -24,7 +27,7 @@ pub use bm25::{
 pub use catalog::{Catalog, SchemaVersion, SourceWatermarks};
 pub use error::{Error, Result};
 pub use execute::{execute, ExecutionBudget, QueryBatch, QueryExecution, QueryRow};
-pub use fusion::execute_snapshot;
+pub use fusion::{execute_snapshot, FusionAnalysis, FusionBudget};
 pub use index::{
     IndexArtifact, IndexArtifactPublication, IndexCatalogue, IndexCatalogueRepository,
     IndexDefinition, IndexEntry, IndexKind, IndexMutationContext, IndexOperationReceipt,

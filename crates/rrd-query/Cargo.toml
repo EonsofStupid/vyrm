@@ -12,7 +12,12 @@ rrd-store = { path = "../rrd-store" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 datafusion = { version = "=55.0.0", default-features = false, features = ["recursive_protection"] }
+datafusion-datasource = "=55.0.0"
+datafusion-session = "=55.0.0"
 futures = "0.3"
+futures-timer = "3"
+async-trait = "0.1"
+tokio = { version = "1", features = ["fs", "rt", "time"] }
 
 [dev-dependencies]
 tempfile = "3"

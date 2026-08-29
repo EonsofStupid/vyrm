@@ -3170,3 +3170,31 @@ index.
 - Public HTTP/MCP routes, generated SDK adapters, richer mutation expressions,
   outer/costed joins, and the final pushdown/spill execution plane remain their
   explicit later gates.
+
+## 2026-08-29 — G03-W04 shared Arrow/DataFusion execution plane candidate
+
+- Replaced the generic DataFusion `MemTable` boundary with an immutable
+  `RrdSnapshotTableProvider`. One schema is derived over the complete captured
+  snapshot, every physical batch obeys the request row bound, and schema
+  metadata binds the read manifest, scope, valid/known time, source cursor, and
+  catalogue revision back to RRD authority.
+- DataFusion now executes through `SendableRecordBatchStream`. Provider
+  projection and limit hints are applied only when exact; filters are declared
+  unsupported and remain above the scan, with the disposition reported as
+  stable RRD evidence rather than a serialized DataFusion plan.
+- Query contracts now carry memory, temporary-spill, and elapsed-time limits.
+  Arrow snapshot residency and DataFusion operator reservations share the
+  memory cap, the temporary disk manager enforces the spill cap, and dropping
+  the physical stream cancels an elapsed query. Resource exhaustion is surfaced
+  as a budget denial.
+- Added `EXPLAIN ANALYZE` as a distinct canonical RRFlowQL mode. Its optional
+  public evidence reports provider scans, bounded input/output batches, input
+  and peak governed memory, pushdown dispositions, physical operator count,
+  spill totals, and elapsed time. Ordinary query response bytes remain
+  backward compatible; the intentional schema addition advances the generated
+  OpenAPI digest to
+  `882e5896e390a8f208941beb85ef3577deab5984ac03ddda441b3e46549d6f5c`.
+- Differential tests prove reference ordering while a constrained external
+  sort actually spills, filter/projection/limit semantics against authoritative
+  rows, memory/spill/time denial, stamp corruption rejection, and execution
+  from both synchronous and already-async engine callers.

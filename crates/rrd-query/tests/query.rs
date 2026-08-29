@@ -329,6 +329,67 @@ fn memory_fjall_and_native_return_identical_exact_rows() {
 }
 
 #[test]
+fn explain_analyze_reports_governed_streaming_plane_and_preserves_reference_rows() {
+    let engine = MemoryEngine::new();
+    engine.commit_runtime(&fixture_commit()).unwrap();
+    let catalog = Catalog::capture(&engine, &ScopeId::new("instance:test").unwrap()).unwrap();
+    let query = parse(
+        "FROM record:document AT VALID 100 KNOWN HEAD WHERE status != \"closed\" PROJECT title LIMIT 1 EXPLAIN ANALYZE",
+    )
+    .unwrap();
+    let physical = plan(&bind(&query, &Parameters::new(), &catalog).unwrap()).unwrap();
+    let budget = ExecutionBudget {
+        max_batch_rows: 1,
+        ..ExecutionBudget::default()
+    };
+    let result = execute(&engine, &physical, &budget).unwrap();
+    assert_eq!(
+        flattened_rows(&result),
+        vec![rrd_query::QueryRow {
+            identity: "record:document:a".into(),
+            values: BTreeMap::from([("title".into(), value("Alpha"))]),
+        }]
+    );
+
+    let analysis = result.analysis.as_ref().expect("analysis was requested");
+    assert_eq!(analysis.engine, "datafusion-55");
+    assert_eq!(analysis.provider_scans, 1);
+    assert_eq!(analysis.input_rows, 2);
+    assert_eq!(analysis.input_batches, 2);
+    assert!(analysis.input_memory_bytes > 0);
+    assert_eq!(analysis.output_batches, 1);
+    assert_eq!(analysis.projection_pushdown, "exact");
+    assert_eq!(analysis.filter_pushdown, "unsupported_exact_post_scan");
+    assert_eq!(analysis.limit_pushdown, "retained_above_scan");
+    assert!(analysis.physical_operators > 0);
+    assert!(analysis.peak_memory_bytes >= analysis.input_memory_bytes);
+    assert!(analysis.peak_memory_bytes <= budget.max_memory_bytes);
+    assert!(analysis.spilled_bytes <= budget.max_spill_bytes);
+
+    let too_small = ExecutionBudget {
+        max_memory_bytes: analysis.input_memory_bytes,
+        ..budget
+    };
+    assert!(matches!(
+        execute(&engine, &physical, &too_small),
+        Err(Error::Budget(reason)) if reason.contains("Arrow snapshot requires")
+    ));
+
+    let without_analysis = parse(
+        "FROM record:document AT VALID 100 KNOWN HEAD WHERE status != \"closed\" PROJECT title LIMIT 1",
+    )
+    .unwrap();
+    let without_analysis =
+        plan(&bind(&without_analysis, &Parameters::new(), &catalog).unwrap()).unwrap();
+    assert!(
+        execute(&engine, &without_analysis, &ExecutionBudget::default())
+            .unwrap()
+            .analysis
+            .is_none()
+    );
+}
+
+#[test]
 fn equi_join_uses_one_stamp_matches_the_reference_oracle_and_is_strictly_bounded() {
     let text = "FROM record:document JOIN relation:depends_on ON id = from_id AT VALID 100 KNOWN HEAD WHERE right.strength != \"cycle\" PROJECT left.id, right.to_id EXPLAIN CONTRACT";
     let expected = vec![BTreeMap::from([

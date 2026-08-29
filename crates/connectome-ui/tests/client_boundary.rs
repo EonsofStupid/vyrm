@@ -245,6 +245,7 @@ fn connectome_uses_authenticated_public_rrd_contracts_end_to_end() {
                 max_rows: 10,
                 max_output_bytes: 4_096,
                 max_batch_rows: 10,
+                ..QueryBudget::default()
             },
         })
         .unwrap();

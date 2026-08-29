@@ -1,7 +1,7 @@
 use crate::{
-    execute_snapshot, index::index_artifact_name, rows_to_record_batch, Bm25Artifact, Bm25Config,
-    BoundFilter, Error, IndexArtifact, IndexKind, LogicalOperator, PhysicalOperator, PhysicalPlan,
-    Result,
+    execute_snapshot, index::index_artifact_name, rows_to_arrow_snapshot, ArrowReadStamp,
+    Bm25Artifact, Bm25Config, BoundFilter, Error, FusionAnalysis, FusionBudget, IndexArtifact,
+    IndexKind, LogicalOperator, PhysicalOperator, PhysicalPlan, Result,
 };
 use crate::{Join, Projection, Source, TraversalDirection};
 use rrd_core::{
@@ -18,6 +18,9 @@ pub struct ExecutionBudget {
     pub max_rows: usize,
     pub max_output_bytes: usize,
     pub max_batch_rows: usize,
+    pub max_memory_bytes: usize,
+    pub max_spill_bytes: usize,
+    pub max_elapsed_ms: u64,
 }
 
 impl Default for ExecutionBudget {
@@ -27,6 +30,9 @@ impl Default for ExecutionBudget {
             max_rows: 10_000,
             max_output_bytes: 8 * 1024 * 1024,
             max_batch_rows: 256,
+            max_memory_bytes: 64 * 1024 * 1024,
+            max_spill_bytes: 256 * 1024 * 1024,
+            max_elapsed_ms: 30_000,
         }
     }
 }
@@ -37,6 +43,9 @@ impl ExecutionBudget {
             || self.max_rows == 0
             || self.max_output_bytes == 0
             || self.max_batch_rows == 0
+            || self.max_memory_bytes == 0
+            || self.max_spill_bytes == 0
+            || self.max_elapsed_ms == 0
         {
             return Err(Error::Budget(
                 "all execution budgets must be greater than zero".into(),
@@ -75,6 +84,8 @@ pub struct QueryExecution {
     pub output_bytes: usize,
     pub truncated: bool,
     pub batches: Vec<QueryBatch>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub analysis: Option<FusionAnalysis>,
 }
 
 pub fn execute<E: Engine>(
@@ -123,14 +134,36 @@ pub fn execute<E: Engine>(
         .filters
         .iter()
         .any(|filter| filter.comparison.is_match());
-    let batch = rows_to_record_batch(&loaded.rows, &plan.logical.field_types)?;
-    let mut rows = execute_snapshot(
-        batch,
+    let snapshot = rows_to_arrow_snapshot(
+        &loaded.rows,
+        &plan.logical.field_types,
+        ArrowReadStamp {
+            read_manifest: plan.logical.read.manifest_id.clone(),
+            scope: plan.logical.read.scope.to_string(),
+            valid_at: shape.valid_at,
+            known_at_cursor: shape.known_at_cursor,
+            source_cursor: plan.logical.source_cursor,
+            schema_revision: plan.logical.schema_revision,
+        },
+        budget.max_batch_rows,
+    )?;
+    loaded.rows.clear();
+    loaded.rows.shrink_to_fit();
+    let fusion = execute_snapshot(
+        snapshot,
         &shape.filters,
         &shape.projection,
         shape.limit,
         has_match,
+        &FusionBudget {
+            max_batch_rows: budget.max_batch_rows,
+            max_memory_bytes: budget.max_memory_bytes,
+            max_spill_bytes: budget.max_spill_bytes,
+            max_elapsed_ms: budget.max_elapsed_ms,
+        },
     )?;
+    let analysis = plan.logical.explain_analyze.then_some(fusion.analysis);
+    let mut rows = fusion.rows;
     if has_match {
         rows.retain(|row| bm25_scores.contains_key(&row.identity));
         rows.sort_by(|left, right| {
@@ -189,6 +222,7 @@ pub fn execute<E: Engine>(
         output_bytes,
         truncated,
         batches,
+        analysis,
     })
 }
 

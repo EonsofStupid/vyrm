@@ -1259,6 +1259,7 @@ pub fn execute(
                 max_rows: *max_rows,
                 max_output_bytes: *max_output_bytes,
                 max_batch_rows: *max_batch_rows,
+                ..rrd_engine::ExecutionBudget::default()
             };
             let result = store.execute_operator_query(
                 scope,

@@ -39,6 +39,8 @@ pub struct BoundQuery {
     pub projection: Projection,
     pub limit: Option<usize>,
     pub explain_contract: bool,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub explain_analyze: bool,
     pub schema_revision: u64,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub index_candidates: Vec<BoundIndexCandidate>,
@@ -93,6 +95,8 @@ pub struct LogicalPlan {
     pub source_cursor: u64,
     pub field_types: QueryFieldTypes,
     pub operators: Vec<LogicalOperator>,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub explain_analyze: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -308,6 +312,7 @@ pub fn bind(query: &Query, parameters: &Parameters, catalog: &Catalog) -> Result
         projection: query.projection.clone(),
         limit: query.limit,
         explain_contract: query.explain_contract,
+        explain_analyze: query.explain_analyze,
         schema_revision: schema.revision,
         index_candidates,
     })
@@ -348,6 +353,7 @@ pub fn plan(bound: &BoundQuery) -> Result<PhysicalPlan> {
         source_cursor: bound.source_cursor,
         field_types: bound.field_types.clone(),
         operators,
+        explain_analyze: bound.explain_analyze,
     };
     let event_cursor = event_cursor_filter(bound);
     let match_field = bound
@@ -531,6 +537,10 @@ pub fn plan(bound: &BoundQuery) -> Result<PhysicalPlan> {
         explanation,
         digest,
     })
+}
+
+fn is_false(value: &bool) -> bool {
+    !*value
 }
 
 fn event_cursor_filter(bound: &BoundQuery) -> Option<u64> {

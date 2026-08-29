@@ -41,16 +41,7 @@ impl RrdEngine {
             .map_err(|error| ServiceError::Query(error.to_string()))?;
         let plan =
             rrd_query::plan(&bound).map_err(|error| ServiceError::Query(error.to_string()))?;
-        let budget = rrd_query::ExecutionBudget {
-            max_scanned_changes: usize::try_from(request.budget.max_scanned_changes)
-                .map_err(|_| ServiceError::Query("query scan budget exceeds usize".into()))?,
-            max_rows: usize::try_from(request.budget.max_rows)
-                .map_err(|_| ServiceError::Query("query row budget exceeds usize".into()))?,
-            max_output_bytes: usize::try_from(request.budget.max_output_bytes)
-                .map_err(|_| ServiceError::Query("query output budget exceeds usize".into()))?,
-            max_batch_rows: usize::try_from(request.budget.max_batch_rows)
-                .map_err(|_| ServiceError::Query("query batch budget exceeds usize".into()))?,
-        };
+        let budget = query_execution_budget(&request.budget)?;
         let execution = rrd_query::execute(&self.storage, &plan, &budget)
             .map_err(|error| ServiceError::Query(error.to_string()))?;
         let rows = execution
@@ -103,6 +94,11 @@ impl RrdEngine {
                 output_bytes: u64::try_from(execution.output_bytes)
                     .map_err(|_| ServiceError::Query("output bytes exceed u64".into()))?,
                 truncated: execution.truncated,
+                analysis: execution
+                    .analysis
+                    .as_ref()
+                    .map(public_query_analysis)
+                    .transpose()?,
             },
             rows,
         })
@@ -401,6 +397,36 @@ fn query_execution_budget(
             .map_err(|_| ServiceError::Query("query output budget exceeds usize".into()))?,
         max_batch_rows: usize::try_from(budget.max_batch_rows)
             .map_err(|_| ServiceError::Query("query batch budget exceeds usize".into()))?,
+        max_memory_bytes: usize::try_from(budget.max_memory_bytes)
+            .map_err(|_| ServiceError::Query("query memory budget exceeds usize".into()))?,
+        max_spill_bytes: usize::try_from(budget.max_spill_bytes)
+            .map_err(|_| ServiceError::Query("query spill budget exceeds usize".into()))?,
+        max_elapsed_ms: budget.max_elapsed_ms,
+    })
+}
+
+fn public_query_analysis(
+    analysis: &rrd_query::FusionAnalysis,
+) -> Result<QueryExecutionAnalysisSnapshot> {
+    let number = |value: usize, label: &str| {
+        u64::try_from(value).map_err(|_| ServiceError::Query(format!("query {label} exceeds u64")))
+    };
+    Ok(QueryExecutionAnalysisSnapshot {
+        engine: analysis.engine.clone(),
+        provider_scans: number(analysis.provider_scans, "provider scans")?,
+        input_rows: number(analysis.input_rows, "analysis input rows")?,
+        input_batches: number(analysis.input_batches, "analysis input batches")?,
+        input_memory_bytes: number(analysis.input_memory_bytes, "analysis input memory")?,
+        output_batches: number(analysis.output_batches, "analysis output batches")?,
+        projection_pushdown: analysis.projection_pushdown.clone(),
+        filter_pushdown: analysis.filter_pushdown.clone(),
+        limit_pushdown: analysis.limit_pushdown.clone(),
+        physical_operators: number(analysis.physical_operators, "physical operators")?,
+        peak_memory_bytes: number(analysis.peak_memory_bytes, "peak memory bytes")?,
+        spill_count: number(analysis.spill_count, "spill count")?,
+        spilled_bytes: number(analysis.spilled_bytes, "spilled bytes")?,
+        spilled_rows: number(analysis.spilled_rows, "spilled rows")?,
+        elapsed_micros: analysis.elapsed_micros,
     })
 }
 
@@ -415,6 +441,7 @@ fn query_index_definition(request: &EnsureQueryIndex) -> Result<(rrd_query::Inde
     if !query.filters.is_empty()
         || query.limit.is_some()
         || query.explain_contract
+        || query.explain_analyze
         || !matches!(query.temporal.known_at, CursorExpr::Head)
     {
         return Err(ServiceError::Query(

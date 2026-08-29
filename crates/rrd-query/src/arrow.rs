@@ -3,7 +3,7 @@
 use crate::{Error, QueryFieldTypes, QueryRow, Result};
 use datafusion::arrow::{
     array::{Array, ArrayRef, BinaryArray, BooleanArray, Int64Array, StringArray, UInt64Array},
-    datatypes::{DataType, Field, Schema},
+    datatypes::{DataType, Field, Schema, SchemaRef},
     record_batch::RecordBatch,
 };
 use rrd_core::{RuntimeValue, RuntimeValueType};
@@ -13,27 +13,173 @@ use std::sync::Arc;
 const IDENTITY: &str = "__rrd_identity";
 const TYPE_METADATA: &str = "rrd.runtime_value_type";
 const UNION_METADATA: &str = "rrd.runtime_union";
+const READ_MANIFEST_METADATA: &str = "rrd.read_manifest";
+const SCOPE_METADATA: &str = "rrd.scope";
+const VALID_AT_METADATA: &str = "rrd.valid_at";
+const KNOWN_AT_CURSOR_METADATA: &str = "rrd.known_at_cursor";
+const SOURCE_CURSOR_METADATA: &str = "rrd.source_cursor";
+const SCHEMA_REVISION_METADATA: &str = "rrd.schema_revision";
+
+/// Stable RRD coordinates carried by every Arrow snapshot schema. Arrow is a
+/// rebuildable execution representation; these coordinates bind it back to
+/// the authoritative catalogue and authenticated read stamp.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ArrowReadStamp {
+    pub read_manifest: String,
+    pub scope: String,
+    pub valid_at: u64,
+    pub known_at_cursor: u64,
+    pub source_cursor: u64,
+    pub schema_revision: u64,
+}
+
+#[derive(Debug, Clone)]
+pub struct ArrowSnapshot {
+    pub stamp: ArrowReadStamp,
+    pub schema: SchemaRef,
+    pub batches: Vec<RecordBatch>,
+    pub rows: usize,
+    pub max_batch_rows: usize,
+}
+
+impl ArrowSnapshot {
+    pub fn validate(&self) -> Result<()> {
+        if self.max_batch_rows == 0 {
+            return Err(Error::Integrity(
+                "Arrow snapshot has a zero batch-row bound".into(),
+            ));
+        }
+        validate_stamp_metadata(self.schema.metadata(), &self.stamp)?;
+        if self
+            .batches
+            .iter()
+            .any(|batch| batch.schema() != self.schema || batch.num_rows() > self.max_batch_rows)
+        {
+            return Err(Error::Integrity(
+                "Arrow snapshot batch violates its schema or row bound".into(),
+            ));
+        }
+        let rows = self
+            .batches
+            .iter()
+            .try_fold(0usize, |total, batch| total.checked_add(batch.num_rows()))
+            .ok_or_else(|| Error::Integrity("Arrow snapshot row count overflow".into()))?;
+        if rows != self.rows {
+            return Err(Error::Integrity(format!(
+                "Arrow snapshot contains {rows} rows but declares {}",
+                self.rows
+            )));
+        }
+        Ok(())
+    }
+
+    /// Resident Arrow array bytes held by the immutable snapshot. This is
+    /// charged to the same query memory budget as DataFusion operators.
+    pub fn resident_bytes(&self) -> Result<usize> {
+        self.batches.iter().try_fold(0usize, |total, batch| {
+            total
+                .checked_add(batch.get_array_memory_size())
+                .ok_or_else(|| Error::Budget("Arrow snapshot memory size overflow".into()))
+        })
+    }
+}
 
 pub fn rows_to_record_batch(rows: &[QueryRow], declared: &QueryFieldTypes) -> Result<RecordBatch> {
+    let schema = row_schema(rows, declared, HashMap::new());
+    rows_to_record_batch_with_schema(rows, schema)
+}
+
+pub fn rows_to_arrow_snapshot(
+    rows: &[QueryRow],
+    declared: &QueryFieldTypes,
+    stamp: ArrowReadStamp,
+    max_batch_rows: usize,
+) -> Result<ArrowSnapshot> {
+    if max_batch_rows == 0 {
+        return Err(Error::Budget(
+            "Arrow snapshot batch-row bound must be greater than zero".into(),
+        ));
+    }
+    let schema = row_schema(rows, declared, stamp_metadata(&stamp));
+    let batches = rows
+        .chunks(max_batch_rows)
+        .map(|rows| rows_to_record_batch_with_schema(rows, Arc::clone(&schema)))
+        .collect::<Result<Vec<_>>>()?;
+    let snapshot = ArrowSnapshot {
+        stamp,
+        schema,
+        batches,
+        rows: rows.len(),
+        max_batch_rows,
+    };
+    snapshot.validate()?;
+    Ok(snapshot)
+}
+
+fn row_schema(
+    rows: &[QueryRow],
+    declared: &QueryFieldTypes,
+    metadata: HashMap<String, String>,
+) -> SchemaRef {
     let mut names = declared.keys().cloned().collect::<BTreeSet<_>>();
     for row in rows {
         names.extend(row.values.keys().cloned());
     }
 
     let mut fields = vec![Field::new(IDENTITY, DataType::Utf8, false)];
+    for name in names {
+        let semantics = semantic_types(rows, declared.get(&name), &name);
+        let representation = Representation::for_types(&semantics);
+        fields.push(representation.field(&name));
+    }
+    Arc::new(Schema::new_with_metadata(fields, metadata))
+}
+
+fn rows_to_record_batch_with_schema(rows: &[QueryRow], schema: SchemaRef) -> Result<RecordBatch> {
     let mut arrays: Vec<ArrayRef> = vec![Arc::new(StringArray::from(
         rows.iter()
             .map(|row| Some(row.identity.as_str()))
             .collect::<Vec<_>>(),
     ))];
-    for name in names {
-        let semantics = semantic_types(rows, declared.get(&name), &name);
-        let representation = Representation::for_types(&semantics);
-        fields.push(representation.field(&name));
-        arrays.push(representation.array(rows, &name)?);
+    for field in schema.fields().iter().skip(1) {
+        arrays.push(Representation::from_field(field)?.array(rows, field.name())?);
     }
-    RecordBatch::try_new(Arc::new(Schema::new(fields)), arrays)
+    RecordBatch::try_new(schema, arrays)
         .map_err(|error| Error::Execution(format!("Arrow batch construction failed: {error}")))
+}
+
+fn stamp_metadata(stamp: &ArrowReadStamp) -> HashMap<String, String> {
+    HashMap::from([
+        (READ_MANIFEST_METADATA.into(), stamp.read_manifest.clone()),
+        (SCOPE_METADATA.into(), stamp.scope.clone()),
+        (VALID_AT_METADATA.into(), stamp.valid_at.to_string()),
+        (
+            KNOWN_AT_CURSOR_METADATA.into(),
+            stamp.known_at_cursor.to_string(),
+        ),
+        (
+            SOURCE_CURSOR_METADATA.into(),
+            stamp.source_cursor.to_string(),
+        ),
+        (
+            SCHEMA_REVISION_METADATA.into(),
+            stamp.schema_revision.to_string(),
+        ),
+    ])
+}
+
+fn validate_stamp_metadata(
+    metadata: &HashMap<String, String>,
+    stamp: &ArrowReadStamp,
+) -> Result<()> {
+    for (name, expected) in stamp_metadata(stamp) {
+        if metadata.get(&name) != Some(&expected) {
+            return Err(Error::Integrity(format!(
+                "Arrow snapshot metadata {name:?} does not match its RRD read stamp"
+            )));
+        }
+    }
+    Ok(())
 }
 
 pub fn record_batch_to_rows(batch: &RecordBatch) -> Result<Vec<QueryRow>> {
@@ -369,5 +515,32 @@ mod tests {
         ];
         let batch = rows_to_record_batch(&rows, &QueryFieldTypes::new()).unwrap();
         assert_eq!(record_batch_to_rows(&batch).unwrap(), rows);
+
+        let stamp = ArrowReadStamp {
+            read_manifest: "a".repeat(64),
+            scope: "instance:test".into(),
+            valid_at: 100,
+            known_at_cursor: 9,
+            source_cursor: 8,
+            schema_revision: 3,
+        };
+        let snapshot =
+            rows_to_arrow_snapshot(&rows, &QueryFieldTypes::new(), stamp.clone(), 1).unwrap();
+        assert_eq!(snapshot.batches.len(), 2);
+        assert!(snapshot
+            .batches
+            .iter()
+            .all(|batch| batch.num_rows() == 1 && batch.schema() == snapshot.schema));
+        assert_eq!(
+            snapshot
+                .batches
+                .iter()
+                .flat_map(|batch| record_batch_to_rows(batch).unwrap())
+                .collect::<Vec<_>>(),
+            rows
+        );
+        let mut corrupted = snapshot;
+        corrupted.stamp.known_at_cursor += 1;
+        assert!(matches!(corrupted.validate(), Err(Error::Integrity(_))));
     }
 }

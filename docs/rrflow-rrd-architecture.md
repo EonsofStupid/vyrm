@@ -98,10 +98,12 @@ operators, applications, local/frontier AI
 
 The diagram is a logical ownership model, not a claim that every box is already
 implemented. Typed Arrow conversion and DataFusion 55 execution exist for
-bounded relational operations over one materialized stamped snapshot. Custom
-streaming providers, full pushdown/spill governance, and broader physical
-optimization remain incomplete; reference row semantics remain the conformance
-oracle.
+bounded relational operations over one materialized stamped snapshot. An
+immutable RRD provider now returns schema-stable bounded batches through a
+physical stream, reports exact projection/limit hints and unsupported filters,
+and enforces snapshot/operator memory, temporary spill, batch, and elapsed-time
+budgets. Lazy storage-to-Arrow scans and broader physical optimization remain
+incomplete; reference row semantics remain the conformance oracle.
 
 ## Complete end-to-end RRFlow flow
 
@@ -491,9 +493,11 @@ As of 2026-08-29:
   an explicit successor-format migration is still required to persist the
   environment identity without invalidating format-1 authority digests;
 - typed Arrow conversion, DataFusion filter/projection/limit execution, and
-  deterministic bounded result batches are present. Joins have a hard
-  intermediate-cardinality budget, but the current bounded `MemTable` path is
-  not the final streaming/pushdown/spill plane;
+  deterministic bounded result batches are present. The stamped snapshot
+  provider, pushdown-disposition evidence, physical batch stream, cancellation,
+  and memory/spill caps are executable. Joins retain a hard intermediate-
+  cardinality budget; lazy direct storage scans and broader physical
+  optimization remain open;
 - TurboQuant contract variants and an experimental physical artifact path are
   present, but they are not a qualified Qdrant-complete collection lifecycle or
   an automatic memory-pressure policy;

@@ -28,6 +28,8 @@ pub struct Query {
     pub limit: Option<usize>,
     #[serde(default)]
     pub explain_contract: bool,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub explain_analyze: bool,
 }
 
 impl Query {
@@ -41,6 +43,7 @@ impl Query {
             projection: Projection::All,
             limit: None,
             explain_contract: false,
+            explain_analyze: false,
         }
     }
 
@@ -56,6 +59,12 @@ impl Query {
         }
         if self.limit == Some(0) {
             return Err(ParseError::new(0, "LIMIT must be greater than zero"));
+        }
+        if self.explain_contract && self.explain_analyze {
+            return Err(ParseError::new(
+                0,
+                "EXPLAIN CONTRACT and EXPLAIN ANALYZE are mutually exclusive",
+            ));
         }
         if matches!(
             &self.source,
@@ -137,6 +146,8 @@ impl Query {
         }
         if self.explain_contract {
             out.push_str(" EXPLAIN CONTRACT");
+        } else if self.explain_analyze {
+            out.push_str(" EXPLAIN ANALYZE");
         }
         out
     }
@@ -749,8 +760,24 @@ impl Parser {
                 }
                 saw_explain = true;
                 self.cursor += 1;
-                self.keyword("CONTRACT")?;
-                query.explain_contract = true;
+                if self
+                    .peek()
+                    .is_some_and(|token| token.is_keyword("CONTRACT"))
+                {
+                    self.cursor += 1;
+                    query.explain_contract = true;
+                } else if self.peek().is_some_and(|token| token.is_keyword("ANALYZE")) {
+                    self.cursor += 1;
+                    query.explain_analyze = true;
+                } else {
+                    return Err(ParseError::new(
+                        self.peek().map_or_else(
+                            || self.tokens.last().map_or(0, |token| token.offset + 1),
+                            |token| token.offset,
+                        ),
+                        "EXPLAIN requires CONTRACT or ANALYZE",
+                    ));
+                }
             } else {
                 break;
             }
@@ -1027,6 +1054,10 @@ impl Parser {
             .get(self.cursor.saturating_sub(1))
             .map_or(0, |token| token.offset)
     }
+}
+
+fn is_false(value: &bool) -> bool {
+    !*value
 }
 
 impl Token {

@@ -75,6 +75,7 @@ impl RrdEngine {
                 max_rows: candidate_limit,
                 max_output_bytes: 8 * 1024 * 1024,
                 max_batch_rows: candidate_limit.clamp(1, 1_024),
+                ..rrd_query::ExecutionBudget::default()
             },
         )
         .map_err(|error| ServiceError::Query(error.to_string()))?;

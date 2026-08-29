@@ -29,11 +29,14 @@ Purgato remain downstream diagnostic/presentation work governed by the
 [Connectome diagnostics recovery plan](docs/connectome-rrd-diagnostics-plan.md).
 
 Native WAL/MVCC/LSM persistence is real. `rrd-query` now converts stamped
-authoritative snapshots to typed Arrow batches and executes relational
-filter/projection/order/limit work through DataFusion 55. The current path
-materializes a bounded snapshot in a DataFusion `MemTable`; custom streaming
-providers, pushdown, spill governance, and broader physical optimization remain
-open. The reference row semantics remain the differential oracle.
+authoritative snapshots to schema-stable, row-bounded Arrow batches and exposes
+them through an immutable RRD `TableProvider`. DataFusion 55 physically streams
+relational filter/projection/order/limit work with exact projection/limit hints,
+explicit unsupported-filter retention, elapsed cancellation, and shared
+snapshot/operator-memory and spill caps. `EXPLAIN ANALYZE` returns stable RRD
+evidence rather than persisted DataFusion internals. Lazy storage-to-Arrow scans
+and broader physical optimization remain open; reference row semantics remain
+the differential oracle.
 
 > **Full-stack baseline (2026-08-23).** RRFlow is a substantive local alpha
 > persistence/runtime kernel; it is not yet a complete SurrealDB- or

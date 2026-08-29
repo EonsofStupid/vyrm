@@ -46,10 +46,13 @@ RRFlow
 
 This is the required architecture, not a blanket completion claim. The current
 query path converts one stamped authoritative snapshot to typed Arrow batches
-and runs bounded relational operations through DataFusion 55. It still uses a
-materialized `MemTable`; custom streaming providers, pushdown, spill governance,
-and broader physical optimization remain open. Reference row semantics remain
-the differential oracle.
+and exposes schema-stable bounded batches through an immutable RRD
+`TableProvider`. DataFusion 55 streams bounded relational operations with
+governed projection/limit hints, retained unsupported filters, elapsed
+cancellation, memory/spill caps, and stable `EXPLAIN ANALYZE` evidence. The
+snapshot is still captured before provider execution; lazy storage-to-Arrow
+scans and broader physical optimization remain open. Reference row semantics
+remain the differential oracle.
 
 Use `RRFlow` in all new product, protocol, CLI, configuration, documentation,
 and module names. Use `RRD` only for the Reason Ready Daemon role and its public

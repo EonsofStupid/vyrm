@@ -311,6 +311,7 @@ async fn rust_client_negotiates_authenticates_queries_and_reads_audit() {
             max_rows: 10,
             max_output_bytes: 4_096,
             max_batch_rows: 10,
+            ..QueryBudget::default()
         },
     };
     let query = client

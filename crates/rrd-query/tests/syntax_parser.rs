@@ -18,6 +18,7 @@ fn parser_corpus_round_trips_to_one_canonical_form() {
         "FROM record:document AT VALID 100 KNOWN HEAD WHERE title MATCH \"frontier runtime\" PROJECT id, title LIMIT 5",
         "FROM traverse:depends_on START document:a DIRECTION OUTGOING DEPTH 4 AT VALID 1000 KNOWN HEAD PROJECT node_id, depth, path",
         "FROM record:document JOIN relation:depends_on ON id = from_id AT VALID 1000 KNOWN HEAD WHERE right.strength = \"hard\" PROJECT left.id, right.to_id",
+        "FROM record:document AT VALID 100 KNOWN HEAD WHERE status = \"open\" PROJECT id EXPLAIN ANALYZE",
     ];
     for source in corpus {
         let first = parse(source).unwrap_or_else(|error| panic!("{source}: {error}"));
@@ -25,6 +26,22 @@ fn parser_corpus_round_trips_to_one_canonical_form() {
         let second = parse(&canonical).unwrap();
         assert_eq!(first, second, "canonical query: {canonical}");
     }
+}
+
+#[test]
+fn explain_analyze_is_distinct_canonical_and_strict() {
+    let analyzed =
+        parse("from record:document at valid 100 known head project id explain analyze").unwrap();
+    assert!(analyzed.explain_analyze);
+    assert!(!analyzed.explain_contract);
+    assert_eq!(
+        analyzed.canonical(),
+        "FROM record:document AT VALID 100 KNOWN HEAD PROJECT id EXPLAIN ANALYZE"
+    );
+
+    let mut invalid = analyzed;
+    invalid.explain_contract = true;
+    assert!(invalid.validate().is_err());
 }
 
 #[test]

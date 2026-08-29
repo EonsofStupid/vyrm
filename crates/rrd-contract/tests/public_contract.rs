@@ -9,16 +9,17 @@ use rrd_contract::{
     ExecuteQueryTransaction, FollowChangefeed, ForwardRollbackCounts, ForwardRollbackRequest,
     HybridFusion, IdempotencyBinding, ListQueryIndexes, ListVectorCollections, Liveness,
     NamedVectorDefinition, PollLiveQuery, PreviewTransaction, ProductCapability,
-    ProductCapabilityCatalogue, ProductSurface, QueryBudget, QueryExecutionSnapshot,
-    QueryIndexKind, QueryPlanCandidate, QueryPlanSnapshot, QueryResult, QueryRowSnapshot,
-    QueryValue, ReadAudit, ReadChangefeed, ReadDataSnapshot, ReadEstate, Readiness, RenewSession,
-    RequestContext, RequestEnvelope, ResourceId, ResourceKind, ResourcePath, ResponseEnvelope,
-    ResponseOutcome, RestoreInstanceBackup, SearchHybrid, SearchVectors, ServiceCapabilities,
-    SessionEndState, SessionLease, SessionLimits, SessionTermination, SurfaceBinding,
-    SurfaceDisposition, TransactionMutation, TransactionPreview, TransactionState,
-    VectorIndexConfiguration, VectorMemoryTier, VectorPayloadCondition, VectorPayloadFilter,
-    VectorPayloadOperator, VectorQuantizationBits, VectorSearchMetric, VectorSearchMode,
-    VectorSearchQuery, VectorValueKind, PROTOCOL, PROTOCOL_VERSION,
+    ProductCapabilityCatalogue, ProductSurface, QueryBudget, QueryExecutionAnalysisSnapshot,
+    QueryExecutionSnapshot, QueryIndexKind, QueryPlanCandidate, QueryPlanSnapshot, QueryResult,
+    QueryRowSnapshot, QueryValue, ReadAudit, ReadChangefeed, ReadDataSnapshot, ReadEstate,
+    Readiness, RenewSession, RequestContext, RequestEnvelope, ResourceId, ResourceKind,
+    ResourcePath, ResponseEnvelope, ResponseOutcome, RestoreInstanceBackup, SearchHybrid,
+    SearchVectors, ServiceCapabilities, SessionEndState, SessionLease, SessionLimits,
+    SessionTermination, SurfaceBinding, SurfaceDisposition, TransactionMutation,
+    TransactionPreview, TransactionState, VectorIndexConfiguration, VectorMemoryTier,
+    VectorPayloadCondition, VectorPayloadFilter, VectorPayloadOperator, VectorQuantizationBits,
+    VectorSearchMetric, VectorSearchMode, VectorSearchQuery, VectorValueKind, PROTOCOL,
+    PROTOCOL_VERSION,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -403,6 +404,23 @@ fn query_contract_is_transport_neutral_bounded_and_strict() {
             returned_rows: 1,
             output_bytes: 32,
             truncated: false,
+            analysis: Some(QueryExecutionAnalysisSnapshot {
+                engine: "datafusion-55".into(),
+                provider_scans: 1,
+                input_rows: 2,
+                input_batches: 1,
+                input_memory_bytes: 512,
+                output_batches: 1,
+                projection_pushdown: "exact".into(),
+                filter_pushdown: "unsupported_exact_post_scan".into(),
+                limit_pushdown: "retained_above_scan".into(),
+                physical_operators: 5,
+                peak_memory_bytes: 1_024,
+                spill_count: 0,
+                spilled_bytes: 0,
+                spilled_rows: 0,
+                elapsed_micros: 50,
+            }),
         },
         rows: vec![QueryRowSnapshot {
             identity: "document:alpha".into(),
@@ -417,6 +435,20 @@ fn query_contract_is_transport_neutral_bounded_and_strict() {
     let mut invalid_budget = request_budget_fixture();
     invalid_budget.max_rows = 0;
     assert!(invalid_budget.validate().is_err());
+    let legacy_budget: QueryBudget = serde_json::from_value(serde_json::json!({
+        "max_scanned_changes": 100,
+        "max_rows": 10,
+        "max_output_bytes": 4096,
+        "max_batch_rows": 10
+    }))
+    .unwrap();
+    assert_eq!(legacy_budget.max_memory_bytes, 64 * 1024 * 1024);
+    assert_eq!(legacy_budget.max_spill_bytes, 256 * 1024 * 1024);
+    assert_eq!(legacy_budget.max_elapsed_ms, 30_000);
+    legacy_budget.validate().unwrap();
+    let mut invalid_memory = legacy_budget;
+    invalid_memory.max_memory_bytes = rrd_contract::MAX_QUERY_MEMORY_BYTES + 1;
+    assert!(invalid_memory.validate().is_err());
     let mut invalid_parameter = request.clone();
     invalid_parameter
         .parameters

@@ -1,6 +1,6 @@
 # RRD Arrow, DataFusion, and BM25 integration plan
 
-**Status:** executable alpha with remaining execution-plane gates, 2026-08-25
+**Status:** Q1/Q2 execution plane implemented; retrieval breadth remains, 2026-08-29
 **Scope:** the shared query/retrieval center of the one RRFlow engine
 **Authority:** `RrdEngine`; no UI, adapter, SDK, or lower physical crate owns
 query or retrieval truth
@@ -21,16 +21,18 @@ The repository now has an executable shared retrieval vertical:
 - `RrdEngine::search_hybrid` executes BM25 and vector branches at one captured
   read stamp and performs deterministic weighted reciprocal-rank fusion.
 
-The remaining gaps are specific rather than existential. DataFusion currently
-uses a bounded materialized `MemTable`, not a custom streaming
-`TableProvider`; pushdown, cancellation, memory/spill budgets, sparse and
-late-interaction fusion, broader analyzer support, and capability-catalogue
-promotion remain open.
+The remaining gaps are specific rather than existential. DataFusion now reads
+the bounded materialized snapshot through an immutable RRD `TableProvider` and
+physical record-batch stream. Exact projection/limit hints, unsupported-filter
+retention, elapsed cancellation, combined snapshot/operator memory accounting,
+bounded temporary spill, and stable `EXPLAIN ANALYZE` evidence are executable.
+Lazy storage-to-Arrow scans, sparse and late-interaction fusion, broader
+analyzer support, and capability-catalogue promotion remain open.
 
 | Slice | Current state |
 |---|---|
-| Q1 Arrow snapshot bridge | Implemented for current `QueryRow` values and source-family differentials |
-| Q2 DataFusion execution | Partial: active for relational operators over a materialized snapshot; streaming provider/pushdown/spill remain |
+| Q1 Arrow snapshot bridge | Implemented: one stamped schema, bounded batches, stable dynamic-field typing, and source-family differentials |
+| Q2 DataFusion execution | Implemented for the captured-snapshot plane: custom provider, physical stream, governed pushdown dispositions, memory/spill/time budgets, and stable analysis evidence |
 | Q3 native BM25 projection | Implemented through engine ensure/query/reopen; broader analyzer and operational-surface qualification remain |
 | Q4 unified retrieval | Partial: engine-owned HNSW, TurboQuant, BM25, and reciprocal-rank fusion pass reopen/staleness tests; sparse/late-interaction breadth remains |
 
@@ -128,6 +130,14 @@ deterministically ordered typed rows from the same immutable `ReadStamp`.
 
 **Exit gate:** `RrdEngine::execute_query` and live-query recomputation use the
 DataFusion path; no adapter or UI calls `rrd_query::execute` directly.
+
+Implemented evidence includes a reference-order differential under a forced
+external sort spill, exact filter/projection/limit result differentials across
+memory/Fjall/native backends, deterministic timeout and spill-cap denial, Arrow
+stamp corruption denial, and safe execution from both synchronous callers and
+an existing async server runtime. The provider deliberately declares filters
+unsupported until an RRD-semantic predicate implementation can prove exactness;
+DataFusion retains those predicates above the scan.
 
 ### Q3 — native BM25 projection
 
