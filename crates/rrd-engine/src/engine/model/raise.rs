@@ -172,6 +172,28 @@ pub(in crate::engine) fn public_schema(
     Ok(DataSchemaRegistry {
         revision: registry.revision,
         migration: registry.migration.clone(),
+        catalogue: DataCatalogueIdentity {
+            namespace: public_change_id(registry.catalogue.namespace.as_str())?,
+            database: public_change_id(registry.catalogue.database.as_str())?,
+        },
+        tables: registry
+            .tables
+            .iter()
+            .map(|(kind, table)| {
+                Ok((
+                    public_change_id(kind.as_str())?,
+                    DataTableSchema {
+                        model: public_logical_model(table.model),
+                        mode: match table.mode {
+                            RuntimeSchemaMode::Strict => DataSchemaMode::Strict,
+                            RuntimeSchemaMode::Schemaless => DataSchemaMode::Schemaless,
+                        },
+                        properties: public_property_schemas(&table.properties),
+                        allow_additional_properties: table.allow_additional_properties,
+                    },
+                ))
+            })
+            .collect::<Result<_>>()?,
         records: registry
             .records
             .iter()
@@ -232,6 +254,26 @@ pub(in crate::engine) fn public_schema(
             })
             .collect::<Result<_>>()?,
     })
+}
+
+fn public_logical_model(model: RuntimeLogicalModel) -> DataLogicalModel {
+    match model {
+        RuntimeLogicalModel::Document => DataLogicalModel::Document,
+        RuntimeLogicalModel::Relational => DataLogicalModel::Relational,
+        RuntimeLogicalModel::GraphNode => DataLogicalModel::GraphNode,
+        RuntimeLogicalModel::GraphRelation => DataLogicalModel::GraphRelation,
+        RuntimeLogicalModel::KeyValue => DataLogicalModel::KeyValue,
+        RuntimeLogicalModel::Vector => DataLogicalModel::Vector,
+        RuntimeLogicalModel::Event => DataLogicalModel::Event,
+        RuntimeLogicalModel::TimeSeries => DataLogicalModel::TimeSeries,
+        RuntimeLogicalModel::Geo => DataLogicalModel::Geo,
+        RuntimeLogicalModel::Object => DataLogicalModel::Object,
+        RuntimeLogicalModel::ReasoningClaim => DataLogicalModel::ReasoningClaim,
+        RuntimeLogicalModel::ReasoningRecord => DataLogicalModel::ReasoningRecord,
+        RuntimeLogicalModel::ReasoningEvent => DataLogicalModel::ReasoningEvent,
+        RuntimeLogicalModel::LifecycleRecord => DataLogicalModel::LifecycleRecord,
+        RuntimeLogicalModel::LifecycleEvent => DataLogicalModel::LifecycleEvent,
+    }
 }
 
 pub(in crate::engine) fn public_property_schemas(

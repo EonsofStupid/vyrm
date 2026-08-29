@@ -686,7 +686,9 @@ identity/digest revalidation; stale queries use the authoritative log. See
 **Deliverables**
 
 - Mutating RRFlowQL and multi-statement transactions.
-- General document/record/edge CRUD and schemafull/schemaless policy.
+- Dedicated document/key-value/record/edge CRUD and retirement surfaces. The
+  revisioned namespace/database catalogue and explicit strict/schemaless table
+  policy are implemented; G03-W02 owns complete mutation/read administration.
 - Relational links, richer graph/path algebra, and spatial operators.
 - Materialized ordinary/compound/unique/count, spatial and full-text indexes;
   exact scalar snapshot artifacts now execute and authenticated ensure/list

@@ -4,8 +4,8 @@
 
 The foundation is not complete, but progress is now recorded against one
 enforced 65-item board rather than an informal checklist. G00-W01 through
-G00-W05, G01-W01 through G01-W04, and G02-W01 through G02-W05 are verified:
-14/65. G02-W06 is active. The repository contains substantial executable
+G00-W05, G01-W01 through G01-W04, and G02-W01 through G02-W06 are verified:
+15/65. G03-W01 is active. The repository contains substantial executable
 storage, query, vector, reasoning, server, security, SDK, estate, and
 Connectome code under one `RrdEngine` composition root. Connectome is
 client-only, the CLI opens `RrdEngine`, and the security and estate product
@@ -21,7 +21,11 @@ G02-W04 is locally committed at `b4187fe3cf18662bde8caec975ee4e24dbab2f93`
 and verified as `a3b092159ae48a9645c05b869d031396f1ac6f883f35090d2dd0f3f171c04c8a`;
 G02-W05 is locally committed at `a5ca5130d30a4e86acc93b0a64ca9eda549c2903`
 and verified as `9dd4891c180dc2c7d14610f586bd4c85d7beded05daafda2c971fb970bc8f9bc`;
-the next broad remote matrix is intentionally deferred to the G02 boundary.
+G02-W06 is published at `6a48b8a0e78e45898f3f5df215659489aeaa6908`
+and verified as `82160760cabf8d870640c686ba35e7ea7838c6ff331608b56ac91ba21b2a0f6a`.
+All fourteen substantive remote partitions and `pipeline / ci-gate` passed in
+the single PR run `33225226128`; the gate observed topology, portability,
+verify, engine suites, optional features, and pgvector all as `success`.
 Canonical platform terminology is owned only by `docs/platform/README.md`, and
 the end-to-end execution/implementation map is owned only by
 `docs/rrflow-rrd-architecture.md`.
@@ -81,7 +85,7 @@ the end-to-end execution/implementation map is owned only by
   unchanged. Vector, geo, series, object, schema, event, and security-audit
   history are not silently rewritten; broader rollback scope remains explicit
   future work.
-- G02-W06 currently has a locally green cohesive tiered-persistence candidate.
+- G02-W06 supplies cohesive tiered persistence.
   The existing immutable-object port now requires authenticated signed
   payloads, conditional writes, resumable multipart/list-parts, SHA-256,
   version-bound ranged reads, and complete pagination before admitting an
@@ -91,6 +95,15 @@ the end-to-end execution/implementation map is owned only by
   and positional fallback, with operation/byte/request/fallback evidence kept
   separate from decoded block-cache residency. Local loss, remote transient
   failure, remote corruption, archive transfer, and backend-parity tests pass.
+- G03-W01 currently has a locally green unified-catalogue candidate. The
+  authoritative `RuntimeSchemaRegistry` now carries one namespace/database
+  identity and a revisioned table map covering document, relational, graph,
+  key-value, vector, event, time-series, geo, object, reasoning, and lifecycle
+  models. Each table is explicitly strict or schemaless; model/family and mode
+  conflicts fail closed. Publishing any explicit table enables complete
+  catalogue admission for every non-claim mutation, while pre-G03 registries
+  remain an exact readable migration form. Cross-model migration failure/retry
+  and Memory/Fjall/native/reopen parity tests pass.
 - Development doctor report v3 records 14 passing checks and five blockers. It
   now distinguishes MCP's clean engine dependency boundary from actual daemon
   readiness: MCP's embedded mode opens `RrdEngine`, while its mutually

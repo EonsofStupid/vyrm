@@ -72,8 +72,9 @@ pub use runtime::{
     SnapshotHandle, SnapshotId, DATA_RUNTIME_CONTRACT_VERSION,
 };
 pub use schema::{
-    RuntimeEventSchema, RuntimePropertySchema, RuntimeRecordSchema, RuntimeRelationSchema,
-    RuntimeSchemaRegistry, RuntimeValueType,
+    RuntimeCatalogueIdentity, RuntimeEventSchema, RuntimeLogicalModel, RuntimePropertySchema,
+    RuntimeRecordSchema, RuntimeRelationSchema, RuntimeSchemaMode, RuntimeSchemaRegistry,
+    RuntimeTableSchema, RuntimeValueType,
 };
 pub use temporal::{changed_since, resolve_as_of, ClaimReader, ClaimSource};
 pub use trace::{

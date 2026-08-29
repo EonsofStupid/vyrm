@@ -252,6 +252,30 @@ pub(in crate::engine) fn runtime_schema(
     Ok(RuntimeSchemaRegistry {
         revision: registry.revision,
         migration: registry.migration.clone(),
+        catalogue: RuntimeCatalogueIdentity {
+            namespace: RuntimeType::new(registry.catalogue.namespace.as_str())
+                .map_err(core_contract)?,
+            database: RuntimeType::new(registry.catalogue.database.as_str())
+                .map_err(core_contract)?,
+        },
+        tables: registry
+            .tables
+            .iter()
+            .map(|(kind, table)| {
+                Ok((
+                    RuntimeType::new(kind.as_str()).map_err(core_contract)?,
+                    RuntimeTableSchema {
+                        model: runtime_logical_model(table.model),
+                        mode: match table.mode {
+                            DataSchemaMode::Strict => RuntimeSchemaMode::Strict,
+                            DataSchemaMode::Schemaless => RuntimeSchemaMode::Schemaless,
+                        },
+                        properties: runtime_property_schemas(&table.properties),
+                        allow_additional_properties: table.allow_additional_properties,
+                    },
+                ))
+            })
+            .collect::<Result<_>>()?,
         records: registry
             .records
             .iter()
@@ -312,6 +336,26 @@ pub(in crate::engine) fn runtime_schema(
             })
             .collect::<Result<_>>()?,
     })
+}
+
+fn runtime_logical_model(model: DataLogicalModel) -> RuntimeLogicalModel {
+    match model {
+        DataLogicalModel::Document => RuntimeLogicalModel::Document,
+        DataLogicalModel::Relational => RuntimeLogicalModel::Relational,
+        DataLogicalModel::GraphNode => RuntimeLogicalModel::GraphNode,
+        DataLogicalModel::GraphRelation => RuntimeLogicalModel::GraphRelation,
+        DataLogicalModel::KeyValue => RuntimeLogicalModel::KeyValue,
+        DataLogicalModel::Vector => RuntimeLogicalModel::Vector,
+        DataLogicalModel::Event => RuntimeLogicalModel::Event,
+        DataLogicalModel::TimeSeries => RuntimeLogicalModel::TimeSeries,
+        DataLogicalModel::Geo => RuntimeLogicalModel::Geo,
+        DataLogicalModel::Object => RuntimeLogicalModel::Object,
+        DataLogicalModel::ReasoningClaim => RuntimeLogicalModel::ReasoningClaim,
+        DataLogicalModel::ReasoningRecord => RuntimeLogicalModel::ReasoningRecord,
+        DataLogicalModel::ReasoningEvent => RuntimeLogicalModel::ReasoningEvent,
+        DataLogicalModel::LifecycleRecord => RuntimeLogicalModel::LifecycleRecord,
+        DataLogicalModel::LifecycleEvent => RuntimeLogicalModel::LifecycleEvent,
+    }
 }
 
 pub(in crate::engine) fn runtime_property_schemas(

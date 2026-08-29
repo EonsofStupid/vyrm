@@ -1820,6 +1820,39 @@ fn encode_schema(out: &mut Vec<u8>, registry: &RuntimeSchemaRegistry) {
         encode_property_schemas(out, &schema.properties);
         out.push(u8::from(schema.allow_additional_properties));
     }
+    let default_catalogue = crate::RuntimeCatalogueIdentity::default();
+    if registry.catalogue != default_catalogue || !registry.tables.is_empty() {
+        out.extend_from_slice(b"rrflow-unified-catalogue-v1\0");
+        text(out, registry.catalogue.namespace.as_str());
+        text(out, registry.catalogue.database.as_str());
+        out.extend_from_slice(&(registry.tables.len() as u64).to_be_bytes());
+        for (kind, table) in &registry.tables {
+            text(out, kind.as_str());
+            out.push(match table.model {
+                crate::RuntimeLogicalModel::Document => 0,
+                crate::RuntimeLogicalModel::Relational => 1,
+                crate::RuntimeLogicalModel::GraphNode => 2,
+                crate::RuntimeLogicalModel::GraphRelation => 3,
+                crate::RuntimeLogicalModel::KeyValue => 4,
+                crate::RuntimeLogicalModel::Vector => 5,
+                crate::RuntimeLogicalModel::Event => 6,
+                crate::RuntimeLogicalModel::TimeSeries => 7,
+                crate::RuntimeLogicalModel::Geo => 8,
+                crate::RuntimeLogicalModel::Object => 9,
+                crate::RuntimeLogicalModel::ReasoningRecord => 10,
+                crate::RuntimeLogicalModel::ReasoningEvent => 11,
+                crate::RuntimeLogicalModel::LifecycleRecord => 12,
+                crate::RuntimeLogicalModel::LifecycleEvent => 13,
+                crate::RuntimeLogicalModel::ReasoningClaim => 14,
+            });
+            out.push(match table.mode {
+                crate::RuntimeSchemaMode::Strict => 0,
+                crate::RuntimeSchemaMode::Schemaless => 1,
+            });
+            encode_property_schemas(out, &table.properties);
+            out.push(u8::from(table.allow_additional_properties));
+        }
+    }
 }
 
 fn encode_property_schemas(

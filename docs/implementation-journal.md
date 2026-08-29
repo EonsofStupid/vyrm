@@ -3096,3 +3096,29 @@ index.
   bounded transient retry, actual logical-archive upload, local loss/ranged
   recovery, remote corruption, mmap/bounded parity, and io_uring execution or
   explicit fallback on the running kernel.
+
+## 2026-08-29 — G03-W01 unified logical catalogue candidate
+
+- Extended the existing `RuntimeSchemaRegistry`; no side catalogue was added.
+  One registry revision now carries namespace/database coordinates and table
+  definitions for document, relational, graph, key-value, vector, event,
+  time-series, geo, object, reasoning claim/record/event, and lifecycle
+  identities.
+- Added explicit tagged strict/schemaless mode. Record/relation/event strict
+  entries retain their specialized constraints; structurally typed vector,
+  series, geo, and object entries use the same table property contract.
+  Schemaless entries cannot simultaneously claim a strict schema, and table
+  kinds cannot cross mutation families.
+- Retained exact pre-G03 migration compatibility: old record/relation/event
+  registries derive strict catalogue rows and keep their historical canonical
+  commit bytes. Once any explicit table is published, all non-claim mutations
+  require a matching logical-model entry.
+- Namespace/database/table definitions round-trip through the public contract
+  and participate in new commit identity. A failed schema-plus-vector revision
+  advances neither cursor nor schema; a corrected retry publishes both.
+- Protocol review: the additive catalogue identity and schema-mode vocabulary
+  intentionally advances the generated OpenAPI digest to
+  `3d3848f74205c56c4fb3dff00070d3c2f4df5a92addd0b7e83a9b122594231f5`.
+- Differential tests cover one mixed catalogue, strict and schemaless records,
+  graph relation, events, vector, series, geo, object, reasoning/lifecycle
+  identities, atomic migration failure/retry, and exact Fjall/native reopen.

@@ -1,13 +1,13 @@
 use rrd_contract::{
     runtime_tool_arguments_sha256, transaction_operation_sha256, AuditDecision, AuditPhase,
     BeginTransaction, CanonicalId, CloseSession, CommitTransaction, CorrelationId, CreateSession,
-    DataProperties, DataPropertySchema, DataRecordSchema, DataReference, DataSchemaRegistry,
-    DataValueType, DataVectorValue, EnsureQueryIndex, EnsureVectorCollection, EstateDesiredPhase,
-    LifecycleEnforcementLevelV1, LifecycleEventCommandV1, LifecycleEventTypeV1, LifecyclePayloadV1,
-    LifecycleSessionSnapshotV1, LifecycleTraceContextV1, NamedVectorDefinition, QueryBudget,
-    QueryIndexKind, QueryValue, ReadAudit, ReadChangefeed, ReadDiagnosticSnapshot, RequestContext,
-    ResourceId, ResourceKind, ResourcePath, RuntimeToolInvocation, SecurityAction, SessionLimits,
-    TransactionMutation, VectorMemoryTier, VectorSearchMetric, VectorValueKind,
+    DataCatalogueIdentity, DataProperties, DataPropertySchema, DataRecordSchema, DataReference,
+    DataSchemaRegistry, DataValueType, DataVectorValue, EnsureQueryIndex, EnsureVectorCollection,
+    EstateDesiredPhase, LifecycleEnforcementLevelV1, LifecycleEventCommandV1, LifecycleEventTypeV1,
+    LifecyclePayloadV1, LifecycleSessionSnapshotV1, LifecycleTraceContextV1, NamedVectorDefinition,
+    QueryBudget, QueryIndexKind, QueryValue, ReadAudit, ReadChangefeed, ReadDiagnosticSnapshot,
+    RequestContext, ResourceId, ResourceKind, ResourcePath, RuntimeToolInvocation, SecurityAction,
+    SessionLimits, TransactionMutation, VectorMemoryTier, VectorSearchMetric, VectorValueKind,
     RUNTIME_TOOL_CATALOGUE_VERSION,
 };
 use rrd_core::{digest, Claim, Predicate, Producer, Subject};
@@ -254,6 +254,8 @@ fn one_authority_coordinates_security_data_catalogues_lifecycle_audit_and_reopen
             registry: DataSchemaRegistry {
                 revision: 1,
                 migration: "install authority fixture schema".into(),
+                catalogue: DataCatalogueIdentity::default(),
+                tables: BTreeMap::new(),
                 records: BTreeMap::from([(
                     canonical("document"),
                     DataRecordSchema {

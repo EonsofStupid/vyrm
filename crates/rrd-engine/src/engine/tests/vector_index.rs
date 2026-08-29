@@ -174,6 +174,8 @@ fn persistent_retrieval_indexes_and_hybrid_fusion_survive_reopen_and_staleness()
                 registry: DataSchemaRegistry {
                     revision: 1,
                     migration: "install vector fixture schema".into(),
+                    catalogue: DataCatalogueIdentity::default(),
+                    tables: BTreeMap::new(),
                     records: BTreeMap::from([(
                         CanonicalId::new("document").unwrap(),
                         DataRecordSchema {
@@ -518,6 +520,8 @@ fn application_backup_restores_turboquant_payload_before_instance_activation() {
                 registry: DataSchemaRegistry {
                     revision: 1,
                     migration: "install backup vector fixture schema".into(),
+                    catalogue: DataCatalogueIdentity::default(),
+                    tables: BTreeMap::new(),
                     records: BTreeMap::from([(
                         CanonicalId::new("document").unwrap(),
                         DataRecordSchema {

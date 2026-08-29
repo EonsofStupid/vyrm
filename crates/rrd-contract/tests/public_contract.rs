@@ -1,22 +1,23 @@
 use rrd_contract::{
     transaction_operation_sha256, BeginTransaction, CanonicalId, CapabilityDescriptor,
     CapabilityStatus, CloseSession, CommitReceipt, CommitTransaction, CorrelationId,
-    CreateInstanceBackup, DeploymentMode, EnsureQueryIndex, EnsureVectorCollection,
-    EnsureVectorIndex, ErrorBody, ErrorCode, EstateActivityPolicySnapshot, EstateBackupJobSnapshot,
-    EstateBackupJobState, EstateBackupJobsSnapshot, EstateMutationResult, EstateSnapshot,
-    ExecuteQuery, FollowChangefeed, ForwardRollbackCounts, ForwardRollbackRequest, HybridFusion,
-    IdempotencyBinding, ListQueryIndexes, ListVectorCollections, Liveness, NamedVectorDefinition,
-    PollLiveQuery, PreviewTransaction, ProductCapability, ProductCapabilityCatalogue,
-    ProductSurface, QueryBudget, QueryExecutionSnapshot, QueryIndexKind, QueryPlanCandidate,
-    QueryPlanSnapshot, QueryResult, QueryRowSnapshot, QueryValue, ReadAudit, ReadChangefeed,
-    ReadEstate, Readiness, RenewSession, RequestContext, RequestEnvelope, ResourceId, ResourceKind,
-    ResourcePath, ResponseEnvelope, ResponseOutcome, RestoreInstanceBackup, SearchHybrid,
-    SearchVectors, ServiceCapabilities, SessionEndState, SessionLease, SessionLimits,
-    SessionTermination, SurfaceBinding, SurfaceDisposition, TransactionMutation,
-    TransactionPreview, TransactionState, VectorIndexConfiguration, VectorMemoryTier,
-    VectorPayloadCondition, VectorPayloadFilter, VectorPayloadOperator, VectorQuantizationBits,
-    VectorSearchMetric, VectorSearchMode, VectorSearchQuery, VectorValueKind, PROTOCOL,
-    PROTOCOL_VERSION,
+    CreateInstanceBackup, DataCatalogueIdentity, DataLogicalModel, DataRecordSchema,
+    DataSchemaMode, DataSchemaRegistry, DataTableSchema, DeploymentMode, EnsureQueryIndex,
+    EnsureVectorCollection, EnsureVectorIndex, ErrorBody, ErrorCode, EstateActivityPolicySnapshot,
+    EstateBackupJobSnapshot, EstateBackupJobState, EstateBackupJobsSnapshot, EstateMutationResult,
+    EstateSnapshot, ExecuteQuery, FollowChangefeed, ForwardRollbackCounts, ForwardRollbackRequest,
+    HybridFusion, IdempotencyBinding, ListQueryIndexes, ListVectorCollections, Liveness,
+    NamedVectorDefinition, PollLiveQuery, PreviewTransaction, ProductCapability,
+    ProductCapabilityCatalogue, ProductSurface, QueryBudget, QueryExecutionSnapshot,
+    QueryIndexKind, QueryPlanCandidate, QueryPlanSnapshot, QueryResult, QueryRowSnapshot,
+    QueryValue, ReadAudit, ReadChangefeed, ReadEstate, Readiness, RenewSession, RequestContext,
+    RequestEnvelope, ResourceId, ResourceKind, ResourcePath, ResponseEnvelope, ResponseOutcome,
+    RestoreInstanceBackup, SearchHybrid, SearchVectors, ServiceCapabilities, SessionEndState,
+    SessionLease, SessionLimits, SessionTermination, SurfaceBinding, SurfaceDisposition,
+    TransactionMutation, TransactionPreview, TransactionState, VectorIndexConfiguration,
+    VectorMemoryTier, VectorPayloadCondition, VectorPayloadFilter, VectorPayloadOperator,
+    VectorQuantizationBits, VectorSearchMetric, VectorSearchMode, VectorSearchQuery,
+    VectorValueKind, PROTOCOL, PROTOCOL_VERSION,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -1033,4 +1034,52 @@ fn transaction_digest_has_a_cross_language_golden_vector() {
     let expected = "d85547ca333304b54db4bc0249b6e11f83cf975fdc7cfebcf551ec6564bb71f8";
     assert_eq!(transaction_operation_sha256(&first), expected);
     assert_eq!(transaction_operation_sha256(&reordered), expected);
+}
+
+#[test]
+fn unified_catalogue_is_strict_round_trippable_and_rejects_mode_confusion() {
+    let document = CanonicalId::new("document").unwrap();
+    let mut registry = DataSchemaRegistry {
+        revision: 1,
+        migration: "freeze public catalogue".into(),
+        catalogue: DataCatalogueIdentity {
+            namespace: CanonicalId::new("project").unwrap(),
+            database: CanonicalId::new("runtime").unwrap(),
+        },
+        tables: BTreeMap::from([
+            (
+                document.clone(),
+                DataTableSchema {
+                    model: DataLogicalModel::Document,
+                    mode: DataSchemaMode::Strict,
+                    properties: BTreeMap::new(),
+                    allow_additional_properties: false,
+                },
+            ),
+            (
+                CanonicalId::new("kv").unwrap(),
+                DataTableSchema {
+                    model: DataLogicalModel::KeyValue,
+                    mode: DataSchemaMode::Schemaless,
+                    properties: BTreeMap::new(),
+                    allow_additional_properties: false,
+                },
+            ),
+        ]),
+        records: BTreeMap::from([(document.clone(), DataRecordSchema::default())]),
+        relations: BTreeMap::new(),
+        events: BTreeMap::new(),
+    };
+    let mutation = TransactionMutation::PutSchema {
+        registry: registry.clone(),
+    };
+    mutation.validate().unwrap();
+    let encoded = serde_json::to_value(&mutation).unwrap();
+    let decoded: TransactionMutation = serde_json::from_value(encoded).unwrap();
+    assert_eq!(decoded, mutation);
+
+    registry.tables.get_mut(&document).unwrap().mode = DataSchemaMode::Schemaless;
+    assert!(TransactionMutation::PutSchema { registry }
+        .validate()
+        .is_err());
 }

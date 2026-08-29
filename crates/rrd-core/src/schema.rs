@@ -1,4 +1,4 @@
-//! Persisted schema contract for typed runtime records, relations, and events.
+//! One persisted catalogue and schema contract for every logical runtime model.
 
 use crate::{
     Error, Result, RuntimeEvent, RuntimeMutation, RuntimeProperties, RuntimeRecord,
@@ -101,10 +101,109 @@ pub struct RuntimeEventSchema {
     pub allow_additional_properties: bool,
 }
 
+/// Logical meaning of one table identity inside a database catalogue.
+///
+/// Record-like models deliberately share the canonical [`RuntimeRecord`]
+/// identity. Their distinct catalogue kind prevents document, relational,
+/// graph, key-value, reasoning, and lifecycle APIs from creating competing
+/// persisted truths for the same table.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RuntimeLogicalModel {
+    Document,
+    Relational,
+    GraphNode,
+    GraphRelation,
+    KeyValue,
+    Vector,
+    Event,
+    TimeSeries,
+    Geo,
+    Object,
+    ReasoningClaim,
+    ReasoningRecord,
+    ReasoningEvent,
+    LifecycleRecord,
+    LifecycleEvent,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RuntimeSchemaMode {
+    Strict,
+    Schemaless,
+}
+
+/// A single table entry in the revisioned logical catalogue.
+///
+/// Record, relation, and event tables keep their richer constraints in the
+/// existing specialized maps below. The property contract here governs the
+/// structurally typed vector, time-series, geo, and object families. In
+/// schemaless mode these fields must remain empty so mode cannot be inferred or
+/// contradicted by a second boolean contract.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RuntimeTableSchema {
+    pub model: RuntimeLogicalModel,
+    pub mode: RuntimeSchemaMode,
+    #[serde(default)]
+    pub properties: BTreeMap<String, RuntimePropertySchema>,
+    #[serde(default)]
+    pub allow_additional_properties: bool,
+}
+
+impl RuntimeTableSchema {
+    pub fn strict(model: RuntimeLogicalModel) -> Self {
+        Self {
+            model,
+            mode: RuntimeSchemaMode::Strict,
+            properties: BTreeMap::new(),
+            allow_additional_properties: false,
+        }
+    }
+
+    pub fn schemaless(model: RuntimeLogicalModel) -> Self {
+        Self {
+            model,
+            mode: RuntimeSchemaMode::Schemaless,
+            properties: BTreeMap::new(),
+            allow_additional_properties: false,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RuntimeCatalogueIdentity {
+    pub namespace: RuntimeType,
+    pub database: RuntimeType,
+}
+
+impl Default for RuntimeCatalogueIdentity {
+    fn default() -> Self {
+        Self {
+            namespace: RuntimeType::new("default").expect("static namespace is valid"),
+            database: RuntimeType::new("default").expect("static database is valid"),
+        }
+    }
+}
+
+impl RuntimeCatalogueIdentity {
+    fn is_default(&self) -> bool {
+        self == &Self::default()
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RuntimeSchemaRegistry {
     pub revision: u64,
     pub migration: String,
+    #[serde(default, skip_serializing_if = "RuntimeCatalogueIdentity::is_default")]
+    pub catalogue: RuntimeCatalogueIdentity,
+    /// Empty only for the persisted pre-G03 migration form. In that form the
+    /// specialized record/relation/event maps derive strict entries. Once any
+    /// explicit table is published, every non-claim mutation must resolve
+    /// through this map.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub tables: BTreeMap<RuntimeType, RuntimeTableSchema>,
     #[serde(default)]
     pub records: BTreeMap<RuntimeType, RuntimeRecordSchema>,
     #[serde(default)]
@@ -118,6 +217,8 @@ impl RuntimeSchemaRegistry {
         Self {
             revision,
             migration: migration.into(),
+            catalogue: RuntimeCatalogueIdentity::default(),
+            tables: BTreeMap::new(),
             records: BTreeMap::new(),
             relations: BTreeMap::new(),
             events: BTreeMap::new(),
@@ -131,9 +232,14 @@ impl RuntimeSchemaRegistry {
         if self.migration.trim().is_empty() {
             return invalid("runtime schema migration description must not be empty");
         }
-        if self.records.is_empty() && self.relations.is_empty() && self.events.is_empty() {
+        if self.tables.is_empty()
+            && self.records.is_empty()
+            && self.relations.is_empty()
+            && self.events.is_empty()
+        {
             return invalid("runtime schema must declare at least one governed type");
         }
+        self.catalogue_tables()?;
         for (kind, schema) in &self.records {
             validate_property_schema(kind, &schema.properties, schema.allow_additional_properties)?;
             for property in &schema.unique_properties {
@@ -163,6 +269,78 @@ impl RuntimeSchemaRegistry {
         Ok(())
     }
 
+    /// Complete table catalogue, including strict entries derived for legacy
+    /// record/relation/event registries. A returned map is therefore stable for
+    /// diagnostics and query planning even before a scope performs its G03
+    /// migration.
+    pub fn catalogue_tables(&self) -> Result<BTreeMap<RuntimeType, RuntimeTableSchema>> {
+        let mut tables = self.tables.clone();
+        for kind in self.records.keys() {
+            install_specialized_table(
+                &mut tables,
+                kind,
+                RuntimeMutationFamily::Record,
+                RuntimeLogicalModel::Relational,
+            )?;
+        }
+        for kind in self.relations.keys() {
+            install_specialized_table(
+                &mut tables,
+                kind,
+                RuntimeMutationFamily::Relation,
+                RuntimeLogicalModel::GraphRelation,
+            )?;
+        }
+        for kind in self.events.keys() {
+            install_specialized_table(
+                &mut tables,
+                kind,
+                RuntimeMutationFamily::Event,
+                RuntimeLogicalModel::Event,
+            )?;
+        }
+        for (kind, table) in &tables {
+            validate_table(kind, table)?;
+            let specialized = match table.model.family() {
+                RuntimeMutationFamily::Record => self.records.contains_key(kind),
+                RuntimeMutationFamily::Relation => self.relations.contains_key(kind),
+                RuntimeMutationFamily::Event => self.events.contains_key(kind),
+                RuntimeMutationFamily::Vector
+                | RuntimeMutationFamily::Series
+                | RuntimeMutationFamily::Geo
+                | RuntimeMutationFamily::Object
+                | RuntimeMutationFamily::Claim => false,
+            };
+            match (table.mode, table.model.family(), specialized) {
+                (
+                    RuntimeSchemaMode::Strict,
+                    RuntimeMutationFamily::Record
+                    | RuntimeMutationFamily::Relation
+                    | RuntimeMutationFamily::Event,
+                    false,
+                ) => {
+                    return invalid(format!(
+                        "strict table type {kind} lacks its specialized {:?} schema",
+                        table.model.family()
+                    ));
+                }
+                (
+                    RuntimeSchemaMode::Schemaless,
+                    RuntimeMutationFamily::Record
+                    | RuntimeMutationFamily::Relation
+                    | RuntimeMutationFamily::Event,
+                    true,
+                ) => {
+                    return invalid(format!(
+                        "schemaless table type {kind} also declares a strict specialized schema"
+                    ));
+                }
+                _ => {}
+            }
+        }
+        Ok(tables)
+    }
+
     pub fn validate_objects<'a>(
         &self,
         mutations: impl IntoIterator<Item = &'a RuntimeMutation>,
@@ -170,18 +348,49 @@ impl RuntimeSchemaRegistry {
         existing_relations: impl IntoIterator<Item = &'a RuntimeRelation>,
     ) -> Result<()> {
         self.validate()?;
+        let tables = self.catalogue_tables()?;
+        let unified = !self.tables.is_empty();
         let mutations = mutations.into_iter().collect::<Vec<_>>();
         for mutation in &mutations {
             match mutation {
-                RuntimeMutation::Claim { .. }
-                | RuntimeMutation::Schema { .. }
-                | RuntimeMutation::Vector { .. }
+                RuntimeMutation::Claim { .. } | RuntimeMutation::Schema { .. } => {}
+                RuntimeMutation::Record { record } => self.validate_record(record, &tables)?,
+                RuntimeMutation::Relation { relation } => {
+                    self.validate_relation(relation, &tables)?
+                }
+                RuntimeMutation::Event { event } => self.validate_event(event, &tables)?,
+                RuntimeMutation::Vector { vector } if unified => validate_structural_table(
+                    "vector",
+                    &vector.reference.kind,
+                    &vector.properties,
+                    RuntimeMutationFamily::Vector,
+                    &tables,
+                )?,
+                RuntimeMutation::SeriesSample { sample } if unified => validate_structural_table(
+                    "time-series sample",
+                    &sample.reference.kind,
+                    &sample.properties,
+                    RuntimeMutationFamily::Series,
+                    &tables,
+                )?,
+                RuntimeMutation::Geo { geo } if unified => validate_structural_table(
+                    "geo value",
+                    &geo.reference.kind,
+                    &geo.properties,
+                    RuntimeMutationFamily::Geo,
+                    &tables,
+                )?,
+                RuntimeMutation::Object { object } if unified => validate_structural_table(
+                    "object",
+                    &object.reference.kind,
+                    &object.properties,
+                    RuntimeMutationFamily::Object,
+                    &tables,
+                )?,
+                RuntimeMutation::Vector { .. }
                 | RuntimeMutation::SeriesSample { .. }
                 | RuntimeMutation::Geo { .. }
                 | RuntimeMutation::Object { .. } => {}
-                RuntimeMutation::Record { record } => self.validate_record(record)?,
-                RuntimeMutation::Relation { relation } => self.validate_relation(relation)?,
-                RuntimeMutation::Event { event } => self.validate_event(event)?,
             }
         }
 
@@ -215,7 +424,19 @@ impl RuntimeSchemaRegistry {
         Ok(())
     }
 
-    fn validate_record(&self, record: &RuntimeRecord) -> Result<()> {
+    fn validate_record(
+        &self,
+        record: &RuntimeRecord,
+        tables: &BTreeMap<RuntimeType, RuntimeTableSchema>,
+    ) -> Result<()> {
+        let table = require_table(
+            &record.reference.kind,
+            RuntimeMutationFamily::Record,
+            tables,
+        )?;
+        if table.mode == RuntimeSchemaMode::Schemaless {
+            return Ok(());
+        }
         let schema =
             self.records
                 .get(&record.reference.kind)
@@ -231,7 +452,19 @@ impl RuntimeSchemaRegistry {
         )
     }
 
-    fn validate_relation(&self, relation: &RuntimeRelation) -> Result<()> {
+    fn validate_relation(
+        &self,
+        relation: &RuntimeRelation,
+        tables: &BTreeMap<RuntimeType, RuntimeTableSchema>,
+    ) -> Result<()> {
+        let table = require_table(
+            &relation.reference.kind,
+            RuntimeMutationFamily::Relation,
+            tables,
+        )?;
+        if table.mode == RuntimeSchemaMode::Schemaless {
+            return Ok(());
+        }
         let schema = self
             .relations
             .get(&relation.reference.kind)
@@ -256,7 +489,15 @@ impl RuntimeSchemaRegistry {
         )
     }
 
-    fn validate_event(&self, event: &RuntimeEvent) -> Result<()> {
+    fn validate_event(
+        &self,
+        event: &RuntimeEvent,
+        tables: &BTreeMap<RuntimeType, RuntimeTableSchema>,
+    ) -> Result<()> {
+        let table = require_table(&event.kind, RuntimeMutationFamily::Event, tables)?;
+        if table.mode == RuntimeSchemaMode::Schemaless {
+            return Ok(());
+        }
         let schema = self
             .events
             .get(&event.kind)
@@ -385,6 +626,119 @@ impl RuntimeSchemaRegistry {
         }
         Ok(())
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RuntimeMutationFamily {
+    Record,
+    Relation,
+    Event,
+    Vector,
+    Series,
+    Geo,
+    Object,
+    Claim,
+}
+
+impl RuntimeLogicalModel {
+    fn family(self) -> RuntimeMutationFamily {
+        match self {
+            Self::Document
+            | Self::Relational
+            | Self::GraphNode
+            | Self::KeyValue
+            | Self::ReasoningRecord
+            | Self::LifecycleRecord => RuntimeMutationFamily::Record,
+            Self::GraphRelation => RuntimeMutationFamily::Relation,
+            Self::Event | Self::ReasoningEvent | Self::LifecycleEvent => {
+                RuntimeMutationFamily::Event
+            }
+            Self::Vector => RuntimeMutationFamily::Vector,
+            Self::TimeSeries => RuntimeMutationFamily::Series,
+            Self::Geo => RuntimeMutationFamily::Geo,
+            Self::Object => RuntimeMutationFamily::Object,
+            Self::ReasoningClaim => RuntimeMutationFamily::Claim,
+        }
+    }
+}
+
+fn install_specialized_table(
+    tables: &mut BTreeMap<RuntimeType, RuntimeTableSchema>,
+    kind: &RuntimeType,
+    family: RuntimeMutationFamily,
+    inferred_model: RuntimeLogicalModel,
+) -> Result<()> {
+    if let Some(table) = tables.get(kind) {
+        if table.model.family() != family {
+            return invalid(format!(
+                "table type {kind} is catalogued as {:?} but also has a {:?} schema",
+                table.model, family
+            ));
+        }
+        return Ok(());
+    }
+    tables.insert(kind.clone(), RuntimeTableSchema::strict(inferred_model));
+    Ok(())
+}
+
+fn validate_table(kind: &RuntimeType, table: &RuntimeTableSchema) -> Result<()> {
+    validate_property_schema(kind, &table.properties, table.allow_additional_properties)?;
+    if table.mode == RuntimeSchemaMode::Schemaless
+        && (!table.properties.is_empty() || table.allow_additional_properties)
+    {
+        return invalid(format!(
+            "schemaless table type {kind} cannot also declare a strict property contract"
+        ));
+    }
+    if matches!(
+        table.model.family(),
+        RuntimeMutationFamily::Record
+            | RuntimeMutationFamily::Relation
+            | RuntimeMutationFamily::Event
+    ) && (!table.properties.is_empty() || table.allow_additional_properties)
+    {
+        return invalid(format!(
+            "table type {kind} must keep record/relation/event properties in its specialized schema"
+        ));
+    }
+    Ok(())
+}
+
+fn require_table<'a>(
+    kind: &RuntimeType,
+    family: RuntimeMutationFamily,
+    tables: &'a BTreeMap<RuntimeType, RuntimeTableSchema>,
+) -> Result<&'a RuntimeTableSchema> {
+    let table = tables.get(kind).ok_or_else(|| Error::InvalidRuntime {
+        reason: format!("{family:?} table type {kind} is not registered in the catalogue"),
+    })?;
+    if table.model.family() != family {
+        return invalid(format!(
+            "table type {kind} is catalogued as {:?}, not {family:?}",
+            table.model
+        ));
+    }
+    Ok(table)
+}
+
+fn validate_structural_table(
+    object: &str,
+    kind: &RuntimeType,
+    properties: &RuntimeProperties,
+    family: RuntimeMutationFamily,
+    tables: &BTreeMap<RuntimeType, RuntimeTableSchema>,
+) -> Result<()> {
+    let table = require_table(kind, family, tables)?;
+    if table.mode == RuntimeSchemaMode::Schemaless {
+        return Ok(());
+    }
+    validate_properties(
+        object,
+        kind,
+        properties,
+        &table.properties,
+        table.allow_additional_properties,
+    )
 }
 
 fn validate_property_schema(
@@ -561,5 +915,71 @@ mod tests {
                 [&first, &overlapping]
             )
             .is_err());
+    }
+
+    #[test]
+    fn one_catalogue_names_every_logical_model_and_schema_mode() {
+        let mut registry = RuntimeSchemaRegistry::empty(1, "freeze unified catalogue");
+        registry.catalogue = RuntimeCatalogueIdentity {
+            namespace: RuntimeType::new("project").unwrap(),
+            database: RuntimeType::new("runtime").unwrap(),
+        };
+        let models = [
+            ("documents", RuntimeLogicalModel::Document),
+            ("rows", RuntimeLogicalModel::Relational),
+            ("nodes", RuntimeLogicalModel::GraphNode),
+            ("edges", RuntimeLogicalModel::GraphRelation),
+            ("entries", RuntimeLogicalModel::KeyValue),
+            ("vectors", RuntimeLogicalModel::Vector),
+            ("events", RuntimeLogicalModel::Event),
+            ("samples", RuntimeLogicalModel::TimeSeries),
+            ("places", RuntimeLogicalModel::Geo),
+            ("objects", RuntimeLogicalModel::Object),
+            ("claims", RuntimeLogicalModel::ReasoningClaim),
+            ("reasoning", RuntimeLogicalModel::ReasoningRecord),
+            ("reasoning_events", RuntimeLogicalModel::ReasoningEvent),
+            ("lifecycles", RuntimeLogicalModel::LifecycleRecord),
+            ("lifecycle_events", RuntimeLogicalModel::LifecycleEvent),
+        ];
+        for (kind, model) in models {
+            registry.tables.insert(
+                RuntimeType::new(kind).unwrap(),
+                RuntimeTableSchema::schemaless(model),
+            );
+        }
+        registry.validate().unwrap();
+        assert_eq!(registry.catalogue_tables().unwrap().len(), models.len());
+        assert_eq!(
+            registry.tables[&RuntimeType::new("documents").unwrap()].mode,
+            RuntimeSchemaMode::Schemaless
+        );
+    }
+
+    #[test]
+    fn strict_and_schemaless_or_conflicting_model_families_cannot_be_confused() {
+        let prompt = RuntimeType::new("prompt").unwrap();
+        let mut registry = RuntimeSchemaRegistry::empty(1, "reject ambiguous schema");
+        registry
+            .records
+            .insert(prompt.clone(), RuntimeRecordSchema::default());
+        registry.tables.insert(
+            prompt.clone(),
+            RuntimeTableSchema::schemaless(RuntimeLogicalModel::Document),
+        );
+        assert!(registry
+            .validate()
+            .unwrap_err()
+            .to_string()
+            .contains("schemaless"));
+
+        registry.tables.insert(
+            prompt,
+            RuntimeTableSchema::strict(RuntimeLogicalModel::GraphRelation),
+        );
+        assert!(registry
+            .validate()
+            .unwrap_err()
+            .to_string()
+            .contains("also has a Record schema"));
     }
 }

@@ -361,6 +361,15 @@ audit, graph/index freshness, and recovery path as application data. They do
 not live in a sidecar memory database. Provider hooks and MCP translate or
 expose this contract; they do not own it.
 
+The catalogue is concretely the revisioned `RuntimeSchemaRegistry`, not a
+diagram-only abstraction. It binds one namespace/database to typed table
+entries for every logical model and carries an explicit strict or schemaless
+mode. Record-like document, relational, graph-node, key-value, reasoning, and
+lifecycle views converge on the canonical record identity; vector, series,
+geo, object, relation, and event families remain structurally distinct but are
+admitted by the same registry revision and commit. See
+[`rrd-unified-catalogue.md`](rrd-unified-catalogue.md).
+
 ## Service faces
 
 | Face | Purpose | Required equivalence |
@@ -455,7 +464,7 @@ architecture map intentionally carries no fixed verified-count snapshot.
 
 ## Current implementation truth
 
-As of 2026-08-27:
+As of 2026-08-29:
 
 - substantial persistence, query, vector, runtime, protocol/server, SDK,
   estate/security, cluster, and Connectome capabilities are real but distributed
@@ -466,12 +475,13 @@ As of 2026-08-27:
   the architecture test rejects any return of `EmbeddedOperator`,
   `runtime_store`, outward `PersistentEngine::open`, or physical-crate
   executable ownership;
-- query parsing/execution and vector planning have separate catalogues and
-  execution paths that still require unification behind the RRD catalogue and
-  transaction/read-stamp contract;
+- query parsing/execution and vector artifact planning retain specialized
+  derived catalogues and execution paths that must consume the now-unified RRD
+  logical catalogue through G03/G04 rather than becoming authorities;
 - the SurrealDB-shaped namespace/database hierarchy now has canonical public
-  resource terms, but catalogue persistence and query integration are not yet
-  complete; executable multi-project instance topology has been removed while
+  resource terms and a persisted, revisioned multi-model table catalogue;
+  complete CRUD and query integration remain open. Executable multi-project
+  instance topology has been removed while
   an explicit successor-format migration is still required to persist the
   environment identity without invalidating format-1 authority digests;
 - typed Arrow conversion and DataFusion execution are present, but the current

@@ -4,10 +4,10 @@ use super::{
 };
 use rrd_contract::{
     AbortTransaction, AuditDecision, AuditPhase, BeginTransaction, CanonicalId, CloseSession,
-    CommitTransaction, CorrelationId, CreateSession, EnsureVectorCollection, NamedVectorDefinition,
-    RenewSession, RequestContext, ResourceId, ResourceKind, ResourcePath, SecurityAction,
-    SessionLimits, TransactionMutation, TransactionState, VectorMemoryTier, VectorSearchMetric,
-    VectorValueKind,
+    CommitTransaction, CorrelationId, CreateSession, DataCatalogueIdentity, EnsureVectorCollection,
+    NamedVectorDefinition, RenewSession, RequestContext, ResourceId, ResourceKind, ResourcePath,
+    SecurityAction, SessionLimits, TransactionMutation, TransactionState, VectorMemoryTier,
+    VectorSearchMetric, VectorValueKind,
 };
 use rrd_core::digest;
 use rrd_security::{Principal, PrincipalKind, ResourceGrant, SecurityRepository, SecurityState};
@@ -80,6 +80,7 @@ fn commit_request(object: &str) -> CommitTransaction {
     }
 }
 
+mod catalogue;
 mod lifecycle;
 mod recovery;
 mod security;

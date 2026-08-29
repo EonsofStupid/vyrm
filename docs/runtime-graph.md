@@ -37,7 +37,7 @@ windows. The enclosing runtime change supplies transaction order and
 provenance. Relation endpoints and event subjects must exist in the same scope,
 either from an earlier commit or as records in the same commit.
 
-## Persisted schema and fail-closed writes
+## Persisted unified catalogue and fail-closed writes
 
 Every scope that writes typed records, relations, or events has an authoritative
 `RuntimeSchemaRegistry`. Installing or advancing that registry is itself a
@@ -45,6 +45,21 @@ hash-chained runtime mutation, so schema and data can migrate in one atomic
 commit. The first revision is `1`; every later migration must advance exactly
 one revision. Concurrent or skipped revisions fail without advancing either
 the runtime cursor or registry.
+
+The same registry now names its namespace/database and owns one table map for
+document, relational, graph-node/relation, key-value, vector, event,
+time-series, geo, object, reasoning, and lifecycle identities. A tagged
+`RuntimeLogicalModel` prevents one table kind from silently changing mutation
+families. A tagged `RuntimeSchemaMode` makes strict and schemaless tables
+distinct states: schemaless entries cannot also carry a strict specialized
+schema, and strict record/relation/event entries must carry one.
+
+Persisted pre-G03 registries remain readable. Their record/relation/event maps
+derive strict catalogue entries without changing historical commit identity.
+The first registry revision containing any explicit table switches that scope
+to the unified contract: every non-claim mutation must resolve to a table whose
+logical model matches the mutation family. Namespace/database coordinates and
+explicit tables participate in commit identity and public contract round trips.
 
 The registry governs allowed object types, required and optional property value
 types, additional-property policy, event subject requirements, legal relation
@@ -60,6 +75,9 @@ commit and all future mutations without pretending old untyped history was
 already governed. Claims remain protected by their statically typed,
 bi-temporal claim contract rather than duplicating that contract in this
 registry.
+
+The exact contract and migration boundary are in
+[`rrd-unified-catalogue.md`](rrd-unified-catalogue.md).
 
 ## Replay and graph views
 

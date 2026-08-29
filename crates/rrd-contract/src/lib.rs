@@ -57,7 +57,7 @@ use std::fmt;
 pub const PROTOCOL: &str = "rrd";
 pub const PROTOCOL_VERSION: u16 = 1;
 pub const OPENAPI_DOCUMENT_SHA256: &str =
-    "ba610071afaec5e6e1726cd331a023264db6e28ccc89403bc384b010331ae446";
+    "3d3848f74205c56c4fb3dff00070d3c2f4df5a92addd0b7e83a9b122594231f5";
 pub const MAX_ID_BYTES: usize = 128;
 pub const MAX_MESSAGE_BYTES: usize = 4_096;
 pub const MAX_CAPABILITIES: usize = 512;
@@ -3391,11 +3391,75 @@ pub struct DataEventSchema {
     pub allow_additional_properties: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum DataLogicalModel {
+    Document,
+    Relational,
+    GraphNode,
+    GraphRelation,
+    KeyValue,
+    Vector,
+    Event,
+    TimeSeries,
+    Geo,
+    Object,
+    ReasoningClaim,
+    ReasoningRecord,
+    ReasoningEvent,
+    LifecycleRecord,
+    LifecycleEvent,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum DataSchemaMode {
+    Strict,
+    Schemaless,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct DataTableSchema {
+    pub model: DataLogicalModel,
+    pub mode: DataSchemaMode,
+    #[serde(default)]
+    pub properties: BTreeMap<String, DataPropertySchema>,
+    #[serde(default)]
+    pub allow_additional_properties: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct DataCatalogueIdentity {
+    pub namespace: CanonicalId,
+    pub database: CanonicalId,
+}
+
+impl Default for DataCatalogueIdentity {
+    fn default() -> Self {
+        Self {
+            namespace: CanonicalId::new("default").expect("static namespace is valid"),
+            database: CanonicalId::new("default").expect("static database is valid"),
+        }
+    }
+}
+
+impl DataCatalogueIdentity {
+    fn is_default(&self) -> bool {
+        self == &Self::default()
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct DataSchemaRegistry {
     pub revision: u64,
     pub migration: String,
+    #[serde(default, skip_serializing_if = "DataCatalogueIdentity::is_default")]
+    pub catalogue: DataCatalogueIdentity,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub tables: BTreeMap<CanonicalId, DataTableSchema>,
     #[serde(default)]
     pub records: BTreeMap<CanonicalId, DataRecordSchema>,
     #[serde(default)]
@@ -3713,8 +3777,59 @@ fn validate_data_schema(registry: &DataSchemaRegistry) -> Result<()> {
     if registry.revision == 0 || registry.migration.trim().is_empty() {
         return invalid("data schema requires a positive revision and migration description");
     }
-    if registry.records.is_empty() && registry.relations.is_empty() && registry.events.is_empty() {
+    if registry.tables.is_empty()
+        && registry.records.is_empty()
+        && registry.relations.is_empty()
+        && registry.events.is_empty()
+    {
         return invalid("data schema must govern at least one type");
+    }
+    for (kind, table) in &registry.tables {
+        if table.mode == DataSchemaMode::Schemaless
+            && (!table.properties.is_empty() || table.allow_additional_properties)
+        {
+            return invalid(format!(
+                "schemaless table {kind} cannot declare a strict property contract"
+            ));
+        }
+        let family = data_model_family(table.model);
+        if matches!(family, "record" | "relation" | "event")
+            && (!table.properties.is_empty() || table.allow_additional_properties)
+        {
+            return invalid(format!(
+                "table {kind} must keep {family} properties in its specialized schema"
+            ));
+        }
+        let specialized = match family {
+            "record" => registry.records.contains_key(kind),
+            "relation" => registry.relations.contains_key(kind),
+            "event" => registry.events.contains_key(kind),
+            _ => false,
+        };
+        if matches!(family, "record" | "relation" | "event") {
+            match (table.mode, specialized) {
+                (DataSchemaMode::Strict, false) => {
+                    return invalid(format!(
+                        "strict table {kind} lacks its specialized {family} schema"
+                    ));
+                }
+                (DataSchemaMode::Schemaless, true) => {
+                    return invalid(format!(
+                        "schemaless table {kind} also declares a strict {family} schema"
+                    ));
+                }
+                _ => {}
+            }
+        }
+    }
+    for kind in registry.records.keys() {
+        validate_specialized_data_table(registry, kind, "record")?;
+    }
+    for kind in registry.relations.keys() {
+        validate_specialized_data_table(registry, kind, "relation")?;
+    }
+    for kind in registry.events.keys() {
+        validate_specialized_data_table(registry, kind, "event")?;
     }
     for schema in registry.records.values() {
         if schema
@@ -3733,6 +3848,42 @@ fn validate_data_schema(registry: &DataSchemaRegistry) -> Result<()> {
         {
             return invalid("relation schema requires endpoints and positive cardinality limits");
         }
+    }
+    Ok(())
+}
+
+fn data_model_family(model: DataLogicalModel) -> &'static str {
+    match model {
+        DataLogicalModel::Document
+        | DataLogicalModel::Relational
+        | DataLogicalModel::GraphNode
+        | DataLogicalModel::KeyValue
+        | DataLogicalModel::ReasoningRecord
+        | DataLogicalModel::LifecycleRecord => "record",
+        DataLogicalModel::GraphRelation => "relation",
+        DataLogicalModel::Event
+        | DataLogicalModel::ReasoningEvent
+        | DataLogicalModel::LifecycleEvent => "event",
+        DataLogicalModel::Vector => "vector",
+        DataLogicalModel::TimeSeries => "time_series",
+        DataLogicalModel::Geo => "geo",
+        DataLogicalModel::Object => "object",
+        DataLogicalModel::ReasoningClaim => "claim",
+    }
+}
+
+fn validate_specialized_data_table(
+    registry: &DataSchemaRegistry,
+    kind: &CanonicalId,
+    family: &str,
+) -> Result<()> {
+    let Some(table) = registry.tables.get(kind) else {
+        return Ok(());
+    };
+    if data_model_family(table.model) != family || table.mode != DataSchemaMode::Strict {
+        return invalid(format!(
+            "table {kind} conflicts with its strict specialized {family} schema"
+        ));
     }
     Ok(())
 }
