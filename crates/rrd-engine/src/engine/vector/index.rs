@@ -2,6 +2,19 @@ use super::*;
 use std::collections::BTreeSet;
 
 impl RrdEngine {
+    /// Installs one process-local GPU HNSW builder behind the strict CPU
+    /// differential boundary. Registration never changes durable state.
+    pub fn install_hnsw_accelerator<B>(&self, builder: B) -> Result<u64>
+    where
+        B: rrd_vector::HnswArtifactBuilder + Send + 'static,
+    {
+        self.hnsw_accelerators
+            .lock()
+            .map_err(|_| ServiceError::Storage("HNSW accelerator lock is poisoned".into()))?
+            .install(Box::new(builder))
+            .map_err(core_vector)
+    }
+
     /// Ensures one durable approximate projection for a named dense vector.
     ///
     /// Canonical vectors remain transaction truth. The immutable graph bytes
@@ -31,6 +44,11 @@ impl RrdEngine {
             &request.configuration,
             VectorIndexConfiguration::TurboQuant { .. }
         ) {
+            if request.build_policy != VectorIndexBuildPolicy::Cpu {
+                return Err(ServiceError::Vector(
+                    "TurboQuant does not support the HNSW GPU build policy".into(),
+                ));
+            }
             return self.ensure_turboquant_index_authorized(session_id, request, now);
         }
         let scope = self.query_scope(&request.scope)?;
@@ -118,13 +136,7 @@ impl RrdEngine {
         .map_err(|error| ServiceError::Vector(error.to_string()))?;
         let projection_id = ProjectionId::new(index_id.as_str()).map_err(core_vector)?;
         let previous = runtime.catalog().entries.get(&projection_id).cloned();
-        let generation = previous
-            .as_ref()
-            .map(|descriptor| descriptor.stamp().generation)
-            .unwrap_or(1);
-        let artifact = if let (VectorIndexConfiguration::Hnsw { .. }, Some(previous)) =
-            (&request.configuration, previous.as_ref())
-        {
+        let (artifact, build_evidence) = if let Some(previous) = previous.as_ref() {
             let active = runtime
                 .artifact(&projection_id, previous.stamp().generation)
                 .ok_or_else(|| {
@@ -135,6 +147,7 @@ impl RrdEngine {
                     "active vector index has the wrong artifact kind".into(),
                 ));
             };
+            let active = active.clone();
             let desired = hnsw_config(request, vector, scope.clone(), projection_id.clone())?;
             if active.config() == &desired {
                 if source_cursor < active.descriptor().stamp.source_cursor {
@@ -143,33 +156,60 @@ impl RrdEngine {
                     ));
                 }
                 if source_cursor == active.descriptor().stamp.source_cursor {
-                    return replay_vector_index(
+                    let replay = replay_vector_index(
                         &self.storage,
                         active.descriptor().clone().into(),
                         &request.collection_id,
                         &request.vector_name,
-                    );
+                    )?;
+                    if build_policy_satisfied(
+                        replay.index.build_evidence.as_ref(),
+                        &request.build_policy,
+                    ) {
+                        return Ok(replay);
+                    }
                 }
-                let next_generation = generation.checked_add(1).ok_or_else(|| {
-                    ServiceError::Vector("vector index generation overflowed".into())
-                })?;
-                active
-                    .advance(
+                let next_generation =
+                    previous.stamp().generation.checked_add(1).ok_or_else(|| {
+                        ServiceError::Vector("vector index generation overflowed".into())
+                    })?;
+                if request.build_policy == VectorIndexBuildPolicy::Cpu {
+                    let advanced = active
+                        .advance(
+                            next_generation,
+                            source_cursor,
+                            candidates
+                                .iter()
+                                .filter(|candidate| {
+                                    candidate.source_cursor
+                                        > active.descriptor().stamp.source_cursor
+                                })
+                                .cloned(),
+                        )
+                        .map_err(core_vector)?;
+                    let evidence =
+                        rrd_vector::cpu_hnsw_build_evidence(&advanced).map_err(core_vector)?;
+                    (advanced.into(), evidence)
+                } else {
+                    build_index_artifact(
+                        &self.hnsw_accelerators,
+                        request,
+                        vector,
+                        scope,
+                        projection_id,
                         next_generation,
                         source_cursor,
-                        candidates.into_iter().filter(|candidate| {
-                            candidate.source_cursor > active.descriptor().stamp.source_cursor
-                        }),
-                    )
-                    .map(Into::into)
-                    .map_err(core_vector)?
+                        candidates,
+                    )?
+                }
             } else {
                 build_index_artifact(
+                    &self.hnsw_accelerators,
                     request,
                     vector,
                     scope,
                     projection_id,
-                    generation.checked_add(1).ok_or_else(|| {
+                    previous.stamp().generation.checked_add(1).ok_or_else(|| {
                         ServiceError::Vector("vector index generation overflowed".into())
                     })?,
                     source_cursor,
@@ -177,46 +217,24 @@ impl RrdEngine {
                 )?
             }
         } else {
-            let artifact = build_index_artifact(
+            build_index_artifact(
+                &self.hnsw_accelerators,
                 request,
                 vector,
                 scope,
                 projection_id,
-                generation,
+                1,
                 source_cursor,
-                candidates.clone(),
-            )?;
-            let descriptor = artifact.descriptor();
-            if previous.as_ref() == Some(&descriptor) {
-                return replay_vector_index(
-                    &self.storage,
-                    descriptor,
-                    &request.collection_id,
-                    &request.vector_name,
-                );
-            }
-            if previous.is_some() {
-                build_index_artifact(
-                    request,
-                    vector,
-                    descriptor.scope().clone(),
-                    descriptor.stamp().id.clone(),
-                    generation.checked_add(1).ok_or_else(|| {
-                        ServiceError::Vector("vector index generation overflowed".into())
-                    })?,
-                    source_cursor,
-                    candidates,
-                )?
-            } else {
-                artifact
-            }
+                candidates,
+            )?
         };
         let expected_revision = runtime.catalog().revision;
-        let publication = crate::publish_traced_vector_artifact(
+        let publication = crate::publish_traced_vector_artifact_with_evidence(
             &data,
             &mut runtime,
             expected_revision,
             artifact,
+            Some(build_evidence),
             &format!("session:{}", session_id.as_str()),
             now,
         )
@@ -292,6 +310,7 @@ fn hnsw_config(
 
 #[allow(clippy::too_many_arguments)]
 fn build_index_artifact(
+    accelerators: &Mutex<rrd_vector::HnswAcceleratorRegistry>,
     request: &EnsureVectorIndex,
     vector: &rrd_vector::NamedVectorConfig,
     scope: ScopeId,
@@ -299,19 +318,61 @@ fn build_index_artifact(
     generation: u64,
     source_cursor: u64,
     candidates: Vec<rrd_vector::VectorCandidate>,
-) -> Result<rrd_vector::VectorArtifact> {
+) -> Result<(rrd_vector::VectorArtifact, rrd_vector::HnswBuildEvidence)> {
     match &request.configuration {
-        VectorIndexConfiguration::Hnsw { .. } => rrd_vector::HnswIndex::build(
-            hnsw_config(request, vector, scope, id)?,
-            generation,
-            source_cursor,
-            candidates,
-        )
-        .map(Into::into)
-        .map_err(core_vector),
+        VectorIndexConfiguration::Hnsw { .. } => {
+            let policy = match &request.build_policy {
+                VectorIndexBuildPolicy::Cpu => rrd_vector::HnswBuildPolicy::CpuOnly,
+                VectorIndexBuildPolicy::PreferGpu {
+                    backend_id,
+                    allow_cpu_fallback,
+                } => rrd_vector::HnswBuildPolicy::Prefer {
+                    backend_id: backend_id.as_str().into(),
+                    allow_cpu_fallback: *allow_cpu_fallback,
+                },
+                VectorIndexBuildPolicy::RequireGpu { backend_id } => {
+                    rrd_vector::HnswBuildPolicy::Require {
+                        backend_id: backend_id.as_str().into(),
+                    }
+                }
+            };
+            let outcome = accelerators
+                .lock()
+                .map_err(|_| ServiceError::Storage("HNSW accelerator lock is poisoned".into()))?
+                .build(
+                    hnsw_config(request, vector, scope, id)?,
+                    generation,
+                    source_cursor,
+                    candidates,
+                    policy,
+                )
+                .map_err(core_vector)?;
+            Ok((outcome.artifact.into(), outcome.evidence))
+        }
         VectorIndexConfiguration::TurboQuant { .. } => Err(ServiceError::Vector(
             "TurboQuant must use the engine quantization lifecycle".into(),
         )),
+    }
+}
+
+fn build_policy_satisfied(
+    evidence: Option<&VectorIndexBuildEvidence>,
+    policy: &VectorIndexBuildPolicy,
+) -> bool {
+    match policy {
+        VectorIndexBuildPolicy::Cpu => true,
+        VectorIndexBuildPolicy::PreferGpu {
+            backend_id,
+            allow_cpu_fallback,
+        } => evidence.is_some_and(|evidence| {
+            evidence.requested_backend_id.as_ref() == Some(backend_id)
+                && (*allow_cpu_fallback || !evidence.used_fallback)
+        }),
+        VectorIndexBuildPolicy::RequireGpu { backend_id } => evidence.is_some_and(|evidence| {
+            evidence.requested_backend_id.as_ref() == Some(backend_id)
+                && !evidence.used_fallback
+                && matches!(evidence.selected_target, VectorIndexBuildTarget::Gpu { .. })
+        }),
     }
 }
 
@@ -415,9 +476,53 @@ fn public_vector_index(
         maintenance,
         packed_vector_bytes,
         full_precision_vector_bytes,
+        build_evidence: entry
+            .build_evidence
+            .as_ref()
+            .map(public_build_evidence)
+            .transpose()?,
         configuration_sha256: stamp.config_digest.clone(),
         artifact_sha256: stamp.artifact_digest.clone(),
         object_sha256: entry.object.sha256.clone(),
         catalogue_revision: entry.catalog_revision,
+    })
+}
+
+fn public_build_evidence(
+    evidence: &rrd_vector::HnswBuildEvidence,
+) -> Result<VectorIndexBuildEvidence> {
+    let status = |value| match value {
+        rrd_vector::BuildDifferentialStatus::NotRun => VectorIndexDifferentialStatus::NotRun,
+        rrd_vector::BuildDifferentialStatus::Passed => VectorIndexDifferentialStatus::Passed,
+        rrd_vector::BuildDifferentialStatus::Failed => VectorIndexDifferentialStatus::Failed,
+    };
+    let selected_target = match &evidence.selected_backend.target {
+        rrd_vector::AcceleratorTarget::Cpu => VectorIndexBuildTarget::Cpu,
+        rrd_vector::AcceleratorTarget::Gpu { platform, device } => VectorIndexBuildTarget::Gpu {
+            platform: platform.clone(),
+            device: device.clone(),
+        },
+    };
+    Ok(VectorIndexBuildEvidence {
+        requested_backend_id: evidence
+            .requested_backend_id
+            .as_deref()
+            .map(CanonicalId::new)
+            .transpose()
+            .map_err(|error| ServiceError::Vector(error.to_string()))?,
+        selected_backend_id: evidence.selected_backend.id.clone(),
+        selected_target,
+        used_fallback: evidence.used_fallback,
+        fallback_reason: evidence.fallback_reason.clone(),
+        byte_differential: status(evidence.byte_differential),
+        semantic_differential: status(evidence.semantic_differential),
+        resources: VectorIndexBuildResourceEvidence {
+            input_vectors: evidence.resources.input_vectors,
+            dimensions: evidence.resources.dimensions,
+            input_values: evidence.resources.input_values,
+            cpu_artifact_bytes: evidence.resources.cpu_artifact_bytes,
+            accelerator_artifact_bytes: evidence.resources.accelerator_artifact_bytes,
+            semantic_probe_queries: evidence.resources.semantic_probe_queries,
+        },
     })
 }

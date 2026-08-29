@@ -569,6 +569,7 @@ fn public_turboquant_index(
         },
         packed_vector_bytes: Some(artifact.packed_vector_bytes),
         full_precision_vector_bytes: Some(artifact.full_precision_vector_bytes),
+        build_evidence: None,
         configuration_sha256: artifact.configuration_sha256.clone(),
         artifact_sha256: artifact.artifact_sha256.clone(),
         object_sha256: artifact.object_sha256.clone(),

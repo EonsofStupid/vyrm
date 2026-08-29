@@ -75,7 +75,7 @@ use std::fmt;
 pub const PROTOCOL: &str = "rrd";
 pub const PROTOCOL_VERSION: u16 = 1;
 pub const OPENAPI_DOCUMENT_SHA256: &str =
-    "98873117404c51a862e5811b51a372f99636bbfbf2cde2ee1db51bab31ca45d3";
+    "449d8d7e1124ebc456e315fd27f0a7de71b4aacbe9f5a6269a258e432068fc70";
 pub const MAX_ID_BYTES: usize = 128;
 pub const MAX_MESSAGE_BYTES: usize = 4_096;
 pub const MAX_CAPABILITIES: usize = 512;
@@ -1026,11 +1026,69 @@ impl VectorIndexConfiguration {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
+pub struct VectorIndexBuildResourceEvidence {
+    pub input_vectors: u64,
+    pub dimensions: u64,
+    pub input_values: u64,
+    pub cpu_artifact_bytes: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub accelerator_artifact_bytes: Option<u64>,
+    pub semantic_probe_queries: u64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum VectorIndexDifferentialStatus {
+    NotRun,
+    Passed,
+    Failed,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum VectorIndexBuildTarget {
+    Cpu,
+    Gpu { platform: String, device: String },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct VectorIndexBuildEvidence {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub requested_backend_id: Option<CanonicalId>,
+    pub selected_backend_id: String,
+    pub selected_target: VectorIndexBuildTarget,
+    pub used_fallback: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fallback_reason: Option<String>,
+    pub byte_differential: VectorIndexDifferentialStatus,
+    pub semantic_differential: VectorIndexDifferentialStatus,
+    pub resources: VectorIndexBuildResourceEvidence,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, Default)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum VectorIndexBuildPolicy {
+    #[default]
+    Cpu,
+    PreferGpu {
+        backend_id: CanonicalId,
+        allow_cpu_fallback: bool,
+    },
+    RequireGpu {
+        backend_id: CanonicalId,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct EnsureVectorIndex {
     pub scope: String,
     pub collection_id: CanonicalId,
     pub vector_name: CanonicalId,
     pub configuration: VectorIndexConfiguration,
+    #[serde(default)]
+    pub build_policy: VectorIndexBuildPolicy,
     pub max_scanned_changes: u64,
 }
 
@@ -1078,6 +1136,8 @@ pub struct VectorIndexSnapshot {
     pub packed_vector_bytes: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub full_precision_vector_bytes: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub build_evidence: Option<VectorIndexBuildEvidence>,
     pub configuration_sha256: String,
     pub artifact_sha256: String,
     pub object_sha256: String,
@@ -1551,7 +1611,22 @@ pub struct VectorSearchResult {
     pub plan_sha256: String,
     pub access_path: CanonicalId,
     pub exact: bool,
+    pub resources: VectorSearchResourceEvidence,
     pub hits: Vec<VectorSearchHit>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct VectorSearchResourceEvidence {
+    pub canonical_candidates: u64,
+    pub selected_candidates: u64,
+    pub ef_search: u64,
+    pub exact_rerank: u64,
+    pub overlay_candidates: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub selected_generation: Option<u64>,
+    pub loaded_artifact_bytes: u64,
+    pub result_hits: u64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]

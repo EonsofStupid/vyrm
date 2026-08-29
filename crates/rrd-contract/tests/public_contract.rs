@@ -21,8 +21,8 @@ use rrd_contract::{
     RetrievalQuery, RetrievalResultShape, SearchHybrid, SearchVectors, ServiceCapabilities,
     SessionEndState, SessionLease, SessionLimits, SessionTermination, SurfaceBinding,
     SurfaceDisposition, TransactionMutation, TransactionPreview, TransactionState,
-    VectorIndexConfiguration, VectorMemoryTier, VectorPayloadCondition, VectorPayloadFilter,
-    VectorPayloadIndexKind, VectorPayloadOperator, VectorProductCompression,
+    VectorIndexBuildPolicy, VectorIndexConfiguration, VectorMemoryTier, VectorPayloadCondition,
+    VectorPayloadFilter, VectorPayloadIndexKind, VectorPayloadOperator, VectorProductCompression,
     VectorQuantizationBits, VectorQuantizationMethod, VectorSearchMetric, VectorSearchMode,
     VectorSearchQuery, VectorValueKind, PROTOCOL, PROTOCOL_VERSION,
 };
@@ -578,6 +578,7 @@ fn query_index_administration_contract_is_bounded_and_strict() {
             seed: 11,
             filter_properties: vec![CanonicalId::new("tenant").unwrap()],
         },
+        build_policy: VectorIndexBuildPolicy::Cpu,
         max_scanned_changes: 10_000,
     }
     .validate()
@@ -726,6 +727,7 @@ fn vector_collection_contract_is_named_bounded_and_search_addressable() {
             seed: 7,
             filter_properties: vec![CanonicalId::new("tenant").unwrap()],
         },
+        build_policy: VectorIndexBuildPolicy::Cpu,
         max_scanned_changes: 10_000,
     }
     .validate()

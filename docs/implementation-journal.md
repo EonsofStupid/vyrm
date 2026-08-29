@@ -3620,3 +3620,39 @@ index.
 - The reviewed public security schema advances the OpenAPI digest to
   `98873117404c51a862e5811b51a372f99636bbfbf2cde2ee1db51bab31ca45d3`.
   Generated outward HTTP/MCP/CLI/SDK bindings remain owned by G06.
+
+## 2026-08-29 — G04-W07 governed GPU HNSW qualification candidate
+
+- Added one process-local `HnswAcceleratorRegistry` to every `RrdEngine`
+  composition root. Optional adapters declare an exact backend identity, GPU
+  platform/device, determinism, and supported portable HNSW format version;
+  registration does not mutate authoritative RRD state.
+- Added strict public CPU, prefer-GPU, and require-GPU build policies. The
+  coordinator always builds the deterministic CPU artifact first, treats
+  adapter bytes as untrusted, decodes and validates their generation and
+  descriptor, requires exact byte equality, and runs deterministic semantic
+  search probes before the GPU result can be selected.
+- Preserved the existing CPU incremental-generation path. Full CPU and GPU
+  builds plus incremental CPU successors now produce one typed resource record
+  covering input vectors/dimensions/values, CPU and accelerator artifact bytes,
+  semantic probes, byte/semantic differential status, selected target, and any
+  fallback reason.
+- Advanced the vector artifact catalogue to backward-compatible version 2.
+  Build evidence is included in the authenticated entry identity and commits
+  atomically with immutable artifact bytes. Version 1 entries still replay with
+  their original digest contract; evidence is HNSW-only and must agree with the
+  published descriptor.
+- Added public build evidence to index snapshots and deterministic physical-work
+  evidence to every vector search: canonical and selected candidates,
+  `ef_search`, exact rerank, overlays, selected generation, loaded immutable
+  bytes, and result count.
+- Added end-to-end engine tests proving correct GPU byte/semantic admission,
+  idempotent replay, restart without adapter reinstall, public search resource
+  accounting, device failure fallback, corrupt-byte fallback, exact-truth
+  equality, and require-GPU failure without a new catalogue publication. The
+  lower vector adapter suite also covers wrong-generation bytes.
+- The reviewed public schema advances the OpenAPI digest to
+  `449d8d7e1124ebc456e315fd27f0a7de71b4aacbe9f5a6269a258e432068fc70`.
+  This qualifies the provider-neutral engine boundary; no production CUDA,
+  ROCm, Metal, or Vulkan adapter and no fixed-hardware performance claim is
+  implied.

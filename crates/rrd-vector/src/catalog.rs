@@ -1,7 +1,8 @@
 use crate::contract::invalid;
 use crate::{
-    CandidatePath, HnswDescriptor, QuantizationMethod, QuantizedDescriptor, SegmentDescriptor,
-    TurboQuantDescriptor, VectorArtifact, VectorArtifactKind, EXACT_SCAN_PROJECTION_ID,
+    CandidatePath, HnswBuildEvidence, HnswDescriptor, QuantizationMethod, QuantizedDescriptor,
+    SegmentDescriptor, TurboQuantDescriptor, VectorArtifact, VectorArtifactKind,
+    EXACT_SCAN_PROJECTION_ID,
 };
 use rrd_core::{
     digest, ObjectReference, ProjectionId, ProjectionStamp, ProjectionState, Result, RuntimeRef,
@@ -10,7 +11,8 @@ use rrd_core::{
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
-pub const VECTOR_ARTIFACT_CATALOG_VERSION: u16 = 1;
+const LEGACY_VECTOR_ARTIFACT_CATALOG_VERSION: u16 = 1;
+pub const VECTOR_ARTIFACT_CATALOG_VERSION: u16 = 2;
 pub const VECTOR_ARTIFACT_RECORD_TYPE: &str = "vector_artifact";
 
 /// One immutable, reconstructable vector projection publication.
@@ -28,6 +30,8 @@ pub struct VectorArtifactCatalogEntry {
     pub descriptor: VectorProjectionDescriptor,
     pub object: ObjectReference,
     pub published_at: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub build_evidence: Option<HnswBuildEvidence>,
     pub entry_digest: String,
 }
 
@@ -50,6 +54,24 @@ impl VectorArtifactCatalogEntry {
         object: ObjectReference,
         published_at: u64,
     ) -> Result<Self> {
+        Self::new_with_build_evidence(
+            catalog_revision,
+            kind,
+            descriptor,
+            object,
+            published_at,
+            None,
+        )
+    }
+
+    pub fn new_with_build_evidence(
+        catalog_revision: u64,
+        kind: VectorArtifactKind,
+        descriptor: VectorProjectionDescriptor,
+        object: ObjectReference,
+        published_at: u64,
+        build_evidence: Option<HnswBuildEvidence>,
+    ) -> Result<Self> {
         let mut entry = Self {
             contract_version: VECTOR_ARTIFACT_CATALOG_VERSION,
             catalog_revision,
@@ -57,6 +79,7 @@ impl VectorArtifactCatalogEntry {
             descriptor,
             object,
             published_at,
+            build_evidence,
             entry_digest: String::new(),
         };
         entry.validate_components()?;
@@ -92,8 +115,17 @@ impl VectorArtifactCatalogEntry {
     }
 
     fn validate_components(&self) -> Result<()> {
-        if self.contract_version != VECTOR_ARTIFACT_CATALOG_VERSION || self.catalog_revision == 0 {
+        if !matches!(
+            self.contract_version,
+            LEGACY_VECTOR_ARTIFACT_CATALOG_VERSION | VECTOR_ARTIFACT_CATALOG_VERSION
+        ) || self.catalog_revision == 0
+        {
             return invalid("vector artifact catalog version and revision must be valid");
+        }
+        if self.contract_version == LEGACY_VECTOR_ARTIFACT_CATALOG_VERSION
+            && self.build_evidence.is_some()
+        {
+            return invalid("legacy vector artifact catalog entries cannot contain build evidence");
         }
         self.descriptor.validate()?;
         if self.descriptor.stamp().state != ProjectionState::Ready {
@@ -125,6 +157,33 @@ impl VectorArtifactCatalogEntry {
         if !kind_matches {
             return invalid("vector artifact codec kind differs from its projection descriptor");
         }
+        match (&self.descriptor, &self.build_evidence) {
+            (VectorProjectionDescriptor::Hnsw { descriptor }, Some(build_evidence)) => {
+                build_evidence.validate()?;
+                let nodes = u64::try_from(descriptor.nodes).map_err(|_| {
+                    rrd_core::Error::InvalidRuntime {
+                        reason: "HNSW descriptor node count exceeds u64".into(),
+                    }
+                })?;
+                let dimensions = u64::try_from(descriptor.dimensions).map_err(|_| {
+                    rrd_core::Error::InvalidRuntime {
+                        reason: "HNSW descriptor dimensions exceed u64".into(),
+                    }
+                })?;
+                if build_evidence.resources.input_vectors != nodes
+                    || build_evidence.resources.dimensions != dimensions
+                {
+                    return invalid(
+                        "HNSW build evidence resources differ from the artifact descriptor",
+                    );
+                }
+            }
+            (VectorProjectionDescriptor::Hnsw { .. }, None) => {}
+            (_, Some(_)) => {
+                return invalid("HNSW build evidence cannot describe another artifact kind")
+            }
+            (_, None) => {}
+        }
         self.object.validate()?;
         if self.object.media_type != self.kind.media_type() {
             return invalid("vector artifact object media type differs from its codec kind");
@@ -136,15 +195,27 @@ impl VectorArtifactCatalogEntry {
     }
 
     fn identity_bytes(&self) -> Result<Vec<u8>> {
-        serde_json::to_vec(&(
-            self.contract_version,
-            self.catalog_revision,
-            self.kind,
-            &self.descriptor,
-            &self.object,
-            self.published_at,
-        ))
-        .map_err(|error| rrd_core::Error::InvalidRuntime {
+        let encoded = if self.contract_version == LEGACY_VECTOR_ARTIFACT_CATALOG_VERSION {
+            serde_json::to_vec(&(
+                self.contract_version,
+                self.catalog_revision,
+                self.kind,
+                &self.descriptor,
+                &self.object,
+                self.published_at,
+            ))
+        } else {
+            serde_json::to_vec(&(
+                self.contract_version,
+                self.catalog_revision,
+                self.kind,
+                &self.descriptor,
+                &self.object,
+                self.published_at,
+                &self.build_evidence,
+            ))
+        };
+        encoded.map_err(|error| rrd_core::Error::InvalidRuntime {
             reason: format!("vector artifact catalog identity cannot be encoded: {error}"),
         })
     }

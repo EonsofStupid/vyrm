@@ -105,6 +105,8 @@ impl RrdEngine {
                     })
             })
             .collect::<Vec<_>>();
+        let canonical_candidates = u64::try_from(candidates.len())
+            .map_err(|_| ServiceError::Vector("vector candidate count exceeds u64".into()))?;
         let source_cursor = candidates
             .iter()
             .filter(|candidate| candidate.vector.field == field)
@@ -215,6 +217,29 @@ impl RrdEngine {
             rrd_vector::AccessPathKind::BinaryQuantized => "binary_quantized",
             rrd_vector::AccessPathKind::TurboQuant => "turboquant",
         };
+        let loaded_artifact_bytes = bindings
+            .get(&(
+                execution.plan.selected.id.clone(),
+                execution.plan.selected.generation,
+            ))
+            .map_or(0, |binding| binding.object.length);
+        let resources = VectorSearchResourceEvidence {
+            canonical_candidates,
+            selected_candidates: execution.plan.selected.estimated_candidates,
+            ef_search: u64::try_from(prepared.ef_search())
+                .map_err(|_| ServiceError::Vector("vector ef_search exceeds u64".into()))?,
+            exact_rerank: u64::try_from(execution.plan.selected.exact_rerank)
+                .map_err(|_| ServiceError::Vector("vector exact_rerank exceeds u64".into()))?,
+            overlay_candidates: execution.plan.selected.overlay_candidates,
+            selected_generation: (!matches!(
+                execution.plan.selected.kind,
+                rrd_vector::AccessPathKind::ExactScan
+            ))
+            .then_some(execution.plan.selected.generation),
+            loaded_artifact_bytes,
+            result_hits: u64::try_from(execution.hits.len())
+                .map_err(|_| ServiceError::Vector("vector result count exceeds u64".into()))?,
+        };
         Ok(VectorSearchResult {
             scope: request.scope.clone(),
             collection_id: request.collection_id.clone(),
@@ -226,6 +251,7 @@ impl RrdEngine {
             access_path: CanonicalId::new(access_path)
                 .map_err(|error| ServiceError::Vector(error.to_string()))?,
             exact: !execution.plan.selected.kind.is_approximate(),
+            resources,
             hits: execution
                 .hits
                 .into_iter()

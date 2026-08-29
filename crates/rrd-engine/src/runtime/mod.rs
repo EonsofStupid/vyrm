@@ -100,10 +100,11 @@ pub use trace::{
 pub(crate) use vector_catalog::vector_artifact_catalog_entries_from_changes;
 pub use vector_catalog::{
     build_traced_quantization_artifact, publish_traced_vector_artifact,
-    quantization_artifact_catalogue, reopen_vector_runtime, reopen_vector_runtime_metadata,
-    transition_traced_quantization_artifact, vector_artifact_catalog_entries,
-    QuantizationArtifactPublication, QuantizationArtifactTransition, VectorArtifactBinding,
-    VectorArtifactPublication, VectorArtifactResidencyKey, VectorRuntimeManifest,
+    publish_traced_vector_artifact_with_evidence, quantization_artifact_catalogue,
+    reopen_vector_runtime, reopen_vector_runtime_metadata, transition_traced_quantization_artifact,
+    vector_artifact_catalog_entries, QuantizationArtifactPublication,
+    QuantizationArtifactTransition, VectorArtifactBinding, VectorArtifactPublication,
+    VectorArtifactResidencyKey, VectorRuntimeManifest,
 };
 pub use vector_residency::{
     VectorResidencyAcquisition, VectorResidencyError, VectorResidencyLimits,

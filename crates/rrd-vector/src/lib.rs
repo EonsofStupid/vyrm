@@ -20,13 +20,13 @@ mod segment;
 mod turbo_segment;
 mod turboquant;
 
-#[cfg(feature = "accelerator")]
 mod accelerator;
 
-#[cfg(feature = "accelerator")]
 pub use accelerator::{
-    build_dense_artifact, AcceleratedBuildPolicy, AcceleratorTarget, DenseArtifactBuilder,
-    DenseBuildBackend, DenseBuildOutcome,
+    build_dense_artifact, build_hnsw_artifact, cpu_hnsw_build_evidence, AcceleratedBuildPolicy,
+    AcceleratorTarget, BuildDifferentialStatus, DenseArtifactBuilder, DenseBuildBackend,
+    DenseBuildOutcome, HnswAcceleratorRegistry, HnswArtifactBuilder, HnswBuildEvidence,
+    HnswBuildOutcome, HnswBuildPolicy, VectorBuildResourceEvidence,
 };
 
 pub use catalog::{

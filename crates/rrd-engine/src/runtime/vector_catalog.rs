@@ -126,6 +126,31 @@ pub fn publish_traced_vector_artifact<D>(
 where
     D: DataRuntimeAccess,
 {
+    publish_traced_vector_artifact_with_evidence(
+        data,
+        runtime,
+        expected_catalog_revision,
+        artifact,
+        None,
+        actor,
+        at,
+    )
+}
+
+/// Publishes one immutable artifact and its validated physical build evidence
+/// in the same authoritative catalogue record.
+pub fn publish_traced_vector_artifact_with_evidence<D>(
+    data: &D,
+    runtime: &mut VectorRuntime,
+    expected_catalog_revision: u64,
+    artifact: VectorArtifact,
+    build_evidence: Option<rrd_vector::HnswBuildEvidence>,
+    actor: &str,
+    at: Millis,
+) -> Result<VectorArtifactPublication, Box<dyn std::error::Error>>
+where
+    D: DataRuntimeAccess,
+{
     if matches!(
         artifact.kind(),
         rrd_vector::VectorArtifactKind::ScalarQuantized
@@ -208,12 +233,13 @@ where
             return finish_publication_error(data.engine(), span, "object_stage", error.into())
         }
     };
-    let entry = VectorArtifactCatalogEntry::new(
+    let entry = VectorArtifactCatalogEntry::new_with_build_evidence(
         next_revision,
         artifact.kind(),
         descriptor,
         object.clone(),
         at,
+        build_evidence,
     )?;
     let record = catalog_record(&entry)?;
 

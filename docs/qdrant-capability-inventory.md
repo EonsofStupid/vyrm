@@ -142,8 +142,8 @@ Sources: [indexing](https://qdrant.tech/documentation/manage-data/indexing/),
 | Sparse inverted index | **Absent** — sparse path is exact scanning |
 | Automatic segment optimization, merge and index thresholds | **Partial** in RRD LSM; vector segment optimization is absent |
 | Optimizer status and indexing progress | **Partial** catalogue only |
-| GPU-accelerated HNSW indexing | **Absent** physical backend |
-| Vulkan GPU support across NVIDIA/AMD and selected devices | **Absent** |
+| GPU-accelerated HNSW indexing | **Engine boundary verified, production adapter absent** — CPU oracle, exact byte/descriptor parity, semantic probes, public prefer/require policy, safe fallback, durable evidence, and restart replay pass through one optional adapter registry |
+| Vulkan GPU support across NVIDIA/AMD and selected devices | **Absent production adapter** — the provider-neutral registry can host a Vulkan implementation only after it declares exact format capability and passes the same CPU differential |
 | CPU SIMD scoring | **Verified locally** for compact exact and four-metric HNSW traversal with scalar differential |
 | mmap/on-disk vector access | **Verified locally** for compact dense exact artifacts |
 | Per-structure `pinned`, `cached`, and `cold` memory tiers | **Partial/engine verified** — physical hard-bounded pinned, byte-bounded cached LRU, and transient cold mmap/owned behavior is enforced per named vector, not independently per structure |

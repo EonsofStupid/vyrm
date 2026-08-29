@@ -19,6 +19,9 @@ pub struct RrdEngine {
     /// Durable catalogue/object state remains in `storage` and `objects`;
     /// this bounded manager alone owns serving residency across requests.
     pub(crate) vector_residency: Mutex<crate::VectorResidencyManager>,
+    /// Process-local optional HNSW build adapters. Their bytes are never
+    /// authoritative until the CPU differential coordinator admits them.
+    pub(crate) hnsw_accelerators: Mutex<rrd_vector::HnswAcceleratorRegistry>,
     /// Process-local executable inference adapters. Exact model, trust, and
     /// resource descriptors are public; credentials and runtime sessions are
     /// never serialized into durable RRD state.
@@ -74,6 +77,7 @@ impl RrdEngine {
             transaction_gate: Mutex::new(()),
             active_invocations: Mutex::new(BTreeMap::new()),
             vector_residency: Mutex::new(vector_residency),
+            hnsw_accelerators: Mutex::new(rrd_vector::HnswAcceleratorRegistry::default()),
             embedding_backends: Mutex::new(rrd_inference::EmbeddingBackendRegistry::default()),
         })
     }
@@ -108,6 +112,7 @@ impl RrdEngine {
             transaction_gate: Mutex::new(()),
             active_invocations: Mutex::new(BTreeMap::new()),
             vector_residency: Mutex::new(vector_residency),
+            hnsw_accelerators: Mutex::new(rrd_vector::HnswAcceleratorRegistry::default()),
             embedding_backends: Mutex::new(rrd_inference::EmbeddingBackendRegistry::default()),
         })
     }
