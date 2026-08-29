@@ -455,6 +455,7 @@ fn one_authority_coordinates_security_data_catalogues_lifecycle_audit_and_reopen
                     .into(),
                 unique: false,
                 kind: QueryIndexKind::Scalar,
+                full_text: None,
                 budget: QueryBudget::default(),
             },
             1_500,

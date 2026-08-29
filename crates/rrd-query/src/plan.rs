@@ -59,6 +59,8 @@ pub struct BoundIndexCandidate {
     pub fields: Vec<String>,
     pub matched_prefix: usize,
     pub kind: IndexKind,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub predicates: Vec<BoundFilter>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -264,6 +266,7 @@ pub fn bind(query: &Query, parameters: &Parameters, catalog: &Catalog) -> Result
             .entries
             .values()
             .filter(|entry| entry.definition.source == query.source)
+            .filter(|entry| entry.maintenance.is_some())
             .filter_map(|entry| {
                 let matched_prefix = entry
                     .definition
@@ -271,6 +274,19 @@ pub fn bind(query: &Query, parameters: &Parameters, catalog: &Catalog) -> Result
                     .iter()
                     .take_while(|field| filter_fields.contains(field.as_str()))
                     .count();
+                let predicates = entry
+                    .definition
+                    .filters
+                    .iter()
+                    .map(|filter| match &filter.value {
+                        ValueExpr::Literal(value) => Some(BoundFilter {
+                            field: filter.field.clone(),
+                            comparison: filter.comparison,
+                            value: value.clone(),
+                        }),
+                        ValueExpr::Parameter(_) => None,
+                    })
+                    .collect::<Option<Vec<_>>>()?;
                 (matched_prefix > 0).then(|| BoundIndexCandidate {
                     id: entry.definition.id.clone(),
                     generation: entry.stamp.generation,
@@ -283,6 +299,7 @@ pub fn bind(query: &Query, parameters: &Parameters, catalog: &Catalog) -> Result
                     fields: entry.definition.fields.clone(),
                     matched_prefix,
                     kind: entry.definition.kind.clone(),
+                    predicates,
                 })
             })
             .collect()
@@ -374,7 +391,12 @@ pub fn plan(bound: &BoundQuery) -> Result<PhysicalPlan> {
                         && candidate.built_valid_at == Some(bound.valid_at)
                         && candidate.artifact_rows.is_some()
                         && match (&candidate.kind, match_field) {
-                            (IndexKind::Scalar, None) => true,
+                            (IndexKind::Scalar | IndexKind::Geo, None) => {
+                                candidate.predicates.is_empty()
+                            }
+                            (IndexKind::MaterializedView, None) => {
+                                candidate.predicates == bound.filters
+                            }
                             (IndexKind::Bm25 { .. }, Some(field)) => {
                                 candidate.fields.as_slice() == [field]
                             }

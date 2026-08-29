@@ -18,6 +18,7 @@ futures = "0.3"
 futures-timer = "3"
 async-trait = "0.1"
 tokio = { version = "1", features = ["fs", "rt", "time"] }
+unicode-normalization = { workspace = true }
 
 [dev-dependencies]
 tempfile = "3"

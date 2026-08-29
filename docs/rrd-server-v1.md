@@ -79,13 +79,15 @@ places that secret elsewhere. `X-RRD-Session` carries the session identifier;
   timeout/wait duration explicitly. Streaming/backpressure and retained
   subscriptions remain open.
 - `POST /v1/query/indexes/ensure` requires a mutation idempotency key and a
-  distinct index-administration grant. It validates a restricted definition
-  query, creates or rebuilds the exact snapshot artifact synchronously, records
-  a durable replay receipt, and returns its authoritative generation/cursor/
-  valid-time/digests. Same-key payload drift conflicts.
+  distinct index-administration grant. It validates scalar/compound unique,
+  count, grouped-count, geo, filtered materialized-view, or configurable BM25
+  definitions; creates or rebuilds one exact stamped artifact; records a
+  durable replay receipt; and returns generation/cursor/valid-time/digests plus
+  maintenance and analytics summaries. Same-key payload drift conflicts.
 - `POST /v1/query/indexes/list` returns the ordered authoritative index
-  catalogue under a separate read grant. Unique, incremental, count, spatial,
-  and full-text index administration remain open.
+  catalogue under a separate read grant. Authoritative commits do not rebuild
+  derived artifacts; stale generations are rejected by planning while ready
+  unique definitions remain enforced at commit.
 - `POST /v1/vector/search` captures an authenticated runtime read stamp and
   runs bounded dense, sparse, or multi-vector search through the canonical
   RRFlow vector planner and exact oracle. The response includes manifest/cursor,

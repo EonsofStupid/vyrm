@@ -82,6 +82,7 @@ fn commit_request(object: &str) -> CommitTransaction {
 
 mod catalogue;
 mod data_crud;
+mod index_foundation;
 mod lifecycle;
 mod query_transaction;
 mod recovery;

@@ -26,18 +26,20 @@ use rrd_contract::{
     InstanceBackupSnapshot, ListInstanceBackups, ListQueryIndexes, ListVectorCollections,
     LiveQueryDeltaResult, LiveQueryRowChange, LogicalArchiveSnapshot, NamedVectorDefinition,
     PollLiveQuery, PreviewTransaction, QueryExecutionAnalysisSnapshot, QueryExecutionSnapshot,
-    QueryIndexCatalogueSnapshot, QueryIndexKind, QueryIndexSnapshot, QueryIndexState,
-    QueryPlanCandidate, QueryPlanSnapshot, QueryResult, QueryRowSnapshot, QueryTransactionResult,
-    QueryValue, ReadAudit, ReadChangefeed, ReadDataSnapshot, ReadDiagnosticSnapshot, Readiness,
-    RenewSession, RequestContext, ResourceId, ResourceKind, ResourcePath, RestoreInstanceBackup,
-    RestoreInstanceBackupResult, RetrieveVectorPoints, RuntimeChangeSnapshot, ScrollVectorPoints,
-    SearchHybrid, SearchVectors, SecurityAction, SessionEndState, SessionLease, SessionLimits,
-    SessionTermination, TransactionLease, TransactionMutation, TransactionPreview,
-    TransactionState, VectorCollectionCatalogueSnapshot, VectorCollectionSnapshot,
-    VectorEmbeddingModel, VectorIndexConfiguration, VectorIndexSnapshot, VectorMemoryTier,
-    VectorPayloadFilter, VectorPayloadOperator, VectorPointBatch, VectorPointPage,
-    VectorPointSnapshot, VectorSearchHit, VectorSearchMetric, VectorSearchMode, VectorSearchQuery,
-    VectorSearchResult, VectorValueKind, DIAGNOSTIC_SNAPSHOT_FORMAT_VERSION,
+    QueryFullTextConfiguration, QueryIndexCatalogueSnapshot, QueryIndexKind,
+    QueryIndexMaintenanceSnapshot, QueryIndexSnapshot, QueryIndexState, QueryPlanCandidate,
+    QueryPlanSnapshot, QueryResult, QueryRowSnapshot, QueryTextAnalyzer, QueryTextStemmer,
+    QueryTextTokenizer, QueryTransactionResult, QueryValue, ReadAudit, ReadChangefeed,
+    ReadDataSnapshot, ReadDiagnosticSnapshot, Readiness, RenewSession, RequestContext, ResourceId,
+    ResourceKind, ResourcePath, RestoreInstanceBackup, RestoreInstanceBackupResult,
+    RetrieveVectorPoints, RuntimeChangeSnapshot, ScrollVectorPoints, SearchHybrid, SearchVectors,
+    SecurityAction, SessionEndState, SessionLease, SessionLimits, SessionTermination,
+    TransactionLease, TransactionMutation, TransactionPreview, TransactionState,
+    VectorCollectionCatalogueSnapshot, VectorCollectionSnapshot, VectorEmbeddingModel,
+    VectorIndexConfiguration, VectorIndexSnapshot, VectorMemoryTier, VectorPayloadFilter,
+    VectorPayloadOperator, VectorPointBatch, VectorPointPage, VectorPointSnapshot, VectorSearchHit,
+    VectorSearchMetric, VectorSearchMode, VectorSearchQuery, VectorSearchResult, VectorValueKind,
+    DIAGNOSTIC_SNAPSHOT_FORMAT_VERSION,
 };
 use rrd_core::{
     digest, Claim, DataTransaction, EmbeddingProvenance, GeoPoint, GeoValue, ObjectReceipt,
@@ -56,6 +58,7 @@ use sha2::Sha256;
 use std::collections::BTreeMap;
 use std::fmt;
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 mod backup;

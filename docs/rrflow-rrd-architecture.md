@@ -299,6 +299,23 @@ value as canonical. Multi-vector and late-interaction retrieval use one object
 identity and one transaction boundary; application middleware must not create
 parallel records solely to join those vectors later.
 
+Query indexes form one engine-owned catalogue, not independent embedded
+databases. Scalar/compound, geo, filtered materialized-view, global-count,
+grouped-count, and BM25 definitions all publish content-addressed immutable
+artifacts with generation, source cursor, catalogue revision, valid time,
+configuration digest, and maintenance evidence. A planner may select an
+artifact only when those coordinates exactly cover its captured read; stale
+artifacts remain visible as rejected candidates and execution falls back to
+canonical RRD data. Corrupt selected bytes fail closed.
+
+Unique scalar/compound definitions are different from optional accelerators:
+the engine checks their keys and overlapping validity windows against the
+prospective transaction at the serialized validation/commit boundary. Derived
+maintenance never enters that authoritative commit path. BM25 artifacts retain
+deterministic analyzer configuration, term frequencies, positions, and UTF-8
+source offsets so score, matched-term, offset, and highlight evidence all come
+from the same stamped generation.
+
 ## Qdrant-shaped vector and TurboQuant flow
 
 The vector path is one branch of the RRD plan, not a side database:

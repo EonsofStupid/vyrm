@@ -43,3 +43,4 @@ toml = "0.8"
 # installed. The kernel (rrd-core) stays out — serde is its only dependency.
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+unicode-normalization = "0.1"

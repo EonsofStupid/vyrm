@@ -254,6 +254,29 @@ impl RrdEngine {
             operation_id,
         )?;
         let (definition, valid_at) = query_index_definition(request)?;
+        let preliminary = repository
+            .load()
+            .map_err(|error| ServiceError::Query(error.to_string()))?;
+        let requires_unique_install = definition.unique
+            && preliminary
+                .entries
+                .get(&definition.id)
+                .is_none_or(|entry| !entry.unique_validated);
+        // Ordinary rebuilds never enter the authoritative commit path. The
+        // first installation of a unique constraint is the exception: it must
+        // prove existing rows and publish its enforcement bit without a write
+        // racing between those two events.
+        let _transaction_guard = requires_unique_install
+            .then(|| self.transaction_gate.lock())
+            .transpose()
+            .map_err(|_| ServiceError::Storage("engine transaction gate is poisoned".into()))?;
+        let current = if requires_unique_install {
+            repository
+                .load()
+                .map_err(|error| ServiceError::Query(error.to_string()))?
+        } else {
+            preliminary
+        };
         let query_catalogue = rrd_query::Catalog::capture(&self.storage, &scope)
             .map_err(|error| ServiceError::Query(error.to_string()))?;
         let source_cursor = query_catalogue.source_cursor(&definition.source);
@@ -263,9 +286,6 @@ impl RrdEngine {
             request_id: request_id.into(),
             operation_id: operation_id.into(),
         };
-        let current = repository
-            .load()
-            .map_err(|error| ServiceError::Query(error.to_string()))?;
         if let Some(existing) = current.entries.get(&definition.id) {
             if existing.definition != definition {
                 return Err(ServiceError::Query(format!(
@@ -277,7 +297,8 @@ impl RrdEngine {
                 ProjectionState::Building => {}
                 ProjectionState::Ready
                     if existing.built_valid_at == Some(valid_at)
-                        && existing.stamp.source_cursor == source_cursor => {}
+                        && existing.stamp.source_cursor == source_cursor
+                        && existing.maintenance.is_some() => {}
                 ProjectionState::Ready => {
                     repository
                         .begin_rebuild(&mutation, &definition.id)
@@ -431,21 +452,16 @@ fn public_query_analysis(
 }
 
 fn query_index_definition(request: &EnsureQueryIndex) -> Result<(rrd_query::IndexDefinition, u64)> {
-    if request.unique {
-        return Err(ServiceError::Query(
-            "unique index enforcement is not implemented".into(),
-        ));
-    }
     let query = rrd_query::parse(&request.definition_query)
         .map_err(|error| ServiceError::Query(error.to_string()))?;
-    if !query.filters.is_empty()
+    if query.join.is_some()
         || query.limit.is_some()
         || query.explain_contract
         || query.explain_analyze
         || !matches!(query.temporal.known_at, CursorExpr::Head)
     {
         return Err(ServiceError::Query(
-            "index definition query requires KNOWN HEAD and cannot contain filters, limits, or EXPLAIN"
+            "index definition query requires KNOWN HEAD and cannot contain joins, limits, or EXPLAIN"
                 .into(),
         ));
     }
@@ -454,24 +470,58 @@ fn query_index_definition(request: &EnsureQueryIndex) -> Result<(rrd_query::Inde
             "index definition valid-time must be a literal".into(),
         ));
     };
-    let Projection::Fields(fields) = query.projection else {
-        return Err(ServiceError::Query(
-            "index definition must project one or more named fields".into(),
-        ));
+    let fields = match query.projection {
+        Projection::Fields(fields) => fields,
+        Projection::All if request.kind == QueryIndexKind::Count => Vec::new(),
+        Projection::All => return Err(ServiceError::Query(
+            "only a count index may use PROJECT *; other index definitions require named fields"
+                .into(),
+        )),
     };
+    let full_text = request.full_text.clone().unwrap_or_default();
     Ok((
         rrd_query::IndexDefinition {
             id: ProjectionId::new(request.index_id.as_str())
                 .map_err(|error| ServiceError::Query(error.to_string()))?,
             source: query.source,
             fields,
-            unique: false,
+            unique: request.unique,
             kind: match request.kind {
                 QueryIndexKind::Scalar => rrd_query::IndexKind::Scalar,
+                QueryIndexKind::Count => rrd_query::IndexKind::Count,
+                QueryIndexKind::Geo => rrd_query::IndexKind::Geo,
+                QueryIndexKind::MaterializedView => rrd_query::IndexKind::MaterializedView,
+                QueryIndexKind::AggregateCount => rrd_query::IndexKind::AggregateCount,
                 QueryIndexKind::Bm25 => rrd_query::IndexKind::Bm25 {
-                    config: rrd_query::Bm25Config::default(),
+                    config: rrd_query::Bm25Config {
+                        analyzer: match full_text.analyzer {
+                            QueryTextAnalyzer::UnicodeLowercase => {
+                                rrd_query::Bm25Analyzer::UnicodeLowercase
+                            }
+                            QueryTextAnalyzer::UnicodeCaseSensitive => {
+                                rrd_query::Bm25Analyzer::UnicodeCaseSensitive
+                            }
+                        },
+                        tokenizer: match full_text.tokenizer {
+                            QueryTextTokenizer::UnicodeAlphanumeric => {
+                                rrd_query::Bm25Tokenizer::UnicodeAlphanumeric
+                            }
+                            QueryTextTokenizer::Whitespace => rrd_query::Bm25Tokenizer::Whitespace,
+                        },
+                        ascii_folding: full_text.ascii_folding,
+                        stop_words: full_text.stop_words,
+                        min_token_chars: full_text.min_token_chars,
+                        max_token_chars: full_text.max_token_chars,
+                        stemmer: match full_text.stemmer {
+                            QueryTextStemmer::None => rrd_query::Bm25Stemmer::None,
+                            QueryTextStemmer::English => rrd_query::Bm25Stemmer::English,
+                        },
+                        k1_micros: full_text.k1_micros,
+                        b_micros: full_text.b_micros,
+                    },
                 },
             },
+            filters: query.filters,
         },
         valid_at,
     ))
@@ -489,6 +539,37 @@ pub(in crate::engine) fn public_query_index(
         },
     );
     definition.projection = Projection::Fields(entry.definition.fields.clone());
+    definition.filters = entry.definition.filters.clone();
+    if entry.definition.fields.is_empty() {
+        definition.projection = Projection::All;
+    }
+    let full_text = match &entry.definition.kind {
+        rrd_query::IndexKind::Bm25 { config } => Some(QueryFullTextConfiguration {
+            analyzer: match config.analyzer {
+                rrd_query::Bm25Analyzer::UnicodeLowercase => QueryTextAnalyzer::UnicodeLowercase,
+                rrd_query::Bm25Analyzer::UnicodeCaseSensitive => {
+                    QueryTextAnalyzer::UnicodeCaseSensitive
+                }
+            },
+            tokenizer: match config.tokenizer {
+                rrd_query::Bm25Tokenizer::UnicodeAlphanumeric => {
+                    QueryTextTokenizer::UnicodeAlphanumeric
+                }
+                rrd_query::Bm25Tokenizer::Whitespace => QueryTextTokenizer::Whitespace,
+            },
+            ascii_folding: config.ascii_folding,
+            stop_words: config.stop_words.clone(),
+            min_token_chars: config.min_token_chars,
+            max_token_chars: config.max_token_chars,
+            stemmer: match config.stemmer {
+                rrd_query::Bm25Stemmer::None => QueryTextStemmer::None,
+                rrd_query::Bm25Stemmer::English => QueryTextStemmer::English,
+            },
+            k1_micros: config.k1_micros,
+            b_micros: config.b_micros,
+        }),
+        _ => None,
+    };
     Ok(QueryIndexSnapshot {
         index_id: CanonicalId::new(entry.definition.id.to_string())
             .map_err(|error| ServiceError::Query(error.to_string()))?,
@@ -496,12 +577,30 @@ pub(in crate::engine) fn public_query_index(
         unique: entry.definition.unique,
         kind: match &entry.definition.kind {
             rrd_query::IndexKind::Scalar => QueryIndexKind::Scalar,
+            rrd_query::IndexKind::Count => QueryIndexKind::Count,
+            rrd_query::IndexKind::Geo => QueryIndexKind::Geo,
+            rrd_query::IndexKind::MaterializedView => QueryIndexKind::MaterializedView,
+            rrd_query::IndexKind::AggregateCount => QueryIndexKind::AggregateCount,
             rrd_query::IndexKind::Bm25 { .. } => QueryIndexKind::Bm25,
         },
+        full_text,
         generation: entry.stamp.generation,
         source_cursor: entry.stamp.source_cursor,
         built_valid_at: entry.built_valid_at,
         artifact_rows: entry.artifact_rows,
+        analytics_total_count: entry.analytics_total_count,
+        analytics_group_count: entry.analytics_group_count,
+        maintenance: entry
+            .maintenance
+            .as_ref()
+            .map(|maintenance| QueryIndexMaintenanceSnapshot {
+                mode: maintenance.mode.clone(),
+                prior_source_cursor: maintenance.prior_source_cursor,
+                source_cursor: maintenance.source_cursor,
+                inserted_rows: maintenance.inserted_rows,
+                updated_rows: maintenance.updated_rows,
+                removed_rows: maintenance.removed_rows,
+            }),
         configuration_sha256: entry.stamp.config_digest.clone(),
         artifact_sha256: entry.stamp.artifact_digest.clone(),
         state: match entry.stamp.state {

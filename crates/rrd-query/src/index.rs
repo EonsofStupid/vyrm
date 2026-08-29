@@ -2,9 +2,10 @@ use crate::{
     bind, execute, plan, Bm25Artifact, Bm25Config, Catalog, Error, ExecutionBudget, Parameters,
     QueryRow, Result,
 };
-use crate::{CursorExpr, Projection, Query, Source, TemporalSelector, TimeExpr};
+use crate::{CursorExpr, Filter, Projection, Query, Source, TemporalSelector, TimeExpr};
 use rrd_core::{
-    digest, ProjectionId, ProjectionStamp, ProjectionState, ScopeId, DATA_RUNTIME_CONTRACT_VERSION,
+    digest, DataTransaction, ProjectionId, ProjectionStamp, ProjectionState, ReadStamp,
+    RuntimeMutation, RuntimeRecord, RuntimeValue, ScopeId, DATA_RUNTIME_CONTRACT_VERSION,
 };
 use rrd_store::{ControlTransition, Durability, Engine};
 use serde::{Deserialize, Serialize};
@@ -21,6 +22,10 @@ const MAX_INDEX_OPERATION_RECEIPTS: usize = 100_000;
 pub enum IndexKind {
     #[default]
     Scalar,
+    Count,
+    Geo,
+    MaterializedView,
+    AggregateCount,
     Bm25 {
         #[serde(default)]
         config: Bm25Config,
@@ -37,6 +42,8 @@ pub struct IndexDefinition {
     pub unique: bool,
     #[serde(default)]
     pub kind: IndexKind,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub filters: Vec<Filter>,
 }
 
 impl IndexDefinition {
@@ -46,9 +53,11 @@ impl IndexDefinition {
                 "recursive traversal cannot be an index source".into(),
             ));
         }
-        if self.fields.is_empty() || self.fields.len() > MAX_INDEX_FIELDS {
+        let allows_empty_fields = matches!(self.kind, IndexKind::Count);
+        if (!allows_empty_fields && self.fields.is_empty()) || self.fields.len() > MAX_INDEX_FIELDS
+        {
             return Err(Error::Catalog(format!(
-                "an index must contain 1..={MAX_INDEX_FIELDS} fields"
+                "this index kind requires 1..={MAX_INDEX_FIELDS} fields"
             )));
         }
         if matches!(self.kind, IndexKind::Bm25 { .. }) && self.fields.len() != 1 {
@@ -61,11 +70,29 @@ impl IndexDefinition {
                 return Err(Error::Catalog("a BM25 index cannot be unique".into()));
             }
             config.validate()?;
-            if config != &Bm25Config::default() {
-                return Err(Error::Catalog(
-                    "BM25 v1 query semantics require the default k1/b configuration".into(),
-                ));
-            }
+        }
+        if self.unique && !matches!(self.kind, IndexKind::Scalar) {
+            return Err(Error::Catalog(
+                "only scalar and compound scalar indexes can enforce uniqueness".into(),
+            ));
+        }
+        if self.unique && !matches!(self.source, Source::Record { .. }) {
+            return Err(Error::Catalog(
+                "unique indexes require an authoritative record source".into(),
+            ));
+        }
+        if matches!(self.kind, IndexKind::Geo) && !matches!(self.source, Source::Geo { .. }) {
+            return Err(Error::Catalog("geo indexes require a geo source".into()));
+        }
+        if !self.filters.is_empty()
+            && !matches!(
+                self.kind,
+                IndexKind::Count | IndexKind::MaterializedView | IndexKind::AggregateCount
+            )
+        {
+            return Err(Error::Catalog(
+                "only count, grouped-count, and materialized-view indexes accept predicates".into(),
+            ));
         }
         let unique = self.fields.iter().collect::<BTreeSet<_>>();
         if unique.len() != self.fields.len() {
@@ -89,6 +116,55 @@ pub struct IndexEntry {
     pub built_valid_at: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub artifact_rows: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prior_artifact: Option<IndexArtifactReference>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub maintenance: Option<IndexMaintenanceEvidence>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub analytics_total_count: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub analytics_group_count: Option<u64>,
+    /// A unique definition becomes an integrity constraint only after its
+    /// first complete build proves the existing authoritative state. Rebuild,
+    /// quarantine, and read-path staleness do not disable that constraint.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub unique_validated: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct IndexArtifactReference {
+    pub generation: u64,
+    pub source_cursor: u64,
+    pub valid_at: u64,
+    pub artifact_digest: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct IndexMaintenanceEvidence {
+    pub mode: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prior_source_cursor: Option<u64>,
+    pub source_cursor: u64,
+    pub inserted_rows: u64,
+    pub updated_rows: u64,
+    pub removed_rows: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct IndexCountGroup {
+    pub values: Vec<RuntimeValue>,
+    pub count: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct IndexAnalyticsArtifact {
+    pub total_count: u64,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub groups: Vec<IndexCountGroup>,
 }
 
 impl IndexEntry {
@@ -97,6 +173,7 @@ impl IndexEntry {
             && self.stamp.source_cursor == source_cursor
             && self.built_valid_at == Some(valid_at)
             && self.artifact_rows.is_some()
+            && self.maintenance.is_some()
             && self
                 .definition
                 .config_digest()
@@ -118,6 +195,9 @@ pub struct IndexArtifact {
     pub rows: Vec<QueryRow>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bm25: Option<Bm25Artifact>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub analytics: Option<IndexAnalyticsArtifact>,
+    pub maintenance: IndexMaintenanceEvidence,
 }
 
 impl IndexArtifact {
@@ -147,9 +227,20 @@ impl IndexArtifact {
                 "index artifact row identities must be unique and sorted".into(),
             ));
         }
-        match (&self.definition.kind, &self.bm25) {
-            (IndexKind::Scalar, None) => {}
-            (IndexKind::Bm25 { config }, Some(artifact)) => {
+        if self.maintenance.source_cursor != self.source_cursor
+            || (self.maintenance.mode != "full_build"
+                && self.maintenance.mode != "incremental_reconciliation")
+        {
+            return Err(Error::Integrity(
+                "index maintenance evidence does not cover this artifact".into(),
+            ));
+        }
+        match (&self.definition.kind, &self.bm25, &self.analytics) {
+            (IndexKind::Scalar | IndexKind::Geo | IndexKind::MaterializedView, None, None) => {}
+            (IndexKind::Count | IndexKind::AggregateCount, None, Some(analytics)) => {
+                validate_analytics(&self.definition, analytics)?;
+            }
+            (IndexKind::Bm25 { config }, Some(artifact), None) => {
                 artifact.validate()?;
                 if &artifact.config != config
                     || artifact.source_cursor != self.source_cursor
@@ -163,7 +254,7 @@ impl IndexArtifact {
             }
             _ => {
                 return Err(Error::Integrity(
-                    "query index kind and BM25 artifact disagree".into(),
+                    "query index kind and specialized artifact disagree".into(),
                 ))
             }
         }
@@ -268,6 +359,9 @@ pub struct IndexArtifactPublication {
     pub valid_at: u64,
     pub artifact_rows: u64,
     pub artifact_digest: String,
+    pub maintenance: IndexMaintenanceEvidence,
+    pub analytics_total_count: Option<u64>,
+    pub analytics_group_count: Option<u64>,
 }
 
 impl IndexMutationContext {
@@ -410,6 +504,11 @@ impl<'a, E: Engine> IndexCatalogueRepository<'a, E> {
                     },
                     built_valid_at: None,
                     artifact_rows: None,
+                    prior_artifact: None,
+                    maintenance: None,
+                    analytics_total_count: None,
+                    analytics_group_count: None,
+                    unique_validated: false,
                 },
             );
             Ok(())
@@ -433,11 +532,24 @@ impl<'a, E: Engine> IndexCatalogueRepository<'a, E> {
                 .generation
                 .checked_add(1)
                 .ok_or_else(|| Error::Integrity("index generation overflow".into()))?;
+            entry.prior_artifact = (entry.stamp.state == ProjectionState::Ready
+                && entry.maintenance.is_some())
+            .then(|| IndexArtifactReference {
+                generation: entry.stamp.generation - 1,
+                source_cursor: entry.stamp.source_cursor,
+                valid_at: entry
+                    .built_valid_at
+                    .expect("ready index has valid-time coverage"),
+                artifact_digest: entry.stamp.artifact_digest.clone(),
+            });
             entry.stamp.source_cursor = 0;
             entry.stamp.artifact_digest = digest::sha256_hex(&[]);
             entry.stamp.state = ProjectionState::Building;
             entry.built_valid_at = None;
             entry.artifact_rows = None;
+            entry.maintenance = None;
+            entry.analytics_total_count = None;
+            entry.analytics_group_count = None;
             Ok(())
         })
     }
@@ -468,6 +580,7 @@ impl<'a, E: Engine> IndexCatalogueRepository<'a, E> {
                 known_at: CursorExpr::Head,
             },
         );
+        query.filters = definition.filters.clone();
         query.projection = Projection::All;
         let bound = bind(&query, &Parameters::new(), &query_catalogue)?;
         let physical = plan(&bound)?;
@@ -482,8 +595,14 @@ impl<'a, E: Engine> IndexCatalogueRepository<'a, E> {
             .into_iter()
             .flat_map(|batch| batch.rows)
             .collect::<Vec<_>>();
+        validate_unique_rows(&definition, &rows)?;
+        validate_unique_definition(self.engine, &query_catalogue.read, &definition)?;
         let bm25 = match &definition.kind {
-            IndexKind::Scalar => None,
+            IndexKind::Scalar
+            | IndexKind::Count
+            | IndexKind::Geo
+            | IndexKind::MaterializedView
+            | IndexKind::AggregateCount => None,
             IndexKind::Bm25 { config } => {
                 let field = &definition.fields[0];
                 let documents = rows
@@ -507,6 +626,21 @@ impl<'a, E: Engine> IndexCatalogueRepository<'a, E> {
                 )?)
             }
         };
+        let analytics = match definition.kind {
+            IndexKind::Count | IndexKind::AggregateCount => {
+                Some(build_analytics(&definition, &rows)?)
+            }
+            _ => None,
+        };
+        let prior = entry.prior_artifact.clone();
+        let maintenance = maintenance_evidence(
+            self.engine,
+            &self.scope,
+            id,
+            prior.as_ref(),
+            bound.source_cursor,
+            &rows,
+        )?;
         let artifact = IndexArtifact {
             contract_version: INDEX_ARTIFACT_CONTRACT_VERSION,
             scope: self.scope.clone(),
@@ -518,6 +652,8 @@ impl<'a, E: Engine> IndexCatalogueRepository<'a, E> {
             valid_at,
             rows,
             bm25,
+            analytics,
+            maintenance,
         };
         let bytes = artifact.encode()?;
         let artifact_digest = digest::sha256_hex(&bytes);
@@ -557,6 +693,15 @@ impl<'a, E: Engine> IndexCatalogueRepository<'a, E> {
                 artifact_rows: u64::try_from(artifact.rows.len())
                     .map_err(|_| Error::Budget("index artifact row count exceeds u64".into()))?,
                 artifact_digest,
+                maintenance: artifact.maintenance.clone(),
+                analytics_total_count: artifact.analytics.as_ref().map(|value| value.total_count),
+                analytics_group_count: artifact
+                    .analytics
+                    .as_ref()
+                    .map(|value| value.groups.len())
+                    .map(u64::try_from)
+                    .transpose()
+                    .map_err(|_| Error::Budget("analytics group count exceeds u64".into()))?,
             },
         )
     }
@@ -593,6 +738,13 @@ impl<'a, E: Engine> IndexCatalogueRepository<'a, E> {
             entry.stamp.state = ProjectionState::Ready;
             entry.built_valid_at = Some(publication.valid_at);
             entry.artifact_rows = Some(publication.artifact_rows);
+            entry.prior_artifact = None;
+            entry.maintenance = Some(publication.maintenance);
+            entry.analytics_total_count = publication.analytics_total_count;
+            entry.analytics_group_count = publication.analytics_group_count;
+            if entry.definition.unique {
+                entry.unique_validated = true;
+            }
             entry
                 .stamp
                 .validate()
@@ -698,6 +850,29 @@ fn validate_index_entry(id: &ProjectionId, entry: &IndexEntry) -> Result<()> {
             "ready index {id} is missing artifact coverage"
         )));
     }
+    let analytics_kind = matches!(
+        entry.definition.kind,
+        IndexKind::Count | IndexKind::AggregateCount
+    );
+    if entry.stamp.state == ProjectionState::Ready
+        && entry.maintenance.is_some()
+        && (analytics_kind
+            != (entry.analytics_total_count.is_some() && entry.analytics_group_count.is_some()))
+    {
+        return Err(Error::Integrity(format!(
+            "ready index {id} has inconsistent analytics summaries"
+        )));
+    }
+    if entry.stamp.state != ProjectionState::Building && entry.prior_artifact.is_some() {
+        return Err(Error::Integrity(format!(
+            "non-building index {id} retained a prior artifact pointer"
+        )));
+    }
+    if entry.unique_validated && !entry.definition.unique {
+        return Err(Error::Integrity(format!(
+            "non-unique index {id} claims unique-constraint validation"
+        )));
+    }
     Ok(())
 }
 
@@ -718,7 +893,12 @@ fn validate_fields(catalogue: &Catalog, definition: &IndexDefinition) -> Result<
             known_at: CursorExpr::Head,
         },
     );
-    query.projection = Projection::Fields(definition.fields.clone());
+    query.filters = definition.filters.clone();
+    query.projection = if definition.fields.is_empty() {
+        Projection::All
+    } else {
+        Projection::Fields(definition.fields.clone())
+    };
     let bound = bind(&query, &Parameters::new(), catalogue)?;
     if let IndexKind::Bm25 { .. } = definition.kind {
         let field = &definition.fields[0];
@@ -730,4 +910,317 @@ fn validate_fields(catalogue: &Catalog, definition: &IndexDefinition) -> Result<
         }
     }
     Ok(())
+}
+
+fn validate_unique_rows(definition: &IndexDefinition, rows: &[QueryRow]) -> Result<()> {
+    if !definition.unique {
+        return Ok(());
+    }
+    let mut keys = BTreeMap::<Vec<u8>, &str>::new();
+    for row in rows {
+        let values = definition
+            .fields
+            .iter()
+            .map(|field| row.values.get(field).cloned().unwrap_or(RuntimeValue::Null))
+            .collect::<Vec<_>>();
+        if values.contains(&RuntimeValue::Null) {
+            continue;
+        }
+        let key = serde_json::to_vec(&values)?;
+        if let Some(existing) = keys.insert(key, &row.identity) {
+            return Err(Error::Catalog(format!(
+                "unique index {} rejects duplicate rows {existing:?} and {:?}",
+                definition.id, row.identity
+            )));
+        }
+    }
+    Ok(())
+}
+
+/// Checks every installed engine-owned unique constraint against the exact
+/// prospective transaction state. Callers serialize this check with the
+/// authoritative commit; rebuilding, quarantined, retiring, or stale data
+/// indexes remain constraints even though planners reject them as access paths.
+pub fn validate_unique_indexes<E: Engine>(
+    engine: &E,
+    transaction: &DataTransaction,
+    _default_valid_at: u64,
+) -> Result<()> {
+    let catalogue = IndexCatalogueRepository::new(engine, transaction.read.scope.clone()).load()?;
+    let unique = catalogue
+        .entries
+        .values()
+        .filter(|entry| entry.definition.unique && entry.unique_validated)
+        .collect::<Vec<_>>();
+    if unique.is_empty() {
+        return Ok(());
+    }
+    let mut records = current_records_at_read(engine, &transaction.read)?;
+    for mutation in &transaction.commit.mutations {
+        match mutation {
+            RuntimeMutation::Record { record } => {
+                records.insert(record.reference.clone(), record.clone());
+            }
+            RuntimeMutation::Retire { retirement } if retirement.model.is_record_like() => {
+                records.remove(&retirement.reference);
+            }
+            _ => {}
+        }
+    }
+    for entry in unique {
+        let Source::Record { kind } = &entry.definition.source else {
+            return Err(Error::Integrity(format!(
+                "unique index {} does not name a record source",
+                entry.definition.id
+            )));
+        };
+        validate_unique_records(
+            &entry.definition,
+            records
+                .values()
+                .filter(|record| &record.reference.kind == kind)
+                .collect(),
+        )?;
+    }
+    Ok(())
+}
+
+fn validate_unique_definition<E: Engine>(
+    engine: &E,
+    read: &ReadStamp,
+    definition: &IndexDefinition,
+) -> Result<()> {
+    if !definition.unique {
+        return Ok(());
+    }
+    let Source::Record { kind } = &definition.source else {
+        return Err(Error::Integrity(format!(
+            "unique index {} does not name a record source",
+            definition.id
+        )));
+    };
+    validate_unique_records(
+        definition,
+        current_records_at_read(engine, read)?
+            .values()
+            .filter(|record| &record.reference.kind == kind)
+            .collect(),
+    )
+}
+
+fn current_records_at_read<E: Engine>(
+    engine: &E,
+    read: &ReadStamp,
+) -> Result<BTreeMap<rrd_core::RuntimeRef, RuntimeRecord>> {
+    if read.commit_cursor == 0 {
+        return Ok(BTreeMap::new());
+    }
+    let limit = usize::try_from(read.commit_cursor)
+        .map_err(|_| Error::Budget("unique-index replay cursor exceeds usize".into()))?;
+    let page = engine.runtime_read_changes(read, 0, limit)?;
+    if page.through_cursor != read.commit_cursor {
+        return Err(Error::Integrity(
+            "unique-index validation did not reach the transaction read cursor".into(),
+        ));
+    }
+    let mut records = BTreeMap::new();
+    for change in page.changes {
+        match change.mutation {
+            RuntimeMutation::Record { record } => {
+                records.insert(record.reference.clone(), record);
+            }
+            RuntimeMutation::Retire { retirement } if retirement.model.is_record_like() => {
+                records.remove(&retirement.reference);
+            }
+            _ => {}
+        }
+    }
+    Ok(records)
+}
+
+fn validate_unique_records(
+    definition: &IndexDefinition,
+    records: Vec<&RuntimeRecord>,
+) -> Result<()> {
+    let mut groups = BTreeMap::<Vec<u8>, Vec<&RuntimeRecord>>::new();
+    for record in records {
+        let values = definition
+            .fields
+            .iter()
+            .map(|field| match field.as_str() {
+                "id" => RuntimeValue::String(record.reference.id.to_string()),
+                "kind" => RuntimeValue::String(record.reference.kind.to_string()),
+                "valid_from" => RuntimeValue::Unsigned(record.valid_from),
+                "valid_to" => record
+                    .valid_to
+                    .map_or(RuntimeValue::Null, RuntimeValue::Unsigned),
+                _ => record
+                    .properties
+                    .get(field)
+                    .cloned()
+                    .unwrap_or(RuntimeValue::Null),
+            })
+            .collect::<Vec<_>>();
+        if values.contains(&RuntimeValue::Null) {
+            continue;
+        }
+        groups
+            .entry(serde_json::to_vec(&values)?)
+            .or_default()
+            .push(record);
+    }
+    for group in groups.values() {
+        for (index, left) in group.iter().enumerate() {
+            if group[index + 1..].iter().any(|right| {
+                windows_overlap(
+                    left.valid_from,
+                    left.valid_to,
+                    right.valid_from,
+                    right.valid_to,
+                )
+            }) {
+                return Err(Error::Catalog(format!(
+                    "unique index {} rejects overlapping duplicate records",
+                    definition.id
+                )));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn windows_overlap(
+    left_from: u64,
+    left_to: Option<u64>,
+    right_from: u64,
+    right_to: Option<u64>,
+) -> bool {
+    left_from < right_to.unwrap_or(u64::MAX) && right_from < left_to.unwrap_or(u64::MAX)
+}
+
+fn is_false(value: &bool) -> bool {
+    !*value
+}
+
+fn build_analytics(
+    definition: &IndexDefinition,
+    rows: &[QueryRow],
+) -> Result<IndexAnalyticsArtifact> {
+    let total_count =
+        u64::try_from(rows.len()).map_err(|_| Error::Budget("index count exceeds u64".into()))?;
+    let groups = if matches!(definition.kind, IndexKind::AggregateCount) {
+        let mut grouped = BTreeMap::<Vec<u8>, (Vec<RuntimeValue>, u64)>::new();
+        for row in rows {
+            let values = definition
+                .fields
+                .iter()
+                .map(|field| row.values.get(field).cloned().unwrap_or(RuntimeValue::Null))
+                .collect::<Vec<_>>();
+            let key = serde_json::to_vec(&values)?;
+            let group = grouped.entry(key).or_insert((values, 0));
+            group.1 = group
+                .1
+                .checked_add(1)
+                .ok_or_else(|| Error::Budget("grouped count overflow".into()))?;
+        }
+        grouped
+            .into_values()
+            .map(|(values, count)| IndexCountGroup { values, count })
+            .collect()
+    } else {
+        Vec::new()
+    };
+    Ok(IndexAnalyticsArtifact {
+        total_count,
+        groups,
+    })
+}
+
+fn validate_analytics(
+    definition: &IndexDefinition,
+    analytics: &IndexAnalyticsArtifact,
+) -> Result<()> {
+    if matches!(definition.kind, IndexKind::Count) && !analytics.groups.is_empty() {
+        return Err(Error::Integrity(
+            "a count index cannot contain groups".into(),
+        ));
+    }
+    if matches!(definition.kind, IndexKind::AggregateCount) {
+        let grouped_total = analytics.groups.iter().try_fold(0_u64, |sum, group| {
+            if group.values.len() != definition.fields.len() || group.count == 0 {
+                return Err(Error::Integrity("grouped-count entry is invalid".into()));
+            }
+            sum.checked_add(group.count)
+                .ok_or_else(|| Error::Integrity("grouped-count total overflow".into()))
+        })?;
+        if grouped_total != analytics.total_count {
+            return Err(Error::Integrity(
+                "grouped-count total does not match its groups".into(),
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn maintenance_evidence<E: Engine>(
+    engine: &E,
+    scope: &ScopeId,
+    id: &ProjectionId,
+    prior: Option<&IndexArtifactReference>,
+    source_cursor: u64,
+    rows: &[QueryRow],
+) -> Result<IndexMaintenanceEvidence> {
+    let Some(prior) = prior else {
+        return Ok(IndexMaintenanceEvidence {
+            mode: "full_build".into(),
+            prior_source_cursor: None,
+            source_cursor,
+            inserted_rows: u64::try_from(rows.len())
+                .map_err(|_| Error::Budget("index row count exceeds u64".into()))?,
+            updated_rows: 0,
+            removed_rows: 0,
+        });
+    };
+    let name = index_artifact_name(scope, id, prior.generation, &prior.artifact_digest);
+    let bytes = engine
+        .get_projection(&name)?
+        .ok_or_else(|| Error::Integrity("prior index artifact is missing".into()))?;
+    let artifact = IndexArtifact::decode(&bytes)?;
+    if artifact.source_cursor != prior.source_cursor || artifact.valid_at != prior.valid_at {
+        return Err(Error::Integrity(
+            "prior index artifact coordinates disagree with the catalogue".into(),
+        ));
+    }
+    let old = artifact
+        .rows
+        .iter()
+        .map(|row| (row.identity.as_str(), row))
+        .collect::<BTreeMap<_, _>>();
+    let new = rows
+        .iter()
+        .map(|row| (row.identity.as_str(), row))
+        .collect::<BTreeMap<_, _>>();
+    let inserted_rows = new
+        .keys()
+        .filter(|identity| !old.contains_key(*identity))
+        .count();
+    let removed_rows = old
+        .keys()
+        .filter(|identity| !new.contains_key(*identity))
+        .count();
+    let updated_rows = new
+        .iter()
+        .filter(|(identity, row)| old.get(*identity).is_some_and(|old| *old != **row))
+        .count();
+    Ok(IndexMaintenanceEvidence {
+        mode: "incremental_reconciliation".into(),
+        prior_source_cursor: Some(prior.source_cursor),
+        source_cursor,
+        inserted_rows: u64::try_from(inserted_rows)
+            .map_err(|_| Error::Budget("inserted row count exceeds u64".into()))?,
+        updated_rows: u64::try_from(updated_rows)
+            .map_err(|_| Error::Budget("updated row count exceeds u64".into()))?,
+        removed_rows: u64::try_from(removed_rows)
+            .map_err(|_| Error::Budget("removed row count exceeds u64".into()))?,
+    })
 }

@@ -3198,3 +3198,34 @@ index.
   sort actually spills, filter/projection/limit semantics against authoritative
   rows, memory/spill/time denial, stamp corruption rejection, and execution
   from both synchronous and already-async engine callers.
+
+## 2026-08-29 — G03-W05 unified index, full-text, and analytics candidate
+
+- Extended the existing query-index catalogue rather than adding specialized
+  side databases. Scalar/compound, unique, count, geo, BM25, filtered
+  materialized-view, and grouped-count definitions share one content-addressed
+  artifact lifecycle and one exact planner boundary.
+- Unique scalar and compound keys are validated across overlapping validity
+  windows during build and again against the prospective transaction. Public
+  index creation and authoritative commit share an engine-owned serialization
+  gate; stale unique artifacts stop accelerating reads but do not stop being
+  constraints.
+- BM25 artifact v2 adds configurable Unicode-alphanumeric/whitespace
+  tokenization, lowercase/case-sensitive analysis, ASCII folding, normalized
+  stop words, token bounds, deterministic English stemming, and configurable
+  `k1`/`b`. Postings persist token positions and UTF-8 byte offsets; query rows
+  expose stable score, matched terms, offsets, and highlighted text.
+- Count and grouped-count artifacts persist analytics beside exact filtered
+  materialized views. Rebuilds remain outside the commit path, compare the
+  prior complete artifact with the new snapshot, record inserted/updated/
+  removed evidence, and atomically publish only the completed generation.
+  Stale artifacts route to authoritative execution and corrupt selected bytes
+  fail closed.
+- Public index contracts expose the new kinds, full-text configuration,
+  maintenance evidence, and bounded analytics summaries. The reviewed additive
+  schema advances the generated OpenAPI digest to
+  `327c4eb616053138feb5231c133b1f2db8496e23c6b1cc4f84030f7b0e2b7260`.
+- Fixed corpora cover scoring, normalization, deterministic ties, offsets, and
+  highlighting. Lifecycle tests cover Memory/Fjall/native/reopen, all index
+  families, generation reconciliation, stale authoritative fallback,
+  corruption denial, and public transaction rejection without cursor advance.

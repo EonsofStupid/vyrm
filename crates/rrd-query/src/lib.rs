@@ -21,17 +21,18 @@ pub use arrow::{
     ArrowSnapshot,
 };
 pub use bm25::{
-    Bm25Analyzer, Bm25Artifact, Bm25Config, Bm25Document, Bm25Hit, Bm25Posting,
-    BM25_ARTIFACT_CONTRACT_VERSION,
+    highlight_offsets, Bm25Analyzer, Bm25Artifact, Bm25Config, Bm25Document, Bm25Hit, Bm25Offset,
+    Bm25Posting, Bm25Stemmer, Bm25Tokenizer, BM25_ARTIFACT_CONTRACT_VERSION,
 };
 pub use catalog::{Catalog, SchemaVersion, SourceWatermarks};
 pub use error::{Error, Result};
 pub use execute::{execute, ExecutionBudget, QueryBatch, QueryExecution, QueryRow};
 pub use fusion::{execute_snapshot, FusionAnalysis, FusionBudget};
 pub use index::{
-    IndexArtifact, IndexArtifactPublication, IndexCatalogue, IndexCatalogueRepository,
-    IndexDefinition, IndexEntry, IndexKind, IndexMutationContext, IndexOperationReceipt,
-    INDEX_ARTIFACT_CONTRACT_VERSION, INDEX_CATALOGUE_CONTRACT_VERSION,
+    validate_unique_indexes, IndexAnalyticsArtifact, IndexArtifact, IndexArtifactPublication,
+    IndexArtifactReference, IndexCatalogue, IndexCatalogueRepository, IndexCountGroup,
+    IndexDefinition, IndexEntry, IndexKind, IndexMaintenanceEvidence, IndexMutationContext,
+    IndexOperationReceipt, INDEX_ARTIFACT_CONTRACT_VERSION, INDEX_CATALOGUE_CONTRACT_VERSION,
 };
 pub use live::{poll_live_query, LiveQueryBudget, LiveQueryDelta, LiveRowChange};
 pub use plan::{

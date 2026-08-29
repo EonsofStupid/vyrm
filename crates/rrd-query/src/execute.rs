@@ -1,7 +1,8 @@
 use crate::{
-    execute_snapshot, index::index_artifact_name, rows_to_arrow_snapshot, ArrowReadStamp,
-    Bm25Artifact, Bm25Config, BoundFilter, Error, FusionAnalysis, FusionBudget, IndexArtifact,
-    IndexKind, LogicalOperator, PhysicalOperator, PhysicalPlan, Result,
+    execute_snapshot, highlight_offsets, index::index_artifact_name, rows_to_arrow_snapshot,
+    ArrowReadStamp, Bm25Artifact, Bm25Config, Bm25Offset, BoundFilter, Error, FusionAnalysis,
+    FusionBudget, IndexArtifact, IndexKind, LogicalOperator, PhysicalOperator, PhysicalPlan,
+    Result,
 };
 use crate::{Join, Projection, Source, TraversalDirection};
 use rrd_core::{
@@ -168,13 +169,34 @@ pub fn execute<E: Engine>(
         rows.retain(|row| bm25_scores.contains_key(&row.identity));
         rows.sort_by(|left, right| {
             bm25_scores[&right.identity]
-                .total_cmp(&bm25_scores[&left.identity])
+                .score
+                .total_cmp(&bm25_scores[&left.identity].score)
                 .then_with(|| left.identity.cmp(&right.identity))
         });
         for row in &mut rows {
+            let evidence = &bm25_scores[&row.identity];
             row.values.insert(
                 "_score".into(),
-                RuntimeValue::Decimal(format!("{:.17}", bm25_scores[&row.identity])),
+                RuntimeValue::Decimal(format!("{:.17}", evidence.score)),
+            );
+            row.values.insert(
+                "_matched_terms".into(),
+                RuntimeValue::List(
+                    evidence
+                        .matched_terms
+                        .iter()
+                        .cloned()
+                        .map(RuntimeValue::String)
+                        .collect(),
+                ),
+            );
+            row.values.insert(
+                "_highlight_offsets".into(),
+                RuntimeValue::List(evidence.offsets.iter().map(public_bm25_offset).collect()),
+            );
+            row.values.insert(
+                "_highlight".into(),
+                RuntimeValue::String(evidence.highlight.clone()),
             );
         }
         if let Some(query_limit) = shape.limit {
@@ -1113,7 +1135,7 @@ fn bm25_scores(
     rows: &[QueryRow],
     shape: &PlanShape,
     artifact: Option<Bm25Artifact>,
-) -> Result<BTreeMap<String, f64>> {
+) -> Result<BTreeMap<String, Bm25Evidence>> {
     let mut matches = shape
         .filters
         .iter()
@@ -1173,11 +1195,57 @@ fn bm25_scores(
             )?
         }
     };
-    Ok(artifact
+    let text_by_identity = rows
+        .iter()
+        .filter_map(|row| match row.values.get(&filter.field) {
+            Some(RuntimeValue::String(text)) => Some((row.identity.as_str(), text.as_str())),
+            _ => None,
+        })
+        .collect::<BTreeMap<_, _>>();
+    artifact
         .search(query, rows.len().max(1))?
         .into_iter()
-        .map(|hit| (hit.identity, hit.score))
-        .collect())
+        .map(|hit| {
+            let text = text_by_identity.get(hit.identity.as_str()).ok_or_else(|| {
+                Error::Integrity(format!(
+                    "BM25 hit {} has no authoritative source text",
+                    hit.identity
+                ))
+            })?;
+            let evidence = Bm25Evidence {
+                score: hit.score,
+                matched_terms: hit.matched_terms,
+                highlight: highlight_offsets(text, &hit.offsets, "<em>", "</em>")?,
+                offsets: hit.offsets,
+            };
+            Ok((hit.identity, evidence))
+        })
+        .collect()
+}
+
+#[derive(Debug)]
+struct Bm25Evidence {
+    score: f64,
+    matched_terms: Vec<String>,
+    offsets: Vec<Bm25Offset>,
+    highlight: String,
+}
+
+fn public_bm25_offset(offset: &Bm25Offset) -> RuntimeValue {
+    RuntimeValue::Map(BTreeMap::from([
+        (
+            "token_ordinal".into(),
+            RuntimeValue::Unsigned(u64::from(offset.token_ordinal)),
+        ),
+        (
+            "byte_start".into(),
+            RuntimeValue::Unsigned(u64::from(offset.byte_start)),
+        ),
+        (
+            "byte_end".into(),
+            RuntimeValue::Unsigned(u64::from(offset.byte_end)),
+        ),
+    ]))
 }
 
 fn apply_projection(row: &mut QueryRow, projection: &Projection) {

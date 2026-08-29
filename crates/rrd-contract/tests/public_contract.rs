@@ -524,6 +524,7 @@ fn query_index_administration_contract_is_bounded_and_strict() {
             .into(),
         unique: false,
         kind: QueryIndexKind::Scalar,
+        full_text: None,
         budget: QueryBudget::default(),
     }
     .validate()

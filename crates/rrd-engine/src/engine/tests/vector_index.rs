@@ -404,6 +404,7 @@ fn persistent_retrieval_indexes_and_hybrid_fusion_survive_reopen_and_staleness()
                 definition_query: "FROM record:document AT VALID 1 KNOWN HEAD PROJECT body".into(),
                 unique: false,
                 kind: QueryIndexKind::Bm25,
+                full_text: None,
                 budget: QueryBudget::default(),
             },
             900,

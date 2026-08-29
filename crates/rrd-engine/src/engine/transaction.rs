@@ -130,6 +130,10 @@ impl RrdEngine {
         request
             .validate()
             .map_err(|error| ServiceError::Contract(error.to_string()))?;
+        let _transaction_guard = self
+            .transaction_gate
+            .lock()
+            .map_err(|_| ServiceError::Storage("engine transaction gate is poisoned".into()))?;
         let actual_digest = request.computed_operation_sha256();
         if actual_digest != request.operation_sha256 {
             return Err(ServiceError::OperationDigestMismatch);
@@ -244,6 +248,8 @@ impl RrdEngine {
                 } else {
                     let transaction = DataTransaction::new(read.clone(), commit.clone())
                         .map_err(|error| ServiceError::Contract(error.to_string()))?;
+                    rrd_query::validate_unique_indexes(&self.storage, &transaction, runtime_at)
+                        .map_err(|error| ServiceError::Query(error.to_string()))?;
                     match self.storage.commit_data_transaction(&transaction) {
                         Ok(outcome) => (outcome, false),
                         Err(error) => match self.storage.runtime_commit_outcome(expected_commit)? {

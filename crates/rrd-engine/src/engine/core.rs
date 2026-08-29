@@ -5,6 +5,10 @@ pub struct RrdEngine {
     pub(crate) objects: rrd_store::LocalObjectStore,
     pub(in crate::engine) instance: CanonicalId,
     pub(crate) token_key: [u8; 32],
+    /// Serializes the local definition/validation/commit boundary. The native
+    /// store already owns the cross-process writer lock; this closes the
+    /// in-process race between publishing a unique index and committing data.
+    pub(crate) transaction_gate: Mutex<()>,
 }
 impl RrdEngine {
     /// Opens a local engine authority for engine-owned control/bootstrap
@@ -36,6 +40,7 @@ impl RrdEngine {
             objects,
             instance,
             token_key,
+            transaction_gate: Mutex::new(()),
         })
     }
 

@@ -57,7 +57,7 @@ use std::fmt;
 pub const PROTOCOL: &str = "rrd";
 pub const PROTOCOL_VERSION: u16 = 1;
 pub const OPENAPI_DOCUMENT_SHA256: &str =
-    "882e5896e390a8f208941beb85ef3577deab5984ac03ddda441b3e46549d6f5c";
+    "327c4eb616053138feb5231c133b1f2db8496e23c6b1cc4f84030f7b0e2b7260";
 pub const MAX_ID_BYTES: usize = 128;
 pub const MAX_MESSAGE_BYTES: usize = 4_096;
 pub const MAX_CAPABILITIES: usize = 512;
@@ -444,6 +444,8 @@ pub struct EnsureQueryIndex {
     pub unique: bool,
     #[serde(default)]
     pub kind: QueryIndexKind,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub full_text: Option<QueryFullTextConfiguration>,
     #[serde(default)]
     pub budget: QueryBudget,
 }
@@ -453,11 +455,113 @@ pub struct EnsureQueryIndex {
 pub enum QueryIndexKind {
     #[default]
     Scalar,
+    Count,
+    Geo,
+    MaterializedView,
+    AggregateCount,
     Bm25,
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum QueryTextAnalyzer {
+    #[default]
+    UnicodeLowercase,
+    UnicodeCaseSensitive,
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum QueryTextTokenizer {
+    #[default]
+    UnicodeAlphanumeric,
+    Whitespace,
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum QueryTextStemmer {
+    #[default]
+    None,
+    English,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct QueryFullTextConfiguration {
+    #[serde(default)]
+    pub analyzer: QueryTextAnalyzer,
+    #[serde(default)]
+    pub tokenizer: QueryTextTokenizer,
+    #[serde(default)]
+    pub ascii_folding: bool,
+    #[serde(default)]
+    pub stop_words: BTreeSet<String>,
+    #[serde(default = "default_query_min_token_chars")]
+    pub min_token_chars: u16,
+    #[serde(default = "default_query_max_token_chars")]
+    pub max_token_chars: u16,
+    #[serde(default)]
+    pub stemmer: QueryTextStemmer,
+    #[serde(default = "default_query_bm25_k1_micros")]
+    pub k1_micros: u32,
+    #[serde(default = "default_query_bm25_b_micros")]
+    pub b_micros: u32,
+}
+
+impl Default for QueryFullTextConfiguration {
+    fn default() -> Self {
+        Self {
+            analyzer: QueryTextAnalyzer::default(),
+            tokenizer: QueryTextTokenizer::default(),
+            ascii_folding: false,
+            stop_words: BTreeSet::new(),
+            min_token_chars: default_query_min_token_chars(),
+            max_token_chars: default_query_max_token_chars(),
+            stemmer: QueryTextStemmer::default(),
+            k1_micros: default_query_bm25_k1_micros(),
+            b_micros: default_query_bm25_b_micros(),
+        }
+    }
+}
+
+impl QueryFullTextConfiguration {
+    fn validate(&self) -> Result<()> {
+        if self.min_token_chars == 0
+            || self.min_token_chars > self.max_token_chars
+            || self.max_token_chars > 40
+            || self.k1_micros == 0
+            || self.k1_micros > 10_000_000
+            || self.b_micros > 1_000_000
+            || self.stop_words.len() > 10_000
+            || self.stop_words.iter().any(|word| word.is_empty())
+        {
+            return invalid("full-text index configuration is outside supported bounds");
+        }
+        Ok(())
+    }
+}
+
+const fn default_query_min_token_chars() -> u16 {
+    1
+}
+const fn default_query_max_token_chars() -> u16 {
+    40
+}
+const fn default_query_bm25_k1_micros() -> u32 {
+    1_200_000
+}
+const fn default_query_bm25_b_micros() -> u32 {
+    750_000
 }
 
 impl EnsureQueryIndex {
     pub fn validate(&self) -> Result<()> {
+        match (self.kind, &self.full_text) {
+            (QueryIndexKind::Bm25, Some(config)) => config.validate()?,
+            (QueryIndexKind::Bm25, None) | (_, None) => {}
+            (_, Some(_)) => return invalid("full_text configuration requires kind bm25"),
+        }
         ExecuteQuery {
             scope: self.scope.clone(),
             query: self.definition_query.clone(),
@@ -502,13 +606,32 @@ pub struct QueryIndexSnapshot {
     pub unique: bool,
     #[serde(default)]
     pub kind: QueryIndexKind,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub full_text: Option<QueryFullTextConfiguration>,
     pub generation: u64,
     pub source_cursor: u64,
     pub built_valid_at: Option<u64>,
     pub artifact_rows: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub analytics_total_count: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub analytics_group_count: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub maintenance: Option<QueryIndexMaintenanceSnapshot>,
     pub configuration_sha256: String,
     pub artifact_sha256: String,
     pub state: QueryIndexState,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct QueryIndexMaintenanceSnapshot {
+    pub mode: String,
+    pub prior_source_cursor: Option<u64>,
+    pub source_cursor: u64,
+    pub inserted_rows: u64,
+    pub updated_rows: u64,
+    pub removed_rows: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]

@@ -1,11 +1,13 @@
 use rrd_core::{
-    digest, ProjectionId, ProjectionState, RuntimeCommit, RuntimeMutation, RuntimePropertySchema,
-    RuntimeRecord, RuntimeRecordSchema, RuntimeRef, RuntimeSchemaRegistry, RuntimeType,
+    digest, DataTransaction, GeoPoint, GeoValue, ProjectionId, ProjectionState, RuntimeCommit,
+    RuntimeGeo, RuntimeLogicalModel, RuntimeMutation, RuntimePropertySchema, RuntimeRecord,
+    RuntimeRecordSchema, RuntimeRef, RuntimeSchemaRegistry, RuntimeTableSchema, RuntimeType,
     RuntimeValue, RuntimeValueType, ScopeId,
 };
 use rrd_query::{
-    bind, execute, plan, Catalog, Error, ExecutionBudget, IndexArtifactPublication,
-    IndexCatalogueRepository, IndexDefinition, IndexMutationContext, Parameters,
+    bind, execute, plan, validate_unique_indexes, Bm25Config, Catalog, ComparisonOperator, Error,
+    ExecutionBudget, Filter, IndexArtifact, IndexArtifactPublication, IndexCatalogueRepository,
+    IndexDefinition, IndexKind, IndexMutationContext, Parameters, ValueExpr,
 };
 use rrd_query::{parse, Source};
 use rrd_store::{Durability, Engine, MemoryEngine, NativeEngine, Store};
@@ -87,6 +89,7 @@ fn definition() -> IndexDefinition {
         fields: vec!["status".into(), "title".into()],
         unique: false,
         kind: rrd_query::IndexKind::Scalar,
+        filters: Vec::new(),
     }
 }
 
@@ -195,6 +198,16 @@ fn exercise<E: Engine>(engine: &E) {
                 valid_at: 20,
                 artifact_rows: 3,
                 artifact_digest: digest::sha256_hex(b"stale"),
+                maintenance: rrd_query::IndexMaintenanceEvidence {
+                    mode: "full_build".into(),
+                    prior_source_cursor: None,
+                    source_cursor: 4,
+                    inserted_rows: 3,
+                    updated_rows: 0,
+                    removed_rows: 0,
+                },
+                analytics_total_count: None,
+                analytics_group_count: None,
             },
         ),
         Err(Error::Catalog(_))
@@ -208,6 +221,15 @@ fn exercise<E: Engine>(engine: &E) {
         )
         .unwrap();
     assert!(ready.entries[&entry.definition.id].is_usable_at(4, 20));
+    let maintenance = ready.entries[&entry.definition.id]
+        .maintenance
+        .as_ref()
+        .unwrap();
+    assert_eq!(maintenance.mode, "incremental_reconciliation");
+    assert_eq!(maintenance.prior_source_cursor, Some(3));
+    assert_eq!(maintenance.inserted_rows, 1);
+    assert_eq!(maintenance.updated_rows, 0);
+    assert_eq!(maintenance.removed_rows, 0);
     let historical_catalogue = Catalog::capture(engine, &scope()).unwrap();
     let historical_query = parse(
         "FROM record:document AT VALID 10 KNOWN 3 WHERE status = \"open\" PROJECT title EXPLAIN CONTRACT",
@@ -421,4 +443,298 @@ fn operation_receipts_replay_and_reject_idempotency_collisions() {
         repository.operation_receipt("ensure-key", &digest::sha256_hex(b"different")),
         Err(Error::Catalog(_))
     ));
+}
+
+#[test]
+fn count_grouped_count_materialized_view_and_bm25_are_durable_artifacts() {
+    let engine = MemoryEngine::new();
+    let query_catalogue = seed(&engine);
+    let repository = IndexCatalogueRepository::new(&engine, scope());
+    let definitions = [
+        IndexDefinition {
+            id: ProjectionId::new("document-count").unwrap(),
+            source: definition().source,
+            fields: Vec::new(),
+            unique: false,
+            kind: IndexKind::Count,
+            filters: Vec::new(),
+        },
+        IndexDefinition {
+            id: ProjectionId::new("document-status-count").unwrap(),
+            source: definition().source,
+            fields: vec!["status".into()],
+            unique: false,
+            kind: IndexKind::AggregateCount,
+            filters: Vec::new(),
+        },
+        IndexDefinition {
+            id: ProjectionId::new("open-documents").unwrap(),
+            source: definition().source,
+            fields: vec!["status".into(), "title".into()],
+            unique: false,
+            kind: IndexKind::MaterializedView,
+            filters: vec![Filter {
+                field: "status".into(),
+                comparison: ComparisonOperator::Equal,
+                value: ValueExpr::Literal(RuntimeValue::String("open".into())),
+            }],
+        },
+        IndexDefinition {
+            id: ProjectionId::new("document-title-bm25").unwrap(),
+            source: definition().source,
+            fields: vec!["title".into()],
+            unique: false,
+            kind: IndexKind::Bm25 {
+                config: Bm25Config {
+                    ascii_folding: true,
+                    ..Bm25Config::default()
+                },
+            },
+            filters: Vec::new(),
+        },
+    ];
+    for (ordinal, definition) in definitions.into_iter().enumerate() {
+        let at = u64::try_from(ordinal).unwrap() + 10;
+        let id = definition.id.clone();
+        repository
+            .create(
+                &context(at, &format!("create-{id}")),
+                &query_catalogue,
+                definition,
+            )
+            .unwrap();
+        let ready = repository
+            .build(
+                &context(at + 20, &format!("build-{id}")),
+                &id,
+                10,
+                &ExecutionBudget::default(),
+            )
+            .unwrap();
+        let entry = &ready.entries[&id];
+        assert!(entry.is_usable_at(3, 10));
+        let artifact_name = format!(
+            "query-index/{}/{}/{}/{}",
+            scope(),
+            id,
+            entry.stamp.generation,
+            entry.stamp.artifact_digest
+        );
+        let artifact =
+            IndexArtifact::decode(&engine.get_projection(&artifact_name).unwrap().unwrap())
+                .unwrap();
+        match entry.definition.kind {
+            IndexKind::Count => {
+                assert_eq!(artifact.analytics.unwrap().total_count, 2);
+                assert_eq!(entry.analytics_group_count, Some(0));
+            }
+            IndexKind::AggregateCount => {
+                let analytics = artifact.analytics.unwrap();
+                assert_eq!(analytics.total_count, 2);
+                assert_eq!(analytics.groups.len(), 2);
+            }
+            IndexKind::MaterializedView => assert_eq!(artifact.rows.len(), 1),
+            IndexKind::Bm25 { .. } => assert!(artifact.bm25.is_some()),
+            _ => unreachable!(),
+        }
+    }
+
+    let captured = Catalog::capture(&engine, &scope()).unwrap();
+    let view_query = parse(
+        "FROM record:document AT VALID 10 KNOWN HEAD WHERE status = \"open\" PROJECT status, title EXPLAIN CONTRACT",
+    )
+    .unwrap();
+    let view_plan = plan(&bind(&view_query, &Parameters::new(), &captured).unwrap()).unwrap();
+    assert_eq!(
+        view_plan
+            .explanation
+            .candidates
+            .iter()
+            .find(|candidate| candidate.selected)
+            .unwrap()
+            .name,
+        "index:open-documents"
+    );
+    let query =
+        parse("FROM record:document AT VALID 10 KNOWN HEAD WHERE title MATCH \"alpha\" PROJECT *")
+            .unwrap();
+    let execution = execute(
+        &engine,
+        &plan(&bind(&query, &Parameters::new(), &captured).unwrap()).unwrap(),
+        &ExecutionBudget::default(),
+    )
+    .unwrap();
+    let values = &execution.batches[0].rows[0].values;
+    assert!(values.contains_key("_score"));
+    assert!(values.contains_key("_matched_terms"));
+    assert!(values.contains_key("_highlight_offsets"));
+    assert_eq!(
+        values["_highlight"],
+        RuntimeValue::String("<em>Alpha</em>".into())
+    );
+}
+
+#[test]
+fn compound_unique_constraint_rejects_a_prospective_commit_even_when_index_is_stale() {
+    let engine = MemoryEngine::new();
+    let query_catalogue = seed(&engine);
+    let repository = IndexCatalogueRepository::new(&engine, scope());
+    let mut unique = definition();
+    unique.id = ProjectionId::new("document-status-unique").unwrap();
+    unique.fields = vec!["status".into()];
+    unique.unique = true;
+    repository
+        .create(
+            &context(2, "create-unique"),
+            &query_catalogue,
+            unique.clone(),
+        )
+        .unwrap();
+    repository
+        .build(
+            &context(3, "build-unique"),
+            &unique.id,
+            10,
+            &ExecutionBudget::default(),
+        )
+        .unwrap();
+    let rebuilding = repository
+        .begin_rebuild(&context(4, "rebuild-unique"), &unique.id)
+        .unwrap();
+    assert!(rebuilding.entries[&unique.id].unique_validated);
+    assert_eq!(
+        rebuilding.entries[&unique.id].stamp.state,
+        ProjectionState::Building
+    );
+    let read = engine.runtime_read_stamp(&scope()).unwrap();
+    let transaction = DataTransaction::new(
+        read.clone(),
+        RuntimeCommit {
+            scope: scope(),
+            at: 20,
+            actor: "test".into(),
+            expected_cursor: read.commit_cursor,
+            mutations: vec![RuntimeMutation::Record {
+                record: RuntimeRecord {
+                    reference: RuntimeRef::new("document", "gamma").unwrap(),
+                    valid_from: 10,
+                    valid_to: None,
+                    properties: BTreeMap::from([
+                        ("status".into(), RuntimeValue::String("open".into())),
+                        ("title".into(), RuntimeValue::String("Gamma".into())),
+                    ]),
+                },
+            }],
+        },
+    )
+    .unwrap();
+    assert!(matches!(
+        validate_unique_indexes(&engine, &transaction, 20),
+        Err(Error::Catalog(message)) if message.contains("rejects overlapping duplicate records")
+    ));
+}
+
+#[test]
+fn geo_index_builds_from_the_same_catalogue_and_read_stamp() {
+    let engine = MemoryEngine::new();
+    let geo_scope = ScopeId::new("instance:geo-index-test").unwrap();
+    let mut registry = RuntimeSchemaRegistry::empty(1, "geo fixture");
+    registry.records.insert(
+        RuntimeType::new("document").unwrap(),
+        RuntimeRecordSchema::default(),
+    );
+    registry.tables.insert(
+        RuntimeType::new("location").unwrap(),
+        RuntimeTableSchema::schemaless(RuntimeLogicalModel::Geo),
+    );
+    engine
+        .commit_runtime(&RuntimeCommit {
+            scope: geo_scope.clone(),
+            at: 1,
+            actor: "test".into(),
+            expected_cursor: 0,
+            mutations: vec![
+                RuntimeMutation::Schema { registry },
+                RuntimeMutation::Record {
+                    record: RuntimeRecord {
+                        reference: RuntimeRef::new("document", "alpha").unwrap(),
+                        valid_from: 10,
+                        valid_to: None,
+                        properties: BTreeMap::new(),
+                    },
+                },
+                RuntimeMutation::Geo {
+                    geo: RuntimeGeo {
+                        reference: RuntimeRef::new("location", "alpha").unwrap(),
+                        subject: RuntimeRef::new("document", "alpha").unwrap(),
+                        field: "position".into(),
+                        valid_from: 10,
+                        valid_to: None,
+                        value: GeoValue::Point {
+                            point: GeoPoint {
+                                longitude: -122.4,
+                                latitude: 37.8,
+                            },
+                        },
+                        properties: BTreeMap::new(),
+                    },
+                },
+            ],
+        })
+        .unwrap();
+    let catalogue = Catalog::capture(&engine, &geo_scope).unwrap();
+    let repository = IndexCatalogueRepository::new(&engine, geo_scope.clone());
+    let id = ProjectionId::new("location-point").unwrap();
+    repository
+        .create(
+            &context(2, "create-geo"),
+            &catalogue,
+            IndexDefinition {
+                id: id.clone(),
+                source: Source::Geo {
+                    kind: RuntimeType::new("location").unwrap(),
+                },
+                fields: vec![
+                    "geometry_kind".into(),
+                    "longitude".into(),
+                    "latitude".into(),
+                ],
+                unique: false,
+                kind: IndexKind::Geo,
+                filters: Vec::new(),
+            },
+        )
+        .unwrap();
+    let ready = repository
+        .build(
+            &context(3, "build-geo"),
+            &id,
+            10,
+            &ExecutionBudget::default(),
+        )
+        .unwrap();
+    assert!(ready.entries[&id].is_usable_at(3, 10));
+    assert_eq!(ready.entries[&id].artifact_rows, Some(1));
+    let captured = Catalog::capture(&engine, &geo_scope).unwrap();
+    let query = parse(
+        "FROM geo:location AT VALID 10 KNOWN HEAD WHERE geometry_kind = \"point\" PROJECT longitude, latitude EXPLAIN CONTRACT",
+    )
+    .unwrap();
+    let physical = plan(&bind(&query, &Parameters::new(), &captured).unwrap()).unwrap();
+    assert_eq!(
+        physical
+            .explanation
+            .candidates
+            .iter()
+            .find(|candidate| candidate.selected)
+            .unwrap()
+            .name,
+        "index:location-point"
+    );
+    assert_eq!(
+        execute(&engine, &physical, &ExecutionBudget::default())
+            .unwrap()
+            .returned_rows,
+        1
+    );
 }
