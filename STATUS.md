@@ -3,9 +3,9 @@
 ## Current recovery truth
 
 The foundation is not complete, but progress is now recorded against one
-enforced 65-item board rather than an informal checklist. G00-W01 through
-G00-W05, G01-W01 through G01-W04, G02-W01 through G02-W06, and G03-W01 are
-verified together with G03-W02: 17/65. G03-W03 is active. The repository contains substantial executable
+enforced 65-item board rather than an informal checklist. All G00, G01, G02,
+G03, and G05 items plus G04-W01 through G04-W04 are verified: 30/65. G04-W05
+is active. The repository contains substantial executable
 storage, query, vector, reasoning, server, security, SDK, estate, and
 Connectome code under one `RrdEngine` composition root. Connectome is
 client-only, the CLI opens `RrdEngine`, and the security and estate product
@@ -867,8 +867,14 @@ remote repetition remains required before compatibility retirement.
   TurboQuant ensure shape now resumes/activates this same lifecycle; new generic
   quantized publication is denied, old generic TurboQuant views are suppressed,
   and lifecycle restoration cannot perturb the HNSW catalogue CAS revision. No
-  Qdrant superiority or residual-QJL claim is made. Generated outward bindings,
-  physical memory tiers, larger fixed-hardware evidence, and GPU remain open.
+  Qdrant superiority or residual-QJL claim is made. G04-W05 adds one
+  engine-owned physical residency authority: per-named-vector pinned retention
+  with hard admission, cached byte-bounded LRU, transient cold mmap/owned
+  loads, active-generation-only metadata replay, pressure-aware exact fallback,
+  resource exhaustion for required ANN, and restart reconstruction from empty
+  process state. Independent per-structure tiers, automatic warming,
+  distributed placement, generated outward bindings, larger fixed-hardware
+  evidence, and GPU remain open. See `docs/rrd-vector-memory-tiers-v1.md`.
 
 - JavaScript application-run claims use script-sensitive canonical event
   subjects such as `package:bun:test`, `package:pnpm:run:typecheck`, and

@@ -2,7 +2,7 @@
 
 | Field | Value |
 |-------|-------|
-| Status | Executable board has 7/65 verified; no item active on 2026-08-27; G01-W03 is the next dependency-ready item |
+| Status | Executable board has 30/65 verified; G04-W05 is active on 2026-08-29 |
 | Governs | Historical sequencing plus executable capability work not superseded by the current identity contract |
 | Does not govern | Terminology or product architecture; those are `docs/platform/README.md` and `docs/rrflow-rrd-architecture.md` |
 
@@ -15,10 +15,10 @@ or names conflict with them, the canonical documents are authoritative.
 
 [`rrflow.workplan.toml`](rrflow.workplan.toml), installed and replayed from
 `.rrflow/rrd`, is the only active implementation sequence. It contains 13
-dependency gates and 65 evidence-gated work items. G00-W01 through G00-W05 and
-G01-W01 through G01-W02 are persisted as verified; no item is active. No later engine,
-provider, Connectome, qualification, or competitor-evidence item is actionable
-until its recorded dependencies verify.
+dependency gates and 65 evidence-gated work items. All G00, G01, G02, G03, and
+G05 items plus G04-W01 through G04-W04 are persisted as verified (30/65).
+G04-W05 is active. No later engine, provider, Connectome, qualification, or
+competitor-evidence item is actionable until its recorded dependencies verify.
 
 The R0-R7 table below is retained as the recovery analysis that produced the
 executable G00-G12 board. It is not a second scheduler and does not authorize
@@ -339,10 +339,15 @@ boundaries so it cannot launch multiple authorities against one database.
 > historical TurboQuant ensure request is now only an idempotent compatibility
 > adapter over this lifecycle; the generic publisher cannot create a parallel
 > quantized catalogue, and lifecycle restore is vector-catalogue revision-
-> neutral. The paper's residual QJL variant, physical memory-tier policy, GPU
-> qualification,
-> and generated G06 bindings remain gated. See
-> `docs/rrd-quantization-lifecycle-v1.md`.
+> neutral. One engine-owned residency authority now makes each named vector's
+> pinned/cached/cold declaration physical: hard-bounded retained pinned bytes,
+> byte-bounded cached LRU, transient verified cold mmap/owned reads,
+> metadata-first active-generation loading, pressure fallback, and empty-cache
+> restart recovery are executable. The paper's residual QJL variant, GPU
+> qualification, independent per-structure tiers, automatic warming, and
+> generated G06 bindings remain gated. See
+> `docs/rrd-quantization-lifecycle-v1.md` and
+> `docs/rrd-vector-memory-tiers-v1.md`.
 
 > **M6 embedding/edge overlay (2026-08-19).** The local kernel gate is closed.
 > `rrd-inference` now provides source-digest/model/read-stamp-bound jobs, two-read

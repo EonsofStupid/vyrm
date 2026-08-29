@@ -3,7 +3,8 @@ use rrd_core::{
     VectorValue,
 };
 use rrd_engine::{
-    publish_traced_vector_artifact, reopen_vector_runtime, vector_artifact_catalog_entries,
+    publish_traced_vector_artifact, reopen_vector_runtime, reopen_vector_runtime_metadata,
+    vector_artifact_catalog_entries,
 };
 use rrd_store::{DataRuntime, Engine, LocalObjectStore, MemoryEngine, NativeEngine, Store};
 use rrd_vector::{
@@ -43,6 +44,10 @@ fn candidates() -> Vec<VectorCandidate> {
 }
 
 fn hnsw(candidates: Vec<VectorCandidate>) -> HnswIndex {
+    hnsw_generation(candidates, 1)
+}
+
+fn hnsw_generation(candidates: Vec<VectorCandidate>, generation: u64) -> HnswIndex {
     HnswIndex::build(
         HnswConfig {
             id: ProjectionId::new("vector:hnsw:body").unwrap(),
@@ -57,11 +62,54 @@ fn hnsw(candidates: Vec<VectorCandidate>) -> HnswIndex {
             seed: 7,
             filter_properties: BTreeSet::new(),
         },
-        1,
+        generation,
         3,
         candidates,
     )
     .unwrap()
+}
+
+#[test]
+fn metadata_manifest_exposes_only_the_active_projection_generation() {
+    let object_dir = tempdir().unwrap();
+    let data = DataRuntime::new(
+        MemoryEngine::new(),
+        LocalObjectStore::open(object_dir.path()).unwrap(),
+    );
+    let canonical = candidates();
+    let mut runtime = VectorRuntime::new(canonical.clone()).unwrap();
+    publish_traced_vector_artifact(
+        &data,
+        &mut runtime,
+        0,
+        hnsw_generation(canonical.clone(), 1).into(),
+        "operator:catalog-test",
+        100,
+    )
+    .unwrap();
+    publish_traced_vector_artifact(
+        &data,
+        &mut runtime,
+        1,
+        hnsw_generation(canonical.clone(), 2).into(),
+        "operator:catalog-test",
+        200,
+    )
+    .unwrap();
+
+    let manifest = reopen_vector_runtime_metadata(&data, &scope(), canonical).unwrap();
+    assert_eq!(manifest.runtime.catalog().revision, 2);
+    assert_eq!(manifest.bindings.len(), 1);
+    let binding = manifest.bindings.values().next().unwrap();
+    assert_eq!(binding.descriptor.stamp().generation, 2);
+    assert_eq!(
+        manifest
+            .runtime
+            .catalog()
+            .entries
+            .get(&binding.descriptor.stamp().id),
+        Some(&binding.descriptor)
+    );
 }
 
 fn turboquant(candidates: Vec<VectorCandidate>) -> TurboQuantSegment {

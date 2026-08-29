@@ -807,9 +807,12 @@ identities.
   checksummed mmap reopen, corruption/update/recovery tests, SIMD/scalar
   differential, exact reranking, and a fixed 512×64 bias/recall/memory/
   compression/latency matrix pass. Generated outward bindings and larger
-  fixed-hardware production evidence remain open; physical placement belongs
-  to the next memory-tier item rather than another codec lifecycle.
-- Per-structure pinned/cached/cold memory policy.
+  fixed-hardware production evidence remain open.
+- Per-named-vector pinned/cached/cold policy is physically enforced by one
+  engine-owned manager: hard pinned admission, cached byte-bounded LRU,
+  transient cold mmap/owned loads, pressure fallback, and restart recovery
+  pass. Independent per-structure tiers, warming, and distributed residency
+  remain open.
 - Physical GPU indexing with CPU byte/semantic differential and fallback.
 - Server/client inference for local and provider models with digest provenance.
 

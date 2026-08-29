@@ -146,9 +146,9 @@ Sources: [indexing](https://qdrant.tech/documentation/manage-data/indexing/),
 | Vulkan GPU support across NVIDIA/AMD and selected devices | **Absent** |
 | CPU SIMD scoring | **Verified locally** for compact exact and four-metric HNSW traversal with scalar differential |
 | mmap/on-disk vector access | **Verified locally** for compact dense exact artifacts |
-| Per-structure `pinned`, `cached`, and `cold` memory tiers | **Absent** |
+| Per-structure `pinned`, `cached`, and `cold` memory tiers | **Partial/engine verified** — physical hard-bounded pinned, byte-bounded cached LRU, and transient cold mmap/owned behavior is enforced per named vector, not independently per structure |
 | Independent tiers for original dense vectors, HNSW, quantized vectors, sparse index, payload and payload indexes | **Absent** |
-| Startup cache warming and OS-evictable mmap tiers | **Absent** policy/control surface |
+| Startup cache warming and OS-evictable mmap tiers | **Partial** — cold supported codecs use verified read-only mmap and restart with empty process residency; automatic warming and explicit OS page-cache control are absent |
 | On-disk vectors with in-memory graph | **Partial** — compact vector bytes mmap; HNSW artifact is not compact/on-disk production form |
 | Strict-mode rejection of inefficient/unbounded queries and updates | **Partial** — resource contracts exist, not Qdrant-complete controls |
 | Rate limits, filter-complexity, batch/result, timeout, index-count and storage caps | **Partial/mostly absent** |
@@ -171,7 +171,7 @@ Source: [Qdrant quantization](https://qdrant.tech/documentation/manage-data/quan
 | Per-vector quantization settings | **Partial** — authenticated configuration is per named-vector artifact, not per point and not transport-bound yet |
 | Store quantized and original vectors together | **Verified in the engine** — derived immutable objects coexist with authoritative full-f32 history |
 | Oversampling and exact rescoring controls | **Engine core present** — bounded `exact_rerank` controls candidate count and final canonical scoring; no separate ratio-named outward field |
-| Quantized-vector memory tier and inline storage controls | **Absent** |
+| Quantized-vector memory tier and inline storage controls | **Partial/engine verified** — active quantized artifacts obey the named-vector physical tier; independent quantized/original settings and inline controls are absent |
 | Recall/compression/speed validation guidance and benchmark matrix | **Local engine evidence present** for 11 fixed 512×64 rows; production fixed-hardware scale/SLO qualification remains absent |
 
 The standalone `ScalarQuantizedVector` remains a scalar oracle primitive and is

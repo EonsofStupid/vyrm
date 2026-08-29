@@ -68,6 +68,12 @@ pub trait ImmutableObjectStore: Send + Sync {
     ) -> Result<VerifiedObject>;
     fn verify(&self, sha256: &str) -> Result<VerifiedObject>;
     fn get(&self, reference: &ObjectReference) -> Result<Vec<u8>>;
+    /// Returns a verified immutable local path when this backend can expose
+    /// one safely. Callers may use it for read-only mmap; remote and in-memory
+    /// authorities return `None` and retain the verified streaming boundary.
+    fn verified_path(&self, _reference: &ObjectReference) -> Result<Option<PathBuf>> {
+        Ok(None)
+    }
     fn inventory(&self, reachable: &BTreeSet<String>) -> Result<ObjectInventory>;
     fn reclaim_orphans(&self, unreachable: &BTreeSet<String>) -> Result<Vec<String>>;
 }
@@ -253,6 +259,10 @@ impl ImmutableObjectStore for ObjectStoreBox {
 
     fn get(&self, reference: &ObjectReference) -> Result<Vec<u8>> {
         self.0.get(reference)
+    }
+
+    fn verified_path(&self, reference: &ObjectReference) -> Result<Option<PathBuf>> {
+        self.0.verified_path(reference)
     }
 
     fn inventory(&self, reachable: &BTreeSet<String>) -> Result<ObjectInventory> {
@@ -661,6 +671,10 @@ impl ImmutableObjectStore for LocalObjectStore {
 
     fn get(&self, reference: &ObjectReference) -> Result<Vec<u8>> {
         LocalObjectStore::get(self, reference)
+    }
+
+    fn verified_path(&self, reference: &ObjectReference) -> Result<Option<PathBuf>> {
+        LocalObjectStore::verified_path(self, reference).map(Some)
     }
 
     fn inventory(&self, reachable: &BTreeSet<String>) -> Result<ObjectInventory> {

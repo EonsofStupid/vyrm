@@ -15,6 +15,10 @@ pub struct RrdEngine {
     /// wrapped call from a direct embedded call and make the latter leave a
     /// durable authorization or denial record as well.
     pub(crate) active_invocations: Mutex<BTreeMap<(String, String), std::thread::ThreadId>>,
+    /// One process-local physical authority for decoded vector artifacts.
+    /// Durable catalogue/object state remains in `storage` and `objects`;
+    /// this bounded manager alone owns serving residency across requests.
+    pub(crate) vector_residency: Mutex<crate::VectorResidencyManager>,
 }
 impl RrdEngine {
     /// Opens a local engine authority for engine-owned control/bootstrap
@@ -39,8 +43,24 @@ impl RrdEngine {
     }
 
     pub fn open(root: &Path, instance: CanonicalId, token_key: [u8; 32]) -> Result<Self> {
+        Self::open_with_vector_residency(
+            root,
+            instance,
+            token_key,
+            crate::VectorResidencyLimits::default(),
+        )
+    }
+
+    pub fn open_with_vector_residency(
+        root: &Path,
+        instance: CanonicalId,
+        token_key: [u8; 32],
+        limits: crate::VectorResidencyLimits,
+    ) -> Result<Self> {
         let storage = PersistentEngine::open(root)?;
         let objects = rrd_store::LocalObjectStore::open(root.join("immutable"))?;
+        let vector_residency = crate::VectorResidencyManager::new(limits)
+            .map_err(|error| ServiceError::Vector(error.to_string()))?;
         Ok(Self {
             storage: EngineBox::persistent(storage),
             objects: ObjectStoreBox::new(objects),
@@ -49,6 +69,7 @@ impl RrdEngine {
             token_key,
             transaction_gate: Mutex::new(()),
             active_invocations: Mutex::new(BTreeMap::new()),
+            vector_residency: Mutex::new(vector_residency),
         })
     }
 
@@ -58,7 +79,22 @@ impl RrdEngine {
     /// methods as embedded and daemon profiles. Durability-only operations
     /// fail explicitly because this mode has no storage path.
     pub fn memory(instance: CanonicalId, token_key: [u8; 32]) -> Self {
-        Self {
+        Self::memory_with_vector_residency(
+            instance,
+            token_key,
+            crate::VectorResidencyLimits::default(),
+        )
+        .expect("default vector residency limits are valid")
+    }
+
+    pub fn memory_with_vector_residency(
+        instance: CanonicalId,
+        token_key: [u8; 32],
+        limits: crate::VectorResidencyLimits,
+    ) -> Result<Self> {
+        let vector_residency = crate::VectorResidencyManager::new(limits)
+            .map_err(|error| ServiceError::Vector(error.to_string()))?;
+        Ok(Self {
             storage: EngineBox::memory(),
             objects: ObjectStoreBox::new(MemoryObjectStore::new()),
             storage_root: None,
@@ -66,7 +102,15 @@ impl RrdEngine {
             token_key,
             transaction_gate: Mutex::new(()),
             active_invocations: Mutex::new(BTreeMap::new()),
-        }
+            vector_residency: Mutex::new(vector_residency),
+        })
+    }
+
+    pub fn vector_residency_snapshot(&self) -> Result<crate::VectorResidencySnapshot> {
+        self.vector_residency
+            .lock()
+            .map(|manager| manager.snapshot())
+            .map_err(|_| ServiceError::Storage("vector residency lock is poisoned".into()))
     }
 
     pub fn has_persistent_root(&self) -> bool {

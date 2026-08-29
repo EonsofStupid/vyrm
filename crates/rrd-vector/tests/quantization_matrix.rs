@@ -21,8 +21,8 @@ const MAX_BUILD_NANOSECONDS_PER_ARTIFACT: u128 = 5_000_000_000;
 const MAX_SEARCH_MATRIX_NANOSECONDS_PER_ARTIFACT: u128 = 5_000_000_000;
 
 enum MatrixArtifact {
-    Quantized(QuantizedSegment),
-    Turbo(TurboQuantSegment),
+    Quantized(Box<QuantizedSegment>),
+    Turbo(Box<TurboQuantSegment>),
 }
 
 impl MatrixArtifact {
@@ -311,7 +311,7 @@ fn build(method: MatrixMethod, scope: &ScopeId, candidates: &[VectorCandidate]) 
     let id = ProjectionId::new(format!("quant-matrix-{}", method.label())).unwrap();
     match method {
         MatrixMethod::Scalar | MatrixMethod::Product(_) | MatrixMethod::Binary => {
-            MatrixArtifact::Quantized(
+            MatrixArtifact::Quantized(Box::new(
                 QuantizedSegment::build(
                     QuantizedSegmentConfig {
                         id,
@@ -335,9 +335,9 @@ fn build(method: MatrixMethod, scope: &ScopeId, candidates: &[VectorCandidate]) 
                     candidates.to_vec(),
                 )
                 .unwrap(),
-            )
+            ))
         }
-        MatrixMethod::Turbo(bits) => MatrixArtifact::Turbo(
+        MatrixMethod::Turbo(bits) => MatrixArtifact::Turbo(Box::new(
             TurboQuantSegment::build(
                 TurboQuantSegmentConfig {
                     id,
@@ -355,7 +355,7 @@ fn build(method: MatrixMethod, scope: &ScopeId, candidates: &[VectorCandidate]) 
                 candidates.to_vec(),
             )
             .unwrap(),
-        ),
+        )),
     }
 }
 

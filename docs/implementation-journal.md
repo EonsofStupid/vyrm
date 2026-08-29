@@ -1,9 +1,35 @@
 # RRFlow implementation journal
 
+## 2026-08-29 — physical vector memory tiers
+
+- Commit: `pending`. G04-W05 is active at the authoritative 30/65 board state;
+  this entry does not claim board verification before the exact gate completes.
+- One process-local `VectorResidencyManager` is owned by `RrdEngine`; collection
+  memory-tier declarations no longer stop at catalogue metadata.
+- Pinned artifacts are retained under hard admission and never silently
+  evicted. Cached artifacts use deterministic byte-bounded LRU eviction and
+  oversized-object transient bypass. Cold artifacts retain zero manager bytes,
+  using verified read-only mmap for compact/quantized/TurboQuant codecs and a
+  verified transient-owned fallback for JSON HNSW/exact or non-local stores.
+- Search reconstructs active planner descriptors before reading bodies and
+  loads only request-compatible artifacts. Retired generation bindings are
+  removed before serving; reconciliation reclaims stale process entries.
+- Corruption and substitution fail closed. Resource pressure suppresses a path
+  only in the current serving view: allow-approximate can fall back to the
+  canonical exact scan, while require-approximate reports ResourceExhausted.
+- Engine and manager tests cover cached hits/LRU, physical tier transitions,
+  cold mmap/owned behavior, bounded admission, stale reclamation, generation
+  replacement, restart equality, pressure fallback, and required-ANN denial.
+- Boundaries: policy is per named vector, not independently configurable for
+  original/HNSW/quantized/sparse/payload structures. Automatic warming,
+  distributed residency, compact mmap HNSW, generated outward controls, and
+  production fixed-hardware sizing remain open.
+
 ## 2026-08-29 — unified quantization artifact lifecycle
 
-- Commit: `pending`. G04-W04 is active at 29/65 while the complete verification
-  surface runs; no board-completion or full-product-green claim is made here.
+- Commit: `3deb168`. G04-W04 is verified with digest
+  `59c35e6d4139a21af11c5b458216efe7a5824351b7b17524cd1f4e5c99a74f6d`;
+  no full-product-green claim is made here.
 - One engine path now builds, lists, activates, retires, reopens, plans, and
   exactly reranks immutable scalar, product 4×/8×/16×/32×/64×, binary, and
   TurboQuant 4/2/1.5/1-bit artifacts. Strict public contract types are present;
@@ -36,9 +62,10 @@
   exact-reranked search, process reopen, retirement, update fallback, next-
   generation rebuild, and reactivation. Durable projection traces link the
   reasoning run and committed object/lifecycle evidence.
-- Remaining boundaries: larger release/fixed-hardware p50/p95/p99 evidence,
-  physical pinned/cached/cold eviction, distributed placement, GPU, residual
-  QJL, and generated outward bindings remain later governed items.
+- Remaining boundaries after G04-W05: larger release/fixed-hardware p50/p95/p99
+  evidence, independent per-structure tiers and automatic warming, distributed
+  placement, GPU, residual QJL, and generated outward bindings remain later
+  governed items.
 
 ## 2026-08-26 — owner-controlled `0.1.0` release train
 

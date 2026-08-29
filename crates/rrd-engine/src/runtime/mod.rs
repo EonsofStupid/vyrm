@@ -36,6 +36,7 @@ pub mod stack;
 mod tools;
 pub mod trace;
 pub mod vector_catalog;
+pub mod vector_residency;
 pub mod workflow;
 pub mod workplan;
 
@@ -99,9 +100,15 @@ pub use trace::{
 pub(crate) use vector_catalog::vector_artifact_catalog_entries_from_changes;
 pub use vector_catalog::{
     build_traced_quantization_artifact, publish_traced_vector_artifact,
-    quantization_artifact_catalogue, reopen_vector_runtime,
+    quantization_artifact_catalogue, reopen_vector_runtime, reopen_vector_runtime_metadata,
     transition_traced_quantization_artifact, vector_artifact_catalog_entries,
-    QuantizationArtifactPublication, QuantizationArtifactTransition, VectorArtifactPublication,
+    QuantizationArtifactPublication, QuantizationArtifactTransition, VectorArtifactBinding,
+    VectorArtifactPublication, VectorArtifactResidencyKey, VectorRuntimeManifest,
+};
+pub use vector_residency::{
+    VectorResidencyAcquisition, VectorResidencyError, VectorResidencyLimits,
+    VectorResidencyManager, VectorResidencySnapshot, VectorResidencySource,
+    DEFAULT_VECTOR_CACHED_BYTES, DEFAULT_VECTOR_PINNED_BYTES,
 };
 pub use workflow::{
     resolve_package_argv, resolve_package_command, VerificationPolicy, WorkflowAuthorization,

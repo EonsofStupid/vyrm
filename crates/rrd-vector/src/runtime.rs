@@ -11,6 +11,8 @@ use rrd_core::{
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
+use std::path::Path;
+use std::sync::Arc;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum VectorArtifact {
@@ -108,6 +110,31 @@ impl VectorArtifact {
             VectorArtifactKind::TurboQuant => {
                 TurboQuantSegment::from_bytes(bytes).map(Self::TurboQuant)
             }
+        }
+    }
+
+    /// Opens codecs with a native read-only mmap representation. JSON codecs
+    /// deliberately return `None`; callers retain the verified owned-byte
+    /// fallback rather than pretending they are physically mapped.
+    pub fn open_mmap(kind: VectorArtifactKind, path: impl AsRef<Path>) -> Result<Option<Self>> {
+        let path = path.as_ref();
+        match kind {
+            VectorArtifactKind::CompactDense => CompactDenseSegment::open_mmap(path)
+                .map(Self::CompactDense)
+                .map(Some),
+            VectorArtifactKind::ScalarQuantized
+            | VectorArtifactKind::ProductQuantized
+            | VectorArtifactKind::BinaryQuantized => {
+                let artifact = QuantizedSegment::open_mmap(path).map(Self::Quantized)?;
+                if artifact.kind() != kind {
+                    return invalid("mapped quantized artifact method differs from its codec kind");
+                }
+                Ok(Some(artifact))
+            }
+            VectorArtifactKind::TurboQuant => TurboQuantSegment::open_mmap(path)
+                .map(Self::TurboQuant)
+                .map(Some),
+            VectorArtifactKind::ExactSegment | VectorArtifactKind::Hnsw => Ok(None),
         }
     }
 
@@ -225,7 +252,7 @@ impl PreparedVectorSearch {
 pub struct VectorRuntime {
     canonical: Vec<VectorCandidate>,
     catalog: VectorCatalog,
-    artifacts: BTreeMap<(ProjectionId, u64), VectorArtifact>,
+    artifacts: BTreeMap<(ProjectionId, u64), Arc<VectorArtifact>>,
 }
 
 impl VectorRuntime {
@@ -246,7 +273,9 @@ impl VectorRuntime {
     }
 
     pub fn artifact(&self, id: &ProjectionId, generation: u64) -> Option<&VectorArtifact> {
-        self.artifacts.get(&(id.clone(), generation))
+        self.artifacts
+            .get(&(id.clone(), generation))
+            .map(Arc::as_ref)
     }
 
     pub fn publish(
@@ -261,7 +290,7 @@ impl VectorRuntime {
             return invalid("vector artifact generation is already installed");
         }
         let revision = self.catalog.publish(expected_revision, descriptor)?;
-        self.artifacts.insert(key, artifact);
+        self.artifacts.insert(key, Arc::new(artifact));
         Ok(revision)
     }
 
@@ -275,8 +304,58 @@ impl VectorRuntime {
             return invalid("restored vector artifact generation is already installed");
         }
         let revision = self.catalog.restore_active(descriptor)?;
-        self.artifacts.insert(key, artifact);
+        self.artifacts.insert(key, Arc::new(artifact));
         Ok(revision)
+    }
+
+    /// Replays one durable generic-catalogue descriptor without materializing
+    /// its immutable object bytes. Revisions remain exact and planning can run
+    /// before a residency policy chooses which artifact to load.
+    pub fn replay_catalog_descriptor(
+        &mut self,
+        expected_revision: u64,
+        descriptor: VectorProjectionDescriptor,
+    ) -> Result<u64> {
+        self.catalog.publish(expected_revision, descriptor)
+    }
+
+    /// Restores one lifecycle-selected descriptor without loading bytes.
+    pub fn restore_active_descriptor(
+        &mut self,
+        descriptor: VectorProjectionDescriptor,
+    ) -> Result<u64> {
+        self.catalog.restore_active(descriptor)
+    }
+
+    /// Installs bytes selected by a physical residency authority without
+    /// changing catalogue identity or revision.
+    pub fn install_loaded_artifact(&mut self, artifact: Arc<VectorArtifact>) -> Result<()> {
+        let descriptor = artifact.descriptor();
+        let key = (descriptor.stamp().id.clone(), descriptor.stamp().generation);
+        let published = self
+            .catalog
+            .entries
+            .get(&descriptor.stamp().id)
+            .ok_or_else(|| Error::InvalidRuntime {
+                reason: "loaded vector artifact has no published descriptor".into(),
+            })?;
+        if published != &descriptor || self.artifacts.contains_key(&key) {
+            return invalid("loaded vector artifact is duplicate or differs from its descriptor");
+        }
+        self.artifacts.insert(key, artifact);
+        Ok(())
+    }
+
+    /// Removes one path from this process-local serving view without changing
+    /// its durable catalogue revision. Used only when a bounded physical
+    /// residency policy cannot admit that path for the current request.
+    pub fn suppress_projection(&mut self, id: &ProjectionId) -> bool {
+        let Some(descriptor) = self.catalog.entries.remove(id) else {
+            return false;
+        };
+        self.artifacts
+            .remove(&(id.clone(), descriptor.stamp().generation));
+        true
     }
 
     /// Removes TurboQuant projections reconstructed from the retired generic
@@ -300,7 +379,7 @@ impl VectorRuntime {
             !matches!(descriptor, VectorProjectionDescriptor::TurboQuant { .. })
         });
         self.artifacts
-            .retain(|_, artifact| !matches!(artifact, VectorArtifact::TurboQuant(_)));
+            .retain(|_, artifact| !matches!(artifact.as_ref(), VectorArtifact::TurboQuant(_)));
         ids.len()
     }
 
@@ -348,7 +427,7 @@ impl VectorRuntime {
                 VectorProjectionDescriptor::Hnsw { descriptor } => self
                     .artifacts
                     .get(&(descriptor.stamp.id.clone(), descriptor.stamp.generation))
-                    .and_then(|artifact| match artifact {
+                    .and_then(|artifact| match artifact.as_ref() {
                         VectorArtifact::Hnsw(index) => {
                             index.estimated_search_cost(request, ef_search).ok()
                         }
@@ -479,7 +558,7 @@ impl VectorRuntime {
                 if artifact.descriptor() != *published {
                     return invalid("selected vector artifact differs from its catalog descriptor");
                 }
-                match (plan.selected.kind, artifact) {
+                match (plan.selected.kind, artifact.as_ref()) {
                     (AccessPathKind::ExactSegment, VectorArtifact::ExactSegment(segment)) => {
                         segment.search_at(request, plan.required_source_cursor)?
                     }

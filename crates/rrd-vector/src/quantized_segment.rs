@@ -502,7 +502,7 @@ impl QuantizedSegment {
             .map_err(|error| {
                 runtime_error(format!("quantized metadata cannot be decoded: {error}"))
             })?;
-        if encode_json(&metadata)? != &bytes[HEADER_BYTES..metadata_end] {
+        if encode_json(&metadata)? != bytes[HEADER_BYTES..metadata_end] {
             return invalid("quantized metadata is not in canonical encoding");
         }
         validate_decoded(&metadata, &header, bytes)?;

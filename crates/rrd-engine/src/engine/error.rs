@@ -22,6 +22,7 @@ pub enum ServiceError {
     OperationDigestMismatch,
     Query(String),
     Vector(String),
+    VectorPressure(String),
     Changefeed(String),
     Subscription(String),
     SubscriptionNotFound,
@@ -90,7 +91,8 @@ impl ServiceError {
             Self::TransactionQuota
             | Self::RenewalQuota
             | Self::SubscriptionBackpressure
-            | Self::FunctionLimit(_) => ServiceErrorKind::ResourceExhausted,
+            | Self::FunctionLimit(_)
+            | Self::VectorPressure(_) => ServiceErrorKind::ResourceExhausted,
             Self::DeadlineExceeded => ServiceErrorKind::DeadlineExceeded,
             Self::StorageConflict(_) => ServiceErrorKind::Conflict,
             Self::Storage(_) | Self::Backup(_) | Self::Estate(_) => ServiceErrorKind::Internal,

@@ -39,7 +39,7 @@ impl RrdEngine {
         // metadata. The subsequent runtime read validates the same stamp and
         // rejects a concurrent catalogue transition instead of combining old
         // collection metadata with a new read manifest.
-        let (field, metric, embedding_model, collection_address) =
+        let (field, metric, embedding_model, collection_address, memory_tier) =
             if let (Some(collection_id), Some(vector_name)) =
                 (&request.collection_id, &request.vector_name)
             {
@@ -68,6 +68,7 @@ impl RrdEngine {
                     vector.metric,
                     vector.embedding_model.clone(),
                     Some((collection_id.clone(), vector_name.clone())),
+                    vector.memory_tier,
                 )
             } else {
                 let field = request
@@ -82,6 +83,7 @@ impl RrdEngine {
                     internal_vector_metric(metric),
                     None,
                     None,
+                    rrd_vector::VectorMemoryTier::Cached,
                 )
             };
         let limit = usize::try_from(request.max_scanned_changes)
@@ -110,8 +112,6 @@ impl RrdEngine {
             .max()
             .unwrap_or(0);
         let data = rrd_store::DataRuntimeRef::new(&self.storage, &self.objects);
-        let runtime = crate::reopen_vector_runtime(&data, &scope, candidates)
-            .map_err(|error| ServiceError::Vector(error.to_string()))?;
         let query = internal_vector_query(&request.query);
         let (mode, ef_search) = match request.mode {
             VectorSearchMode::Exact => (rrd_vector::SearchMode::Exact, 1),
@@ -141,7 +141,7 @@ impl RrdEngine {
             ),
         };
         let search = rrd_vector::SearchRequest {
-            scope,
+            scope: scope.clone(),
             read: read.clone(),
             valid_at: request.valid_at,
             field,
@@ -157,9 +157,52 @@ impl RrdEngine {
                 .map(internal_vector_filter)
                 .transpose()?,
         };
-        let prepared = runtime
-            .prepare_search_at(&search, source_cursor, ef_search)
-            .map_err(core_vector)?;
+        let crate::VectorRuntimeManifest {
+            mut runtime,
+            bindings,
+        } = crate::reopen_vector_runtime_metadata(&data, &scope, candidates)
+            .map_err(|error| ServiceError::Vector(error.to_string()))?;
+        let active = bindings
+            .values()
+            .map(crate::VectorArtifactBinding::key)
+            .collect::<std::collections::BTreeSet<_>>();
+        let mut first_pressure = None;
+        {
+            let mut residency = self
+                .vector_residency
+                .lock()
+                .map_err(|_| ServiceError::Storage("vector residency lock is poisoned".into()))?;
+            residency.reconcile(&active);
+            for binding in bindings
+                .values()
+                .filter(|binding| vector_artifact_relevant(&binding.descriptor, &search))
+            {
+                match residency.acquire(memory_tier, binding, &self.objects) {
+                    Ok(acquisition) => runtime
+                        .install_loaded_artifact(acquisition.artifact)
+                        .map_err(core_vector)?,
+                    Err(error) if error.is_pressure() => {
+                        first_pressure.get_or_insert_with(|| error.to_string());
+                        runtime.suppress_projection(&binding.descriptor.stamp().id);
+                    }
+                    Err(error) => return Err(ServiceError::Vector(error.to_string())),
+                }
+            }
+        }
+        let prepared = match runtime.prepare_search_at(&search, source_cursor, ef_search) {
+            Ok(prepared) => prepared,
+            Err(_error)
+                if matches!(
+                    search.mode,
+                    rrd_vector::SearchMode::RequireApproximate { .. }
+                ) && first_pressure.is_some() =>
+            {
+                return Err(ServiceError::VectorPressure(
+                    first_pressure.expect("pressure was checked as present"),
+                ));
+            }
+            Err(error) => return Err(core_vector(error)),
+        };
         let execution = runtime
             .execute_search(&search, &prepared)
             .map_err(core_vector)?;
@@ -196,6 +239,33 @@ impl RrdEngine {
                 })
                 .collect::<Result<_>>()?,
         })
+    }
+}
+
+fn vector_artifact_relevant(
+    descriptor: &rrd_vector::VectorProjectionDescriptor,
+    request: &rrd_vector::SearchRequest,
+) -> bool {
+    let candidate = descriptor.candidate_path(1);
+    if descriptor.scope() != &request.scope
+        || candidate.stamp.state != ProjectionState::Ready
+        || candidate.field != request.field
+        || candidate.dimensions != request.query.dimensions()
+        || candidate.metric != request.metric
+        || candidate.embedding_model != request.embedding_model
+        || request.filter.as_ref().is_some_and(|filter| {
+            filter
+                .referenced_properties()
+                .iter()
+                .any(|property| !candidate.filter_properties.contains(property))
+        })
+    {
+        return false;
+    }
+    match request.mode {
+        rrd_vector::SearchMode::Exact => !candidate.kind.is_approximate(),
+        rrd_vector::SearchMode::AllowApproximate { .. } => true,
+        rrd_vector::SearchMode::RequireApproximate { .. } => candidate.kind.is_approximate(),
     }
 }
 

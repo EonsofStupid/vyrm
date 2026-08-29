@@ -321,6 +321,19 @@ pub fn product_capability_catalogue() -> ProductCapabilityCatalogue {
             planned(ENGINE_SURFACE_PLAN_REASON),
         ),
     });
+    capabilities.push(ProductCapability {
+        id: "vector-memory-residency".into(),
+        label: "Vector memory residency".into(),
+        category: "vector".into(),
+        summary: "Enforce per-named-vector pinned, byte-bounded cached LRU, and transient cold mmap/owned artifact placement with exact pressure fallback and restart reconstruction.".into(),
+        bindings: bindings(
+            available("rrd-engine:RrdEngine::search_vectors,vector_residency_snapshot"),
+            planned(ENGINE_SURFACE_PLAN_REASON),
+            planned(ENGINE_SURFACE_PLAN_REASON),
+            planned(ENGINE_SURFACE_PLAN_REASON),
+            planned(ENGINE_SURFACE_PLAN_REASON),
+        ),
+    });
 
     capabilities.sort_by(|left, right| left.id.cmp(&right.id));
     ProductCapabilityCatalogue {

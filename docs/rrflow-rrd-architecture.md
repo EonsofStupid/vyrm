@@ -400,9 +400,11 @@ build is `ready` and planner-invisible; authenticated activation verifies the
 bytes and selects one generation; retirement removes it from planning. Scalar,
 product, binary, and TurboQuant all pass exact-oracle recall plus packed/total
 byte accounting, build/search timing, SIMD/scalar, mmap, restart, update, and
-corruption differentials before becoming selectable. Physical memory-tier
-placement remains a separate policy. See
-[`rrd-quantization-lifecycle-v1.md`](rrd-quantization-lifecycle-v1.md).
+corruption differentials before becoming selectable. One engine-owned physical
+residency policy now enforces named-vector pinned, cached, and cold behavior;
+it remains separate from the durable quantization lifecycle and catalogue. See
+[`rrd-quantization-lifecycle-v1.md`](rrd-quantization-lifecycle-v1.md) and
+[`rrd-vector-memory-tiers-v1.md`](rrd-vector-memory-tiers-v1.md).
 
 Qdrant documents 4-bit TurboQuant as an 8× representation and the lower bit
 depths as progressively smaller, with quantized vectors stored alongside

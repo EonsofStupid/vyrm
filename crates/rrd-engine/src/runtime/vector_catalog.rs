@@ -7,10 +7,10 @@
 
 use super::{active_reasoning_run, DurableTraceSpan, TraceIdentity};
 use rrd_core::{
-    DataTransaction, Millis, ProjectionId, ReadStamp, RuntimeChange, RuntimeCommit,
-    RuntimeCommitOutcome, RuntimeMutation, RuntimeProperties, RuntimePropertySchema, RuntimeRecord,
-    RuntimeRecordSchema, RuntimeRef, RuntimeSchemaRegistry, RuntimeType, RuntimeValue,
-    RuntimeValueType, ScopeId, TraceDataClass, TraceDomain, TraceLink, TraceOutcome,
+    DataTransaction, Millis, ObjectReference, ProjectionId, ReadStamp, RuntimeChange,
+    RuntimeCommit, RuntimeCommitOutcome, RuntimeMutation, RuntimeProperties, RuntimePropertySchema,
+    RuntimeRecord, RuntimeRecordSchema, RuntimeRef, RuntimeSchemaRegistry, RuntimeType,
+    RuntimeValue, RuntimeValueType, ScopeId, TraceDataClass, TraceDomain, TraceLink, TraceOutcome,
 };
 use rrd_store::{DataRuntimeAccess, Engine, Error as StoreError, ImmutableObjectStore};
 use rrd_vector::{
@@ -20,6 +20,7 @@ use rrd_vector::{
     QUANTIZATION_LIFECYCLE_RECORD_TYPE, VECTOR_ARTIFACT_RECORD_TYPE,
 };
 use std::collections::{BTreeMap, BTreeSet};
+use std::sync::Arc;
 
 const REPLAY_PAGE: usize = 4_096;
 const PUBLICATION_RETRIES: usize = 16;
@@ -45,6 +46,71 @@ pub struct QuantizationArtifactTransition {
     pub entry: QuantizationArtifactEntry,
     pub state: QuantizationArtifactState,
     pub commit: RuntimeCommitOutcome,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct VectorArtifactResidencyKey {
+    pub scope: ScopeId,
+    pub projection_id: ProjectionId,
+    pub generation: u64,
+    pub object_sha256: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VectorArtifactBinding {
+    pub kind: rrd_vector::VectorArtifactKind,
+    pub descriptor: rrd_vector::VectorProjectionDescriptor,
+    pub object: ObjectReference,
+}
+
+impl VectorArtifactBinding {
+    pub fn key(&self) -> VectorArtifactResidencyKey {
+        VectorArtifactResidencyKey {
+            scope: self.descriptor.scope().clone(),
+            projection_id: self.descriptor.stamp().id.clone(),
+            generation: self.descriptor.stamp().generation,
+            object_sha256: self.object.sha256.clone(),
+        }
+    }
+
+    pub fn decode_owned(
+        &self,
+        objects: &impl ImmutableObjectStore,
+    ) -> Result<Arc<VectorArtifact>, Box<dyn std::error::Error>> {
+        let bytes = objects.get(&self.object)?;
+        let artifact = VectorArtifact::from_bytes(self.kind, &bytes)?;
+        self.validate_artifact(&artifact)?;
+        Ok(Arc::new(artifact))
+    }
+
+    pub fn decode_mapped(
+        &self,
+        objects: &impl ImmutableObjectStore,
+    ) -> Result<Option<Arc<VectorArtifact>>, Box<dyn std::error::Error>> {
+        let Some(path) = objects.verified_path(&self.object)? else {
+            return Ok(None);
+        };
+        let Some(artifact) = VectorArtifact::open_mmap(self.kind, path)? else {
+            return Ok(None);
+        };
+        self.validate_artifact(&artifact)?;
+        Ok(Some(Arc::new(artifact)))
+    }
+
+    fn validate_artifact(
+        &self,
+        artifact: &VectorArtifact,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        if artifact.kind() != self.kind || artifact.descriptor() != self.descriptor {
+            return Err("loaded vector artifact differs from its durable binding".into());
+        }
+        Ok(())
+    }
+}
+
+pub struct VectorRuntimeManifest {
+    pub runtime: VectorRuntime,
+    pub bindings: BTreeMap<(ProjectionId, u64), VectorArtifactBinding>,
 }
 
 /// Publishes one immutable artifact without exposing it to serving until its
@@ -208,22 +274,84 @@ pub fn reopen_vector_runtime<D>(
 where
     D: DataRuntimeAccess,
 {
+    let mut manifest = reopen_vector_runtime_metadata(data, scope, canonical)?;
+    for binding in manifest.bindings.values() {
+        manifest
+            .runtime
+            .install_loaded_artifact(binding.decode_owned(data.objects())?)?;
+    }
+    Ok(manifest.runtime)
+}
+
+/// Reconstructs exact planner metadata without eagerly reading immutable
+/// artifact bodies. Physical residency policy can then load only paths that
+/// could serve the current request.
+pub fn reopen_vector_runtime_metadata<D>(
+    data: &D,
+    scope: &ScopeId,
+    canonical: impl IntoIterator<Item = VectorCandidate>,
+) -> Result<VectorRuntimeManifest, Box<dyn std::error::Error>>
+where
+    D: DataRuntimeAccess,
+{
     let entries = vector_artifact_catalog_entries(data.engine(), scope)?;
     let mut runtime = VectorRuntime::new(canonical)?;
+    let mut bindings = BTreeMap::new();
     for entry in entries {
         let expected_revision = runtime.catalog().revision;
-        let bytes = data.objects().get(&entry.object)?;
-        let artifact = entry.decode_artifact(&bytes)?;
-        runtime.publish(expected_revision, artifact)?;
+        runtime.replay_catalog_descriptor(expected_revision, entry.descriptor.clone())?;
+        if entry.kind != rrd_vector::VectorArtifactKind::TurboQuant {
+            let key = (
+                entry.descriptor.stamp().id.clone(),
+                entry.descriptor.stamp().generation,
+            );
+            if bindings
+                .insert(
+                    key,
+                    VectorArtifactBinding {
+                        kind: entry.kind,
+                        descriptor: entry.descriptor,
+                        object: entry.object,
+                    },
+                )
+                .is_some()
+            {
+                return Err("duplicate vector artifact residency binding".into());
+            }
+        }
     }
     runtime.suppress_legacy_turboquant();
+    // The durable event stream contains every generation so replay can prove
+    // the exact catalogue revision and retirement chain. Serving residency,
+    // however, must never expose those retired bodies: retain only the
+    // descriptor currently selected by the reconstructed catalogue.
+    bindings.retain(|(id, generation), binding| {
+        runtime.catalog().entries.get(id).is_some_and(|active| {
+            active == &binding.descriptor && active.stamp().generation == *generation
+        })
+    });
     let quantization = quantization_artifact_catalogue(data.engine(), scope)?;
     for entry in quantization.active_entries() {
-        let bytes = data.objects().get(&entry.object)?;
-        let artifact = entry.decode_artifact(&bytes)?;
-        runtime.restore_active(artifact)?;
+        runtime.restore_active_descriptor(entry.descriptor.clone())?;
+        let key = (
+            entry.descriptor.stamp().id.clone(),
+            entry.descriptor.stamp().generation,
+        );
+        if bindings
+            .insert(
+                key,
+                VectorArtifactBinding {
+                    kind: entry.kind,
+                    descriptor: entry.descriptor.clone(),
+                    object: entry.object.clone(),
+                },
+            )
+            .is_some()
+        {
+            return Err("duplicate active quantization residency binding".into());
+        }
     }
-    Ok(runtime)
+    Ok(VectorRuntimeManifest { runtime, bindings })
 }
 
 /// Publishes immutable quantized bytes in `ready` state without changing the
@@ -553,15 +681,14 @@ pub(crate) fn quantization_artifact_catalogue_from_changes(
                     subject.kind.as_str() == QUANTIZATION_ARTIFACT_RECORD_TYPE
                 }) =>
             {
-                if objects
+                objects
                     .insert(
                         object.reference.clone(),
                         (object.clone(), change.commit_id.clone()),
                     )
-                    .is_some()
-                {
-                    return Err("duplicate quantization object mutation identity".into());
-                }
+                    .is_none()
+                    .then_some(())
+                    .ok_or("duplicate quantization object mutation identity")?;
             }
             _ => {}
         }
