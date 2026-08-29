@@ -117,7 +117,8 @@ result replay after reopen.
 G04-W03 establishes one cohesive engine algebra and correctness/reopen
 evidence. It does not establish Qdrant parity or production superiority. The
 remaining vector foundation includes sparse ANN/inverted indexing, compact
-graph and payload-index layouts, promoted quantizer and memory-tier lifecycles,
-physical GPU execution, server/provider inference, outward G06 bindings,
-production fixed-hardware recall/latency/update/recovery evidence, and the
-broader formula/DBSF operators listed above.
+graph and payload-index layouts, physical quantized memory tiers, physical GPU
+execution, server/provider inference, outward G06 bindings, production fixed-
+hardware scale evidence, and the broader formula/DBSF operators listed above.
+The scalar/product/binary/TurboQuant engine lifecycle is now qualified by
+G04-W04 rather than remaining part of this query-algebra gap.

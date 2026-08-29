@@ -856,13 +856,19 @@ remote repetition remains required before compatibility retirement.
   `docs/rrflow-mcps-architecture-research.md`,
   `docs/rrd-vector-search.md`, `docs/rrd-inferenceding-edge.md`, and
   `docs/rrd-cluster-m7.md`.
-  The older symmetric-int8 experiment remains separate from TurboQuant. The
-  new MSE TurboQuant path uses deterministic seeded rotation, fixed
-  distribution-matched 4/2/1.5/1-bit scalar codes, bit packing, norm correction,
-  asymmetric query scoring, authenticated reopen, and exact-oracle reranking.
-  It does not claim the paper's residual QJL estimator or full production
-  qualification; SIMD, broad recall/bias/latency evidence, and public lifecycle
-  administration remain open.
+  One authenticated quantization lifecycle now covers scalar, product 4×–64×,
+  binary, and deterministic MSE TurboQuant 4/2/1.5/1-bit artifacts. Build is
+  planner-invisible until explicit activation; activation verifies immutable
+  bytes; retirement removes planner visibility; restart reconstructs only the
+  active generation. Owned/mmap, corruption, update/rebuild/recovery,
+  scalar/runtime-dispatched SIMD parity, exact reranking, and a fixed 512×64
+  bias/recall/memory/compression/latency matrix pass locally. Packed 64× is not
+  described as total-artifact or production memory reduction. The historical
+  TurboQuant ensure shape now resumes/activates this same lifecycle; new generic
+  quantized publication is denied, old generic TurboQuant views are suppressed,
+  and lifecycle restoration cannot perturb the HNSW catalogue CAS revision. No
+  Qdrant superiority or residual-QJL claim is made. Generated outward bindings,
+  physical memory tiers, larger fixed-hardware evidence, and GPU remain open.
 
 - JavaScript application-run claims use script-sensitive canonical event
   subjects such as `package:bun:test`, `package:pnpm:run:typecheck`, and

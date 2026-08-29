@@ -19,6 +19,16 @@ use rrd_core::{Claim, ClaimReader, Millis, Predicate, Producer, Subject};
 use rrd_store::Engine;
 use serde::Deserialize;
 
+/// Native lifecycle vocabulary used by one harness. The runtime keeps one
+/// provider-neutral event model and renders only this thin adapter edge.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum HookProtocol {
+    ClaudeCode,
+    Codex,
+    Gemini,
+}
+
 /// How long a verification claim stays in force: 21 days, in milliseconds.
 /// Expiry is the alarm interval the operator asked for ("make noise every
 /// few weeks").
@@ -33,6 +43,9 @@ pub struct Harness {
     pub display: String,
     /// Full hook lifecycle: pre-reasoning injection and tool gating.
     pub hooks: bool,
+    /// Native hook schema. Present exactly when `hooks` is true.
+    #[serde(default)]
+    pub hook_protocol: Option<HookProtocol>,
     pub mcp_client: bool,
     pub mcp_server: bool,
     /// Convention file the harness reads natively.
@@ -197,14 +210,18 @@ mod tests {
                 harness.name
             );
             harness.subject(); // must be a valid identifier
+            assert_eq!(
+                harness.hooks,
+                harness.hook_protocol.is_some(),
+                "{} hook capability and protocol disagree",
+                harness.name
+            );
         }
-        assert!(
-            registry.get("gemini-cli").unwrap().retired.is_some(),
-            "the closed interval is the registry's first bi-temporal fact"
-        );
         assert!(
             registry.get("claude-code").unwrap().hooks,
             "the fast path has hooks"
         );
+        assert!(registry.get("codex-cli").unwrap().hooks);
+        assert!(registry.get("gemini-cli").unwrap().hooks);
     }
 }

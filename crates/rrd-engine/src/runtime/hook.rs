@@ -3,8 +3,8 @@
 //! the text goes into the model's context, for gate events a JSON decision
 //! blocks or allows the tool call. `PLAN.md` Step P.
 //!
-//! Field names follow the Claude Code hook contract (the registry's one
-//! hooks-capable adapter). Read-only payloads remain tolerant, but mutation
+//! The internal events are provider-neutral; the adapter edge renders Claude
+//! Code/Codex or Gemini output shapes. Read-only payloads remain tolerant, but mutation
 //! payloads crossing a checked-in work plan fail closed unless they carry a
 //! stable canonical session and tool-call identity.
 
@@ -43,6 +43,7 @@ pub enum HookEvent {
     PostToolUse,
     Stop,
     PreCompact,
+    SessionEnd,
 }
 
 impl HookEvent {
@@ -54,6 +55,7 @@ impl HookEvent {
             "post-tool-use" => HookEvent::PostToolUse,
             "stop" => HookEvent::Stop,
             "pre-compact" => HookEvent::PreCompact,
+            "session-end" => HookEvent::SessionEnd,
             _ => return None,
         })
     }
@@ -66,6 +68,7 @@ impl HookEvent {
             HookEvent::PostToolUse => "post-tool-use",
             HookEvent::Stop => "stop",
             HookEvent::PreCompact => "pre-compact",
+            HookEvent::SessionEnd => "session-end",
         }
     }
 }
@@ -203,7 +206,7 @@ fn handle_inner<E: Engine>(
                 ..
             } = preflight(store, root, harness, reader, now, budget)?;
             Ok(HookResponse {
-                stdout: context,
+                stdout: context_output(harness, HookEvent::SessionStart, context),
                 effectiveness: Some(effectiveness),
                 detail: (!warnings.is_empty()).then(|| format!("{} warning(s)", warnings.len())),
                 ..HookResponse::default()
@@ -246,7 +249,11 @@ fn handle_inner<E: Engine>(
             let matched = matched_subjects(store, prompt)?;
             if matched.is_empty() {
                 return Ok(HookResponse {
-                    stdout: work_plan_context.unwrap_or_default(),
+                    stdout: context_output(
+                        harness,
+                        HookEvent::UserPromptSubmit,
+                        work_plan_context.unwrap_or_default(),
+                    ),
                     ..HookResponse::default()
                 });
             }
@@ -285,7 +292,7 @@ fn handle_inner<E: Engine>(
                 outcome: RecallOutcome::Unknown,
             };
             Ok(HookResponse {
-                stdout: lines.join("\n"),
+                stdout: context_output(harness, HookEvent::UserPromptSubmit, lines.join("\n")),
                 effectiveness: Some(effectiveness),
                 detail: None,
                 ..HookResponse::default()
@@ -311,6 +318,7 @@ fn handle_inner<E: Engine>(
                 Ok(run) => run,
                 Err(error) => {
                     return Ok(deny(
+                        harness,
                         format!("rrflow: reasoning contract cannot be trusted. Wait: {error}"),
                         "denied: reasoning ledger unavailable",
                     ))
@@ -321,6 +329,7 @@ fn handle_inner<E: Engine>(
                 ToolPolicy::Deny { differential } => {
                     let rendered = differential.render();
                     return Ok(deny(
+                        harness,
                         format!("rrflow: mutation denied by reasoning policy. Wait: {rendered}"),
                         &format!("denied: {rendered}"),
                     ));
@@ -336,23 +345,15 @@ fn handle_inner<E: Engine>(
             // The estate wait gate follows the contract gate: a quarantined
             // projection makes even a properly declared attempt wait.
             if let ProjectionStatus::Quarantined { at, .. } = store.current_projection()?.status {
-                let decision = serde_json::json!({
-                    "hookSpecificOutput": {
-                        "hookEventName": "PreToolUse",
-                        "permissionDecision": "deny",
-                        "permissionDecisionReason": format!(
-                            "rrflow: memory projection quarantined at {at} — grounding found \
-                             divergence. Wait: resolve it first (`rrflow ground` to see the \
-                             differential, `rrflow reset-projection` to recover)."
-                        ),
-                    }
-                });
-                return Ok(HookResponse {
-                    stdout: decision.to_string(),
-                    effectiveness: None,
-                    detail: Some("denied: projection quarantined".into()),
-                    ..HookResponse::default()
-                });
+                return Ok(deny(
+                    harness,
+                    format!(
+                        "rrflow: memory projection quarantined at {at} — grounding found \
+                         divergence. Wait: resolve it first (`rrflow ground` to see the \
+                         differential, `rrflow reset-projection` to recover)."
+                    ),
+                    "denied: projection quarantined",
+                ));
             }
             // The second wait gate is source evidence. It refreshes immediately
             // before the mutation, persists any new generation, and denies if
@@ -361,27 +362,20 @@ fn handle_inner<E: Engine>(
             let ready = match ensure_routing_fresh(store, root) {
                 Ok(ready) => ready,
                 Err(error) => {
-                    let decision = serde_json::json!({
-                        "hookSpecificOutput": {
-                            "hookEventName": "PreToolUse",
-                            "permissionDecision": "deny",
-                            "permissionDecisionReason": format!(
-                                "rrflow: source-routing freshness could not be established. Wait: {error}"
-                            ),
-                        }
-                    });
-                    return Ok(HookResponse {
-                        stdout: decision.to_string(),
-                        effectiveness: None,
-                        detail: Some("denied: routing freshness unavailable".into()),
-                        ..HookResponse::default()
-                    });
+                    return Ok(deny(
+                        harness,
+                        format!(
+                            "rrflow: source-routing freshness could not be established. Wait: {error}"
+                        ),
+                        "denied: routing freshness unavailable",
+                    ));
                 }
             };
             let receipt = match require_fresh_attunement(store, root, &ready) {
                 Ok(receipt) => receipt,
                 Err(error) => {
                     return Ok(deny(
+                        harness,
                         format!("rrflow: project attunement is absent or stale. Wait: {error}"),
                         "denied: project attunement receipt unavailable or stale",
                     ));
@@ -411,6 +405,7 @@ fn handle_inner<E: Engine>(
                             Err(differential) => {
                                 let rendered = differential.render();
                                 return Ok(deny(
+                                    harness,
                                     format!("rrflow: package workflow denied. Wait: {rendered}"),
                                     &format!("denied: {rendered}"),
                                 ));
@@ -420,12 +415,14 @@ fn handle_inner<E: Engine>(
                     Ok(WorkflowDecision::Deny(differential)) => {
                         let rendered = differential.render();
                         return Ok(deny(
+                            harness,
                             format!("rrflow: package workflow denied. Wait: {rendered}"),
                             &format!("denied: {rendered}"),
                         ));
                     }
                     Err(error) => {
                         return Ok(deny(
+                            harness,
                             format!(
                                 "rrflow: package workflow policy cannot be trusted. Wait: {error}"
                             ),
@@ -445,6 +442,7 @@ fn handle_inner<E: Engine>(
                 Ok(snapshot) => snapshot,
                 Err(error) => {
                     return Ok(deny(
+                        harness,
                         format!("rrflow: checked-in work plan cannot be trusted. Wait: {error}"),
                         "denied: work-plan source invalid",
                     ));
@@ -459,6 +457,7 @@ fn handle_inner<E: Engine>(
                     Ok(supervised) => supervised,
                     Err(error) => {
                         return Ok(deny(
+                            harness,
                             format!(
                                 "rrflow: mutation denied by the canonical work-plan lifecycle. Wait: {error}"
                             ),
@@ -486,6 +485,7 @@ fn handle_inner<E: Engine>(
                     Ok(receipt) => receipt,
                     Err(error) => {
                         return Ok(deny(
+                            harness,
                             format!(
                                 "rrflow: tool authorization is stale or consumed. Wait: {error}"
                             ),
@@ -574,7 +574,9 @@ fn handle_inner<E: Engine>(
                             summary: format!("observed result of declared {tool} attempt"),
                             evidence: vec![evidence],
                         }),
-                        ReasoningState::NeedsVerification if tool == "Bash" => {
+                        ReasoningState::NeedsVerification
+                            if matches!(tool, "Bash" | "run_shell_command") =>
+                        {
                             let status = if run_exit_code(input) == Some(0) {
                                 CheckStatus::Passed
                             } else {
@@ -762,6 +764,10 @@ fn handle_inner<E: Engine>(
             detail: Some("compaction imminent; session-start re-injects after".into()),
             ..HookResponse::default()
         }),
+        HookEvent::SessionEnd => Ok(HookResponse {
+            detail: Some("session ended".into()),
+            ..HookResponse::default()
+        }),
     }
 }
 
@@ -773,6 +779,12 @@ fn response_denied(response: &HookResponse) -> bool {
                 .pointer("/hookSpecificOutput/permissionDecision")
                 .and_then(Value::as_str)
                 .map(str::to_owned)
+                .or_else(|| {
+                    value
+                        .get("decision")
+                        .and_then(Value::as_str)
+                        .map(str::to_owned)
+                })
         })
         .as_deref()
         == Some("deny")
@@ -797,20 +809,42 @@ fn superseding_claim_mutations<E: Engine>(
         .collect())
 }
 
-fn deny(reason: String, detail: &str) -> HookResponse {
-    let decision = serde_json::json!({
-        "hookSpecificOutput": {
-            "hookEventName": "PreToolUse",
-            "permissionDecision": "deny",
-            "permissionDecisionReason": reason,
-        }
-    });
+fn deny(harness: Option<&str>, reason: String, detail: &str) -> HookResponse {
+    let decision = if harness == Some("gemini-cli") {
+        serde_json::json!({"decision": "deny", "reason": reason})
+    } else {
+        serde_json::json!({
+            "hookSpecificOutput": {
+                "hookEventName": "PreToolUse",
+                "permissionDecision": "deny",
+                "permissionDecisionReason": reason,
+            }
+        })
+    };
     HookResponse {
         stdout: decision.to_string(),
         effectiveness: None,
         detail: Some(detail.to_owned()),
         ..HookResponse::default()
     }
+}
+
+fn context_output(harness: Option<&str>, event: HookEvent, context: String) -> String {
+    if context.is_empty() || harness != Some("gemini-cli") {
+        return context;
+    }
+    let native_event = match event {
+        HookEvent::SessionStart => "SessionStart",
+        HookEvent::UserPromptSubmit => "BeforeAgent",
+        _ => return context,
+    };
+    serde_json::json!({
+        "hookSpecificOutput": {
+            "hookEventName": native_event,
+            "additionalContext": context,
+        }
+    })
+    .to_string()
 }
 
 fn tool_source(input: &Value) -> String {
@@ -897,4 +931,47 @@ fn run_exit_code(input: &Value) -> Option<i64> {
 
 fn first_line(command: &str) -> &str {
     command.lines().next().unwrap_or(command).trim()
+}
+
+#[cfg(test)]
+mod adapter_tests {
+    use super::*;
+
+    #[test]
+    fn denial_renders_the_native_provider_contract() {
+        let codex: Value =
+            serde_json::from_str(&deny(Some("codex-cli"), "wait".into(), "denied").stdout).unwrap();
+        assert_eq!(codex["hookSpecificOutput"]["permissionDecision"], "deny");
+        assert!(codex.get("decision").is_none());
+
+        let gemini: Value =
+            serde_json::from_str(&deny(Some("gemini-cli"), "wait".into(), "denied").stdout)
+                .unwrap();
+        assert_eq!(gemini["decision"], "deny");
+        assert_eq!(gemini["reason"], "wait");
+        assert!(gemini.get("hookSpecificOutput").is_none());
+    }
+
+    #[test]
+    fn gemini_context_uses_before_agent_while_codex_accepts_plain_text() {
+        let gemini: Value = serde_json::from_str(&context_output(
+            Some("gemini-cli"),
+            HookEvent::UserPromptSubmit,
+            "recalled".into(),
+        ))
+        .unwrap();
+        assert_eq!(gemini["hookSpecificOutput"]["hookEventName"], "BeforeAgent");
+        assert_eq!(
+            gemini["hookSpecificOutput"]["additionalContext"],
+            "recalled"
+        );
+        assert_eq!(
+            context_output(
+                Some("codex-cli"),
+                HookEvent::UserPromptSubmit,
+                "recalled".into()
+            ),
+            "recalled"
+        );
+    }
 }

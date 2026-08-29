@@ -190,7 +190,7 @@ pub enum Command {
     /// on stdout. Wired by `rrflow init`; recorded with trigger `event`.
     Hook {
         /// session-start | user-prompt-submit | pre-tool-use |
-        /// post-tool-use | stop | pre-compact
+        /// post-tool-use | stop | pre-compact | session-end
         event: String,
         #[arg(long)]
         harness: Option<String>,

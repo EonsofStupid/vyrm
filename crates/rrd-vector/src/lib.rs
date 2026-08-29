@@ -13,6 +13,8 @@ mod filter;
 mod hnsw;
 mod plan;
 mod quantization;
+mod quantization_catalog;
+mod quantized_segment;
 mod runtime;
 mod segment;
 mod turbo_segment;
@@ -58,6 +60,17 @@ pub use plan::{
     EXACT_SCAN_PROJECTION_ID,
 };
 pub use quantization::ScalarQuantizedVector;
+pub use quantization_catalog::{
+    QuantizationArtifactCatalogue, QuantizationArtifactEntry, QuantizationArtifactSnapshot,
+    QuantizationArtifactState, QuantizationLifecycleAction, QuantizationLifecycleEvent,
+    QUANTIZATION_ARTIFACT_RECORD_TYPE, QUANTIZATION_CATALOG_VERSION,
+    QUANTIZATION_LIFECYCLE_RECORD_TYPE,
+};
+pub use quantized_segment::{
+    ProductCompression, QuantizationMethod, QuantizedDescriptor, QuantizedKernel,
+    QuantizedMemoryPlacement, QuantizedSegment, QuantizedSegmentConfig,
+    QUANTIZED_SEGMENT_FORMAT_VERSION,
+};
 pub use runtime::{
     PreparedVectorSearch, SearchExecution, VectorArtifact, VectorArtifactKind, VectorRuntime,
 };

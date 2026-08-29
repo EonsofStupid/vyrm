@@ -754,6 +754,16 @@ fn require_no_collection_artifacts(
             }
         }
     }
+    let quantization = crate::quantization_artifact_catalogue(&engine.storage, scope)
+        .map_err(|error| ServiceError::Vector(error.to_string()))?;
+    if quantization.artifacts.values().any(|artifact| {
+        artifact.entry.collection_id.as_str() == collection_id.as_str()
+            && artifact.state != rrd_vector::QuantizationArtifactState::Retired
+    }) {
+        return Err(ServiceError::Vector(format!(
+            "vector collection {collection_id} still owns ready or active quantization artifacts; retire them before deletion"
+        )));
+    }
     Ok(())
 }
 
@@ -782,6 +792,9 @@ fn require_payload_index_not_in_use(
                 rrd_vector::VectorProjectionDescriptor::TurboQuant { descriptor } => {
                     &descriptor.filter_properties
                 }
+                rrd_vector::VectorProjectionDescriptor::Quantized { descriptor } => {
+                    &descriptor.filter_properties
+                }
                 rrd_vector::VectorProjectionDescriptor::ExactSegment { .. } => continue,
             };
             if properties.contains(field) {
@@ -790,6 +803,28 @@ fn require_payload_index_not_in_use(
                     entry.descriptor.stamp().id
                 )));
             }
+        }
+    }
+    let quantization = crate::quantization_artifact_catalogue(&engine.storage, scope)
+        .map_err(|error| ServiceError::Vector(error.to_string()))?;
+    for artifact in quantization.artifacts.values().filter(|artifact| {
+        artifact.entry.collection_id.as_str() == collection_id.as_str()
+            && artifact.state != rrd_vector::QuantizationArtifactState::Retired
+    }) {
+        let properties = match &artifact.entry.descriptor {
+            rrd_vector::VectorProjectionDescriptor::Quantized { descriptor } => {
+                &descriptor.filter_properties
+            }
+            rrd_vector::VectorProjectionDescriptor::TurboQuant { descriptor } => {
+                &descriptor.filter_properties
+            }
+            _ => continue,
+        };
+        if properties.contains(field) {
+            return Err(ServiceError::Vector(format!(
+                "payload index {field} is required by quantization artifact {}; retire it before deletion",
+                artifact.entry.descriptor.stamp().id
+            )));
         }
     }
     Ok(())

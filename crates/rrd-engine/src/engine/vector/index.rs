@@ -27,6 +27,12 @@ impl RrdEngine {
             request_id,
             operation_id,
         )?;
+        if matches!(
+            &request.configuration,
+            VectorIndexConfiguration::TurboQuant { .. }
+        ) {
+            return self.ensure_turboquant_index_authorized(session_id, request, now);
+        }
         let scope = self.query_scope(&request.scope)?;
         let catalogue = rrd_vector::VectorCollectionRepository::new(&self.storage, scope.clone())
             .load()
@@ -294,8 +300,6 @@ fn build_index_artifact(
     source_cursor: u64,
     candidates: Vec<rrd_vector::VectorCandidate>,
 ) -> Result<rrd_vector::VectorArtifact> {
-    let dimensions = usize::try_from(vector.dimensions)
-        .map_err(|_| ServiceError::Vector("vector dimensions exceed usize".into()))?;
     match &request.configuration {
         VectorIndexConfiguration::Hnsw { .. } => rrd_vector::HnswIndex::build(
             hnsw_config(request, vector, scope, id)?,
@@ -305,41 +309,9 @@ fn build_index_artifact(
         )
         .map(Into::into)
         .map_err(core_vector),
-        VectorIndexConfiguration::TurboQuant {
-            bits,
-            seed,
-            filter_properties,
-        } => rrd_vector::TurboQuantSegment::build(
-            rrd_vector::TurboQuantSegmentConfig {
-                id,
-                scope,
-                field: vector.field.clone(),
-                dimensions,
-                metric: vector.metric,
-                bits: match bits {
-                    rrd_contract::VectorQuantizationBits::Bits4 => {
-                        rrd_vector::TurboQuantBits::Bits4
-                    }
-                    rrd_contract::VectorQuantizationBits::Bits2 => {
-                        rrd_vector::TurboQuantBits::Bits2
-                    }
-                    rrd_contract::VectorQuantizationBits::Bits1_5 => {
-                        rrd_vector::TurboQuantBits::Bits1_5
-                    }
-                    rrd_contract::VectorQuantizationBits::Bits1 => {
-                        rrd_vector::TurboQuantBits::Bits1
-                    }
-                },
-                seed: *seed,
-                embedding_model: vector.embedding_model.clone(),
-                filter_properties: public_filter_properties(filter_properties),
-            },
-            generation,
-            source_cursor,
-            candidates,
-        )
-        .map(Into::into)
-        .map_err(core_vector),
+        VectorIndexConfiguration::TurboQuant { .. } => Err(ServiceError::Vector(
+            "TurboQuant must use the engine quantization lifecycle".into(),
+        )),
     }
 }
 
@@ -394,6 +366,20 @@ fn public_vector_index(
                 previous_generation: None,
                 indexed_delta_vectors: u64::try_from(descriptor.candidate_versions).map_err(
                     |_| ServiceError::Vector("TurboQuant delta count exceeds u64".into()),
+                )?,
+            },
+        ),
+        rrd_vector::VectorProjectionDescriptor::Quantized { descriptor } => (
+            &descriptor.stamp,
+            descriptor.method.as_str(),
+            descriptor.candidate_versions,
+            Some(descriptor.packed_vector_bytes),
+            Some(descriptor.full_precision_vector_bytes),
+            VectorIndexMaintenanceSnapshot {
+                mode: VectorIndexMaintenanceMode::FullBuild,
+                previous_generation: None,
+                indexed_delta_vectors: u64::try_from(descriptor.candidate_versions).map_err(
+                    |_| ServiceError::Vector("quantized delta count exceeds u64".into()),
                 )?,
             },
         ),

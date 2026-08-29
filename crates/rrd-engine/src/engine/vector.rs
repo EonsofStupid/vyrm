@@ -3,6 +3,7 @@ use super::*;
 mod collection;
 mod index;
 mod points;
+mod quantization;
 mod search;
 
 pub(in crate::engine) use collection::{

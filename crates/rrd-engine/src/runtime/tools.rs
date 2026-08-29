@@ -97,6 +97,7 @@ enum HookApplyEvent {
     PostToolUse,
     Stop,
     PreCompact,
+    SessionEnd,
 }
 
 impl HookApplyEvent {
@@ -108,6 +109,7 @@ impl HookApplyEvent {
             Self::PostToolUse => HookEvent::PostToolUse,
             Self::Stop => HookEvent::Stop,
             Self::PreCompact => HookEvent::PreCompact,
+            Self::SessionEnd => HookEvent::SessionEnd,
         }
     }
 }

@@ -198,16 +198,14 @@ establish superiority over Qdrant or any other vector database.
 
 - HNSW currently accelerates only dense vectors; sparse and multi-vector ANN
   remain exact-only.
-- Scalar quantization is an experiment, not a published planner path.
-- The older `ScalarQuantizedVector` remains a separate per-vector symmetric
-  int8 experiment. `TurboQuantVector` now implements a deterministic MSE
-  TurboQuant variant with seeded randomized Hadamard rotation, fixed
-  standard-normal Lloyd-Max codebooks, 4/2/1.5/1-bit packing, per-vector norm
-  correction, and asymmetric dense-query scoring. `TurboQuantSegment` removes
-  full-f32 payloads from its authenticated binary artifact, participates in the
-  projection catalogue/planner, and supplies candidates for exact-f32 reranking.
-  Public artifact build/lifecycle APIs, SIMD, broad quality/latency evidence,
-  and the paper's residual QJL estimator are not implemented.
+- Scalar, product 4×–64×, binary, and TurboQuant 4/2/1.5/1-bit codecs are
+  planner-visible only through the shared authenticated lifecycle documented in
+  [`rrd-quantization-lifecycle-v1.md`](rrd-quantization-lifecycle-v1.md).
+  Build/list/activate/retire, exact-stamp CAS, immutable object binding,
+  checksummed owned/mmap reopen, corruption denial, SIMD/scalar differential,
+  update/rebuild/recovery, and exact-f32 reranking pass locally. The standalone
+  `ScalarQuantizedVector` remains a reference primitive rather than a second
+  lifecycle.
 - HNSW graph artifacts remain canonical JSON and storage-heavy. Dense exact
   payloads have a compact mmap representation; compact graph and payload-bitmap
   layouts, ACORN-style payload-derived edges, and automatic merge thresholds
@@ -222,7 +220,7 @@ establish superiority over Qdrant or any other vector database.
 Cross-system Qdrant proof remains a separate fixed-hardware protocol after the
 remaining production paths are ready.
 
-## TurboQuant implementation and remaining promotion gate
+## Quantization implementation and remaining promotion gate
 
 The primary contract is Zandieh et al.,
 [“TurboQuant: Online Vector Quantization with Near-optimal Distortion Rate”](https://arxiv.org/abs/2504.19874)
@@ -234,11 +232,13 @@ and exact reranking. It deliberately does not claim the paper's residual QJL
 estimator. Exact f32 vectors remain authoritative for quality measurement and
 final reranking.
 
-The evidence matrix must report encode/index time, bytes per vector including
-norms/seeds/residual sketches, MSE, inner-product bias/variance, Recall@k before
-and after exact reranking, filtered recall, query throughput and p50/p95/p99,
-scalar/SIMD parity, artifact authentication, reopen, and adversarial/non-power-
-of-two dimensions. Before product promotion, the remaining rows—especially
-large-corpus bias/recall, filtered quality, scalar/SIMD parity, mmap and public
-lifecycle/recovery administration—must pass. The planner-visible artifact is
-therefore an internal alpha path, not a Qdrant-equivalence or superiority claim.
+The local 512×64 matrix reports packed/full/auxiliary/total bytes, build and
+automatic-kernel search time, mean absolute score error, Recall@10 after exact
+reranking, mmap reopen, and scalar/runtime-dispatched SIMD parity for every
+supported scalar/product/binary/TurboQuant row. Engine integration separately
+proves authenticated lifecycle denial, update, recovery, and exact truth.
+Product promotion still requires larger fixed-hardware corpora, filtered
+p50/p95/p99 service measurements, distributed placement, physical memory-tier
+policy, and GPU qualification. The paper's residual QJL estimator is not
+implemented. This remains an engine-alpha capability, not a Qdrant-equivalence
+or superiority claim.

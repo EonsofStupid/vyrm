@@ -322,19 +322,27 @@ boundaries so it cannot launch multiple authorities against one database.
 > dense/sparse/multivector oracle, bounded typed filters, immutable exact
 > segments, deterministic dense HNSW with filter-aware admission and exact
 > reranking, a freshness-aware planner/executor, unified CAS generation
-> lifecycle, scalar-quantization experiment, portable fixture, backend
+> lifecycle, portable fixture, backend
 > differential, recall gate, and eight-generation update/delete/reopen/
 > replacement soak. The retained 10k×128 profile reaches 0.98 recall@10 at
 > `ef=256` while exposing a 3.90× JSON-artifact overhead; this is a local
 > baseline, not a Qdrant superiority claim. Compact binary/mmap, SIMD/GPU,
 > sparse/multivector ANN, embeddings, and external comparison remain gated.
 > See `docs/rrd-vector-search.md`.
-> The existing symmetric-int8 experiment remains separate from TurboQuant. A
-> deterministic MSE TurboQuant path now supplies seeded randomized Hadamard
-> rotation, fixed distribution-matched 4/2/1.5/1-bit codes, packed authenticated
-> artifacts, asymmetric scoring, planner selection, and exact-f32 reranking.
-> Public build/lifecycle administration, the paper's residual QJL variant,
-> broad recall/bias/latency evidence, mmap, and scalar/SIMD parity remain gated.
+> A shared authenticated quantization lifecycle now builds, lists, activates,
+> retires, reopens, and exactly reranks immutable scalar, product 4×–64×,
+> binary, and TurboQuant 4/2/1.5/1-bit artifacts. All codecs have checksummed
+> binary forms, owned/mmap reopen, corruption denial, and scalar/runtime-
+> dispatched SIMD differential evidence. The retained 512×64 matrix reports
+> packed, auxiliary, total-artifact, bias, recall, build, and search evidence;
+> it is a local diagnostic, not a production/Qdrant performance claim. The
+> historical TurboQuant ensure request is now only an idempotent compatibility
+> adapter over this lifecycle; the generic publisher cannot create a parallel
+> quantized catalogue, and lifecycle restore is vector-catalogue revision-
+> neutral. The paper's residual QJL variant, physical memory-tier policy, GPU
+> qualification,
+> and generated G06 bindings remain gated. See
+> `docs/rrd-quantization-lifecycle-v1.md`.
 
 > **M6 embedding/edge overlay (2026-08-19).** The local kernel gate is closed.
 > `rrd-inference` now provides source-digest/model/read-stamp-bound jobs, two-read

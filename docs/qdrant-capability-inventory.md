@@ -159,23 +159,25 @@ Source: [Qdrant quantization](https://qdrant.tech/documentation/manage-data/quan
 
 | Qdrant capability | RRFlow disposition |
 |---|---|
-| Scalar int8 quantization (4x compression) | **Partial/experimental** — symmetric per-vector int8 only, not Qdrant-equivalent production format |
-| Binary quantization | **Absent** |
-| 1-bit, 1.5-bit and 2-bit encodings | **Absent** |
-| Asymmetric binary-stored/scalar-query scoring | **Absent** |
-| Product quantization | **Absent** |
-| TurboQuant random rotation and global distribution-aware mapping | **Absent** |
-| TurboQuant 4/2/1.5/1-bit modes (8x–32x) | **Absent** |
-| TurboQuant asymmetric full-precision query scoring | **Absent** |
-| SIMD TurboQuant scoring for cosine/dot/Euclidean | **Absent** |
-| Per-vector quantization settings | **Absent** public config |
-| Store quantized and original vectors together | **Absent** production lifecycle |
-| Oversampling and exact rescoring controls | **Partial** — exact rerank exists, no quantized oversampling |
+| Scalar int8 quantization (4x compression) | **Verified in the engine** — immutable artifact-wide symmetric int8; not claimed format-equivalent to Qdrant |
+| Binary quantization | **Verified in the engine** — packed sign-bit candidate artifact with exact canonical reranking |
+| 1-bit, 1.5-bit and 2-bit encodings | **Verified in the engine** for deterministic MSE TurboQuant |
+| Asymmetric binary-stored/scalar-query scoring | **Partial** — the query remains f32 but binary candidate scoring uses its sign bits before exact f32 reranking |
+| Product quantization | **Verified in the engine** at packed-code ratios 4×, 8×, 16×, 32×, and 64×; codebook and total artifact bytes are separate evidence |
+| TurboQuant random rotation and global distribution-aware mapping | **Verified in the engine** for the deterministic MSE variant; residual QJL is not implemented |
+| TurboQuant 4/2/1.5/1-bit modes (8x–32x) | **Verified in the engine** |
+| TurboQuant asymmetric full-precision query scoring | **Verified in the engine** with exact canonical reranking |
+| SIMD TurboQuant scoring for cosine/dot/Euclidean | **Verified locally** through runtime-dispatched AVX2 rotated-dot scoring and scalar parity |
+| Per-vector quantization settings | **Partial** — authenticated configuration is per named-vector artifact, not per point and not transport-bound yet |
+| Store quantized and original vectors together | **Verified in the engine** — derived immutable objects coexist with authoritative full-f32 history |
+| Oversampling and exact rescoring controls | **Engine core present** — bounded `exact_rerank` controls candidate count and final canonical scoring; no separate ratio-named outward field |
 | Quantized-vector memory tier and inline storage controls | **Absent** |
-| Recall/compression/speed validation guidance and benchmark matrix | **Absent** for TurboQuant; an exact oracle gate is specified only |
+| Recall/compression/speed validation guidance and benchmark matrix | **Local engine evidence present** for 11 fixed 512×64 rows; production fixed-hardware scale/SLO qualification remains absent |
 
-The existing `ScalarQuantizedVector` must not be renamed or presented as
-TurboQuant. Qdrant 1.19 implements a materially different codec and lifecycle.
+The standalone `ScalarQuantizedVector` remains a scalar oracle primitive and is
+not presented as TurboQuant. RRFlow's lifecycle and binary formats are its own;
+this inventory does not claim wire, format, or performance equivalence to
+Qdrant.
 
 ## 7. Persistence, mutation semantics, and storage lifecycle
 
@@ -366,8 +368,8 @@ product stack.
 
 The critical missing blocks are generated collection/point bindings, richer
 payload index families and statistics, ACORN/payload-derived graph edges,
-DBSF/general formula operators, promoted quantizer lifecycles, compact
-graph storage, memory tiers, physical GPU indexing, server inference, official
+DBSF/general formula operators, compact graph storage, physical quantized
+memory tiers, physical GPU indexing, server inference, official
 SDK qualification, REST/gRPC breadth, and production distribution.
 
 Until those exist and pass fixed-corpus/fixed-hardware differentials, a RRFlow

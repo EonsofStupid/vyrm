@@ -43,7 +43,7 @@ pub fn evaluate_tool(run: Option<&ReasoningRun>, input: &Value) -> ToolPolicy {
     if !is_project_mutation_tool(tool) {
         return ToolPolicy::ReadOnly;
     }
-    if tool == "Bash"
+    if is_shell_tool(tool)
         && input
             .pointer("/tool_input/command")
             .and_then(Value::as_str)
@@ -52,7 +52,7 @@ pub fn evaluate_tool(run: Option<&ReasoningRun>, input: &Value) -> ToolPolicy {
         return ToolPolicy::ControlPlane;
     }
 
-    let actual = if tool == "Bash" {
+    let actual = if is_shell_tool(tool) {
         format!(
             "Bash({})",
             input
@@ -91,7 +91,7 @@ pub fn evaluate_tool(run: Option<&ReasoningRun>, input: &Value) -> ToolPolicy {
             );
             ToolPolicy::Allow { differential }
         }
-        Some(ReasoningState::NeedsVerification) if tool == "Bash" => {
+        Some(ReasoningState::NeedsVerification) if is_shell_tool(tool) => {
             differential
                 .expected
                 .push("a verification command followed by typed verification checks".into());
@@ -125,11 +125,25 @@ pub fn evaluate_tool(run: Option<&ReasoningRun>, input: &Value) -> ToolPolicy {
 pub(super) fn is_project_mutation_tool(tool: &str) -> bool {
     matches!(
         tool,
-        "Edit" | "Write" | "NotebookEdit" | "Bash" | "RRFlowExec"
+        "Edit"
+            | "Write"
+            | "NotebookEdit"
+            | "Bash"
+            | "apply_patch"
+            | "write_file"
+            | "replace"
+            | "run_shell_command"
+            | "RRFlowExec"
     ) || runtime_tool_catalogue().iter().any(|definition| {
-        definition.name == tool
-            && definition.lifecycle == RuntimeToolLifecyclePolicy::PlannedMutation
+        definition.lifecycle == RuntimeToolLifecyclePolicy::PlannedMutation
+            && (definition.name == tool
+                || tool.ends_with(&format!("__{}", definition.name))
+                || tool.ends_with(&format!("_{}", definition.name)))
     })
+}
+
+fn is_shell_tool(tool: &str) -> bool {
+    matches!(tool, "Bash" | "run_shell_command")
 }
 
 pub(super) fn tool_request_digest(input: &Value) -> Result<String, serde_json::Error> {
@@ -201,6 +215,12 @@ mod tests {
             evaluate_tool(Some(&planned()), &input),
             ToolPolicy::Deny { .. }
         ));
+        for tool in ["apply_patch", "write_file", "replace", "run_shell_command"] {
+            assert!(matches!(
+                evaluate_tool(None, &serde_json::json!({"tool_name":tool})),
+                ToolPolicy::Deny { .. }
+            ));
+        }
     }
 
     #[test]
@@ -217,6 +237,17 @@ mod tests {
         .unwrap();
         assert!(matches!(
             evaluate_tool(Some(&run), &serde_json::json!({"tool_name":"Edit"})),
+            ToolPolicy::Allow { .. }
+        ));
+        assert!(matches!(
+            evaluate_tool(Some(&run), &serde_json::json!({"tool_name":"apply_patch"})),
+            ToolPolicy::Allow { .. }
+        ));
+        assert!(matches!(
+            evaluate_tool(
+                Some(&run),
+                &serde_json::json!({"tool_name":"mcp__rrflow__rrflow_data_commit"})
+            ),
             ToolPolicy::Allow { .. }
         ));
         assert!(matches!(

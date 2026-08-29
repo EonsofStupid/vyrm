@@ -167,6 +167,9 @@ impl RrdEngine {
             rrd_vector::AccessPathKind::ExactScan => "exact_scan",
             rrd_vector::AccessPathKind::ExactSegment => "exact_segment",
             rrd_vector::AccessPathKind::Hnsw => "hnsw",
+            rrd_vector::AccessPathKind::ScalarQuantized => "scalar_quantized",
+            rrd_vector::AccessPathKind::ProductQuantized => "product_quantized",
+            rrd_vector::AccessPathKind::BinaryQuantized => "binary_quantized",
             rrd_vector::AccessPathKind::TurboQuant => "turboquant",
         };
         Ok(VectorSearchResult {

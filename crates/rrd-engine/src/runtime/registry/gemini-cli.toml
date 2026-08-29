@@ -1,14 +1,14 @@
-# The registry's first closed interval, and the evidence the drift alarm is
-# required rather than cautious: Gemini CLI was shut down mid-2026, months
-# after any hand-written adapter list would have named it. Kept as history;
-# `rrflow init` refuses it with the retirement stated.
+# Re-verified 2026-08-29 against the current google-gemini/gemini-cli hook,
+# skill, and plan-mode references. The earlier retirement claim was false
+# drift and is intentionally corrected rather than preserved as capability.
 name = "gemini-cli"
 display = "Google Gemini CLI"
-hooks = false
+hooks = true
+hook_protocol = "gemini"
 mcp_client = true
 mcp_server = false
 context_file = "GEMINI.md"
+config_path = ".gemini/settings.json"
 billing = ["subscription", "per_usage"]
 providers = ["google"]
-retired = "2026-07"
-notes = "Shut down mid-2026. Recorded 2026-08-13."
+notes = "BeforeAgent injects prompt-bound recall; BeforeTool and AfterTool enforce and observe mutations; SessionStart and PreCompress preserve context; .agents/skills is discovered natively."

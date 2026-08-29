@@ -1,8 +1,9 @@
 use crate::contract::invalid;
 use crate::{
     search_exact_ref, AccessPathKind, CompactDenseSegment, HnswIndex, HnswKernel,
-    ImmutableVectorSegment, SearchHit, SearchPlan, SearchRequest, TurboQuantSegment,
-    VectorCandidate, VectorCatalog, VectorPlanner, VectorProjectionDescriptor,
+    ImmutableVectorSegment, QuantizationMethod, QuantizedKernel, QuantizedSegment, SearchHit,
+    SearchPlan, SearchRequest, TurboQuantSegment, VectorCandidate, VectorCatalog, VectorPlanner,
+    VectorProjectionDescriptor,
 };
 use rrd_core::{
     digest, Error, ProjectionId, ProjectionStamp, ProjectionState, Result,
@@ -16,6 +17,7 @@ pub enum VectorArtifact {
     ExactSegment(ImmutableVectorSegment),
     CompactDense(CompactDenseSegment),
     Hnsw(HnswIndex),
+    Quantized(QuantizedSegment),
     TurboQuant(TurboQuantSegment),
 }
 
@@ -28,6 +30,9 @@ pub enum VectorArtifactKind {
     ExactSegment,
     CompactDense,
     Hnsw,
+    ScalarQuantized,
+    ProductQuantized,
+    BinaryQuantized,
     TurboQuant,
 }
 
@@ -37,6 +42,9 @@ impl VectorArtifactKind {
             Self::ExactSegment => "exact_segment",
             Self::CompactDense => "compact_dense",
             Self::Hnsw => "hnsw",
+            Self::ScalarQuantized => "scalar_quantized",
+            Self::ProductQuantized => "product_quantized",
+            Self::BinaryQuantized => "binary_quantized",
             Self::TurboQuant => "turboquant",
         }
     }
@@ -46,17 +54,25 @@ impl VectorArtifactKind {
             Self::ExactSegment => "application/vnd.rrflow.vector-exact-segment+json",
             Self::CompactDense => "application/vnd.rrflow.vector-compact-dense",
             Self::Hnsw => "application/vnd.rrflow.vector-hnsw+json",
+            Self::ScalarQuantized => "application/vnd.rrflow.vector-quantized-scalar",
+            Self::ProductQuantized => "application/vnd.rrflow.vector-quantized-product",
+            Self::BinaryQuantized => "application/vnd.rrflow.vector-quantized-binary",
             Self::TurboQuant => "application/vnd.rrflow.vector-turboquant",
         }
     }
 }
 
 impl VectorArtifact {
-    pub const fn kind(&self) -> VectorArtifactKind {
+    pub fn kind(&self) -> VectorArtifactKind {
         match self {
             Self::ExactSegment(_) => VectorArtifactKind::ExactSegment,
             Self::CompactDense(_) => VectorArtifactKind::CompactDense,
             Self::Hnsw(_) => VectorArtifactKind::Hnsw,
+            Self::Quantized(segment) => match segment.descriptor().method {
+                QuantizationMethod::Scalar => VectorArtifactKind::ScalarQuantized,
+                QuantizationMethod::Product { .. } => VectorArtifactKind::ProductQuantized,
+                QuantizationMethod::Binary => VectorArtifactKind::BinaryQuantized,
+            },
             Self::TurboQuant(_) => VectorArtifactKind::TurboQuant,
         }
     }
@@ -66,6 +82,7 @@ impl VectorArtifact {
             Self::ExactSegment(segment) => segment.as_bytes(),
             Self::CompactDense(segment) => segment.as_bytes(),
             Self::Hnsw(index) => index.as_bytes(),
+            Self::Quantized(segment) => segment.as_bytes(),
             Self::TurboQuant(segment) => segment.as_bytes(),
         }
     }
@@ -79,6 +96,15 @@ impl VectorArtifact {
                 CompactDenseSegment::from_bytes(bytes).map(Self::CompactDense)
             }
             VectorArtifactKind::Hnsw => HnswIndex::from_bytes(bytes).map(Self::Hnsw),
+            VectorArtifactKind::ScalarQuantized
+            | VectorArtifactKind::ProductQuantized
+            | VectorArtifactKind::BinaryQuantized => {
+                let artifact = QuantizedSegment::from_bytes(bytes).map(Self::Quantized)?;
+                if artifact.kind() != kind {
+                    return invalid("quantized artifact method differs from its codec kind");
+                }
+                Ok(artifact)
+            }
             VectorArtifactKind::TurboQuant => {
                 TurboQuantSegment::from_bytes(bytes).map(Self::TurboQuant)
             }
@@ -90,6 +116,7 @@ impl VectorArtifact {
             Self::ExactSegment(segment) => segment.descriptor().clone().into(),
             Self::CompactDense(segment) => segment.descriptor().clone().into(),
             Self::Hnsw(index) => index.descriptor().clone().into(),
+            Self::Quantized(segment) => segment.descriptor().clone().into(),
             Self::TurboQuant(segment) => segment.descriptor().clone().into(),
         }
     }
@@ -110,6 +137,12 @@ impl From<HnswIndex> for VectorArtifact {
 impl From<CompactDenseSegment> for VectorArtifact {
     fn from(segment: CompactDenseSegment) -> Self {
         Self::CompactDense(segment)
+    }
+}
+
+impl From<QuantizedSegment> for VectorArtifact {
+    fn from(segment: QuantizedSegment) -> Self {
+        Self::Quantized(segment)
     }
 }
 
@@ -232,6 +265,45 @@ impl VectorRuntime {
         Ok(revision)
     }
 
+    /// Installs the one generation selected by an already-validated durable
+    /// lifecycle catalogue during restart.
+    pub fn restore_active(&mut self, artifact: impl Into<VectorArtifact>) -> Result<u64> {
+        let artifact = artifact.into();
+        let descriptor = artifact.descriptor();
+        let key = (descriptor.stamp().id.clone(), descriptor.stamp().generation);
+        if self.artifacts.contains_key(&key) {
+            return invalid("restored vector artifact generation is already installed");
+        }
+        let revision = self.catalog.restore_active(descriptor)?;
+        self.artifacts.insert(key, artifact);
+        Ok(revision)
+    }
+
+    /// Removes TurboQuant projections reconstructed from the retired generic
+    /// vector-artifact catalogue. Their durable records remain readable for
+    /// migration and audit, but only the quantization lifecycle may install a
+    /// TurboQuant serving view.
+    pub fn suppress_legacy_turboquant(&mut self) -> usize {
+        let ids = self
+            .catalog
+            .entries
+            .iter()
+            .filter_map(|(id, descriptor)| {
+                matches!(descriptor, VectorProjectionDescriptor::TurboQuant { .. })
+                    .then_some(id.clone())
+            })
+            .collect::<Vec<_>>();
+        for id in &ids {
+            self.catalog.entries.remove(id);
+        }
+        self.catalog.retired.retain(|descriptor| {
+            !matches!(descriptor, VectorProjectionDescriptor::TurboQuant { .. })
+        });
+        self.artifacts
+            .retain(|_, artifact| !matches!(artifact, VectorArtifact::TurboQuant(_)));
+        ids.len()
+    }
+
     pub fn quarantine(
         &mut self,
         expected_revision: u64,
@@ -282,10 +354,14 @@ impl VectorRuntime {
                         }
                         VectorArtifact::ExactSegment(_)
                         | VectorArtifact::CompactDense(_)
+                        | VectorArtifact::Quantized(_)
                         | VectorArtifact::TurboQuant(_) => None,
                     })
                     .unwrap_or(descriptor.nodes.max(1) as u64),
                 VectorProjectionDescriptor::TurboQuant { descriptor } => {
+                    descriptor.candidate_versions.max(1) as u64
+                }
+                VectorProjectionDescriptor::Quantized { descriptor } => {
                     descriptor.candidate_versions.max(1) as u64
                 }
             };
@@ -382,7 +458,12 @@ impl VectorRuntime {
         let plan = &prepared.plan;
         let hits = match plan.selected.kind {
             AccessPathKind::ExactScan => search_exact_ref(request, &self.canonical)?,
-            AccessPathKind::ExactSegment | AccessPathKind::Hnsw | AccessPathKind::TurboQuant => {
+            AccessPathKind::ExactSegment
+            | AccessPathKind::Hnsw
+            | AccessPathKind::ScalarQuantized
+            | AccessPathKind::ProductQuantized
+            | AccessPathKind::BinaryQuantized
+            | AccessPathKind::TurboQuant => {
                 let key = (plan.selected.id.clone(), plan.selected.generation);
                 let artifact =
                     self.artifacts
@@ -422,6 +503,29 @@ impl VectorRuntime {
                                     && candidate.source_cursor <= plan.required_source_cursor
                                     && hnsw_covers_candidate(index.descriptor(), candidate)
                             })),
+                        )?
+                    }
+                    (
+                        AccessPathKind::ScalarQuantized
+                        | AccessPathKind::ProductQuantized
+                        | AccessPathKind::BinaryQuantized,
+                        VectorArtifact::Quantized(segment),
+                    ) => {
+                        let approximate = segment.search_candidates_at(
+                            request,
+                            plan.selected.exact_rerank,
+                            plan.required_source_cursor,
+                            QuantizedKernel::Auto,
+                        )?;
+                        let references = approximate
+                            .into_iter()
+                            .map(|hit| hit.reference)
+                            .collect::<BTreeSet<_>>();
+                        search_exact_ref(
+                            request,
+                            self.canonical.iter().filter(|candidate| {
+                                references.contains(&candidate.vector.reference)
+                            }),
                         )?
                     }
                     (AccessPathKind::TurboQuant, VectorArtifact::TurboQuant(segment)) => {
@@ -713,5 +817,91 @@ mod tests {
         assert_eq!(execution.plan.selected.kind, AccessPathKind::TurboQuant);
         assert_eq!(execution.hits[0].reference.id.as_str(), "a");
         assert_eq!(execution.hits[0].score, 1.0);
+    }
+
+    #[test]
+    fn lifecycle_restore_is_revision_neutral_and_legacy_turbo_is_suppressed() {
+        let scope = ScopeId::new("instance:quantization-authority").unwrap();
+        let values = vec![
+            candidate(&scope, 1, "a", vec![1.0, 0.0]),
+            candidate(&scope, 2, "b", vec![0.0, 1.0]),
+        ];
+        let mut runtime = VectorRuntime::new(values.clone()).unwrap();
+        let hnsw = HnswIndex::build(
+            HnswConfig {
+                id: ProjectionId::new("vector:hnsw:authority").unwrap(),
+                scope: scope.clone(),
+                field: "body".into(),
+                dimensions: 2,
+                metric: ScoreMetric::Dot,
+                embedding_model: None,
+                m: 2,
+                ef_construction: 4,
+                max_level: 3,
+                seed: 7,
+                filter_properties: BTreeSet::new(),
+            },
+            1,
+            2,
+            values.clone(),
+        )
+        .unwrap();
+        assert_eq!(runtime.publish(0, hnsw).unwrap(), 1);
+        let legacy = TurboQuantSegment::build(
+            TurboQuantSegmentConfig {
+                id: ProjectionId::new("vector:legacy-turbo:authority").unwrap(),
+                scope: scope.clone(),
+                field: "body".into(),
+                dimensions: 2,
+                metric: ScoreMetric::Dot,
+                bits: TurboQuantBits::Bits2,
+                seed: 11,
+                embedding_model: None,
+                filter_properties: BTreeSet::new(),
+            },
+            1,
+            2,
+            values.clone(),
+        )
+        .unwrap();
+        assert_eq!(runtime.publish(1, legacy).unwrap(), 2);
+        assert_eq!(runtime.suppress_legacy_turboquant(), 1);
+
+        let lifecycle = TurboQuantSegment::build(
+            TurboQuantSegmentConfig {
+                id: ProjectionId::new("quant-turbo:authority").unwrap(),
+                scope: scope.clone(),
+                field: "body".into(),
+                dimensions: 2,
+                metric: ScoreMetric::Dot,
+                bits: TurboQuantBits::Bits2,
+                seed: 13,
+                embedding_model: None,
+                filter_properties: BTreeSet::new(),
+            },
+            1,
+            2,
+            values.clone(),
+        )
+        .unwrap();
+        assert_eq!(runtime.restore_active(lifecycle).unwrap(), 2);
+        assert_eq!(runtime.catalog().revision, 2);
+
+        let exact = ImmutableVectorSegment::build(
+            VectorSegmentConfig {
+                id: ProjectionId::new("vector:exact:authority").unwrap(),
+                scope,
+                field: "body".into(),
+                dimensions: 2,
+                metric: ScoreMetric::Dot,
+                embedding_model: None,
+                filter_properties: BTreeSet::new(),
+            },
+            1,
+            2,
+            values,
+        )
+        .unwrap();
+        assert_eq!(runtime.publish(2, exact).unwrap(), 3);
     }
 }

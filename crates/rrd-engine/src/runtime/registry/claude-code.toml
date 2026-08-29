@@ -4,6 +4,7 @@
 name = "claude-code"
 display = "Claude Code"
 hooks = true
+hook_protocol = "claude-code"
 mcp_client = true
 mcp_server = false
 context_file = "CLAUDE.md"

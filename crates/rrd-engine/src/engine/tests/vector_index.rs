@@ -1,17 +1,20 @@
 use super::*;
 use rrd_contract::{
-    BackupCoverageSnapshot, CreateInstanceBackup, DataEmbeddingProvenance, DataLogicalModel,
-    DataProperties, DataPropertySchema, DataRecordSchema, DataReference, DataSchemaMode,
-    DataSchemaRegistry, DataTableSchema, DataTarget, DataValueType, DataVectorNormalization,
-    DataVectorValue, DeleteVectorCollection, DeleteVectorPayloadIndex, EnsureQueryIndex,
-    EnsureVectorIndex, EnsureVectorPayloadIndex, ExecuteRetrievalQuery, HybridFusion,
-    ListVectorCollections, ListVectorPayloadIndexes, QueryBudget, QueryIndexKind, QueryValue,
-    RestoreInstanceBackup, RetrievalContextPair, RetrievalFusion, RetrievalOutput,
-    RetrievalPrefetch, RetrievalQuery, RetrievalRecommendStrategy, RetrievalRerankStage,
-    RetrievalResultShape, RetrievalVectorExample, RetrieveVectorPoints, SearchHybrid,
-    SearchVectors, VectorEmbeddingModel, VectorIndexConfiguration, VectorIndexMaintenanceMode,
-    VectorPayloadCondition, VectorPayloadFilter, VectorPayloadIndexKind, VectorPayloadOperator,
-    VectorQuantizationBits, VectorSearchMode, VectorSearchQuery,
+    ActivateVectorQuantizationArtifact, BackupCoverageSnapshot, BuildVectorQuantizationArtifact,
+    CreateInstanceBackup, DataEmbeddingProvenance, DataLogicalModel, DataProperties,
+    DataPropertySchema, DataRecordSchema, DataReference, DataSchemaMode, DataSchemaRegistry,
+    DataTableSchema, DataTarget, DataValueType, DataVectorNormalization, DataVectorValue,
+    DeleteVectorCollection, DeleteVectorPayloadIndex, EnsureQueryIndex, EnsureVectorIndex,
+    EnsureVectorPayloadIndex, ExecuteRetrievalQuery, HybridFusion, ListVectorCollections,
+    ListVectorPayloadIndexes, ListVectorQuantizationArtifacts, QueryBudget, QueryIndexKind,
+    QueryValue, RestoreInstanceBackup, RetireVectorQuantizationArtifact, RetrievalContextPair,
+    RetrievalFusion, RetrievalOutput, RetrievalPrefetch, RetrievalQuery,
+    RetrievalRecommendStrategy, RetrievalRerankStage, RetrievalResultShape, RetrievalVectorExample,
+    RetrieveVectorPoints, SearchHybrid, SearchVectors, VectorEmbeddingModel,
+    VectorIndexConfiguration, VectorIndexMaintenanceMode, VectorPayloadCondition,
+    VectorPayloadFilter, VectorPayloadIndexKind, VectorPayloadOperator, VectorProductCompression,
+    VectorQuantizationArtifactState, VectorQuantizationBits, VectorQuantizationMethod,
+    VectorSearchMode, VectorSearchQuery,
 };
 use std::collections::BTreeMap;
 
@@ -132,6 +135,375 @@ fn search_request(mode: VectorSearchMode) -> SearchVectors {
         mode,
         max_scanned_changes: 10_000,
     }
+}
+
+fn quantization_build(method: VectorQuantizationMethod) -> BuildVectorQuantizationArtifact {
+    BuildVectorQuantizationArtifact {
+        scope: format!("instance:{}", instance()),
+        collection_id: CanonicalId::new("documents").unwrap(),
+        vector_name: CanonicalId::new("body").unwrap(),
+        method,
+        filter_properties: Vec::new(),
+        max_scanned_changes: 10_000,
+    }
+}
+
+fn quantization_search(values: Vec<f32>, mode: VectorSearchMode) -> SearchVectors {
+    SearchVectors {
+        scope: format!("instance:{}", instance()),
+        valid_at: 1,
+        collection_id: Some(CanonicalId::new("documents").unwrap()),
+        vector_name: Some(CanonicalId::new("body").unwrap()),
+        field: None,
+        query: VectorSearchQuery::Dense { values },
+        filter: None,
+        metric: None,
+        top_k: 1,
+        mode,
+        max_scanned_changes: 10_000,
+    }
+}
+
+#[test]
+fn quantization_build_list_activate_retire_update_and_recovery_share_exact_truth() {
+    let root = tempfile::tempdir().unwrap();
+    let engine = RrdEngine::open(root.path(), instance(), TOKEN_KEY).unwrap();
+    let lease = engine
+        .create_session(
+            &session_request(9_000, 4),
+            &id("quantization-session"),
+            100,
+            "request-quantization-session",
+            "operation-quantization-session",
+        )
+        .unwrap();
+    engine
+        .ensure_vector_collection(
+            &lease.session_id,
+            &lease.token,
+            &EnsureVectorCollection {
+                scope: format!("instance:{}", instance()),
+                collection_id: CanonicalId::new("documents").unwrap(),
+                vectors: vec![NamedVectorDefinition {
+                    name: CanonicalId::new("body").unwrap(),
+                    field: CanonicalId::new("body-embedding").unwrap(),
+                    kind: VectorValueKind::Dense,
+                    dimensions: 64,
+                    metric: VectorSearchMetric::Cosine,
+                    embedding_model: None,
+                    memory_tier: VectorMemoryTier::Cached,
+                }],
+            },
+            &mutation_context(
+                &id("quantization-collection"),
+                "request-quantization-collection",
+                "operation-quantization-collection",
+            ),
+            200,
+        )
+        .unwrap();
+    let vector = |row: usize| {
+        (0..64)
+            .map(|dimension| ((row * 17 + dimension * 13) % 101) as f32 / 50.0 - 1.0)
+            .collect::<Vec<_>>()
+    };
+    commit_vectors(
+        &engine,
+        &lease,
+        300,
+        std::iter::once(TransactionMutation::PutSchema {
+            registry: DataSchemaRegistry {
+                revision: 1,
+                migration: "install quantization fixture schema".into(),
+                catalogue: DataCatalogueIdentity::default(),
+                tables: BTreeMap::new(),
+                records: BTreeMap::from([(
+                    CanonicalId::new("document").unwrap(),
+                    DataRecordSchema {
+                        properties: BTreeMap::from([(
+                            "body".into(),
+                            DataPropertySchema {
+                                value_type: DataValueType::String,
+                                required: false,
+                            },
+                        )]),
+                        allow_additional_properties: true,
+                        ..DataRecordSchema::default()
+                    },
+                )]),
+                relations: BTreeMap::new(),
+                events: BTreeMap::new(),
+            },
+        })
+        .chain((0..12).flat_map(|row| {
+            let id = format!("q{row}");
+            [
+                document_mutation(&id, "quantization fixture"),
+                vector_mutation(&id, vector(row)),
+            ]
+        }))
+        .collect(),
+    );
+
+    let methods = [
+        VectorQuantizationMethod::Scalar,
+        VectorQuantizationMethod::Product {
+            compression: VectorProductCompression::X64,
+        },
+        VectorQuantizationMethod::Binary,
+        VectorQuantizationMethod::TurboQuant {
+            bits: VectorQuantizationBits::Bits1,
+            seed: 91,
+        },
+    ];
+    let mut built = Vec::new();
+    for (ordinal, method) in methods.into_iter().enumerate() {
+        let result = engine
+            .build_vector_quantization_artifact(
+                &lease.session_id,
+                &lease.token,
+                &quantization_build(method),
+                400 + ordinal as u64,
+                &format!("request-quantization-build-{ordinal}"),
+                &format!("operation-quantization-build-{ordinal}"),
+            )
+            .unwrap();
+        assert_eq!(
+            result.artifact.state,
+            VectorQuantizationArtifactState::Ready
+        );
+        built.push(result.artifact);
+    }
+    assert_eq!(built[1].maximum_compression_ratio, 64);
+    assert_eq!(
+        built[1].full_precision_vector_bytes / built[1].packed_vector_bytes,
+        64
+    );
+
+    let list_request = ListVectorQuantizationArtifacts {
+        scope: format!("instance:{}", instance()),
+        collection_id: Some(CanonicalId::new("documents").unwrap()),
+        vector_name: Some(CanonicalId::new("body").unwrap()),
+        max_artifacts: 100,
+    };
+    let ready = engine
+        .list_vector_quantization_artifacts(
+            &lease.session_id,
+            &lease.token,
+            &list_request,
+            450,
+            "request-quantization-list-ready",
+            "operation-quantization-list-ready",
+        )
+        .unwrap();
+    assert_eq!(ready.artifacts.len(), 4);
+    assert!(ready
+        .artifacts
+        .iter()
+        .all(|artifact| artifact.state == VectorQuantizationArtifactState::Ready));
+
+    let exact_before = engine
+        .search_vectors(
+            &lease.session_id,
+            &lease.token,
+            &quantization_search(
+                vector(3),
+                VectorSearchMode::AllowApproximate {
+                    exact_rerank: 8,
+                    ef_search: 8,
+                },
+            ),
+            451,
+            "request-quantization-search-before",
+            "operation-quantization-search-before",
+        )
+        .unwrap();
+    assert_eq!(exact_before.access_path.as_str(), "exact_scan");
+
+    // The compatibility ensure route resumes the already-built ready
+    // TurboQuant generation and activates it through the same lifecycle. It
+    // must not publish a fifth artifact through the generic vector catalogue.
+    let lifecycle_turbo = EnsureVectorIndex {
+        scope: format!("instance:{}", instance()),
+        collection_id: CanonicalId::new("documents").unwrap(),
+        vector_name: CanonicalId::new("body").unwrap(),
+        configuration: VectorIndexConfiguration::TurboQuant {
+            bits: VectorQuantizationBits::Bits1,
+            seed: 91,
+            filter_properties: Vec::new(),
+        },
+        max_scanned_changes: 10_000,
+    };
+    let resumed = engine
+        .ensure_vector_index(
+            &lease.session_id,
+            &lease.token,
+            &lifecycle_turbo,
+            452,
+            "request-quantization-resume-turbo",
+            "operation-quantization-resume-turbo",
+        )
+        .unwrap();
+    assert_eq!(resumed.index.generation, built[3].generation);
+    assert_eq!(resumed.index.object_sha256, built[3].object_sha256);
+    assert!(!resumed.idempotent_replay);
+    let resumed_replay = engine
+        .ensure_vector_index(
+            &lease.session_id,
+            &lease.token,
+            &lifecycle_turbo,
+            453,
+            "request-quantization-resume-turbo-replay",
+            "operation-quantization-resume-turbo-replay",
+        )
+        .unwrap();
+    assert_eq!(resumed_replay.index, resumed.index);
+    assert!(resumed_replay.idempotent_replay);
+
+    for (ordinal, artifact) in built.iter().take(3).enumerate() {
+        engine
+            .activate_vector_quantization_artifact(
+                &lease.session_id,
+                &lease.token,
+                &ActivateVectorQuantizationArtifact {
+                    scope: format!("instance:{}", instance()),
+                    artifact_id: artifact.artifact_id.clone(),
+                    generation: artifact.generation,
+                },
+                500 + ordinal as u64,
+                &format!("request-quantization-activate-{ordinal}"),
+                &format!("operation-quantization-activate-{ordinal}"),
+            )
+            .unwrap();
+    }
+    let approximate_request = quantization_search(
+        vector(3),
+        VectorSearchMode::RequireApproximate {
+            exact_rerank: 8,
+            ef_search: 8,
+        },
+    );
+    let active_search = engine
+        .search_vectors(
+            &lease.session_id,
+            &lease.token,
+            &approximate_request,
+            550,
+            "request-quantization-search-active",
+            "operation-quantization-search-active",
+        )
+        .unwrap();
+    assert!(!active_search.exact);
+    assert_eq!(active_search.hits[0].reference.id.as_str(), "q3");
+    drop(engine);
+
+    let reopened = RrdEngine::open(root.path(), instance(), TOKEN_KEY).unwrap();
+    let recovered = reopened
+        .search_vectors(
+            &lease.session_id,
+            &lease.token,
+            &approximate_request,
+            600,
+            "request-quantization-search-reopen",
+            "operation-quantization-search-reopen",
+        )
+        .unwrap();
+    assert_eq!(recovered.access_path, active_search.access_path);
+    assert_eq!(recovered.hits, active_search.hits);
+
+    for (ordinal, artifact) in built.iter().enumerate() {
+        reopened
+            .retire_vector_quantization_artifact(
+                &lease.session_id,
+                &lease.token,
+                &RetireVectorQuantizationArtifact {
+                    scope: format!("instance:{}", instance()),
+                    artifact_id: artifact.artifact_id.clone(),
+                    generation: artifact.generation,
+                },
+                650 + ordinal as u64,
+                &format!("request-quantization-retire-{ordinal}"),
+                &format!("operation-quantization-retire-{ordinal}"),
+            )
+            .unwrap();
+    }
+    let retired = reopened
+        .list_vector_quantization_artifacts(
+            &lease.session_id,
+            &lease.token,
+            &list_request,
+            700,
+            "request-quantization-list-retired",
+            "operation-quantization-list-retired",
+        )
+        .unwrap();
+    assert!(retired
+        .artifacts
+        .iter()
+        .all(|artifact| artifact.state == VectorQuantizationArtifactState::Retired));
+    assert!(reopened
+        .search_vectors(
+            &lease.session_id,
+            &lease.token,
+            &approximate_request,
+            701,
+            "request-quantization-search-retired",
+            "operation-quantization-search-retired",
+        )
+        .is_err());
+
+    commit_vectors(
+        &reopened,
+        &lease,
+        710,
+        vec![
+            document_mutation("q12", "quantization update"),
+            vector_mutation("q12", vector(3)),
+        ],
+    );
+    let rebuilt = reopened
+        .build_vector_quantization_artifact(
+            &lease.session_id,
+            &lease.token,
+            &quantization_build(VectorQuantizationMethod::Scalar),
+            720,
+            "request-quantization-rebuild",
+            "operation-quantization-rebuild",
+        )
+        .unwrap();
+    assert_eq!(rebuilt.artifact.generation, 2);
+    reopened
+        .activate_vector_quantization_artifact(
+            &lease.session_id,
+            &lease.token,
+            &ActivateVectorQuantizationArtifact {
+                scope: format!("instance:{}", instance()),
+                artifact_id: rebuilt.artifact.artifact_id,
+                generation: rebuilt.artifact.generation,
+            },
+            721,
+            "request-quantization-reactivate",
+            "operation-quantization-reactivate",
+        )
+        .unwrap();
+    let updated = reopened
+        .search_vectors(
+            &lease.session_id,
+            &lease.token,
+            &quantization_search(
+                vector(3),
+                VectorSearchMode::RequireApproximate {
+                    exact_rerank: 13,
+                    ef_search: 13,
+                },
+            ),
+            722,
+            "request-quantization-search-update",
+            "operation-quantization-search-update",
+        )
+        .unwrap();
+    assert_eq!(updated.access_path.as_str(), "scalar_quantized");
+    assert_eq!(updated.hits[0].reference.id.as_str(), "q12");
 }
 
 #[test]
@@ -378,6 +750,35 @@ fn persistent_retrieval_indexes_and_hybrid_fusion_survive_reopen_and_staleness()
         .unwrap();
     assert_eq!(turboquant_replay.index, turboquant.index);
     assert!(turboquant_replay.idempotent_replay);
+    let turboquant_lifecycle = reopened
+        .list_vector_quantization_artifacts(
+            &lease.session_id,
+            &lease.token,
+            &ListVectorQuantizationArtifacts {
+                scope: turboquant_request().scope,
+                collection_id: Some(CanonicalId::new("documents").unwrap()),
+                vector_name: Some(CanonicalId::new("body").unwrap()),
+                max_artifacts: 10,
+            },
+            852,
+            "request-turboquant-lifecycle",
+            "operation-turboquant-lifecycle",
+        )
+        .unwrap();
+    assert_eq!(turboquant_lifecycle.artifacts.len(), 1);
+    assert_eq!(
+        turboquant_lifecycle.artifacts[0].state,
+        VectorQuantizationArtifactState::Active
+    );
+    assert_eq!(
+        turboquant_lifecycle.artifacts[0].object_sha256,
+        turboquant.index.object_sha256
+    );
+    let scope = reopened.query_scope(&turboquant_request().scope).unwrap();
+    let legacy_entries = crate::vector_artifact_catalog_entries(&reopened.storage, &scope).unwrap();
+    assert!(legacy_entries
+        .iter()
+        .all(|entry| entry.kind != rrd_vector::VectorArtifactKind::TurboQuant));
 
     let turbo_search = reopened
         .search_vectors(
@@ -1344,6 +1745,7 @@ fn vector_administration_uses_distinct_deny_by_default_actions() {
                             &[
                                 SecurityAction::SessionCreate,
                                 SecurityAction::VectorCollectionEnsure,
+                                SecurityAction::VectorCollectionList,
                                 SecurityAction::VectorCollectionDelete,
                                 SecurityAction::VectorPayloadIndexEnsure,
                                 SecurityAction::VectorPayloadIndexList,
@@ -1438,6 +1840,85 @@ fn vector_administration_uses_distinct_deny_by_default_actions() {
             200,
         )
         .unwrap();
+    let quantization_build = BuildVectorQuantizationArtifact {
+        scope: scope.clone(),
+        collection_id: collection_id.clone(),
+        vector_name: CanonicalId::new("dense").unwrap(),
+        method: VectorQuantizationMethod::Scalar,
+        filter_properties: Vec::new(),
+        max_scanned_changes: 10,
+    };
+    assert!(matches!(
+        engine.build_vector_quantization_artifact(
+            &limited.session_id,
+            &limited.token,
+            &quantization_build,
+            201,
+            "request-limited-quantization-build",
+            "operation-limited-quantization-build",
+        ),
+        Err(ServiceError::PermissionDenied)
+    ));
+    let quantization_list = ListVectorQuantizationArtifacts {
+        scope: scope.clone(),
+        collection_id: Some(collection_id.clone()),
+        vector_name: None,
+        max_artifacts: 10,
+    };
+    assert!(matches!(
+        engine.list_vector_quantization_artifacts(
+            &limited.session_id,
+            &limited.token,
+            &quantization_list,
+            202,
+            "request-limited-quantization-list",
+            "operation-limited-quantization-list",
+        ),
+        Err(ServiceError::PermissionDenied)
+    ));
+    assert!(engine
+        .list_vector_quantization_artifacts(
+            &admin.session_id,
+            &admin.token,
+            &quantization_list,
+            203,
+            "request-admin-quantization-list",
+            "operation-admin-quantization-list",
+        )
+        .unwrap()
+        .artifacts
+        .is_empty());
+    let artifact_id = CanonicalId::new("quant-scalar-secured-dense").unwrap();
+    assert!(matches!(
+        engine.activate_vector_quantization_artifact(
+            &limited.session_id,
+            &limited.token,
+            &ActivateVectorQuantizationArtifact {
+                scope: scope.clone(),
+                artifact_id: artifact_id.clone(),
+                generation: 1,
+            },
+            204,
+            "request-limited-quantization-activate",
+            "operation-limited-quantization-activate",
+        ),
+        Err(ServiceError::PermissionDenied)
+    ));
+    assert!(matches!(
+        engine.retire_vector_quantization_artifact(
+            &limited.session_id,
+            &limited.token,
+            &RetireVectorQuantizationArtifact {
+                scope: scope.clone(),
+                artifact_id,
+                generation: 1,
+            },
+            205,
+            "request-limited-quantization-retire",
+            "operation-limited-quantization-retire",
+        ),
+        Err(ServiceError::PermissionDenied)
+    ));
     let retrieval = ExecuteRetrievalQuery {
         scope: scope.clone(),
         valid_at: 1,

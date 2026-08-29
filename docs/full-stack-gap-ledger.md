@@ -802,11 +802,13 @@ identities.
   query work is dedicated nearest-by-ID, batching, DBSF, general numeric/geo
   formulas, whole-collection facet administration, and generated outward G06
   bindings.
-- Complete TurboQuant promotion: the landed MSE path has seeded rotation,
-  fixed distribution-aware mapping, 4/2/1.5/1-bit packing, asymmetric scoring,
-  authenticated artifact lifecycle, planner selection, and exact reranking.
-  Add public lifecycle administration, SIMD/mmap, broad recall/bias/latency and
-  recovery evidence; keep scalar/binary/product methods separate.
+- Quantization engine lifecycle is implemented: authenticated build/list/
+  activate/retire, immutable scalar/product/binary/TurboQuant generations,
+  checksummed mmap reopen, corruption/update/recovery tests, SIMD/scalar
+  differential, exact reranking, and a fixed 512×64 bias/recall/memory/
+  compression/latency matrix pass. Generated outward bindings and larger
+  fixed-hardware production evidence remain open; physical placement belongs
+  to the next memory-tier item rather than another codec lifecycle.
 - Per-structure pinned/cached/cold memory policy.
 - Physical GPU indexing with CPU byte/semantic differential and fallback.
 - Server/client inference for local and provider models with digest provenance.

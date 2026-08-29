@@ -212,11 +212,20 @@ fn tool_request(input: &Value) -> Result<LifecycleToolRequestV1, Box<dyn std::er
         .or_else(|| input.get("tool_call_id"))
         .and_then(Value::as_str)
         .filter(|value| !value.is_empty())
-        .ok_or("planned mutation has no stable tool_use_id or tool_call_id")?;
+        .map(str::to_owned)
+        .unwrap_or_else(|| {
+            // Gemini's hook contract does not expose a tool-call id. The
+            // exact request digest is stable across BeforeTool/AfterTool; two
+            // concurrent identical calls deliberately collide and fail closed.
+            format!(
+                "derived-{}",
+                &tool_request_digest(input).expect("JSON request digest cannot fail")[..32]
+            )
+        });
     Ok(LifecycleToolRequestV1 {
         tool_name: tool_name.into(),
         tool_request_sha256: tool_request_digest(input)?,
-        tool_call_id: tool_call_id.into(),
+        tool_call_id,
         mutation: true,
     })
 }
@@ -227,4 +236,29 @@ fn tool_succeeded(input: &Value) -> bool {
         .and_then(Value::as_bool)
         .or_else(|| super::run_exit_code(input).map(|exit_code| exit_code == 0))
         .unwrap_or(true)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn gemini_request_without_call_id_gets_a_stable_exact_identity() {
+        let before = serde_json::json!({
+            "session_id": "gemini-session",
+            "tool_name": "write_file",
+            "tool_input": {"file_path": "src/lib.rs", "content": "changed"}
+        });
+        let after = serde_json::json!({
+            "session_id": "gemini-session",
+            "tool_name": "write_file",
+            "tool_input": {"file_path": "src/lib.rs", "content": "changed"},
+            "tool_response": {"success": true}
+        });
+        let before = tool_request(&before).unwrap();
+        let after = tool_request(&after).unwrap();
+        assert_eq!(before.tool_call_id, after.tool_call_id);
+        assert_eq!(before.tool_request_sha256, after.tool_request_sha256);
+        assert!(before.tool_call_id.starts_with("derived-"));
+    }
 }

@@ -1,4 +1,4 @@
-# OpenAI Codex CLI
+# Claude Code
 
 <!-- rrflow:begin -->
 ## RRFlow project context

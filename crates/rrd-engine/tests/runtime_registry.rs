@@ -11,6 +11,8 @@ fn verification_is_a_bitemporal_claim_that_expires_and_makes_noise() {
     let store = Store::open(dir.path()).unwrap();
     let registry = Registry::builtin();
     let adapter = registry.get("codex-cli").unwrap();
+    assert!(adapter.hooks);
+    assert!(adapter.hook_protocol.is_some());
 
     // Never audited: the state before the first claim.
     assert_eq!(
@@ -68,6 +70,17 @@ fn verification_is_a_bitemporal_claim_that_expires_and_makes_noise() {
             .unwrap(),
         Verification::Current { .. }
     ));
+}
+
+#[test]
+fn current_codex_and_gemini_adapters_expose_native_hooks() {
+    let registry = Registry::builtin();
+    for name in ["codex-cli", "gemini-cli"] {
+        let adapter = registry.get(name).unwrap();
+        assert!(adapter.hooks, "{name} must not degrade to advisory context");
+        assert!(adapter.hook_protocol.is_some());
+        assert!(adapter.retired.is_none());
+    }
 }
 
 #[test]

@@ -1,7 +1,7 @@
 use crate::contract::invalid;
 use crate::{
-    CandidatePath, HnswDescriptor, SegmentDescriptor, TurboQuantDescriptor, VectorArtifact,
-    VectorArtifactKind, EXACT_SCAN_PROJECTION_ID,
+    CandidatePath, HnswDescriptor, QuantizationMethod, QuantizedDescriptor, SegmentDescriptor,
+    TurboQuantDescriptor, VectorArtifact, VectorArtifactKind, EXACT_SCAN_PROJECTION_ID,
 };
 use rrd_core::{
     digest, ObjectReference, ProjectionId, ProjectionStamp, ProjectionState, Result, RuntimeRef,
@@ -99,19 +99,29 @@ impl VectorArtifactCatalogEntry {
         if self.descriptor.stamp().state != ProjectionState::Ready {
             return invalid("cataloged vector artifact must be ready");
         }
-        let kind_matches = matches!(
-            (&self.descriptor, self.kind),
+        let kind_matches = match (&self.descriptor, self.kind) {
             (
                 VectorProjectionDescriptor::ExactSegment { .. },
-                VectorArtifactKind::ExactSegment | VectorArtifactKind::CompactDense
-            ) | (
-                VectorProjectionDescriptor::Hnsw { .. },
-                VectorArtifactKind::Hnsw
-            ) | (
-                VectorProjectionDescriptor::TurboQuant { .. },
-                VectorArtifactKind::TurboQuant
+                VectorArtifactKind::ExactSegment | VectorArtifactKind::CompactDense,
             )
-        );
+            | (VectorProjectionDescriptor::Hnsw { .. }, VectorArtifactKind::Hnsw)
+            | (VectorProjectionDescriptor::TurboQuant { .. }, VectorArtifactKind::TurboQuant) => {
+                true
+            }
+            (
+                VectorProjectionDescriptor::Quantized { descriptor },
+                VectorArtifactKind::ScalarQuantized,
+            ) => descriptor.method == QuantizationMethod::Scalar,
+            (
+                VectorProjectionDescriptor::Quantized { descriptor },
+                VectorArtifactKind::ProductQuantized,
+            ) => matches!(descriptor.method, QuantizationMethod::Product { .. }),
+            (
+                VectorProjectionDescriptor::Quantized { descriptor },
+                VectorArtifactKind::BinaryQuantized,
+            ) => descriptor.method == QuantizationMethod::Binary,
+            _ => false,
+        };
         if !kind_matches {
             return invalid("vector artifact codec kind differs from its projection descriptor");
         }
@@ -145,6 +155,7 @@ impl VectorArtifactCatalogEntry {
 pub enum VectorProjectionDescriptor {
     ExactSegment { descriptor: SegmentDescriptor },
     Hnsw { descriptor: HnswDescriptor },
+    Quantized { descriptor: QuantizedDescriptor },
     TurboQuant { descriptor: TurboQuantDescriptor },
 }
 
@@ -153,6 +164,7 @@ impl VectorProjectionDescriptor {
         match self {
             Self::ExactSegment { descriptor } => &descriptor.stamp,
             Self::Hnsw { descriptor } => &descriptor.stamp,
+            Self::Quantized { descriptor } => &descriptor.stamp,
             Self::TurboQuant { descriptor } => &descriptor.stamp,
         }
     }
@@ -161,6 +173,7 @@ impl VectorProjectionDescriptor {
         match self {
             Self::ExactSegment { descriptor } => &descriptor.scope,
             Self::Hnsw { descriptor } => &descriptor.scope,
+            Self::Quantized { descriptor } => &descriptor.scope,
             Self::TurboQuant { descriptor } => &descriptor.scope,
         }
     }
@@ -169,6 +182,7 @@ impl VectorProjectionDescriptor {
         match self {
             Self::ExactSegment { descriptor } => &mut descriptor.stamp,
             Self::Hnsw { descriptor } => &mut descriptor.stamp,
+            Self::Quantized { descriptor } => &mut descriptor.stamp,
             Self::TurboQuant { descriptor } => &mut descriptor.stamp,
         }
     }
@@ -177,6 +191,7 @@ impl VectorProjectionDescriptor {
         match self {
             Self::ExactSegment { descriptor } => descriptor.validate(),
             Self::Hnsw { descriptor } => descriptor.validate(),
+            Self::Quantized { descriptor } => descriptor.validate(),
             Self::TurboQuant { descriptor } => descriptor.validate(),
         }
     }
@@ -185,17 +200,21 @@ impl VectorProjectionDescriptor {
         match self {
             Self::ExactSegment { descriptor } => descriptor.candidate_path(estimated_cost),
             Self::Hnsw { descriptor } => descriptor.candidate_path(estimated_cost),
+            Self::Quantized { descriptor } => descriptor.candidate_path(estimated_cost),
             Self::TurboQuant { descriptor } => descriptor.candidate_path(estimated_cost),
         }
     }
 
     fn same_kind(&self, other: &Self) -> bool {
-        matches!(
-            (self, other),
+        match (self, other) {
             (Self::ExactSegment { .. }, Self::ExactSegment { .. })
-                | (Self::Hnsw { .. }, Self::Hnsw { .. })
-                | (Self::TurboQuant { .. }, Self::TurboQuant { .. })
-        )
+            | (Self::Hnsw { .. }, Self::Hnsw { .. })
+            | (Self::TurboQuant { .. }, Self::TurboQuant { .. }) => true,
+            (Self::Quantized { descriptor: left }, Self::Quantized { descriptor: right }) => {
+                left.method == right.method
+            }
+            _ => false,
+        }
     }
 }
 
@@ -208,6 +227,12 @@ impl From<SegmentDescriptor> for VectorProjectionDescriptor {
 impl From<HnswDescriptor> for VectorProjectionDescriptor {
     fn from(descriptor: HnswDescriptor) -> Self {
         Self::Hnsw { descriptor }
+    }
+}
+
+impl From<QuantizedDescriptor> for VectorProjectionDescriptor {
+    fn from(descriptor: QuantizedDescriptor) -> Self {
+        Self::Quantized { descriptor }
     }
 }
 
@@ -232,6 +257,29 @@ pub struct VectorCatalog {
 }
 
 impl VectorCatalog {
+    /// Restores one lifecycle-selected active artifact into a fresh serving
+    /// view. Unlike `publish`, the durable lifecycle has already validated the
+    /// generation chain, so restart may legitimately restore generation N
+    /// without replaying retired artifact bodies 1..N-1. Lifecycle restoration
+    /// is revision-neutral: `revision` belongs exclusively to the legacy vector
+    /// projection catalogue and cannot be advanced by another durable authority.
+    pub fn restore_active(
+        &mut self,
+        descriptor: impl Into<VectorProjectionDescriptor>,
+    ) -> Result<u64> {
+        let descriptor = descriptor.into();
+        descriptor.validate()?;
+        if descriptor.stamp().state != ProjectionState::Ready
+            || descriptor.stamp().id.as_str() == EXACT_SCAN_PROJECTION_ID
+            || self.entries.contains_key(&descriptor.stamp().id)
+        {
+            return invalid("restored vector artifact is not one unique ready generation");
+        }
+        self.entries
+            .insert(descriptor.stamp().id.clone(), descriptor);
+        Ok(self.revision)
+    }
+
     pub fn publish(
         &mut self,
         expected_revision: u64,

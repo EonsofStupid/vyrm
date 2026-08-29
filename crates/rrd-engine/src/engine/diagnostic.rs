@@ -255,6 +255,13 @@ fn public_vector_artifact(
                 DiagnosticVectorArtifactKind::CompactDense
             }
             rrd_vector::VectorArtifactKind::Hnsw => DiagnosticVectorArtifactKind::Hnsw,
+            rrd_vector::VectorArtifactKind::ScalarQuantized
+            | rrd_vector::VectorArtifactKind::ProductQuantized
+            | rrd_vector::VectorArtifactKind::BinaryQuantized => {
+                return Err(ServiceError::Vector(
+                    "quantization lifecycle artifacts use their dedicated catalogue".into(),
+                ))
+            }
             rrd_vector::VectorArtifactKind::TurboQuant => DiagnosticVectorArtifactKind::TurboQuant,
         },
         scope: entry.scope().as_str().into(),

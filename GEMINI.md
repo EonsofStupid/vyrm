@@ -1,4 +1,4 @@
-# OpenAI Codex CLI
+# Google Gemini CLI
 
 <!-- rrflow:begin -->
 ## RRFlow project context

@@ -7,7 +7,7 @@
 //! codec/oracle component; planner-visible persisted serving lands separately.
 
 use crate::contract::invalid;
-use crate::ScoreMetric;
+use crate::{QuantizedKernel, ScoreMetric};
 use rrd_core::Result;
 use serde::{Deserialize, Serialize};
 
@@ -164,6 +164,15 @@ impl TurboQuantVector {
     }
 
     pub fn score(&self, query: &[f32], metric: ScoreMetric) -> Result<f64> {
+        self.score_with_kernel(query, metric, QuantizedKernel::Auto)
+    }
+
+    pub fn score_with_kernel(
+        &self,
+        query: &[f32],
+        metric: ScoreMetric,
+        kernel: QuantizedKernel,
+    ) -> Result<f64> {
         self.validate()?;
         if query.len() != self.dimensions || query.iter().any(|value| !value.is_finite()) {
             return invalid("TurboQuant score requires finite vectors with matching dimensions");
@@ -179,11 +188,7 @@ impl TurboQuantVector {
         let rotation = Rotation::new(self.padded_dimensions, self.seed);
         rotation.apply(&mut rotated_query);
         let centroids = self.decoded_centroids();
-        let raw_dot = rotated_query
-            .iter()
-            .zip(&centroids)
-            .map(|(query, stored)| query * stored)
-            .sum::<f64>();
+        let raw_dot = dot(&rotated_query, &centroids, kernel);
         let scale = if self.original_norm == 0.0 {
             0.0
         } else {
@@ -252,6 +257,41 @@ impl TurboQuantVector {
         .map(|index| f64::from(centroids[usize::from(index)]))
         .collect()
     }
+}
+
+fn dot(left: &[f64], right: &[f64], kernel: QuantizedKernel) -> f64 {
+    debug_assert_eq!(left.len(), right.len());
+    #[cfg(target_arch = "x86_64")]
+    if kernel == QuantizedKernel::Auto && std::arch::is_x86_feature_detected!("avx2") {
+        // SAFETY: AVX2 support was checked and both slices have equal lengths.
+        return unsafe { dot_avx2(left, right) };
+    }
+    left.iter()
+        .zip(right)
+        .map(|(left, right)| left * right)
+        .sum()
+}
+
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2")]
+unsafe fn dot_avx2(left: &[f64], right: &[f64]) -> f64 {
+    use std::arch::x86_64::*;
+    let mut sum = _mm256_setzero_pd();
+    let mut index = 0;
+    while index + 4 <= left.len() {
+        let left_values = _mm256_loadu_pd(left.as_ptr().add(index));
+        let right_values = _mm256_loadu_pd(right.as_ptr().add(index));
+        sum = _mm256_add_pd(sum, _mm256_mul_pd(left_values, right_values));
+        index += 4;
+    }
+    let mut lanes = [0.0_f64; 4];
+    _mm256_storeu_pd(lanes.as_mut_ptr(), sum);
+    let mut result = lanes.into_iter().sum::<f64>();
+    while index < left.len() {
+        result += left[index] * right[index];
+        index += 1;
+    }
+    result
 }
 
 fn validate_input(values: &[f32]) -> Result<()> {
@@ -453,6 +493,20 @@ mod tests {
                 .score(&query, ScoreMetric::Manhattan)
                 .unwrap()
                 .is_finite());
+            for metric in [
+                ScoreMetric::Dot,
+                ScoreMetric::Cosine,
+                ScoreMetric::Euclidean,
+                ScoreMetric::Manhattan,
+            ] {
+                let scalar = encoded
+                    .score_with_kernel(&query, metric, QuantizedKernel::Scalar)
+                    .unwrap();
+                let automatic = encoded
+                    .score_with_kernel(&query, metric, QuantizedKernel::Auto)
+                    .unwrap();
+                assert!((scalar - automatic).abs() < 1e-9);
+            }
         }
     }
 

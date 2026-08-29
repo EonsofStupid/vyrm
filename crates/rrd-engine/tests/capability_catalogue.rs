@@ -174,6 +174,7 @@ fn required_unimplemented_foundation_is_visible_and_not_falsely_available() {
         "vector-collection-delete",
         "vector-payload-index-administration",
         "vector-query-algebra",
+        "vector-quantization-lifecycle",
     ] {
         let capability = catalogue
             .capabilities

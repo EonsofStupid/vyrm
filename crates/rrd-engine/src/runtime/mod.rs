@@ -83,7 +83,7 @@ pub use query::{
 pub use reasoning::{
     active_reasoning_run, reasoning_run, reasoning_runs, record_reasoning, REASONING_SCOPE,
 };
-pub use registry::{Harness, Registry, Verification, VERIFICATION_TTL_MS};
+pub use registry::{Harness, HookProtocol, Registry, Verification, VERIFICATION_TTL_MS};
 pub use routing::{ensure_routing_fresh, load_routing, reset_routing, RoutingReady};
 pub use stack::{
     detect, package_run_event, package_run_event_argv, PackageManager, PackageRunEvent,
@@ -98,8 +98,10 @@ pub use trace::{
 };
 pub(crate) use vector_catalog::vector_artifact_catalog_entries_from_changes;
 pub use vector_catalog::{
-    publish_traced_vector_artifact, reopen_vector_runtime, vector_artifact_catalog_entries,
-    VectorArtifactPublication,
+    build_traced_quantization_artifact, publish_traced_vector_artifact,
+    quantization_artifact_catalogue, reopen_vector_runtime,
+    transition_traced_quantization_artifact, vector_artifact_catalog_entries,
+    QuantizationArtifactPublication, QuantizationArtifactTransition, VectorArtifactPublication,
 };
 pub use workflow::{
     resolve_package_argv, resolve_package_command, VerificationPolicy, WorkflowAuthorization,

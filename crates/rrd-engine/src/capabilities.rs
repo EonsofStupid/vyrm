@@ -308,6 +308,19 @@ pub fn product_capability_catalogue() -> ProductCapabilityCatalogue {
             planned(ENGINE_SURFACE_PLAN_REASON),
         ),
     });
+    capabilities.push(ProductCapability {
+        id: "vector-quantization-lifecycle".into(),
+        label: "Vector quantization lifecycle".into(),
+        category: "vector".into(),
+        summary: "Build, list, activate, and retire immutable scalar, product, binary, and TurboQuant artifacts while preserving canonical exact reranking.".into(),
+        bindings: bindings(
+            available("rrd-engine:RrdEngine::activate_vector_quantization_artifact,build_vector_quantization_artifact,list_vector_quantization_artifacts,retire_vector_quantization_artifact"),
+            planned(ENGINE_SURFACE_PLAN_REASON),
+            planned(ENGINE_SURFACE_PLAN_REASON),
+            planned(ENGINE_SURFACE_PLAN_REASON),
+            planned(ENGINE_SURFACE_PLAN_REASON),
+        ),
+    });
 
     capabilities.sort_by(|left, right| left.id.cmp(&right.id));
     ProductCapabilityCatalogue {

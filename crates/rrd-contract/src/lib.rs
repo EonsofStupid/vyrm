@@ -1083,6 +1083,214 @@ pub struct EnsureVectorIndexResult {
     pub idempotent_replay: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum VectorProductCompression {
+    X4,
+    X8,
+    X16,
+    X32,
+    X64,
+}
+
+impl VectorProductCompression {
+    pub const fn ratio(self) -> u64 {
+        match self {
+            Self::X4 => 4,
+            Self::X8 => 8,
+            Self::X16 => 16,
+            Self::X32 => 32,
+            Self::X64 => 64,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "method", rename_all = "snake_case", deny_unknown_fields)]
+pub enum VectorQuantizationMethod {
+    Scalar,
+    Product {
+        compression: VectorProductCompression,
+    },
+    Binary,
+    TurboQuant {
+        bits: VectorQuantizationBits,
+        seed: u64,
+    },
+}
+
+impl VectorQuantizationMethod {
+    pub const fn maximum_compression_ratio(&self) -> u64 {
+        match self {
+            Self::Scalar => 4,
+            Self::Product { compression } => compression.ratio(),
+            Self::Binary
+            | Self::TurboQuant {
+                bits: VectorQuantizationBits::Bits1,
+                ..
+            } => 32,
+            Self::TurboQuant {
+                bits: VectorQuantizationBits::Bits1_5,
+                ..
+            } => 21,
+            Self::TurboQuant {
+                bits: VectorQuantizationBits::Bits2,
+                ..
+            } => 16,
+            Self::TurboQuant {
+                bits: VectorQuantizationBits::Bits4,
+                ..
+            } => 8,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum VectorQuantizationArtifactState {
+    Ready,
+    Active,
+    Retired,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct BuildVectorQuantizationArtifact {
+    pub scope: String,
+    pub collection_id: CanonicalId,
+    pub vector_name: CanonicalId,
+    pub method: VectorQuantizationMethod,
+    #[serde(default)]
+    pub filter_properties: Vec<CanonicalId>,
+    pub max_scanned_changes: u64,
+}
+
+impl BuildVectorQuantizationArtifact {
+    pub fn validate(&self) -> Result<()> {
+        validate_vector_scope(&self.scope)?;
+        if self.max_scanned_changes == 0 || self.max_scanned_changes > MAX_VECTOR_SEARCH_CHANGES {
+            return invalid(format!(
+                "quantization build max_scanned_changes must be in 1..={MAX_VECTOR_SEARCH_CHANGES}"
+            ));
+        }
+        let unique = self
+            .filter_properties
+            .iter()
+            .map(CanonicalId::as_str)
+            .collect::<BTreeSet<_>>();
+        if unique.len() != self.filter_properties.len() {
+            return invalid("quantization filter properties must be unique");
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ListVectorQuantizationArtifacts {
+    pub scope: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub collection_id: Option<CanonicalId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub vector_name: Option<CanonicalId>,
+    pub max_artifacts: u64,
+}
+
+impl ListVectorQuantizationArtifacts {
+    pub fn validate(&self) -> Result<()> {
+        validate_vector_scope(&self.scope)?;
+        if self.max_artifacts == 0 || self.max_artifacts > 100_000 {
+            return invalid("quantization list max_artifacts must be in 1..=100000");
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ActivateVectorQuantizationArtifact {
+    pub scope: String,
+    pub artifact_id: CanonicalId,
+    pub generation: u64,
+}
+
+impl ActivateVectorQuantizationArtifact {
+    pub fn validate(&self) -> Result<()> {
+        validate_vector_scope(&self.scope)?;
+        if self.generation == 0 {
+            return invalid("quantization activation generation must be greater than zero");
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct RetireVectorQuantizationArtifact {
+    pub scope: String,
+    pub artifact_id: CanonicalId,
+    pub generation: u64,
+}
+
+impl RetireVectorQuantizationArtifact {
+    pub fn validate(&self) -> Result<()> {
+        validate_vector_scope(&self.scope)?;
+        if self.generation == 0 {
+            return invalid("quantization retirement generation must be greater than zero");
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct VectorQuantizationArtifactSnapshot {
+    pub artifact_id: CanonicalId,
+    pub collection_id: CanonicalId,
+    pub vector_name: CanonicalId,
+    pub method: VectorQuantizationMethod,
+    pub state: VectorQuantizationArtifactState,
+    pub generation: u64,
+    pub source_cursor: u64,
+    pub indexed_vectors: u64,
+    pub packed_vector_bytes: u64,
+    pub full_precision_vector_bytes: u64,
+    pub auxiliary_bytes: u64,
+    pub maximum_compression_ratio: u64,
+    pub configuration_sha256: String,
+    pub artifact_sha256: String,
+    pub object_sha256: String,
+    pub object_length: u64,
+    pub built_at_unix_ms: u64,
+    pub lifecycle_revision: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct BuildVectorQuantizationArtifactResult {
+    pub artifact: VectorQuantizationArtifactSnapshot,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ListVectorQuantizationArtifactsResult {
+    pub scope: String,
+    pub lifecycle_revision: u64,
+    pub artifacts: Vec<VectorQuantizationArtifactSnapshot>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ActivateVectorQuantizationArtifactResult {
+    pub artifact: VectorQuantizationArtifactSnapshot,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct RetireVectorQuantizationArtifactResult {
+    pub artifact: VectorQuantizationArtifactSnapshot,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "operator", rename_all = "snake_case", deny_unknown_fields)]
 pub enum VectorPayloadOperator {

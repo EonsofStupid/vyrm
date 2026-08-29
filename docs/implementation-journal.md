@@ -1,5 +1,45 @@
 # RRFlow implementation journal
 
+## 2026-08-29 — unified quantization artifact lifecycle
+
+- Commit: `pending`. G04-W04 is active at 29/65 while the complete verification
+  surface runs; no board-completion or full-product-green claim is made here.
+- One engine path now builds, lists, activates, retires, reopens, plans, and
+  exactly reranks immutable scalar, product 4×/8×/16×/32×/64×, binary, and
+  TurboQuant 4/2/1.5/1-bit artifacts. Strict public contract types are present;
+  generated HTTP/MCP/CLI/SDK bindings remain G06 work.
+- The historical TurboQuant `ensure_vector_index` shape now delegates to that
+  lifecycle with ready-generation recovery and active-generation replay. New
+  generic quantized publication is denied, old generic TurboQuant views are
+  suppressed at reopen, and lifecycle restore no longer advances the unrelated
+  generic vector-catalogue revision.
+- Lifecycle authority is append-only and digest-chained. Build atomically binds
+  its canonical record, object receipt, and build event. Ready generations do
+  not serve; activation verifies bytes and selects one generation; retirement
+  removes planner visibility. Restart reconstructs active generations only.
+- Concurrency correction: catalogue replay is pinned to an authenticated read
+  stamp and the exact same stamp supplies the commit CAS. A concurrent lifecycle
+  change therefore conflicts instead of allowing a stale semantic revision to
+  commit. Duplicate/missing builds, revision gaps, backward activation, and
+  non-atomic record/object/event combinations fail recovery.
+- Physical formats are bounded and checksummed. Scalar/product/binary share an
+  aligned binary format; TurboQuant now also has true read-only mmap rather than
+  copying on reopen. Runtime-dispatched AVX2 and portable scalar paths retain
+  identical rankings with bounded score tolerance.
+- The retained 512×64 matrix covers 11 method/ratio rows, owned+mmap reopen,
+  corruption, packed/full/auxiliary/total bytes, mean absolute score error,
+  Recall@10 after exact reranking 96, and build/search timing. Observed recall is
+  0.90–1.00 and product packed codes reach 64×. Product codebook overhead makes
+  the small-corpus total artifacts larger than raw f32, so 64× is explicitly
+  not presented as universal resident-memory compression.
+- Engine tests cover authentication denial, ready isolation, activation,
+  exact-reranked search, process reopen, retirement, update fallback, next-
+  generation rebuild, and reactivation. Durable projection traces link the
+  reasoning run and committed object/lifecycle evidence.
+- Remaining boundaries: larger release/fixed-hardware p50/p95/p99 evidence,
+  physical pinned/cached/cold eviction, distributed placement, GPU, residual
+  QJL, and generated outward bindings remain later governed items.
+
 ## 2026-08-26 — owner-controlled `0.1.0` release train
 
 - Product decision: RRFlow remains at `0.1.0`. Internal protocol, contract,

@@ -7,7 +7,8 @@ use rrd_engine::{
 };
 use rrd_store::{DataRuntime, Engine, LocalObjectStore, MemoryEngine, NativeEngine, Store};
 use rrd_vector::{
-    HnswConfig, HnswIndex, ScoreMetric, VectorCandidate, VectorRuntime, VECTOR_ARTIFACT_RECORD_TYPE,
+    HnswConfig, HnswIndex, ScoreMetric, TurboQuantBits, TurboQuantSegment, TurboQuantSegmentConfig,
+    VectorCandidate, VectorRuntime, VECTOR_ARTIFACT_RECORD_TYPE,
 };
 use std::collections::BTreeSet;
 use tempfile::tempdir;
@@ -54,6 +55,26 @@ fn hnsw(candidates: Vec<VectorCandidate>) -> HnswIndex {
             ef_construction: 4,
             max_level: 3,
             seed: 7,
+            filter_properties: BTreeSet::new(),
+        },
+        1,
+        3,
+        candidates,
+    )
+    .unwrap()
+}
+
+fn turboquant(candidates: Vec<VectorCandidate>) -> TurboQuantSegment {
+    TurboQuantSegment::build(
+        TurboQuantSegmentConfig {
+            id: ProjectionId::new("vector:legacy-turbo:body").unwrap(),
+            scope: scope(),
+            field: "body".into(),
+            dimensions: 2,
+            metric: ScoreMetric::Dot,
+            bits: TurboQuantBits::Bits2,
+            seed: 13,
+            embedding_model: None,
             filter_properties: BTreeSet::new(),
         },
         1,
@@ -114,6 +135,32 @@ fn publication_atomically_binds_typed_record_object_and_serving_view() {
 
     let reopened = reopen_vector_runtime(&data, &scope(), canonical).unwrap();
     assert_eq!(reopened.catalog(), runtime.catalog());
+}
+
+#[test]
+fn generic_publication_rejects_turboquant_before_durable_or_serving_mutation() {
+    let object_dir = tempdir().unwrap();
+    let data = DataRuntime::new(
+        MemoryEngine::new(),
+        LocalObjectStore::open(object_dir.path()).unwrap(),
+    );
+    let canonical = candidates();
+    let mut runtime = VectorRuntime::new(canonical.clone()).unwrap();
+    let error = publish_traced_vector_artifact(
+        &data,
+        &mut runtime,
+        0,
+        turboquant(canonical).into(),
+        "operator:catalog-test",
+        100,
+    )
+    .unwrap_err()
+    .to_string();
+    assert!(error.contains("quantization artifact lifecycle"));
+    assert_eq!(runtime.catalog().revision, 0);
+    assert!(vector_artifact_catalog_entries(data.engine(), &scope())
+        .unwrap()
+        .is_empty());
 }
 
 #[test]

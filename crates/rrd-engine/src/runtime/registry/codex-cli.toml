@@ -1,13 +1,14 @@
-# Verified 2026-08-13. Rust-native; AGENTS.md convention; MCP client AND
-# server via ~/.codex/config.toml. No hook lifecycle: recall is on-demand
-# through MCP once rrflow-mcp lands — a stated degradation, not a silent one.
+# Verified 2026-08-29 against developers.openai.com/codex/hooks and the
+# installed Codex CLI 0.151.0. Native project hooks cover session, prompt,
+# tool, compaction, stop, and session-end events; .agents/skills is native.
 name = "codex-cli"
 display = "OpenAI Codex CLI"
-hooks = false
+hooks = true
+hook_protocol = "codex"
 mcp_client = true
 mcp_server = true
 context_file = "AGENTS.md"
-config_path = "~/.codex/config.toml"
+config_path = ".codex/hooks.json"
 billing = ["subscription", "per_usage"]
 providers = ["openai"]
-notes = "AGENTS.md is read natively; MCP tools configure in config.toml. Without hooks there is no pre-reasoning injection."
+notes = "Project hooks intercept Bash, apply_patch, and MCP tools; SessionStart re-injects after compaction; .agents/skills is discovered natively. Project hooks must be reviewed in /hooks when their hash changes."

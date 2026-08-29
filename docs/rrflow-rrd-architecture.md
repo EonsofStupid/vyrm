@@ -365,7 +365,7 @@ database catalogue
   → bind metric, dimensions, strict mode, tenant policy and read stamp
   → plan payload indexes and shard route
   → choose exact / HNSW / sparse / keyword / recommendation / context operator
-  → choose full-precision or qualified quantized artifact
+  → choose full-precision or an explicitly active qualified quantized artifact
   → execute bounded nested prefetch and RRF when requested
   → apply governed boost / exact / model-MaxSim / MMR stages in order
   → deterministic point / group / facet / directed-matrix output
@@ -393,11 +393,16 @@ changes logical results silently or destroys the canonical vector.
    explicitly. Never build or select an unrecorded codec because free memory
    happened to fall during a request.
 
-Every vector artifact binds collection, named vector, source cursor, catalogue
-revision, dimensions, metric, codec, bit depth, rotation/seed, build version,
-memory tier, checksum, and benchmark corpus. TurboQuant must pass exact-oracle
-recall plus end-to-end compression, build-time, latency, SIMD/scalar, restart,
-and corruption differentials before becoming selectable.
+Every vector artifact binds collection, named vector, source cursor, lifecycle
+revision, dimensions, metric, codec, bit depth or product ratio, rotation/seed,
+build generation, checksum, and content-addressed object receipt. The immutable
+build is `ready` and planner-invisible; authenticated activation verifies the
+bytes and selects one generation; retirement removes it from planning. Scalar,
+product, binary, and TurboQuant all pass exact-oracle recall plus packed/total
+byte accounting, build/search timing, SIMD/scalar, mmap, restart, update, and
+corruption differentials before becoming selectable. Physical memory-tier
+placement remains a separate policy. See
+[`rrd-quantization-lifecycle-v1.md`](rrd-quantization-lifecycle-v1.md).
 
 Qdrant documents 4-bit TurboQuant as an 8× representation and the lower bit
 depths as progressively smaller, with quantized vectors stored alongside

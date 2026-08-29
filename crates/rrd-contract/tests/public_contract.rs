@@ -1,27 +1,30 @@
 use rrd_contract::{
-    transaction_operation_sha256, BeginTransaction, CanonicalId, CapabilityDescriptor,
-    CapabilityStatus, CloseSession, CommitReceipt, CommitTransaction, CorrelationId,
-    CreateInstanceBackup, DataCatalogueIdentity, DataLogicalModel, DataRecordSchema, DataReference,
-    DataSchemaMode, DataSchemaRegistry, DataSnapshot, DataTableSchema, DataTarget,
-    DeleteVectorCollection, DeleteVectorPayloadIndex, DeploymentMode, EnsureQueryIndex,
-    EnsureVectorCollection, EnsureVectorIndex, EnsureVectorPayloadIndex, ErrorBody, ErrorCode,
+    transaction_operation_sha256, ActivateVectorQuantizationArtifact, BeginTransaction,
+    BuildVectorQuantizationArtifact, CanonicalId, CapabilityDescriptor, CapabilityStatus,
+    CloseSession, CommitReceipt, CommitTransaction, CorrelationId, CreateInstanceBackup,
+    DataCatalogueIdentity, DataLogicalModel, DataRecordSchema, DataReference, DataSchemaMode,
+    DataSchemaRegistry, DataSnapshot, DataTableSchema, DataTarget, DeleteVectorCollection,
+    DeleteVectorPayloadIndex, DeploymentMode, EnsureQueryIndex, EnsureVectorCollection,
+    EnsureVectorIndex, EnsureVectorPayloadIndex, ErrorBody, ErrorCode,
     EstateActivityPolicySnapshot, EstateBackupJobSnapshot, EstateBackupJobState,
     EstateBackupJobsSnapshot, EstateMutationResult, EstateSnapshot, ExecuteQuery,
     ExecuteQueryTransaction, ExecuteRetrievalQuery, FollowChangefeed, ForwardRollbackCounts,
     ForwardRollbackRequest, HybridFusion, IdempotencyBinding, ListQueryIndexes,
-    ListVectorCollections, ListVectorPayloadIndexes, Liveness, NamedVectorDefinition,
-    PollLiveQuery, PreviewTransaction, ProductCapability, ProductCapabilityCatalogue,
-    ProductSurface, QueryBudget, QueryExecutionAnalysisSnapshot, QueryExecutionSnapshot,
-    QueryIndexKind, QueryPlanCandidate, QueryPlanSnapshot, QueryResult, QueryRowSnapshot,
-    QueryValue, ReadAudit, ReadChangefeed, ReadDataSnapshot, ReadEstate, Readiness, RenewSession,
-    RequestContext, RequestEnvelope, ResourceId, ResourceKind, ResourcePath, ResponseEnvelope,
-    ResponseOutcome, RestoreInstanceBackup, RetrievalFusion, RetrievalPrefetch, RetrievalQuery,
+    ListVectorCollections, ListVectorPayloadIndexes, ListVectorQuantizationArtifacts, Liveness,
+    NamedVectorDefinition, PollLiveQuery, PreviewTransaction, ProductCapability,
+    ProductCapabilityCatalogue, ProductSurface, QueryBudget, QueryExecutionAnalysisSnapshot,
+    QueryExecutionSnapshot, QueryIndexKind, QueryPlanCandidate, QueryPlanSnapshot, QueryResult,
+    QueryRowSnapshot, QueryValue, ReadAudit, ReadChangefeed, ReadDataSnapshot, ReadEstate,
+    Readiness, RenewSession, RequestContext, RequestEnvelope, ResourceId, ResourceKind,
+    ResourcePath, ResponseEnvelope, ResponseOutcome, RestoreInstanceBackup,
+    RetireVectorQuantizationArtifact, RetrievalFusion, RetrievalPrefetch, RetrievalQuery,
     RetrievalResultShape, SearchHybrid, SearchVectors, ServiceCapabilities, SessionEndState,
     SessionLease, SessionLimits, SessionTermination, SurfaceBinding, SurfaceDisposition,
     TransactionMutation, TransactionPreview, TransactionState, VectorIndexConfiguration,
     VectorMemoryTier, VectorPayloadCondition, VectorPayloadFilter, VectorPayloadIndexKind,
-    VectorPayloadOperator, VectorQuantizationBits, VectorSearchMetric, VectorSearchMode,
-    VectorSearchQuery, VectorValueKind, PROTOCOL, PROTOCOL_VERSION,
+    VectorPayloadOperator, VectorProductCompression, VectorQuantizationBits,
+    VectorQuantizationMethod, VectorSearchMetric, VectorSearchMode, VectorSearchQuery,
+    VectorValueKind, PROTOCOL, PROTOCOL_VERSION,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -586,6 +589,67 @@ fn query_index_administration_contract_is_bounded_and_strict() {
     .unwrap();
     assert!(ListQueryIndexes {
         scope: String::new()
+    }
+    .validate()
+    .is_err());
+}
+
+#[test]
+fn vector_quantization_lifecycle_contract_is_bounded_and_strict() {
+    let build = BuildVectorQuantizationArtifact {
+        scope: "instance:project-alpha".into(),
+        collection_id: CanonicalId::new("documents").unwrap(),
+        vector_name: CanonicalId::new("title").unwrap(),
+        method: VectorQuantizationMethod::Product {
+            compression: VectorProductCompression::X64,
+        },
+        filter_properties: vec![CanonicalId::new("tenant").unwrap()],
+        max_scanned_changes: 10_000,
+    };
+    build.validate().unwrap();
+    assert_eq!(build.method.maximum_compression_ratio(), 64);
+
+    let mut duplicate_filter = build.clone();
+    duplicate_filter
+        .filter_properties
+        .push(CanonicalId::new("tenant").unwrap());
+    assert!(duplicate_filter.validate().is_err());
+    let mut unbounded = build.clone();
+    unbounded.max_scanned_changes = 0;
+    assert!(unbounded.validate().is_err());
+    let mut unknown = serde_json::to_value(&build).unwrap();
+    unknown["always_ram"] = serde_json::json!(true);
+    assert!(serde_json::from_value::<BuildVectorQuantizationArtifact>(unknown).is_err());
+
+    ListVectorQuantizationArtifacts {
+        scope: build.scope.clone(),
+        collection_id: Some(build.collection_id.clone()),
+        vector_name: None,
+        max_artifacts: 100,
+    }
+    .validate()
+    .unwrap();
+    assert!(ListVectorQuantizationArtifacts {
+        scope: build.scope.clone(),
+        collection_id: None,
+        vector_name: None,
+        max_artifacts: 0,
+    }
+    .validate()
+    .is_err());
+
+    let artifact_id = CanonicalId::new("quant-product-documents-title").unwrap();
+    ActivateVectorQuantizationArtifact {
+        scope: build.scope.clone(),
+        artifact_id: artifact_id.clone(),
+        generation: 1,
+    }
+    .validate()
+    .unwrap();
+    assert!(RetireVectorQuantizationArtifact {
+        scope: build.scope,
+        artifact_id,
+        generation: 0,
     }
     .validate()
     .is_err());

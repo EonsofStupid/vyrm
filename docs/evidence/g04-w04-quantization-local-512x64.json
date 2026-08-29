@@ -1,0 +1,169 @@
+{
+  "schema": "rrflow.quantization-evidence.v1",
+  "recorded_at": "2026-08-29",
+  "source_revision": "d55a9e622cceb17bc282a538ba0b1a695a5ff3cc+g04-w04-uncommitted",
+  "profile": {
+    "vectors": 512,
+    "dimensions": 64,
+    "queries": 8,
+    "top_k": 10,
+    "exact_rerank": 96,
+    "build_profile": "cargo-test-debug",
+    "kernel": "runtime-dispatched-avx2-with-scalar-differential",
+    "memory_placements": ["owned", "mmap"]
+  },
+  "environment": {
+    "rustc": "1.98.0 (88d9e12ae 2026-08-18)",
+    "target": "x86_64-unknown-linux-gnu",
+    "os": "Linux 7.0.0-30-generic x86_64",
+    "cpu": "Intel Xeon E5-2699 v4 @ 2.20GHz",
+    "logical_cpus": 8
+  },
+  "rows": [
+    {
+      "method": "scalar",
+      "packed_compression_ratio": 4,
+      "packed_vector_bytes": 32768,
+      "auxiliary_bytes": 0,
+      "artifact_bytes": 105856,
+      "full_precision_vector_bytes": 131072,
+      "mean_absolute_score_error": 0.00045616452488709126,
+      "recall_at_10_after_exact_rerank_96": 1.0,
+      "build_nanoseconds": 42234853,
+      "search_matrix_nanoseconds": 154415099
+    },
+    {
+      "method": "product_4x",
+      "packed_compression_ratio": 4,
+      "packed_vector_bytes": 32768,
+      "auxiliary_bytes": 65536,
+      "artifact_bytes": 298240,
+      "full_precision_vector_bytes": 131072,
+      "mean_absolute_score_error": 0.0012855476056131867,
+      "recall_at_10_after_exact_rerank_96": 1.0,
+      "build_nanoseconds": 664589256,
+      "search_matrix_nanoseconds": 176499813
+    },
+    {
+      "method": "product_8x",
+      "packed_compression_ratio": 8,
+      "packed_vector_bytes": 16384,
+      "auxiliary_bytes": 65536,
+      "artifact_bytes": 281792,
+      "full_precision_vector_bytes": 131072,
+      "mean_absolute_score_error": 0.006064488962498153,
+      "recall_at_10_after_exact_rerank_96": 1.0,
+      "build_nanoseconds": 585818617,
+      "search_matrix_nanoseconds": 160016685
+    },
+    {
+      "method": "product_16x",
+      "packed_compression_ratio": 16,
+      "packed_vector_bytes": 8192,
+      "auxiliary_bytes": 65536,
+      "artifact_bytes": 273600,
+      "full_precision_vector_bytes": 131072,
+      "mean_absolute_score_error": 0.014873129528445992,
+      "recall_at_10_after_exact_rerank_96": 1.0,
+      "build_nanoseconds": 570537748,
+      "search_matrix_nanoseconds": 156858685
+    },
+    {
+      "method": "product_32x",
+      "packed_compression_ratio": 32,
+      "packed_vector_bytes": 4096,
+      "auxiliary_bytes": 65536,
+      "artifact_bytes": 269504,
+      "full_precision_vector_bytes": 131072,
+      "mean_absolute_score_error": 0.03073492755910274,
+      "recall_at_10_after_exact_rerank_96": 0.975,
+      "build_nanoseconds": 522462326,
+      "search_matrix_nanoseconds": 160454014
+    },
+    {
+      "method": "product_64x",
+      "packed_compression_ratio": 64,
+      "packed_vector_bytes": 2048,
+      "auxiliary_bytes": 65536,
+      "artifact_bytes": 267456,
+      "full_precision_vector_bytes": 131072,
+      "mean_absolute_score_error": 0.04241240246930466,
+      "recall_at_10_after_exact_rerank_96": 0.9000000000000001,
+      "build_nanoseconds": 508211023,
+      "search_matrix_nanoseconds": 148008167
+    },
+    {
+      "method": "binary",
+      "packed_compression_ratio": 32,
+      "packed_vector_bytes": 4096,
+      "auxiliary_bytes": 0,
+      "artifact_bytes": 77120,
+      "full_precision_vector_bytes": 131072,
+      "mean_absolute_score_error": 0.07215651949696576,
+      "recall_at_10_after_exact_rerank_96": 0.9500000000000001,
+      "build_nanoseconds": 32779265,
+      "search_matrix_nanoseconds": 140751326
+    },
+    {
+      "method": "turboquant_4bit",
+      "packed_compression_ratio": 8,
+      "packed_vector_bytes": 16384,
+      "auxiliary_bytes": 0,
+      "artifact_bytes": 113203,
+      "full_precision_vector_bytes": 131072,
+      "mean_absolute_score_error": 0.00938487902958596,
+      "recall_at_10_after_exact_rerank_96": 1.0,
+      "build_nanoseconds": 90052391,
+      "search_matrix_nanoseconds": 419651726
+    },
+    {
+      "method": "turboquant_2bit",
+      "packed_compression_ratio": 16,
+      "packed_vector_bytes": 8192,
+      "auxiliary_bytes": 0,
+      "artifact_bytes": 105009,
+      "full_precision_vector_bytes": 131072,
+      "mean_absolute_score_error": 0.03372828750410836,
+      "recall_at_10_after_exact_rerank_96": 1.0,
+      "build_nanoseconds": 79171131,
+      "search_matrix_nanoseconds": 423429862
+    },
+    {
+      "method": "turboquant_1_5bit",
+      "packed_compression_ratio": 21,
+      "packed_vector_bytes": 6144,
+      "auxiliary_bytes": 0,
+      "artifact_bytes": 103387,
+      "full_precision_vector_bytes": 131072,
+      "mean_absolute_score_error": 0.053601511637252484,
+      "recall_at_10_after_exact_rerank_96": 0.975,
+      "build_nanoseconds": 92305507,
+      "search_matrix_nanoseconds": 555498800
+    },
+    {
+      "method": "turboquant_1bit",
+      "packed_compression_ratio": 32,
+      "packed_vector_bytes": 4096,
+      "auxiliary_bytes": 0,
+      "artifact_bytes": 101334,
+      "full_precision_vector_bytes": 131072,
+      "mean_absolute_score_error": 0.06297425016329712,
+      "recall_at_10_after_exact_rerank_96": 0.9750000000000001,
+      "build_nanoseconds": 75053924,
+      "search_matrix_nanoseconds": 424124516
+    }
+  ],
+  "qualification": {
+    "minimum_recall_at_10_after_exact_rerank_96": 0.8,
+    "observed_minimum_recall": 0.9000000000000001,
+    "maximum_mean_absolute_score_error": 0.15,
+    "observed_maximum_mean_absolute_score_error": 0.07215651949696576,
+    "maximum_build_nanoseconds_per_artifact": 5000000000,
+    "maximum_search_matrix_nanoseconds_per_artifact": 5000000000,
+    "maximum_supported_packed_compression_ratio": 64,
+    "simd_scalar_rank_parity": true,
+    "mmap_reopen_all_methods": true
+  },
+  "command": "cargo test -p rrd-vector --test quantization_matrix --locked -- --nocapture",
+  "scope": "One deterministic debug-profile local observation. Packed-code ratios exclude metadata and codebooks. Timings are diagnostics, not release SLOs or a Qdrant superiority claim."
+}

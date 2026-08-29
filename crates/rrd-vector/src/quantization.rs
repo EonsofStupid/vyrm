@@ -3,11 +3,10 @@ use crate::ScoreMetric;
 use rrd_core::Result;
 use serde::{Deserialize, Serialize};
 
-/// Experimental per-vector symmetric 8-bit encoding.
+/// Reference per-vector symmetric 8-bit encoding.
 ///
-/// This is deliberately not a planner-visible projection yet. It establishes
-/// a deterministic size/error baseline while exact vectors remain available
-/// for final reranking.
+/// Planner-visible scalar artifacts use the immutable segment codec; this
+/// compact value remains the standalone deterministic oracle primitive.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ScalarQuantizedVector {

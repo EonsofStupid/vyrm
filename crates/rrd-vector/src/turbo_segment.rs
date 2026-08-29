@@ -1,15 +1,20 @@
 use crate::contract::invalid;
 use crate::exact::validate_candidate_versions;
 use crate::{
-    AccessPathKind, CandidatePath, EmbeddingModelBinding, ScoreMetric, SearchHit, SearchRequest,
-    TurboQuantBits, TurboQuantVector, VectorCandidate, VectorQuery,
+    AccessPathKind, CandidatePath, EmbeddingModelBinding, QuantizedKernel,
+    QuantizedMemoryPlacement, ScoreMetric, SearchHit, SearchRequest, TurboQuantBits,
+    TurboQuantVector, VectorCandidate, VectorQuery,
 };
+use memmap2::{Mmap, MmapOptions};
 use rrd_core::{
     digest, ProjectionId, ProjectionStamp, ProjectionState, Result, RuntimeProperties, RuntimeRef,
     ScopeId, VectorCollectionAddress, VectorValue, DATA_RUNTIME_CONTRACT_VERSION,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
+use std::fs::File;
+use std::path::Path;
+use std::sync::Arc;
 
 pub const TURBOQUANT_SEGMENT_FORMAT_VERSION: u16 = 1;
 const TURBOQUANT_SEGMENT_MAGIC: &[u8; 8] = b"RRDTQ001";
@@ -151,13 +156,42 @@ struct SegmentHeader {
     candidates: Vec<StoredCandidate>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
+enum TurboQuantStorage {
+    Owned(Arc<[u8]>),
+    Mapped(Arc<Mmap>),
+}
+
+impl TurboQuantStorage {
+    fn as_bytes(&self) -> &[u8] {
+        match self {
+            Self::Owned(bytes) => bytes,
+            Self::Mapped(bytes) => bytes,
+        }
+    }
+
+    fn placement(&self) -> QuantizedMemoryPlacement {
+        match self {
+            Self::Owned(_) => QuantizedMemoryPlacement::Owned,
+            Self::Mapped(_) => QuantizedMemoryPlacement::Mapped,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct TurboQuantSegment {
     descriptor: TurboQuantDescriptor,
     candidates: Vec<StoredCandidate>,
     packed_bytes_per_vector: usize,
-    payload: Vec<u8>,
-    bytes: Vec<u8>,
+    payload_offset: usize,
+    payload_len: usize,
+    storage: TurboQuantStorage,
+}
+
+impl PartialEq for TurboQuantSegment {
+    fn eq(&self, other: &Self) -> bool {
+        self.descriptor == other.descriptor && self.as_bytes() == other.as_bytes()
+    }
 }
 
 impl TurboQuantSegment {
@@ -229,10 +263,37 @@ impl TurboQuantSegment {
         let header_bytes = encode_json(&header)?;
         let artifact_digest = artifact_digest(&header_bytes, &payload);
         let bytes = encode_artifact(&header_bytes, &payload, &artifact_digest)?;
-        Self::from_parts(header, payload, bytes, artifact_digest)
+        Self::decode(TurboQuantStorage::Owned(Arc::from(bytes)))
     }
 
     pub fn from_bytes(bytes: &[u8]) -> Result<Self> {
+        Self::decode(TurboQuantStorage::Owned(Arc::from(bytes)))
+    }
+
+    pub fn open_mmap(path: impl AsRef<Path>) -> Result<Self> {
+        let path = path.as_ref();
+        let file = File::open(path).map_err(|error| {
+            runtime_error(format!(
+                "cannot open TurboQuant artifact {}: {error}",
+                path.display()
+            ))
+        })?;
+        let length = file
+            .metadata()
+            .map_err(|error| runtime_error(format!("cannot stat TurboQuant artifact: {error}")))?
+            .len();
+        if length == 0 || length > MAX_TURBOQUANT_SEGMENT_BYTES as u64 {
+            return invalid("TurboQuant artifact file length is outside safety bounds");
+        }
+        // SAFETY: the file is opened read-only and its bounded non-zero length
+        // was checked. Published artifact files are immutable.
+        let mmap = unsafe { MmapOptions::new().map(&file) }
+            .map_err(|error| runtime_error(format!("cannot map TurboQuant artifact: {error}")))?;
+        Self::decode(TurboQuantStorage::Mapped(Arc::new(mmap)))
+    }
+
+    fn decode(storage: TurboQuantStorage) -> Result<Self> {
+        let bytes = storage.as_bytes();
         if bytes.len() < HEADER_PREFIX_BYTES || bytes.len() > MAX_TURBOQUANT_SEGMENT_BYTES {
             return invalid("TurboQuant artifact byte length is outside bounds");
         }
@@ -281,22 +342,13 @@ impl TurboQuantSegment {
         if encode_json(&header)? != header_bytes {
             return invalid("TurboQuant header is not in canonical encoding");
         }
-        Self::from_parts(header, payload.to_vec(), bytes.to_vec(), actual)
-    }
-
-    fn from_parts(
-        header: SegmentHeader,
-        payload: Vec<u8>,
-        bytes: Vec<u8>,
-        artifact_digest: String,
-    ) -> Result<Self> {
         header.config.validate()?;
         if header.generation == 0
             || header.minimum_cursor != 0
             || header.candidates.is_empty()
             || header.candidates.len() > MAX_TURBOQUANT_CANDIDATES
             || header.packed_bytes_per_vector == 0
-            || payload.len()
+            || payload_len
                 != header
                     .candidates
                     .len()
@@ -324,7 +376,7 @@ impl TurboQuantSegment {
                 generation: header.generation,
                 source_cursor: header.source_cursor,
                 config_digest: header.config.digest()?,
-                artifact_digest,
+                artifact_digest: actual,
                 state: ProjectionState::Ready,
             },
             scope: header.config.scope,
@@ -337,7 +389,7 @@ impl TurboQuantSegment {
             filter_properties: header.config.filter_properties,
             minimum_cursor: header.minimum_cursor,
             candidate_versions: header.candidates.len(),
-            packed_vector_bytes: payload.len(),
+            packed_vector_bytes: payload_len,
             full_precision_vector_bytes: header
                 .candidates
                 .len()
@@ -349,8 +401,9 @@ impl TurboQuantSegment {
             descriptor,
             candidates: header.candidates,
             packed_bytes_per_vector: header.packed_bytes_per_vector,
-            payload,
-            bytes,
+            payload_offset: HEADER_PREFIX_BYTES + header_len,
+            payload_len,
+            storage,
         })
     }
 
@@ -359,7 +412,11 @@ impl TurboQuantSegment {
     }
 
     pub fn as_bytes(&self) -> &[u8] {
-        &self.bytes
+        self.storage.as_bytes()
+    }
+
+    pub fn memory_placement(&self) -> QuantizedMemoryPlacement {
+        self.storage.placement()
     }
 
     pub fn search_candidates_at(
@@ -367,6 +424,21 @@ impl TurboQuantSegment {
         request: &SearchRequest,
         candidate_limit: usize,
         required_source_cursor: u64,
+    ) -> Result<Vec<SearchHit>> {
+        self.search_candidates_at_with_kernel(
+            request,
+            candidate_limit,
+            required_source_cursor,
+            QuantizedKernel::Auto,
+        )
+    }
+
+    pub fn search_candidates_at_with_kernel(
+        &self,
+        request: &SearchRequest,
+        candidate_limit: usize,
+        required_source_cursor: u64,
+        kernel: QuantizedKernel,
     ) -> Result<Vec<SearchHit>> {
         request.validate()?;
         self.descriptor.validate()?;
@@ -409,6 +481,7 @@ impl TurboQuantSegment {
                 latest.insert(&candidate.reference, index);
             }
         }
+        let payload = &self.as_bytes()[self.payload_offset..self.payload_offset + self.payload_len];
         let mut hits = Vec::new();
         for index in latest.into_values() {
             let candidate = &self.candidates[index];
@@ -434,18 +507,24 @@ impl TurboQuantSegment {
                     .padded_dimensions(self.descriptor.dimensions),
                 original_norm: candidate.original_norm,
                 centroid_norm: candidate.centroid_norm,
-                packed: self.payload[start..start + self.packed_bytes_per_vector].to_vec(),
+                packed: payload[start..start + self.packed_bytes_per_vector].to_vec(),
             };
             hits.push(SearchHit {
                 reference: candidate.reference.clone(),
                 subject: candidate.subject.clone(),
                 source_cursor: candidate.source_cursor,
-                score: encoded.score(values, request.metric)?,
+                score: encoded.score_with_kernel(values, request.metric, kernel)?,
             });
         }
         hits.sort_by(SearchHit::compare_best_first);
         hits.truncate(candidate_limit);
         Ok(hits)
+    }
+}
+
+fn runtime_error(reason: impl Into<String>) -> rrd_core::Error {
+    rrd_core::Error::InvalidRuntime {
+        reason: reason.into(),
     }
 }
 

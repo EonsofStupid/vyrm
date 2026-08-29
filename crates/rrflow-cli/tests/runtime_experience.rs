@@ -767,7 +767,7 @@ fn exact_argv_exec_is_authorized_observed_and_cannot_reuse_the_attempt() {
 }
 
 #[test]
-fn init_writes_real_wiring_idempotently_and_refuses_a_dead_harness() {
+fn init_writes_and_merges_current_native_wiring_idempotently() {
     let root = scratch("init-project");
     let db = root.join(".rrflow/rrd");
     let root_str = root.to_str().unwrap();
@@ -832,6 +832,15 @@ fn init_writes_real_wiring_idempotently_and_refuses_a_dead_harness() {
             "{expected} missing from wiring:\n{settings}"
         );
     }
+    let claude_json: serde_json::Value = serde_json::from_str(&settings).unwrap();
+    assert_eq!(
+        claude_json["hooks"]["SessionStart"][0]["hooks"][0]["timeout"],
+        90
+    );
+    assert_eq!(
+        claude_json["hooks"]["SessionEnd"][0]["hooks"][0]["timeout"],
+        3
+    );
     let context = std::fs::read_to_string(root.join("CLAUDE.md")).unwrap();
     assert!(
         context.contains("RRFlow project context"),
@@ -851,25 +860,76 @@ fn init_writes_real_wiring_idempotently_and_refuses_a_dead_harness() {
         "init must be idempotent:\n{context}"
     );
 
-    // The registry's closed interval refuses to wire.
-    let (ok, _, err) = rrflow(
+    // Codex gets its native project hook vocabulary and the shared skill.
+    let (ok, out, err) = rrflow(
+        &db,
+        &["init", "--harness", "codex-cli", "--root", root_str],
+        None,
+    );
+    assert!(ok, "Codex init failed: stdout={out} stderr={err}");
+    let codex = std::fs::read_to_string(root.join(".codex/hooks.json")).unwrap();
+    for expected in [
+        "apply_patch",
+        "mcp__.*",
+        "SessionEnd",
+        "--harness codex-cli",
+    ] {
+        assert!(codex.contains(expected), "{expected} missing:\n{codex}");
+    }
+    let codex_json: serde_json::Value = serde_json::from_str(&codex).unwrap();
+    assert_eq!(
+        codex_json["hooks"]["SessionStart"][0]["hooks"][0]["timeout"],
+        90
+    );
+    assert_eq!(
+        codex_json["hooks"]["SessionEnd"][0]["hooks"][0]["timeout"],
+        3
+    );
+    let skill =
+        std::fs::read_to_string(root.join(".agents/skills/rrflow-engine-development/SKILL.md"))
+            .unwrap();
+    assert!(skill.contains("Inspect before planning"));
+
+    // Existing unrelated hook settings survive re-init.
+    let codex_path = root.join(".codex/hooks.json");
+    let mut codex_json = codex_json;
+    codex_json["team_setting"] = serde_json::json!("preserve-me");
+    std::fs::write(&codex_path, serde_json::to_vec_pretty(&codex_json).unwrap()).unwrap();
+    rrflow(
+        &db,
+        &["init", "--harness", "codex-cli", "--root", root_str],
+        None,
+    );
+    let codex_json: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(codex_path).unwrap()).unwrap();
+    assert_eq!(codex_json["team_setting"], "preserve-me");
+
+    // Gemini is current and maps the same internal lifecycle to native names.
+    let (ok, out, err) = rrflow(
         &db,
         &["init", "--harness", "gemini-cli", "--root", root_str],
         None,
     );
-    assert!(!ok, "a retired harness must refuse init");
-    assert!(
-        err.contains("retired"),
-        "refusal must state the retirement: {err}"
+    assert!(ok, "Gemini init failed: stdout={out} stderr={err}");
+    let gemini = std::fs::read_to_string(root.join(".gemini/settings.json")).unwrap();
+    for expected in ["BeforeAgent", "BeforeTool", "AfterTool", "PreCompress"] {
+        assert!(gemini.contains(expected), "{expected} missing:\n{gemini}");
+    }
+    let gemini_json: serde_json::Value = serde_json::from_str(&gemini).unwrap();
+    assert_eq!(
+        gemini_json["hooks"]["SessionStart"][0]["hooks"][0]["timeout"],
+        90_000
+    );
+    assert_eq!(
+        gemini_json["hooks"]["SessionEnd"][0]["hooks"][0]["timeout"],
+        3_000
     );
 
     // And the status board states every axis.
     let (ok, out, err) = rrflow(&db, &["harness", "status"], None);
     assert!(ok, "status failed: {err}");
-    assert!(
-        out.contains("RETIRED"),
-        "gemini-cli's closed interval missing: {out}"
-    );
+    assert!(out.contains("codex-cli    hooks=true"));
+    assert!(out.contains("gemini-cli   hooks=true"));
     assert!(
         out.contains("per_usage") && out.contains("subscription"),
         "billing axes missing: {out}"

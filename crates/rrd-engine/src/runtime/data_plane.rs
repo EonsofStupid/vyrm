@@ -893,6 +893,9 @@ fn access_path_name(kind: AccessPathKind) -> &'static str {
         AccessPathKind::ExactScan => "exact_scan",
         AccessPathKind::ExactSegment => "exact_segment",
         AccessPathKind::Hnsw => "hnsw",
+        AccessPathKind::ScalarQuantized => "scalar_quantized",
+        AccessPathKind::ProductQuantized => "product_quantized",
+        AccessPathKind::BinaryQuantized => "binary_quantized",
         AccessPathKind::TurboQuant => "turboquant",
     }
 }

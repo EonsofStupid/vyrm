@@ -60,13 +60,16 @@ full workspace and operating-system matrix may be called verified.
      not mutate authority, and the planner selects the persisted access path.
    - Test: `rrd-query/index_catalogue::native_catalogue_reopens_and_invalid_fields_fail_before_control_state_changes`
 
-9. **Persistent online HNSW, TurboQuant, BM25 hybrid, and staleness**
-   - Invariant: HNSW and TurboQuant artifacts reopen; post-HNSW vector versions
+9. **Persistent online HNSW, quantization, BM25 hybrid, and staleness**
+   - Invariant: HNSW and active scalar/product/binary/TurboQuant artifacts
+     reopen from authenticated lifecycle state; ready and retired quantized
+     generations remain planner-invisible; post-HNSW vector versions
      are immediately exact-overlaid, unchanged HNSW configurations append only
      their delta into consecutive immutable generations, incompatible/stale
      paths fail or explicitly fall back, and BM25/vector branches execute at one
      read stamp with hybrid results surviving reopen.
    - Test: `rrd-engine::engine::tests::vector_index::persistent_retrieval_indexes_and_hybrid_fusion_survive_reopen_and_staleness`
+   - Test: `rrd-engine::engine::tests::vector_index::quantization_build_list_activate_retire_update_and_recovery_share_exact_truth`
 
 10. **Application-complete vector backup and restore**
     - Invariant: logical state, query/vector catalogues, catalogue revisions,
