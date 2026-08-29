@@ -263,7 +263,7 @@ pub(super) fn capabilities(
                 MAX_AUDIT_PAGE_RECORDS,
             )]),
             limitation: Some(if security_enforced {
-                "redacted authenticated-journal audit for routed HTTP outcomes; atomic authorization reservation and external archival remain open"
+                "independently hash-chained redacted JSON audit with protected bounded read and canonical JSON Lines export; external sink delivery remains adapter-owned"
                     .into()
             } else {
                 "audit requires initialized persistent security authority".into()

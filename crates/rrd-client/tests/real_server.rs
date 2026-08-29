@@ -6,9 +6,9 @@ use rrd_client::{is_unauthenticated, ClientConfig, Error, RequestOptions, RrdCli
 use rrd_contract::{
     transaction_operation_sha256, AbortTransaction, BeginTransaction, CanonicalId,
     CloseSubscription, CommitTransaction, CreateSession, DeploymentConformanceCorpus,
-    DeploymentMode, ExecuteQuery, OpenSubscription, PreviewTransaction, QueryBudget, ReadAudit,
-    ReadChangefeed, ReadDiagnosticSnapshot, ResourceId, ResourceKind, ResourcePath, SessionLimits,
-    SubscriptionServerFrame, SubscriptionStream, TransactionMutation,
+    DeploymentMode, ExecuteQuery, ExportAudit, OpenSubscription, PreviewTransaction, QueryBudget,
+    ReadAudit, ReadChangefeed, ReadDiagnosticSnapshot, ResourceId, ResourceKind, ResourcePath,
+    SessionLimits, SubscriptionServerFrame, SubscriptionStream, TransactionMutation,
 };
 use rrd_core::{
     digest, RuntimeCommit, RuntimeProperties, RuntimePropertySchema, RuntimeRecord,
@@ -272,6 +272,7 @@ async fn rust_client_negotiates_authenticates_queries_and_reads_audit() {
             Action::SessionCreate,
             Action::QueryExecute,
             Action::AuditRead,
+            Action::AuditExport,
             Action::TransactionBegin,
             Action::TransactionPreview,
             Action::TransactionAbort,
@@ -367,9 +368,9 @@ async fn rust_client_negotiates_authenticates_queries_and_reads_audit() {
         rrd_engine::product_capability_catalogue()
     );
     let catalogue = client.endpoint_catalogue().await.unwrap();
-    assert_eq!(catalogue.endpoints.len(), 33);
+    assert_eq!(catalogue.endpoints.len(), 34);
     let openapi = client.openapi_document().await.unwrap();
-    assert_eq!(openapi["x-rrd-endpoint-count"], 33);
+    assert_eq!(openapi["x-rrd-endpoint-count"], 34);
 
     let session_request = CreateSession {
         limits: SessionLimits {
@@ -756,6 +757,26 @@ async fn rust_client_negotiates_authenticates_queries_and_reads_audit() {
         record.action == rrd_contract::SecurityAction::QueryExecute
             && record.phase == rrd_contract::AuditPhase::Completed
     }));
+    let exported = client
+        .export_audit(
+            &session,
+            ExportAudit {
+                after_sequence: 0,
+                limit: 128,
+            },
+            RequestOptions::read("request-audit-export", "operation-audit-export").unwrap(),
+        )
+        .await
+        .unwrap();
+    exported.validate().unwrap();
+    assert_eq!(
+        exported.record_count as usize,
+        exported.json_lines.lines().count()
+    );
+    assert_eq!(
+        exported.content_sha256,
+        digest::sha256_hex(exported.json_lines.as_bytes())
+    );
     assert!(audit.records.iter().any(|record| {
         record.action == rrd_contract::SecurityAction::MemoryContextRead
             && record.principal_id.as_ref().map(CanonicalId::as_str) == Some("rust-sdk")

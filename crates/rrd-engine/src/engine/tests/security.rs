@@ -77,9 +77,24 @@ fn embedded_engine_cannot_bypass_policy_grants() {
     assert!(matches!(denied, Err(ServiceError::PermissionDenied)));
     let after = engine.storage.control_journal_since(0, 64).unwrap();
     assert_eq!(
-        after, before,
-        "a denied embedded call must not prepare a backup"
+        after.len(),
+        before.len() + 2,
+        "a denied embedded call must append only its audit record and audit head"
     );
+    assert!(after
+        .iter()
+        .all(|entry| !entry.action.starts_with("backup.")));
+    let denied_audit = SecurityRepository::new(&engine.storage, instance())
+        .audit_since(0, 64)
+        .unwrap()
+        .records
+        .into_iter()
+        .map(|(_, record)| record)
+        .find(|record| record.request_id == "request-backup")
+        .expect("the direct embedded denial is audited");
+    assert_eq!(denied_audit.action, SecurityAction::BackupCreate);
+    assert_eq!(denied_audit.phase, AuditPhase::Completed);
+    assert_eq!(denied_audit.decision, AuditDecision::Denied);
 }
 
 #[test]
@@ -249,12 +264,21 @@ fn engine_invocation_owns_authorization_and_completion_audit() {
         .unwrap();
 
     let page = repository.audit_since(0, 16).unwrap();
-    assert_eq!(page.records.len(), 2);
-    assert_eq!(page.records[0].1.phase, AuditPhase::Authorized);
-    assert_eq!(page.records[1].1.phase, AuditPhase::Completed);
-    assert_eq!(page.records[1].1.decision, AuditDecision::Allowed);
-    assert_eq!(page.records[1].1.action, SecurityAction::QueryExecute);
-    assert_eq!(page.records[1].1.principal_id, Some(principal_id));
+    let records = page
+        .records
+        .iter()
+        .filter(|(_, record)| record.action == SecurityAction::QueryExecute)
+        .map(|(_, record)| record)
+        .collect::<Vec<_>>();
+    assert_eq!(records.len(), 2);
+    assert_eq!(records[0].phase, AuditPhase::Authorized);
+    assert_eq!(records[1].phase, AuditPhase::Completed);
+    assert_eq!(records[1].decision, AuditDecision::Allowed);
+    assert_eq!(records[1].principal_id, Some(principal_id));
+    assert_eq!(
+        records[1].previous_audit_sha256.as_deref(),
+        Some(records[0].audit_sha256.as_str())
+    );
 }
 
 #[test]
@@ -330,10 +354,14 @@ fn denied_engine_invocation_is_audited_without_domain_mutation() {
     assert_eq!(engine.storage.runtime_cursor().unwrap(), before_runtime);
 
     let page = repository.audit_since(0, 16).unwrap();
-    assert_eq!(page.records.len(), 1);
-    assert_eq!(page.records[0].1.phase, AuditPhase::Completed);
-    assert_eq!(page.records[0].1.decision, AuditDecision::Denied);
-    assert_eq!(page.records[0].1.action, SecurityAction::BackupCreate);
+    let denied = page
+        .records
+        .iter()
+        .find(|(_, record)| record.action == SecurityAction::BackupCreate)
+        .map(|(_, record)| record)
+        .unwrap();
+    assert_eq!(denied.phase, AuditPhase::Completed);
+    assert_eq!(denied.decision, AuditDecision::Denied);
 }
 
 #[test]

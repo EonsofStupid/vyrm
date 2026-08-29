@@ -57,7 +57,7 @@ use std::fmt;
 pub const PROTOCOL: &str = "rrd";
 pub const PROTOCOL_VERSION: u16 = 1;
 pub const OPENAPI_DOCUMENT_SHA256: &str =
-    "78716ccb2720fbee0a0beffba06b4efc605f073a8e72ccca4c72b1ed4ccd7fe5";
+    "2a02019b9d89b06714b62d27477413c6216fbb8bff79c371ac24f3b18653ebc3";
 pub const MAX_ID_BYTES: usize = 128;
 pub const MAX_MESSAGE_BYTES: usize = 4_096;
 pub const MAX_CAPABILITIES: usize = 512;
@@ -1924,7 +1924,9 @@ pub enum SecurityAction {
     BackupList,
     RestoreCreate,
     EstateRead,
+    EstateAdmin,
     AuditRead,
+    AuditExport,
     DiagnosticsRead,
     SecurityAdmin,
     MemoryContextRead,
@@ -1990,6 +1992,57 @@ pub struct AuditRecordSnapshot {
     pub status_code: u16,
     pub request_sha256: String,
     pub response_sha256: String,
+    pub previous_audit_sha256: Option<String>,
+    pub audit_sha256: String,
+}
+
+impl AuditRecordSnapshot {
+    pub fn validate(&self) -> Result<()> {
+        self.resource.validate()?;
+        validate_sha256(&self.request_sha256, "audit request_sha256")?;
+        validate_sha256(&self.response_sha256, "audit response_sha256")?;
+        if let Some(previous) = &self.previous_audit_sha256 {
+            validate_sha256(previous, "previous audit digest")?;
+        }
+        validate_sha256(&self.audit_sha256, "audit digest")?;
+        if self.sequence == 0
+            || self.at_unix_ms == 0
+            || self.request_id.is_empty()
+            || self.operation_id.is_empty()
+            || self.request_id.len() > 256
+            || self.operation_id.len() > 256
+            || !self.request_id.is_ascii()
+            || !self.operation_id.is_ascii()
+            || !(100..=599).contains(&self.status_code)
+            || (self.phase == AuditPhase::Authorized
+                && (self.decision != AuditDecision::Allowed || self.status_code != 100))
+            || (self.phase == AuditPhase::Completed && self.status_code < 200)
+        {
+            return invalid("audit record coordinates are invalid");
+        }
+        let expected = sha256_bytes(
+            &serde_json::to_vec(&(
+                &self.audit_id,
+                self.at_unix_ms,
+                &self.principal_id,
+                self.action,
+                &self.resource,
+                &self.request_id,
+                &self.operation_id,
+                self.phase,
+                self.decision,
+                self.status_code,
+                &self.request_sha256,
+                &self.response_sha256,
+                &self.previous_audit_sha256,
+            ))
+            .map_err(|error| ContractError(error.to_string()))?,
+        );
+        if expected != self.audit_sha256 {
+            return invalid("audit record digest is invalid");
+        }
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -1997,7 +2050,124 @@ pub struct AuditRecordSnapshot {
 pub struct AuditPage {
     pub requested_after_sequence: u64,
     pub through_sequence: u64,
+    pub chain_anchor_sha256: Option<String>,
+    pub chain_head_sha256: Option<String>,
     pub records: Vec<AuditRecordSnapshot>,
+}
+
+impl AuditPage {
+    pub fn validate(&self) -> Result<()> {
+        if self.through_sequence < self.requested_after_sequence || self.records.len() > 1_024 {
+            return invalid("audit page coordinates are invalid");
+        }
+        validate_audit_chain(
+            &self.records,
+            self.chain_anchor_sha256.as_deref(),
+            self.chain_head_sha256.as_deref(),
+        )
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ExportAudit {
+    pub after_sequence: u64,
+    pub limit: u16,
+}
+
+impl ExportAudit {
+    pub fn validate(&self) -> Result<()> {
+        ReadAudit {
+            after_sequence: self.after_sequence,
+            limit: self.limit,
+        }
+        .validate()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct AuditExport {
+    pub requested_after_sequence: u64,
+    pub through_sequence: u64,
+    pub chain_anchor_sha256: Option<String>,
+    pub chain_head_sha256: Option<String>,
+    pub record_count: u16,
+    pub media_type: String,
+    pub content_sha256: String,
+    pub json_lines: String,
+}
+
+impl AuditExport {
+    pub fn validate(&self) -> Result<()> {
+        if self.through_sequence < self.requested_after_sequence
+            || self.record_count > 1_024
+            || self.media_type != "application/x-ndjson; profile=rrd-audit-v1"
+            || self.json_lines.len() > 8 * 1024 * 1024
+        {
+            return invalid("audit export coordinates are invalid");
+        }
+        validate_sha256(&self.content_sha256, "audit export content_sha256")?;
+        for digest in self
+            .chain_anchor_sha256
+            .iter()
+            .chain(&self.chain_head_sha256)
+        {
+            validate_sha256(digest, "audit export chain digest")?;
+        }
+        if sha256_bytes(self.json_lines.as_bytes()) != self.content_sha256 {
+            return invalid("audit export content digest does not match JSON Lines");
+        }
+        if (!self.json_lines.is_empty() && !self.json_lines.ends_with('\n'))
+            || (self.json_lines.is_empty() && self.record_count != 0)
+        {
+            return invalid("audit export JSON Lines framing is invalid");
+        }
+        let records = self
+            .json_lines
+            .lines()
+            .map(|line| {
+                serde_json::from_str::<AuditRecordSnapshot>(line)
+                    .map_err(|error| ContractError(error.to_string()))
+            })
+            .collect::<Result<Vec<_>>>()?;
+        if records.len() != usize::from(self.record_count) {
+            return invalid("audit export record count differs from JSON Lines");
+        }
+        validate_audit_chain(
+            &records,
+            self.chain_anchor_sha256.as_deref(),
+            self.chain_head_sha256.as_deref(),
+        )?;
+        Ok(())
+    }
+}
+
+fn validate_audit_chain(
+    records: &[AuditRecordSnapshot],
+    anchor: Option<&str>,
+    head: Option<&str>,
+) -> Result<()> {
+    if records.is_empty() {
+        if anchor.is_some() || head.is_some() {
+            return invalid("empty audit range cannot advertise chain coordinates");
+        }
+        return Ok(());
+    }
+    if records[0].previous_audit_sha256.as_deref() != anchor
+        || records.last().map(|record| record.audit_sha256.as_str()) != head
+    {
+        return invalid("audit range chain coordinates are invalid");
+    }
+    let mut previous = anchor;
+    for record in records {
+        record.validate()?;
+        if record.previous_audit_sha256.as_deref() != previous {
+            return invalid("audit record lineage is discontinuous");
+        }
+        previous = Some(record.audit_sha256.as_str());
+    }
+    Ok(())
 }
 
 #[derive(
@@ -2166,6 +2336,16 @@ impl EndpointCatalogue {
 
 pub fn endpoint_catalogue() -> EndpointCatalogue {
     let mut endpoints = vec![
+        endpoint(
+            "audit-export",
+            HttpMethod::Post,
+            "/v1/audit/export",
+            EndpointAuthentication::SessionBearer,
+            false,
+            SecurityAction::AuditExport,
+            "ExportAudit",
+            "AuditExport",
+        ),
         endpoint(
             "audit-read",
             HttpMethod::Post,
@@ -2813,6 +2993,7 @@ fn request_envelope_schema(name: &str) -> Result<serde_json::Value> {
         "CreateInstanceBackup" => schema_json::<RequestEnvelope<CreateInstanceBackup>>(),
         "CreateSession" => schema_json::<RequestEnvelope<CreateSession>>(),
         "ExecuteQuery" => schema_json::<RequestEnvelope<ExecuteQuery>>(),
+        "ExportAudit" => schema_json::<RequestEnvelope<ExportAudit>>(),
         "EnsureQueryIndex" => schema_json::<RequestEnvelope<EnsureQueryIndex>>(),
         "EnsureVectorCollection" => schema_json::<RequestEnvelope<EnsureVectorCollection>>(),
         "ListQueryIndexes" => schema_json::<RequestEnvelope<ListQueryIndexes>>(),
@@ -2841,6 +3022,7 @@ fn request_envelope_schema(name: &str) -> Result<serde_json::Value> {
 
 fn response_envelope_schema(name: &str) -> Result<serde_json::Value> {
     let schema = match name {
+        "AuditExport" => schema_json::<ResponseEnvelope<AuditExport>>(),
         "AuditPage" => schema_json::<ResponseEnvelope<AuditPage>>(),
         "ChangefeedFollowResult" => schema_json::<ResponseEnvelope<ChangefeedFollowResult>>(),
         "ChangefeedPage" => schema_json::<ResponseEnvelope<ChangefeedPage>>(),
@@ -5036,6 +5218,17 @@ fn validate_sha256(value: &str, field: &str) -> Result<()> {
         return invalid(format!("{field} must be lowercase SHA-256 hex"));
     }
     Ok(())
+}
+
+fn sha256_bytes(bytes: &[u8]) -> String {
+    let digest = Sha256::digest(bytes);
+    let mut output = String::with_capacity(64);
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    for byte in digest {
+        output.push(HEX[usize::from(byte >> 4)] as char);
+        output.push(HEX[usize::from(byte & 0x0f)] as char);
+    }
+    output
 }
 
 fn invalid<T>(message: impl Into<String>) -> Result<T> {

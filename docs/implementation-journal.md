@@ -3350,3 +3350,38 @@ index.
 - Regenerated the TypeScript OpenAPI schema. The two additive query-plan
   security evidence fields advance the reviewed digest to
   `78716ccb2720fbee0a0beffba06b4efc605f073a8e72ccca4c72b1ed4ccd7fe5`.
+
+## 2026-08-29 — G05-W04 comprehensive structured-audit candidate
+
+- Added one atomic distinct-key control-batch port across memory, Fjall
+  compatibility, native RRD LSM, persistent dispatch, and the type-erased
+  engine boundary. Every member is compare-and-swap validated before the batch
+  publishes, its journal entries receive consecutive sequence/digest links,
+  and any conflict rolls the complete batch back.
+- Split unsealed audit input from immutable records. Each record commits its
+  previous audit digest and semantic SHA-256; the record and compare-and-swap
+  audit head publish in one control batch. Bounded contention retry creates one
+  linear chain rather than last-writer-wins forks. Page validation retains an
+  exact anchor/head across filtered control-journal coordinates.
+- Security initialization and replacement now publish state plus a completed
+  `security_admin` record atomically. Authorized estate administration,
+  reconciliation, backup reconciliation, retention pruning, and restore
+  recovery emit `estate_admin` authorization/completion records. Secured direct
+  embedded calls outside a supported invocation lifecycle leave a durable
+  authorization reservation or terminal denial.
+- Added protected `POST /v1/audit/export` and Rust-client support. Its canonical
+  newline-delimited JSON carries an exact count, media type, content digest,
+  chain anchor/head, and individually verifiable records. Oversized HTTP bodies
+  and handler-join failures now cross the same rejection audit boundary instead
+  of returning unaudited transport failures.
+- Added storage parity/rollback, eight-writer no-fork concurrency, restart,
+  direct embedded denial, estate administration, real server, export redaction,
+  digest, and chain-continuity evidence. Regenerated TypeScript, Python, Go,
+  Java, and .NET route maps at 34 HTTP operations. The reviewed OpenAPI digest
+  advances to
+  `2a02019b9d89b06714b62d27477413c6216fbb8bff79c371ac24f3b18653ebc3`.
+- Terminal structured-audit completion is intentionally still appended after
+  an application operation; the pre-effect reservation makes a crash visible.
+  Coupling every terminal record to the application data transaction, retention
+  policy, and external sink delivery remain later hardening rather than hidden
+  claims in this foundation slice.

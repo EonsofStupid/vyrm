@@ -4,7 +4,7 @@ use rrd_contract::{
 use rrd_core::{digest, ClaimReader, Predicate, Subject};
 use rrd_engine::{InstanceBinding, InstanceManifest, RrdEngine, RuntimeToolLifecyclePolicy};
 use rrd_estate::{EstateRepository, MutationContext};
-use rrd_security::{AuditRecord, SecurityRepository};
+use rrd_security::{AuditEvent, SecurityRepository};
 use rrd_store::PersistentEngine;
 use serde_json::{json, Value};
 
@@ -62,7 +62,7 @@ fn administration_tools_backup_restore_estate_and_audit_through_one_engine() {
         })
         .unwrap();
     SecurityRepository::new(&storage, id(binding.manifest.id.as_str()))
-        .append_audit(&AuditRecord {
+        .append_audit(&AuditEvent {
             audit_id: id("audit-fixture"),
             at_unix_ms: 11,
             principal_id: None,

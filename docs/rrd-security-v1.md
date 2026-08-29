@@ -1,12 +1,14 @@
 # RRD security authority v1
 
-Status: G05-W03 identity and authorization foundation implemented. The durable
-authority, inherited roles, API-key and short-lived JWT sessions, exact
-third-party identity bindings, tenant/row/field query policy, TLS 1.3 mTLS,
-rotation/revocation, routed-outcome audit, and protected audit read are
+Status: G05-W03 identity/authorization and G05-W04 comprehensive structured
+audit foundations implemented. The durable authority, inherited roles,
+API-key and short-lived JWT sessions, exact third-party identity bindings,
+tenant/row/field query policy, TLS 1.3 mTLS, rotation/revocation, independent
+hash-chained audit, protected read, and canonical JSON Lines export are
 executable. An external OIDC/JWK verifier adapter, certificate hot reload,
-secret-provider integration, rate limits, atomic audit completion with the
-application mutation, and external audit archival remain open.
+secret-provider integration, rate limits, atomic completion in the same data
+transaction, retention policy, and external sink delivery remain later
+production hardening.
 
 `rrd-security` owns identity, deny-by-default action policy, and the durable
 audit vocabulary. It is deliberately separate from RRFlow physical storage,
@@ -65,27 +67,35 @@ with the policy revision and authorization digest. A requested forbidden field
 returns `permission_denied`. Operations without a policy injector deny a
 constrained grant instead of silently widening it.
 
-The initial action vocabulary covers session lifecycle, query, transaction
-lifecycle, changefeed read/follow, vector search, backup/list/restore, estate
-read, audit read, and security administration.
+The closed action vocabulary covers session lifecycle, query and index work,
+transaction lifecycle, changefeed/subscription work, vector collections and
+points, backup/list/restore, estate read/administration, audit read/export,
+diagnostics, security administration, and governed RRFlow runtime actions.
 
 ## Audit contract
 
 An `AuditRecord` captures a canonical audit identity, time, optional principal,
 closed action, exact resource, request/operation coordinates, allow/deny/fail
-decision, authorization/completion phase, HTTP-style status, and request/
-response SHA-256 values. Bodies,
-credentials, bearer tokens, and arbitrary headers are excluded.
+decision, authorization/completion phase, HTTP-style status, request/response
+SHA-256 values, the previous audit digest, and its own semantic digest. Bodies,
+credentials, bearer tokens, signing keys, filesystem paths, and arbitrary
+headers are excluded.
 
 Each record is immutable and idempotent by audit identity. Rebinding that
-identity is denied. The record is appended through RRFlow's authenticated
-control journal, so restart replay validates the existing journal chain rather
-than trusting a detached log file. Bounded reads return only typed
-`security.audit` records while retaining their global control-journal sequence.
-The public `POST /v1/audit/read` contract is itself protected by `audit_read`.
-Its `through_sequence` reports the global journal coordinate scanned, rather
-than merely the last matching audit record, so unrelated control activity
-cannot stall pagination.
+identity is denied. Audit owns an independent genesis-to-head hash chain rather
+than inheriting trust from a filtered view of the broader control journal. The
+record and compare-and-swap audit head publish in one bounded atomic control
+batch; concurrent writers retry the head conflict and cannot create forks.
+Restart reads validate every record digest and the requested chain segment.
+Bounded reads retain the global control-journal sequence, anchor digest, and
+head digest. `through_sequence` is the global coordinate scanned, so unrelated
+control activity cannot stall pagination.
+
+`POST /v1/audit/read` is protected by `audit_read`. The separately authorized
+`POST /v1/audit/export` returns canonical newline-delimited JSON with exact
+record count, chain anchor/head, media type, and content SHA-256. Contract and
+client validation parse every line, recompute every record digest, verify the
+lineage, and reject framing, count, content, or chain substitution.
 
 After successful principal authorization, the server appends an `authorized`
 record before invoking the operation. A missing completion therefore remains
@@ -95,12 +105,22 @@ terminal `completed/denied` record; accepted work receives a terminal
 Authorization records are constrained to status 100/allowed and completion
 records to final status codes.
 
+Security initialization/replacement publishes its state transition and
+`security_admin` completion audit in the same control batch. Authorized estate
+administration, reconciliation, backup reconciliation, retention pruning, and
+restore recovery emit `estate_admin` authorization and completion records.
+Session-backed embedded calls outside an active invocation cannot disappear:
+they emit a durable authorization reservation or terminal denial. A missing
+completion therefore remains explicit evidence of a crashed or nonconforming
+caller instead of looking like an operation that never occurred.
+
 ## Evidence and remaining gate
 
-Native reopen tests prove exact-scope allow, wrong credential denial,
-ungranted-action denial, wrong-instance denial after restart, audit replay,
-audit identity collision denial, journal verification, and absence of the raw
-credential from serialized journal evidence.
+Memory, Fjall-compatibility, and native tests prove atomic multi-record control
+publication and rollback. Native reopen and concurrent-writer tests prove
+exact-scope allow, wrong credential denial, wrong-instance denial, audit replay,
+identity collision denial, linear no-fork chaining, journal verification, and
+absence of raw credentials from serialized evidence.
 
 When an instance has initialized security state, session creation accepts
 `X-RRD-Principal` plus `Authorization: ApiKey …`, or an RRD-issued
@@ -116,15 +136,10 @@ remote bind. The real-socket differentials prove missing/bad API-key denial,
 JWT exchange, allowed and forbidden-field query decisions, denied-audit
 persistence, exact session replay, credential rotation, rejection of an old
 JWT and its existing lease, ungranted backup denial without a runtime mutation,
-failed query execution, bounded protected audit read, all three decision
-classes, and absence of raw API-key/JWT/signing-key material from reopened
-storage.
-
-F4 audit remains open under G05-W04. Routed envelope operations, public
-inspection, and unknown routes record outcomes when security is enabled, and
-authorized work is reserved durably before execution. Atomic completion in the
-same transaction as application mutation, complete mutation/security-admin
-coverage, oversized-body/handler-failure coverage, retention, rotation/export,
-and external archival remain before calling audit comprehensive. Remote
-cleartext remains prohibited; non-loopback service requires initialized
-application security plus client-authenticated TLS 1.3.
+failed query execution, bounded protected audit read and export, all three
+decision classes, oversized-body rejection, handler-join failure attribution,
+chain continuity, export digest verification, and absence of raw
+API-key/JWT/signing-key material from reopened storage. Public inspection and
+unknown routes are attributed too. Remote cleartext remains prohibited;
+non-loopback service requires initialized application security plus
+client-authenticated TLS 1.3.

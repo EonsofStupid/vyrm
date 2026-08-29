@@ -1,8 +1,8 @@
 //! The substrate-backed claim store.
 
 use crate::control::{
-    validate_control_key, verify_control_page, verify_control_tail, ControlJournalEntry,
-    ControlTransition,
+    validate_control_batch, validate_control_key, verify_control_page, verify_control_tail,
+    ControlJournalEntry, ControlTransition,
 };
 use crate::error::{Error, Result};
 use crate::gc::{build_report, RemovalReport, Tally};
@@ -1014,6 +1014,76 @@ impl Store {
     ) -> Result<ControlJournalEntry> {
         self.commit_control_transition_inner(transition, None)
             .map(|(_, entry)| entry)
+    }
+
+    pub fn commit_control_batch(
+        &self,
+        transitions: &[ControlTransition],
+    ) -> Result<Vec<ControlJournalEntry>> {
+        validate_control_batch(transitions)?;
+        let mut tx = self
+            .db
+            .write_tx()
+            .durability(Durability::Authoritative.persist_mode());
+        for transition in transitions {
+            let current = tx.get(&self.meta, transition.key.as_bytes())?;
+            if current.as_deref() != transition.expected.as_deref() {
+                return Err(Error::ControlConflict(transition.key.clone()));
+            }
+        }
+        let current_sequence =
+            decode_optional_sequence(tx.get(&self.meta, keyspaces::CONTROL_JOURNAL_SEQUENCE)?)?;
+        let mut previous_digest = tx
+            .get(&self.meta, keyspaces::CONTROL_JOURNAL_LAST_DIGEST)?
+            .map(|value| String::from_utf8(value.to_vec()))
+            .transpose()
+            .map_err(|error| Error::CorruptWatermark(error.to_string()))?;
+        let previous_entry = if current_sequence == 0 {
+            None
+        } else {
+            tx.get(&self.meta, keyspaces::control_journal_key(current_sequence))?
+                .map(|value| serde_json::from_slice(&value))
+                .transpose()?
+        };
+        verify_control_tail(
+            current_sequence,
+            previous_digest.as_deref(),
+            previous_entry.as_ref(),
+        )?;
+        let mut entries = Vec::with_capacity(transitions.len());
+        for (offset, transition) in transitions.iter().enumerate() {
+            let sequence = current_sequence
+                .checked_add(offset as u64 + 1)
+                .ok_or(Error::SequenceOverflow)?;
+            let entry =
+                ControlJournalEntry::committed(sequence, transition, previous_digest.clone());
+            previous_digest = Some(entry.digest.clone());
+            entries.push(entry);
+        }
+        for (transition, entry) in transitions.iter().zip(&entries) {
+            match &transition.replacement {
+                Some(value) => tx.insert(&self.meta, transition.key.as_bytes(), value),
+                None => tx.remove(&self.meta, transition.key.as_bytes()),
+            }
+            tx.insert(
+                &self.meta,
+                keyspaces::control_journal_key(entry.sequence),
+                serde_json::to_vec(entry)?,
+            );
+        }
+        let last = entries.last().expect("validated non-empty control batch");
+        tx.insert(
+            &self.meta,
+            keyspaces::CONTROL_JOURNAL_SEQUENCE,
+            last.sequence.to_string().as_bytes(),
+        );
+        tx.insert(
+            &self.meta,
+            keyspaces::CONTROL_JOURNAL_LAST_DIGEST,
+            last.digest.as_bytes(),
+        );
+        tx.commit()?;
+        Ok(entries)
     }
 
     pub fn commit_catalog_transition(

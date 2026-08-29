@@ -820,6 +820,85 @@ fn audit_read_contract_is_bounded_and_strict() {
         "include_bodies": true
     }))
     .is_err());
+    rrd_contract::ExportAudit {
+        after_sequence: 41,
+        limit: 128,
+    }
+    .validate()
+    .unwrap();
+    assert!(
+        serde_json::from_value::<rrd_contract::ExportAudit>(serde_json::json!({
+            "after_sequence": 0,
+            "limit": 1,
+            "target_path": "/tmp/audit"
+        }))
+        .is_err()
+    );
+}
+
+#[test]
+fn audit_export_rejects_content_record_and_chain_substitution() {
+    let mut record = rrd_contract::AuditRecordSnapshot {
+        sequence: 7,
+        audit_id: CanonicalId::new("audit-contract-record").unwrap(),
+        at_unix_ms: 100,
+        principal_id: Some(CanonicalId::new("contract-auditor").unwrap()),
+        action: rrd_contract::SecurityAction::AuditRead,
+        resource: ResourcePath {
+            segments: vec![ResourceId::new(ResourceKind::Instance, "contract-instance").unwrap()],
+        },
+        request_id: "request-audit-contract".into(),
+        operation_id: "operation-audit-contract".into(),
+        phase: rrd_contract::AuditPhase::Completed,
+        decision: rrd_contract::AuditDecision::Allowed,
+        status_code: 200,
+        request_sha256: "a".repeat(64),
+        response_sha256: "b".repeat(64),
+        previous_audit_sha256: Some("c".repeat(64)),
+        audit_sha256: String::new(),
+    };
+    record.audit_sha256 = sha256_for_test(
+        &serde_json::to_vec(&(
+            &record.audit_id,
+            record.at_unix_ms,
+            &record.principal_id,
+            record.action,
+            &record.resource,
+            &record.request_id,
+            &record.operation_id,
+            record.phase,
+            record.decision,
+            record.status_code,
+            &record.request_sha256,
+            &record.response_sha256,
+            &record.previous_audit_sha256,
+        ))
+        .unwrap(),
+    );
+    let json_lines = format!("{}\n", serde_json::to_string(&record).unwrap());
+    let export = rrd_contract::AuditExport {
+        requested_after_sequence: 0,
+        through_sequence: 8,
+        chain_anchor_sha256: record.previous_audit_sha256.clone(),
+        chain_head_sha256: Some(record.audit_sha256.clone()),
+        record_count: 1,
+        media_type: "application/x-ndjson; profile=rrd-audit-v1".into(),
+        content_sha256: sha256_for_test(json_lines.as_bytes()),
+        json_lines,
+    };
+    export.validate().unwrap();
+
+    let mut content_tampered = export.clone();
+    content_tampered.json_lines.push(' ');
+    assert!(content_tampered.validate().is_err());
+
+    let mut record_tampered = record;
+    record_tampered.response_sha256 = "d".repeat(64);
+    let substituted = format!("{}\n", serde_json::to_string(&record_tampered).unwrap());
+    let mut sealed_substitution = export;
+    sealed_substitution.content_sha256 = sha256_for_test(substituted.as_bytes());
+    sealed_substitution.json_lines = substituted;
+    assert!(sealed_substitution.validate().is_err());
 }
 
 #[test]
@@ -883,8 +962,8 @@ fn diagnostic_read_contract_is_bounded_strict_and_separately_authorized() {
 fn endpoint_catalogue_is_complete_sorted_and_transport_neutral() {
     let catalogue = rrd_contract::endpoint_catalogue();
     catalogue.validate().unwrap();
-    assert_eq!(catalogue.endpoints.len(), 33);
-    assert_eq!(catalogue.endpoints[0].operation.as_str(), "audit-read");
+    assert_eq!(catalogue.endpoints.len(), 34);
+    assert_eq!(catalogue.endpoints[0].operation.as_str(), "audit-export");
     let create = catalogue
         .endpoints
         .iter()

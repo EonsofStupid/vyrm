@@ -164,7 +164,7 @@ impl RrdEngine {
             .as_slice(),
         );
         rrd_security::SecurityRepository::new(&self.storage, self.instance.clone()).append_audit(
-            &rrd_security::AuditRecord {
+            &rrd_security::AuditEvent {
                 audit_id: CanonicalId::new(format!("audit-{identity}"))
                     .map_err(|error| ServiceError::Contract(error.to_string()))?,
                 at_unix_ms: event.at_unix_ms,
@@ -210,6 +210,8 @@ impl RrdEngine {
         Ok(AuditPage {
             requested_after_sequence: request.after_sequence,
             through_sequence: page.through_sequence,
+            chain_anchor_sha256: page.chain_anchor_sha256,
+            chain_head_sha256: page.chain_head_sha256,
             records: page
                 .records
                 .into_iter()
@@ -227,8 +229,79 @@ impl RrdEngine {
                     status_code: record.status_code,
                     request_sha256: record.request_sha256,
                     response_sha256: record.response_sha256,
+                    previous_audit_sha256: record.previous_audit_sha256,
+                    audit_sha256: record.audit_sha256,
                 })
                 .collect(),
         })
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn export_audit(
+        &self,
+        session_id: &CorrelationId,
+        token: &CorrelationId,
+        request: &ExportAudit,
+        now: u64,
+        request_id: &str,
+        operation_id: &str,
+    ) -> Result<AuditExport> {
+        request
+            .validate()
+            .map_err(|error| ServiceError::Contract(error.to_string()))?;
+        self.authorize(
+            session_id,
+            token,
+            SecurityAction::AuditExport,
+            now,
+            request_id,
+            operation_id,
+        )?;
+        let page = rrd_security::SecurityRepository::new(&self.storage, self.instance.clone())
+            .audit_since(request.after_sequence, usize::from(request.limit))
+            .map_err(|error| ServiceError::Contract(error.to_string()))?;
+        let records = page
+            .records
+            .into_iter()
+            .map(|(sequence, record)| AuditRecordSnapshot {
+                sequence,
+                audit_id: record.audit_id,
+                at_unix_ms: record.at_unix_ms,
+                principal_id: record.principal_id,
+                action: record.action,
+                resource: record.resource,
+                request_id: record.request_id,
+                operation_id: record.operation_id,
+                phase: record.phase,
+                decision: record.decision,
+                status_code: record.status_code,
+                request_sha256: record.request_sha256,
+                response_sha256: record.response_sha256,
+                previous_audit_sha256: record.previous_audit_sha256,
+                audit_sha256: record.audit_sha256,
+            })
+            .collect::<Vec<_>>();
+        let mut json_lines = String::new();
+        for record in &records {
+            json_lines.push_str(&serde_json::to_string(record).map_err(contract_json)?);
+            json_lines.push('\n');
+        }
+        let export = AuditExport {
+            requested_after_sequence: request.after_sequence,
+            through_sequence: page.through_sequence,
+            chain_anchor_sha256: page.chain_anchor_sha256,
+            chain_head_sha256: page.chain_head_sha256,
+            record_count: records
+                .len()
+                .try_into()
+                .map_err(|_| ServiceError::Contract("audit export count overflow".into()))?,
+            media_type: "application/x-ndjson; profile=rrd-audit-v1".into(),
+            content_sha256: digest::sha256_hex(json_lines.as_bytes()),
+            json_lines,
+        };
+        export
+            .validate()
+            .map_err(|error| ServiceError::Contract(error.to_string()))?;
+        Ok(export)
     }
 }

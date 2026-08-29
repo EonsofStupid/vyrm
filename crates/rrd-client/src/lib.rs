@@ -14,21 +14,21 @@ use hyper_util::client::legacy::connect::HttpConnector;
 use hyper_util::client::legacy::Client;
 use hyper_util::rt::TokioExecutor;
 use rrd_contract::{
-    AbortTransaction, AuditPage, BeginTransaction, CanonicalId, ChangefeedFollowResult,
-    ChangefeedPage, CloseSession, CloseSubscription, CloseSubscriptionResult, CommitReceipt,
-    CommitTransaction, CorrelationId, CreateInstanceBackup, CreateInstanceBackupResult,
-    CreateSession, DiagnosticSnapshot, EndpointCatalogue, EnsureVectorCollection,
-    EnsureVectorCollectionResult, ErrorBody, ErrorCode, EstateSnapshot, ExecuteQuery,
-    FollowChangefeed, InstanceBackupCatalogueSnapshot, ListInstanceBackups, ListRuntimeTools,
-    ListVectorCollections, OpenSubscription, OpenSubscriptionResult, PreviewTransaction,
-    QueryResult, ReadAudit, ReadChangefeed, ReadDiagnosticSnapshot, ReadEstate, RenewSession,
-    RequestContext, RequestEnvelope, ResourceId, ResourceKind, ResourcePath, ResponseEnvelope,
-    ResponseOutcome, RestoreInstanceBackup, RestoreInstanceBackupResult, RetrieveVectorPoints,
-    RuntimeToolCatalogue, RuntimeToolInvocation, RuntimeToolInvocationResult, ScrollVectorPoints,
-    SearchVectors, ServiceCapabilities, SessionLease, SessionTermination, SubscriptionClientFrame,
-    SubscriptionServerFrame, SubscriptionSnapshot, TransactionLease, TransactionPreview,
-    VectorCollectionCatalogueSnapshot, VectorPointBatch, VectorPointPage, VectorSearchResult,
-    PROTOCOL, PROTOCOL_VERSION,
+    AbortTransaction, AuditExport, AuditPage, BeginTransaction, CanonicalId,
+    ChangefeedFollowResult, ChangefeedPage, CloseSession, CloseSubscription,
+    CloseSubscriptionResult, CommitReceipt, CommitTransaction, CorrelationId, CreateInstanceBackup,
+    CreateInstanceBackupResult, CreateSession, DiagnosticSnapshot, EndpointCatalogue,
+    EnsureVectorCollection, EnsureVectorCollectionResult, ErrorBody, ErrorCode, EstateSnapshot,
+    ExecuteQuery, ExportAudit, FollowChangefeed, InstanceBackupCatalogueSnapshot,
+    ListInstanceBackups, ListRuntimeTools, ListVectorCollections, OpenSubscription,
+    OpenSubscriptionResult, PreviewTransaction, QueryResult, ReadAudit, ReadChangefeed,
+    ReadDiagnosticSnapshot, ReadEstate, RenewSession, RequestContext, RequestEnvelope, ResourceId,
+    ResourceKind, ResourcePath, ResponseEnvelope, ResponseOutcome, RestoreInstanceBackup,
+    RestoreInstanceBackupResult, RetrieveVectorPoints, RuntimeToolCatalogue, RuntimeToolInvocation,
+    RuntimeToolInvocationResult, ScrollVectorPoints, SearchVectors, ServiceCapabilities,
+    SessionLease, SessionTermination, SubscriptionClientFrame, SubscriptionServerFrame,
+    SubscriptionSnapshot, TransactionLease, TransactionPreview, VectorCollectionCatalogueSnapshot,
+    VectorPointBatch, VectorPointPage, VectorSearchResult, PROTOCOL, PROTOCOL_VERSION,
 };
 use rustls::ClientConfig as RustlsClientConfig;
 use serde::de::DeserializeOwned;
@@ -781,15 +781,38 @@ impl RrdClient {
         request: ReadAudit,
         options: RequestOptions,
     ) -> Result<AuditPage> {
-        self.session_call(
-            Method::POST,
-            "/v1/audit/read",
-            session,
-            request,
-            options,
-            false,
-        )
-        .await
+        let page: AuditPage = self
+            .session_call(
+                Method::POST,
+                "/v1/audit/read",
+                session,
+                request,
+                options,
+                false,
+            )
+            .await?;
+        page.validate().map_err(contract)?;
+        Ok(page)
+    }
+
+    pub async fn export_audit(
+        &self,
+        session: &Session,
+        request: ExportAudit,
+        options: RequestOptions,
+    ) -> Result<AuditExport> {
+        let export: AuditExport = self
+            .session_call(
+                Method::POST,
+                "/v1/audit/export",
+                session,
+                request,
+                options,
+                false,
+            )
+            .await?;
+        export.validate().map_err(contract)?;
+        Ok(export)
     }
 
     pub async fn read_diagnostic_snapshot(

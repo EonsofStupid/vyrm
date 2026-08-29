@@ -458,6 +458,17 @@ fn initialized_security_authority_binds_sessions_and_denies_ungranted_routes() {
                 },
                 data_policy: None,
             },
+            ResourceGrant {
+                action: SecurityAction::AuditExport,
+                resource_prefix: rrd_contract::ResourcePath {
+                    segments: vec![rrd_contract::ResourceId::new(
+                        rrd_contract::ResourceKind::Instance,
+                        "socket-test",
+                    )
+                    .unwrap()],
+                },
+                data_policy: None,
+            },
         ],
     };
     SecurityRepository::new(&engine, instance)
@@ -549,15 +560,30 @@ fn initialized_security_authority_binds_sessions_and_denies_ungranted_routes() {
     let (status, failed) = post(&server, "/v1/query", &invalid_query, Some((session, token)));
     assert_eq!(status, 400, "{failed}");
 
-    let audit = envelope(json!({"after_sequence": 0, "limit": 32}), None, None);
+    let oversized = "x".repeat(rrd_server::RRD_MAX_BODY_BYTES + 1);
+    let (status, exhausted) = http(
+        server.address,
+        "POST",
+        "/v1/query",
+        &[("Content-Type", "application/json")],
+        oversized.as_bytes(),
+    );
+    assert_eq!(status, 429, "{exhausted}");
+
+    let audit = envelope(json!({"after_sequence": 0, "limit": 64}), None, None);
     let (status, audited) = post(&server, "/v1/audit/read", &audit, Some((session, token)));
     assert_eq!(status, 200, "{audited}");
     let records = payload(&audited)["records"].as_array().unwrap();
-    assert_eq!(records.len(), 13, "{audited}");
-    assert_eq!(records[0]["action"], "service_inspect");
-    assert_eq!(records[0]["decision"], "allowed");
-    assert_eq!(records[1]["action"], "unknown_request");
-    assert_eq!(records[1]["decision"], "failed");
+    assert!(records.len() >= 15, "{audited}");
+    assert!(records
+        .iter()
+        .any(|record| record["action"] == "security_admin" && record["decision"] == "allowed"));
+    assert!(records
+        .iter()
+        .any(|record| record["action"] == "service_inspect" && record["decision"] == "allowed"));
+    assert!(records
+        .iter()
+        .any(|record| record["action"] == "unknown_request" && record["decision"] == "failed"));
     assert_eq!(
         records
             .iter()
@@ -592,9 +618,33 @@ fn initialized_security_authority_binds_sessions_and_denies_ungranted_routes() {
     assert!(records
         .iter()
         .any(|record| { record["action"] == "audit_read" && record["phase"] == "authorized" }));
+    assert!(records.iter().any(|record| {
+        record["action"] == "query_execute"
+            && record["phase"] == "completed"
+            && record["status_code"] == 429
+    }));
+    assert!(records.windows(2).all(|pair| {
+        pair[1]["previous_audit_sha256"].as_str() == pair[0]["audit_sha256"].as_str()
+    }));
     let encoded = serde_json::to_string(records).unwrap();
     assert!(!encoded.contains("local-api-key"));
     assert!(!encoded.contains("wrong"));
+
+    let export = envelope(json!({"after_sequence": 0, "limit": 64}), None, None);
+    let (status, exported) = post(&server, "/v1/audit/export", &export, Some((session, token)));
+    assert_eq!(status, 200, "{exported}");
+    let exported = payload(&exported);
+    let json_lines = exported["json_lines"].as_str().unwrap();
+    assert_eq!(
+        exported["content_sha256"],
+        rrd_core::digest::sha256_hex(json_lines.as_bytes())
+    );
+    assert_eq!(
+        exported["record_count"].as_u64().unwrap() as usize,
+        json_lines.lines().count()
+    );
+    assert!(!json_lines.contains("local-api-key"));
+    assert!(!json_lines.contains(token));
     server.stop();
     let reopened = PersistentEngine::open(&root).unwrap();
     assert_eq!(reopened.runtime_cursor().unwrap(), 2);
@@ -2381,7 +2431,7 @@ fn real_socket_exercises_lifecycle_commit_and_restart_replay() {
     assert_eq!(payload(&catalogue)["protocol_version"], 1);
     assert_eq!(
         payload(&catalogue)["endpoints"].as_array().unwrap().len(),
-        33
+        34
     );
     assert_eq!(
         payload(&catalogue)["websocket_endpoints"]
@@ -2393,7 +2443,7 @@ fn real_socket_exercises_lifecycle_commit_and_restart_replay() {
     let (status, openapi) = http(server.address, "GET", "/v1/schema/openapi", &[], &[]);
     assert_eq!(status, 200, "{openapi}");
     assert_eq!(payload(&openapi)["openapi"], "3.1.0");
-    assert_eq!(payload(&openapi)["x-rrd-endpoint-count"], 33);
+    assert_eq!(payload(&openapi)["x-rrd-endpoint-count"], 34);
     assert_eq!(payload(&openapi)["x-rrd-websocket-endpoint-count"], 1);
     assert!(
         payload(&openapi)["paths"]["/v1/query"]["post"]["requestBody"]["content"]

@@ -15,6 +15,7 @@ pub enum RrdOperation {
     TransactionCommit,
     TransactionAbort,
     EstateRead,
+    EstateAdmin,
     QueryExecute,
     QueryLivePoll,
     QueryIndexEnsure,
@@ -34,6 +35,7 @@ pub enum RrdOperation {
     SubscriptionAck,
     SubscriptionClose,
     AuditRead,
+    AuditExport,
     DiagnosticsRead,
     MemoryContextRead,
     MemoryInspect,
@@ -62,6 +64,7 @@ impl RrdOperation {
                 | Self::TransactionPreview
                 | Self::TransactionCommit
                 | Self::TransactionAbort
+                | Self::EstateAdmin
                 | Self::SubscriptionOpen
                 | Self::SubscriptionConnect
                 | Self::SubscriptionAck
@@ -93,6 +96,7 @@ impl RrdOperation {
             Self::TransactionCommit => SecurityAction::TransactionCommit,
             Self::TransactionAbort => SecurityAction::TransactionAbort,
             Self::EstateRead => SecurityAction::EstateRead,
+            Self::EstateAdmin => SecurityAction::EstateAdmin,
             Self::QueryExecute => SecurityAction::QueryExecute,
             Self::QueryLivePoll => SecurityAction::QueryLivePoll,
             Self::QueryIndexEnsure => SecurityAction::QueryIndexEnsure,
@@ -112,6 +116,7 @@ impl RrdOperation {
             Self::SubscriptionAck => SecurityAction::SubscriptionAck,
             Self::SubscriptionClose => SecurityAction::SubscriptionClose,
             Self::AuditRead => SecurityAction::AuditRead,
+            Self::AuditExport => SecurityAction::AuditExport,
             Self::DiagnosticsRead => SecurityAction::DiagnosticsRead,
             Self::MemoryContextRead => SecurityAction::MemoryContextRead,
             Self::MemoryInspect => SecurityAction::MemoryInspect,
@@ -271,6 +276,16 @@ impl RrdEngine {
             100,
             digest::sha256_hex(b"rrd-audit-completion-pending"),
         )?;
+        let coordinates = invocation_coordinates(&invocation);
+        if self
+            .active_invocations
+            .lock()
+            .expect("active invocation mutex")
+            .insert(coordinates, std::thread::current().id())
+            .is_some()
+        {
+            return Err(ServiceError::IdempotencyConflict);
+        }
         Ok(AuthorizedInvocation {
             invocation,
             operation,
@@ -284,6 +299,15 @@ impl RrdEngine {
         completion: InvocationCompletion,
     ) -> Result<()> {
         validate_sha256(&completion.response_sha256)?;
+        let coordinates = invocation_coordinates(&authorized.invocation);
+        if !self
+            .active_invocations
+            .lock()
+            .expect("active invocation mutex")
+            .contains_key(&coordinates)
+        {
+            return Err(ServiceError::IdempotencyConflict);
+        }
         self.append_invocation_audit(
             &authorized.invocation,
             authorized.operation,
@@ -292,7 +316,12 @@ impl RrdEngine {
             completion.decision,
             completion.status_code,
             completion.response_sha256,
-        )
+        )?;
+        self.active_invocations
+            .lock()
+            .expect("active invocation mutex")
+            .remove(&coordinates);
+        Ok(())
     }
 
     /// Records a request rejected before authorization could complete, such as
@@ -412,6 +441,79 @@ impl RrdEngine {
             response_sha256,
         })
     }
+
+    pub(in crate::engine) fn has_active_invocation(
+        &self,
+        request_id: &str,
+        operation_id: &str,
+    ) -> bool {
+        self.active_invocations
+            .lock()
+            .expect("active invocation mutex")
+            .iter()
+            .any(|(coordinates, owner)| {
+                coordinates == &(request_id.into(), operation_id.into())
+                    || owner == &std::thread::current().id()
+            })
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(in crate::engine) fn record_direct_authorization(
+        &self,
+        principal_id: Option<CanonicalId>,
+        action: SecurityAction,
+        resource: &ResourcePath,
+        now: u64,
+        request_id: &str,
+        operation_id: &str,
+        error: Option<&ServiceError>,
+    ) -> Result<()> {
+        if !self.security_enforced()? || self.has_active_invocation(request_id, operation_id) {
+            return Ok(());
+        }
+        let request_sha256 = digest::sha256_hex(
+            &serde_json::to_vec(&(action, resource, request_id, operation_id, now))
+                .map_err(contract_json)?,
+        );
+        let (phase, decision, status_code, response_sha256) = match error {
+            Some(error) => {
+                let (decision, status_code) = audit_failure(error);
+                (
+                    AuditPhase::Completed,
+                    decision,
+                    status_code,
+                    digest::sha256_hex(error.to_string().as_bytes()),
+                )
+            }
+            None => (
+                AuditPhase::Authorized,
+                AuditDecision::Allowed,
+                100,
+                digest::sha256_hex(b"rrd-audit-completion-pending"),
+            ),
+        };
+        self.append_audit(AuditEvent {
+            at_unix_ms: now,
+            attempt: 1,
+            principal_id,
+            action,
+            resource: resource.clone(),
+            request_id: request_id.into(),
+            operation_id: operation_id.into(),
+            phase,
+            decision,
+            status_code,
+            request_sha256,
+            response_sha256,
+        })
+    }
+}
+
+fn invocation_coordinates(invocation: &Invocation) -> (String, String) {
+    (
+        invocation.context.request_id.as_str().into(),
+        invocation.context.operation_id.as_str().into(),
+    )
 }
 
 fn validate_sha256(value: &str) -> Result<()> {
@@ -429,7 +531,7 @@ fn validate_sha256(value: &str) -> Result<()> {
     }
 }
 
-fn audit_failure(error: &ServiceError) -> (AuditDecision, u16) {
+pub(super) fn audit_failure(error: &ServiceError) -> (AuditDecision, u16) {
     match error.kind() {
         ServiceErrorKind::Unauthenticated => (AuditDecision::Denied, 401),
         ServiceErrorKind::PermissionDenied => (AuditDecision::Denied, 403),

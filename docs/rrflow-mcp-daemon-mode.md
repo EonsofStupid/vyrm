@@ -110,7 +110,7 @@ server-side invocation, or second database opener satisfies these gates.
 
 ### D3 protocol result
 
-The public endpoint catalogue now contains 33 HTTP operations plus one durable
+The public endpoint catalogue now contains 34 HTTP operations plus one durable
 subscription WebSocket. Two HTTP operations are the daemon runtime boundary:
 
 - `POST /v1/runtime/tools/list` requires a session and the dedicated

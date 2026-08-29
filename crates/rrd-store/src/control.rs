@@ -3,6 +3,9 @@
 use crate::{Error, Result};
 use rrd_core::digest;
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeSet;
+
+const MAX_CONTROL_BATCH_TRANSITIONS: usize = 64;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -52,6 +55,24 @@ impl ControlTransition {
         }
         Ok(())
     }
+}
+
+pub(crate) fn validate_control_batch(transitions: &[ControlTransition]) -> Result<()> {
+    if transitions.is_empty() || transitions.len() > MAX_CONTROL_BATCH_TRANSITIONS {
+        return Err(Error::Substrate(
+            "control batch size must be in 1..=64".into(),
+        ));
+    }
+    let mut keys = BTreeSet::new();
+    for transition in transitions {
+        transition.validate()?;
+        if !keys.insert(transition.key.as_str()) {
+            return Err(Error::Substrate(
+                "control batch cannot address one key more than once".into(),
+            ));
+        }
+    }
+    Ok(())
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

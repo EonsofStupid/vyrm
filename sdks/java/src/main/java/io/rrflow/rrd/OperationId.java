@@ -2,6 +2,7 @@
 package io.rrflow.rrd;
 
 public enum OperationId {
+    AUDIT_EXPORT("audit-export", "POST", "/v1/audit/export", Authentication.SESSION_BEARER, false),
     AUDIT_READ("audit-read", "POST", "/v1/audit/read", Authentication.SESSION_BEARER, false),
     BACKUP_CREATE("backup-create", "POST", "/v1/backups", Authentication.SESSION_BEARER, true),
     BACKUP_LIST("backup-list", "POST", "/v1/backups/list", Authentication.SESSION_BEARER, false),

@@ -21,8 +21,8 @@
 //! accelerate reads and must never be the system of record.
 
 use crate::control::{
-    validate_control_key, verify_control_page, verify_control_tail, ControlJournalEntry,
-    ControlTransition,
+    validate_control_batch, validate_control_key, verify_control_page, verify_control_tail,
+    ControlJournalEntry, ControlTransition,
 };
 use crate::error::{Error, Result};
 use crate::keyspaces::Durability;
@@ -196,6 +196,14 @@ pub trait Engine: ClaimSource<Error = Error> {
         &self,
         transition: &ControlTransition,
     ) -> Result<ControlJournalEntry>;
+
+    /// Atomically compares and replaces several distinct control records and
+    /// appends their consecutively hash-chained journal entries. Either every
+    /// transition publishes or none does.
+    fn commit_control_batch(
+        &self,
+        transitions: &[ControlTransition],
+    ) -> Result<Vec<ControlJournalEntry>>;
 
     /// Commits one catalogue mutation and advances the affected scope's
     /// catalogue revision in the same authoritative transaction. Catalogue
@@ -704,6 +712,12 @@ impl Engine for Store {
     ) -> Result<ControlJournalEntry> {
         Store::commit_control_transition(self, transition)
     }
+    fn commit_control_batch(
+        &self,
+        transitions: &[ControlTransition],
+    ) -> Result<Vec<ControlJournalEntry>> {
+        Store::commit_control_batch(self, transitions)
+    }
     fn commit_catalog_transition(
         &self,
         scope: &ScopeId,
@@ -1002,6 +1016,57 @@ impl Engine for MemoryEngine {
     ) -> Result<ControlJournalEntry> {
         let mut inner = self.inner.lock().expect("engine mutex");
         memory_commit_control_transition(&mut inner, transition, None).map(|(_, entry)| entry)
+    }
+
+    fn commit_control_batch(
+        &self,
+        transitions: &[ControlTransition],
+    ) -> Result<Vec<ControlJournalEntry>> {
+        validate_control_batch(transitions)?;
+        let mut inner = self.inner.lock().expect("engine mutex");
+        for transition in transitions {
+            if inner
+                .control_records
+                .get(&transition.key)
+                .map(Vec::as_slice)
+                != transition.expected.as_deref()
+            {
+                return Err(Error::ControlConflict(transition.key.clone()));
+            }
+        }
+        let mut previous = inner
+            .control_journal
+            .last()
+            .map(|entry| entry.digest.clone());
+        verify_control_tail(
+            inner.control_journal.len() as u64,
+            previous.as_deref(),
+            inner.control_journal.last(),
+        )?;
+        let current_sequence = inner.control_journal.len() as u64;
+        let mut entries = Vec::with_capacity(transitions.len());
+        for (offset, transition) in transitions.iter().enumerate() {
+            let sequence = current_sequence
+                .checked_add(offset as u64 + 1)
+                .ok_or(Error::SequenceOverflow)?;
+            let entry = ControlJournalEntry::committed(sequence, transition, previous.clone());
+            previous = Some(entry.digest.clone());
+            entries.push(entry);
+        }
+        for (transition, entry) in transitions.iter().zip(&entries) {
+            match &transition.replacement {
+                Some(value) => {
+                    inner
+                        .control_records
+                        .insert(transition.key.clone(), value.clone());
+                }
+                None => {
+                    inner.control_records.remove(&transition.key);
+                }
+            }
+            inner.control_journal.push(entry.clone());
+        }
+        Ok(entries)
     }
 
     fn commit_catalog_transition(
@@ -1655,6 +1720,13 @@ impl Engine for EngineBox {
         transition: &ControlTransition,
     ) -> Result<ControlJournalEntry> {
         self.engine().commit_control_transition(transition)
+    }
+
+    fn commit_control_batch(
+        &self,
+        transitions: &[ControlTransition],
+    ) -> Result<Vec<ControlJournalEntry>> {
+        self.engine().commit_control_batch(transitions)
     }
 
     fn commit_catalog_transition(

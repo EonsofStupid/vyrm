@@ -2,8 +2,8 @@
 
 use hmac::{Hmac, KeyInit, Mac};
 use rrd_contract::{
-    transaction_operation_sha256, AbortTransaction, AuditDecision, AuditPage, AuditPhase,
-    AuditRecordSnapshot, BeginTransaction, CanonicalId, ChangeMutationSnapshot,
+    transaction_operation_sha256, AbortTransaction, AuditDecision, AuditExport, AuditPage,
+    AuditPhase, AuditRecordSnapshot, BeginTransaction, CanonicalId, ChangeMutationSnapshot,
     ChangefeedFollowResult, ChangefeedPage, ChangefeedValidation, ClaimChangeSnapshot,
     ClaimPromotionSnapshot, ClaimTierSnapshot, CloseSession, CloseSubscription,
     CloseSubscriptionResult, CommitReceipt, CommitTransaction, CorrelationId, CreateInstanceBackup,
@@ -20,7 +20,7 @@ use rrd_contract::{
     DiagnosticSnapshot, DiagnosticSnapshotLease, DiagnosticVectorArtifactCatalogueSnapshot,
     DiagnosticVectorArtifactKind, DiagnosticVectorArtifactSnapshot, EnsureQueryIndex,
     EnsureQueryIndexResult, EnsureVectorCollection, EnsureVectorCollectionResult,
-    EnsureVectorIndex, EnsureVectorIndexResult, ExecuteQuery, ExecuteQueryTransaction,
+    EnsureVectorIndex, EnsureVectorIndexResult, ExecuteQuery, ExecuteQueryTransaction, ExportAudit,
     FollowChangefeed, ForwardRollbackCounts, ForwardRollbackPlan, ForwardRollbackRequest,
     HybridFusion, HybridSearchHit, HybridSearchResult, InstanceBackupCatalogueSnapshot,
     InstanceBackupSnapshot, ListInstanceBackups, ListQueryIndexes, ListVectorCollections,

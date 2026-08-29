@@ -1,8 +1,17 @@
 use rrd_store::{ControlTransition, Engine, Error, MemoryEngine, NativeEngine, Store};
 
 fn transition(expected: Option<&[u8]>, replacement: Option<&[u8]>, at: u64) -> ControlTransition {
+    keyed_transition("server/state/session/session-1", expected, replacement, at)
+}
+
+fn keyed_transition(
+    key: &str,
+    expected: Option<&[u8]>,
+    replacement: Option<&[u8]>,
+    at: u64,
+) -> ControlTransition {
     ControlTransition {
-        key: "server/state/session/session-1".into(),
+        key: key.into(),
         expected: expected.map(<[u8]>::to_vec),
         replacement: replacement.map(<[u8]>::to_vec),
         at,
@@ -11,6 +20,45 @@ fn transition(expected: Option<&[u8]>, replacement: Option<&[u8]>, at: u64) -> C
         request_id: format!("request-{at}"),
         operation_id: format!("operation-{at}"),
     }
+}
+
+fn assert_atomic_batch(engine: &dyn Engine) {
+    let entries = engine
+        .commit_control_batch(&[
+            keyed_transition("server/state/audit/record-1", None, Some(b"record"), 20),
+            keyed_transition("server/state/audit/head", None, Some(b"head"), 20),
+        ])
+        .unwrap();
+    assert_eq!(entries.len(), 2);
+    assert_eq!(entries[0].sequence + 1, entries[1].sequence);
+    assert_eq!(
+        entries[1].previous_digest.as_deref(),
+        Some(entries[0].digest.as_str())
+    );
+    assert_eq!(
+        engine
+            .control_record("server/state/audit/record-1")
+            .unwrap(),
+        Some(b"record".to_vec())
+    );
+
+    let before = engine.control_sequence().unwrap();
+    let denied = engine.commit_control_batch(&[
+        keyed_transition("server/state/audit/record-2", None, Some(b"record-2"), 21),
+        keyed_transition("server/state/audit/head", None, Some(b"wrong-head"), 21),
+    ]);
+    assert!(matches!(denied, Err(Error::ControlConflict(_))));
+    assert_eq!(engine.control_sequence().unwrap(), before);
+    assert_eq!(
+        engine
+            .control_record("server/state/audit/record-2")
+            .unwrap(),
+        None
+    );
+    assert_eq!(
+        engine.control_record("server/state/audit/head").unwrap(),
+        Some(b"head".to_vec())
+    );
 }
 
 fn assert_journal(engine: &dyn Engine) {
@@ -50,11 +98,17 @@ fn assert_journal(engine: &dyn Engine) {
 
 #[test]
 fn every_engine_materializes_and_journals_the_same_cas_transitions() {
-    assert_journal(&MemoryEngine::new());
+    let memory = MemoryEngine::new();
+    assert_journal(&memory);
+    assert_atomic_batch(&memory);
     let native = tempfile::tempdir().unwrap();
-    assert_journal(&NativeEngine::open(&native.path().join("native")).unwrap());
+    let native = NativeEngine::open(&native.path().join("native")).unwrap();
+    assert_journal(&native);
+    assert_atomic_batch(&native);
     let fjall = tempfile::tempdir().unwrap();
-    assert_journal(&Store::open(&fjall.path().join("fjall")).unwrap());
+    let fjall = Store::open(&fjall.path().join("fjall")).unwrap();
+    assert_journal(&fjall);
+    assert_atomic_batch(&fjall);
 }
 
 #[test]

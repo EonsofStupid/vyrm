@@ -3,6 +3,7 @@ namespace Rrflow.Rrd;
 
 public enum OperationId
 {
+    AuditExport,
     AuditRead,
     BackupCreate,
     BackupList,
@@ -54,10 +55,11 @@ public sealed record Endpoint(
 
 public static class EndpointCatalog
 {
-    public const int Count = 33;
+    public const int Count = 34;
 
     public static Endpoint Get(OperationId operation) => operation switch
     {
+        OperationId.AuditExport => new("audit-export", "POST", "/v1/audit/export", Authentication.SessionBearer, false),
         OperationId.AuditRead => new("audit-read", "POST", "/v1/audit/read", Authentication.SessionBearer, false),
         OperationId.BackupCreate => new("backup-create", "POST", "/v1/backups", Authentication.SessionBearer, true),
         OperationId.BackupList => new("backup-list", "POST", "/v1/backups/list", Authentication.SessionBearer, false),

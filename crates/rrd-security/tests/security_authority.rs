@@ -1,12 +1,13 @@
 use rrd_contract::{CanonicalId, ResourceId, ResourceKind, ResourcePath};
 use rrd_core::digest;
 use rrd_security::{
-    Action, AuditDecision, AuditPhase, AuditRecord, DataPolicy, Error, IdentityBinding,
+    Action, AuditDecision, AuditEvent, AuditPhase, DataPolicy, Error, IdentityBinding,
     JwtIssueRequest, JwtIssuer, PolicyPredicate, Principal, PrincipalKind, ResourceGrant, Role,
     SecurityRepository, SecurityState, SECURITY_FORMAT,
 };
-use rrd_store::{Engine, NativeEngine};
+use rrd_store::{ControlTransition, Engine, MemoryEngine, NativeEngine};
 use std::collections::{BTreeMap, BTreeSet};
+use std::sync::Arc;
 
 fn path(instance: &str) -> ResourcePath {
     ResourcePath {
@@ -154,7 +155,7 @@ fn audit_is_redacted_idempotent_authenticated_and_replayable() {
             "operation-bootstrap",
         )
         .unwrap();
-    let record = AuditRecord {
+    let record = AuditEvent {
         audit_id: CanonicalId::new("audit-query-1").unwrap(),
         at_unix_ms: 2_000,
         principal_id: Some(CanonicalId::new("connectome-local").unwrap()),
@@ -181,13 +182,106 @@ fn audit_is_redacted_idempotent_authenticated_and_replayable() {
     let engine = NativeEngine::open(&root).unwrap();
     let repository = SecurityRepository::new(&engine, CanonicalId::new("alpha").unwrap());
     let page = repository.audit_since(0, 10).unwrap();
-    assert_eq!(page.records.len(), 1);
-    assert_eq!(page.records[0].1, record);
-    assert_eq!(page.through_sequence, 2);
+    assert_eq!(page.records.len(), 2);
+    let bootstrap = &page.records[0].1;
+    let query = &page.records[1].1;
+    assert_eq!(bootstrap.action, Action::SecurityAdmin);
+    assert_eq!(query.audit_id, record.audit_id);
+    assert_eq!(query.status_code, record.status_code);
+    assert_eq!(
+        query.previous_audit_sha256,
+        Some(bootstrap.audit_sha256.clone())
+    );
+    assert_eq!(page.chain_anchor_sha256, None);
+    assert_eq!(page.chain_head_sha256, Some(query.audit_sha256.clone()));
+    assert_eq!(page.through_sequence, 5);
     let journal = engine.control_journal_since(0, 10).unwrap();
     let encoded = serde_json::to_string(&journal).unwrap();
     assert!(!encoded.contains("do-not-journal-this-secret"));
     assert!(journal.iter().all(|entry| entry.verify()));
+}
+
+#[test]
+fn concurrent_audit_append_has_one_linear_chain_without_forks() {
+    let engine = Arc::new(MemoryEngine::new());
+    SecurityRepository::new(engine.as_ref(), CanonicalId::new("alpha").unwrap())
+        .initialize(
+            state(b"concurrent-secret"),
+            1_000,
+            "bootstrap",
+            "request-concurrent-bootstrap",
+            "operation-concurrent-bootstrap",
+        )
+        .unwrap();
+    let mut workers = Vec::new();
+    for index in 0..8_u64 {
+        let engine = Arc::clone(&engine);
+        workers.push(std::thread::spawn(move || {
+            SecurityRepository::new(engine.as_ref(), CanonicalId::new("alpha").unwrap())
+                .append_audit(&AuditEvent {
+                    audit_id: CanonicalId::new(format!("audit-concurrent-{index}")).unwrap(),
+                    at_unix_ms: 2_000 + index,
+                    principal_id: None,
+                    action: Action::QueryExecute,
+                    resource: path("alpha"),
+                    request_id: format!("request-concurrent-{index}"),
+                    operation_id: format!("operation-concurrent-{index}"),
+                    phase: AuditPhase::Completed,
+                    decision: AuditDecision::Allowed,
+                    status_code: 200,
+                    request_sha256: digest::sha256_hex(format!("request-{index}").as_bytes()),
+                    response_sha256: digest::sha256_hex(format!("response-{index}").as_bytes()),
+                })
+                .unwrap();
+        }));
+    }
+    for worker in workers {
+        worker.join().unwrap();
+    }
+    let page = SecurityRepository::new(engine.as_ref(), CanonicalId::new("alpha").unwrap())
+        .audit_since(0, 32)
+        .unwrap();
+    assert_eq!(page.records.len(), 9);
+    assert!(page.records.windows(2).all(|pair| {
+        pair[1].1.previous_audit_sha256.as_deref() == Some(pair[0].1.audit_sha256.as_str())
+    }));
+    assert_eq!(page.chain_anchor_sha256, None);
+    assert_eq!(engine.control_sequence().unwrap(), 19);
+}
+
+#[test]
+fn audit_read_rejects_a_substituted_durable_head() {
+    let engine = MemoryEngine::new();
+    let instance = CanonicalId::new("alpha").unwrap();
+    SecurityRepository::new(&engine, instance.clone())
+        .initialize(
+            state(b"head-integrity-secret"),
+            1_000,
+            "bootstrap",
+            "request-head-bootstrap",
+            "operation-head-bootstrap",
+        )
+        .unwrap();
+    let key = format!("server/state/{instance}/audit-head");
+    let expected = engine.control_record(&key).unwrap().unwrap();
+    let mut substituted: serde_json::Value = serde_json::from_slice(&expected).unwrap();
+    substituted["audit_sha256"] = serde_json::Value::String("f".repeat(64));
+    engine
+        .commit_control_transition(&ControlTransition {
+            key,
+            expected: Some(expected),
+            replacement: Some(serde_json::to_vec(&substituted).unwrap()),
+            at: 2_000,
+            actor: "tamper-test".into(),
+            action: "test.audit-head-substitution".into(),
+            request_id: "request-head-substitution".into(),
+            operation_id: "operation-head-substitution".into(),
+        })
+        .unwrap();
+    assert!(matches!(
+        SecurityRepository::new(&engine, instance).audit_since(0, 16),
+        Err(Error::Invalid(message)) if message == "audit head digest is invalid"
+    ));
 }
 
 #[test]

@@ -6,7 +6,7 @@
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine as _;
 use hmac::{Hmac, KeyInit, Mac};
-use rrd_contract::{CanonicalId, ResourcePath};
+use rrd_contract::{CanonicalId, ResourceId, ResourceKind, ResourcePath};
 use rrd_core::{digest, RuntimeValue};
 use rrd_store::{ControlJournalEntry, ControlTransition, Engine};
 use serde::{Deserialize, Serialize};
@@ -317,7 +317,7 @@ pub use rrd_contract::{AuditDecision, AuditPhase};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct AuditRecord {
+pub struct AuditEvent {
     pub audit_id: CanonicalId,
     pub at_unix_ms: u64,
     pub principal_id: Option<CanonicalId>,
@@ -332,13 +332,43 @@ pub struct AuditRecord {
     pub response_sha256: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AuditRecord {
+    pub audit_id: CanonicalId,
+    pub at_unix_ms: u64,
+    pub principal_id: Option<CanonicalId>,
+    pub action: Action,
+    pub resource: ResourcePath,
+    pub request_id: String,
+    pub operation_id: String,
+    pub phase: AuditPhase,
+    pub decision: AuditDecision,
+    pub status_code: u16,
+    pub request_sha256: String,
+    pub response_sha256: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub previous_audit_sha256: Option<String>,
+    pub audit_sha256: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct AuditHead {
+    audit_id: CanonicalId,
+    audit_sha256: String,
+    record_count: u64,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AuditJournalPage {
     pub through_sequence: u64,
+    pub chain_anchor_sha256: Option<String>,
+    pub chain_head_sha256: Option<String>,
     pub records: Vec<(u64, AuditRecord)>,
 }
 
-impl AuditRecord {
+impl AuditEvent {
     pub fn validate(&self) -> Result<()> {
         self.resource
             .validate()
@@ -360,6 +390,83 @@ impl AuditRecord {
             return Err(Error::Invalid("audit coordinates are invalid".into()));
         }
         Ok(())
+    }
+}
+
+impl AuditRecord {
+    fn seal(event: AuditEvent, previous_audit_sha256: Option<String>) -> Result<Self> {
+        event.validate()?;
+        if let Some(previous) = &previous_audit_sha256 {
+            validate_sha256(previous)?;
+        }
+        let mut record = Self {
+            audit_id: event.audit_id,
+            at_unix_ms: event.at_unix_ms,
+            principal_id: event.principal_id,
+            action: event.action,
+            resource: event.resource,
+            request_id: event.request_id,
+            operation_id: event.operation_id,
+            phase: event.phase,
+            decision: event.decision,
+            status_code: event.status_code,
+            request_sha256: event.request_sha256,
+            response_sha256: event.response_sha256,
+            previous_audit_sha256,
+            audit_sha256: String::new(),
+        };
+        record.audit_sha256 = record.expected_sha256()?;
+        Ok(record)
+    }
+
+    pub fn validate(&self) -> Result<()> {
+        self.as_event().validate()?;
+        if let Some(previous) = &self.previous_audit_sha256 {
+            validate_sha256(previous)?;
+        }
+        validate_sha256(&self.audit_sha256)?;
+        if self.expected_sha256()? != self.audit_sha256 {
+            return Err(Error::Invalid("audit record hash is invalid".into()));
+        }
+        Ok(())
+    }
+
+    fn as_event(&self) -> AuditEvent {
+        AuditEvent {
+            audit_id: self.audit_id.clone(),
+            at_unix_ms: self.at_unix_ms,
+            principal_id: self.principal_id.clone(),
+            action: self.action,
+            resource: self.resource.clone(),
+            request_id: self.request_id.clone(),
+            operation_id: self.operation_id.clone(),
+            phase: self.phase,
+            decision: self.decision,
+            status_code: self.status_code,
+            request_sha256: self.request_sha256.clone(),
+            response_sha256: self.response_sha256.clone(),
+        }
+    }
+
+    fn expected_sha256(&self) -> Result<String> {
+        Ok(digest::sha256_hex(
+            &serde_json::to_vec(&(
+                &self.audit_id,
+                self.at_unix_ms,
+                &self.principal_id,
+                self.action,
+                &self.resource,
+                &self.request_id,
+                &self.operation_id,
+                self.phase,
+                self.decision,
+                self.status_code,
+                &self.request_sha256,
+                &self.response_sha256,
+                &self.previous_audit_sha256,
+            ))
+            .map_err(json_error)?,
+        ))
     }
 }
 
@@ -392,17 +499,25 @@ impl<'a, E: Engine> SecurityRepository<'a, E> {
         if self.load()?.is_some() {
             return Err(Error::AlreadyInitialized);
         }
-        self.engine.commit_control_transition(&ControlTransition {
+        let state_bytes = serde_json::to_vec(&state).map_err(json_error)?;
+        let transition = ControlTransition {
             key: security_key(&self.instance),
             expected: None,
-            replacement: Some(serde_json::to_vec(&state).map_err(json_error)?),
+            replacement: Some(state_bytes.clone()),
             at,
             actor: actor.into(),
             action: "security.initialized".into(),
             request_id: request_id.into(),
             operation_id: operation_id.into(),
-        })?;
-        Ok(())
+        };
+        let audit = self.administrative_audit(
+            at,
+            request_id,
+            operation_id,
+            &digest::sha256_hex(&state_bytes),
+            "security-authority-initialized",
+        )?;
+        self.commit_with_audit(&[transition], &audit)
     }
 
     /// Replaces the complete security authority with one compare-and-swap
@@ -435,17 +550,25 @@ impl<'a, E: Engine> SecurityRepository<'a, E> {
         if current.revision != expected_revision {
             return Err(Error::IdempotencyConflict);
         }
-        self.engine.commit_control_transition(&ControlTransition {
+        let replacement_bytes = serde_json::to_vec(&replacement).map_err(json_error)?;
+        let transition = ControlTransition {
             key,
             expected: Some(current_bytes),
-            replacement: Some(serde_json::to_vec(&replacement).map_err(json_error)?),
+            replacement: Some(replacement_bytes.clone()),
             at,
             actor: actor.into(),
             action: "security.replaced".into(),
             request_id: request_id.into(),
             operation_id: operation_id.into(),
-        })?;
-        Ok(())
+        };
+        let audit = self.administrative_audit(
+            at,
+            request_id,
+            operation_id,
+            &digest::sha256_hex(&replacement_bytes),
+            "security-authority-replaced",
+        )?;
+        self.commit_with_audit(&[transition], &audit)
     }
 
     pub fn authenticate_and_authorize(
@@ -645,32 +768,8 @@ impl<'a, E: Engine> SecurityRepository<'a, E> {
         Ok(self.load()?.is_some())
     }
 
-    pub fn append_audit(&self, record: &AuditRecord) -> Result<()> {
-        record.validate()?;
-        let bytes = serde_json::to_vec(record).map_err(json_error)?;
-        let key = audit_key(&self.instance, &record.audit_id);
-        if let Some(existing) = self.engine.control_record(&key)? {
-            return if existing == bytes {
-                Ok(())
-            } else {
-                Err(Error::IdempotencyConflict)
-            };
-        }
-        self.engine.commit_control_transition(&ControlTransition {
-            key,
-            expected: None,
-            replacement: Some(bytes),
-            at: record.at_unix_ms,
-            actor: record
-                .principal_id
-                .as_ref()
-                .map_or("anonymous", CanonicalId::as_str)
-                .into(),
-            action: "security.audit".into(),
-            request_id: record.request_id.clone(),
-            operation_id: record.operation_id.clone(),
-        })?;
-        Ok(())
+    pub fn append_audit(&self, event: &AuditEvent) -> Result<()> {
+        self.commit_with_audit(&[], event)
     }
 
     pub fn audit_since(&self, after: u64, limit: usize) -> Result<AuditJournalPage> {
@@ -679,9 +778,11 @@ impl<'a, E: Engine> SecurityRepository<'a, E> {
         }
         let mut cursor = after;
         let mut records = Vec::new();
+        let mut reached_control_tail = false;
         while records.len() < limit {
             let entries = self.engine.control_journal_since(cursor, limit)?;
             if entries.is_empty() {
+                reached_control_tail = true;
                 break;
             }
             for entry in &entries {
@@ -694,12 +795,176 @@ impl<'a, E: Engine> SecurityRepository<'a, E> {
                 }
             }
             if entries.len() < limit {
+                reached_control_tail = true;
                 break;
+            }
+        }
+        let durable_head = self
+            .engine
+            .control_record(&audit_head_key(&self.instance))?
+            .as_deref()
+            .map(decode_audit_head)
+            .transpose()?;
+        if let Some(head) = &durable_head {
+            let head_record = self
+                .engine
+                .control_record(&audit_key(&self.instance, &head.audit_id))?
+                .ok_or_else(|| Error::Invalid("audit head record is missing".into()))?;
+            let head_record = decode_audit_bytes(&head_record)?;
+            if head_record.audit_sha256 != head.audit_sha256 {
+                return Err(Error::Invalid("audit head digest is invalid".into()));
+            }
+        } else if !records.is_empty() {
+            return Err(Error::Invalid("audit records exist without a head".into()));
+        }
+        let chain_anchor_sha256 = records
+            .first()
+            .and_then(|(_, record)| record.previous_audit_sha256.clone());
+        let mut expected = chain_anchor_sha256.clone();
+        for (_, record) in &records {
+            if record.previous_audit_sha256 != expected {
+                return Err(Error::Invalid("audit chain continuity is invalid".into()));
+            }
+            expected = Some(record.audit_sha256.clone());
+        }
+        if after == 0 && chain_anchor_sha256.is_some() {
+            return Err(Error::Invalid("audit chain genesis is invalid".into()));
+        }
+        if let (Some((_, last)), Some(head)) = (records.last(), durable_head.as_ref()) {
+            if last.audit_id == head.audit_id {
+                if last.audit_sha256 != head.audit_sha256
+                    || (after == 0 && records.len() as u64 != head.record_count)
+                {
+                    return Err(Error::Invalid("audit head closure is invalid".into()));
+                }
+            } else if reached_control_tail {
+                return Err(Error::Invalid(
+                    "audit chain does not reach its durable head".into(),
+                ));
             }
         }
         Ok(AuditJournalPage {
             through_sequence: cursor,
+            chain_anchor_sha256,
+            chain_head_sha256: expected,
             records,
+        })
+    }
+
+    fn commit_with_audit(
+        &self,
+        additional: &[ControlTransition],
+        event: &AuditEvent,
+    ) -> Result<()> {
+        event.validate()?;
+        let record_key = audit_key(&self.instance, &event.audit_id);
+        if let Some(existing) = self.engine.control_record(&record_key)? {
+            return exact_audit_replay(&existing, event);
+        }
+        let head_key = audit_head_key(&self.instance);
+        for _ in 0..16 {
+            let head_bytes = self.engine.control_record(&head_key)?;
+            let head = head_bytes.as_deref().map(decode_audit_head).transpose()?;
+            let record = AuditRecord::seal(
+                event.clone(),
+                head.as_ref().map(|head| head.audit_sha256.clone()),
+            )?;
+            let next_head = AuditHead {
+                audit_id: record.audit_id.clone(),
+                audit_sha256: record.audit_sha256.clone(),
+                record_count: head.as_ref().map_or(Ok(1), |head| {
+                    head.record_count
+                        .checked_add(1)
+                        .ok_or(Error::Invalid("audit record count overflow".into()))
+                })?,
+            };
+            let record_bytes = serde_json::to_vec(&record).map_err(json_error)?;
+            let mut transitions = additional.to_vec();
+            transitions.push(ControlTransition {
+                key: record_key.clone(),
+                expected: None,
+                replacement: Some(record_bytes),
+                at: event.at_unix_ms,
+                actor: event
+                    .principal_id
+                    .as_ref()
+                    .map_or("anonymous", CanonicalId::as_str)
+                    .into(),
+                action: "security.audit".into(),
+                request_id: event.request_id.clone(),
+                operation_id: event.operation_id.clone(),
+            });
+            transitions.push(ControlTransition {
+                key: head_key.clone(),
+                expected: head_bytes.clone(),
+                replacement: Some(serde_json::to_vec(&next_head).map_err(json_error)?),
+                at: event.at_unix_ms,
+                actor: event
+                    .principal_id
+                    .as_ref()
+                    .map_or("anonymous", CanonicalId::as_str)
+                    .into(),
+                action: "security.audit.head".into(),
+                request_id: event.request_id.clone(),
+                operation_id: event.operation_id.clone(),
+            });
+            match self.engine.commit_control_batch(&transitions) {
+                Ok(_) => return Ok(()),
+                Err(rrd_store::Error::ControlConflict(key)) if key == head_key => continue,
+                Err(rrd_store::Error::ControlConflict(key)) if key == record_key => {
+                    let existing = self
+                        .engine
+                        .control_record(&record_key)?
+                        .ok_or_else(|| Error::Invalid("audit identity conflict vanished".into()))?;
+                    return exact_audit_replay(&existing, event);
+                }
+                Err(error) => return Err(error.into()),
+            }
+        }
+        Err(Error::Store(rrd_store::Error::Substrate(
+            "audit head contention exceeded its retry bound".into(),
+        )))
+    }
+
+    fn administrative_audit(
+        &self,
+        at_unix_ms: u64,
+        request_id: &str,
+        operation_id: &str,
+        request_sha256: &str,
+        outcome: &str,
+    ) -> Result<AuditEvent> {
+        let identity = digest::sha256_hex(
+            &serde_json::to_vec(&(
+                request_id,
+                operation_id,
+                Action::SecurityAdmin,
+                AuditPhase::Completed,
+                request_sha256,
+                outcome,
+            ))
+            .map_err(json_error)?,
+        );
+        Ok(AuditEvent {
+            audit_id: CanonicalId::new(format!("audit-{identity}"))
+                .map_err(|error| Error::Invalid(error.to_string()))?,
+            at_unix_ms,
+            principal_id: None,
+            action: Action::SecurityAdmin,
+            resource: ResourcePath {
+                segments: vec![ResourceId::new(
+                    ResourceKind::Instance,
+                    self.instance.as_str().to_owned(),
+                )
+                .map_err(|error| Error::Invalid(error.to_string()))?],
+            },
+            request_id: request_id.into(),
+            operation_id: operation_id.into(),
+            phase: AuditPhase::Completed,
+            decision: AuditDecision::Allowed,
+            status_code: 200,
+            request_sha256: request_sha256.into(),
+            response_sha256: digest::sha256_hex(outcome.as_bytes()),
         })
     }
 }
@@ -999,9 +1264,31 @@ fn decode_audit(entry: &ControlJournalEntry) -> Result<AuditRecord> {
         .replacement
         .as_deref()
         .ok_or_else(|| Error::Invalid("audit journal entry deleted its record".into()))?;
+    decode_audit_bytes(bytes)
+}
+
+fn decode_audit_bytes(bytes: &[u8]) -> Result<AuditRecord> {
     let record: AuditRecord = serde_json::from_slice(bytes).map_err(json_error)?;
     record.validate()?;
     Ok(record)
+}
+
+fn decode_audit_head(bytes: &[u8]) -> Result<AuditHead> {
+    let head: AuditHead = serde_json::from_slice(bytes).map_err(json_error)?;
+    validate_sha256(&head.audit_sha256)?;
+    if head.record_count == 0 {
+        return Err(Error::Invalid("audit head record count is zero".into()));
+    }
+    Ok(head)
+}
+
+fn exact_audit_replay(existing: &[u8], event: &AuditEvent) -> Result<()> {
+    let record = decode_audit_bytes(existing)?;
+    if record.as_event() == *event {
+        Ok(())
+    } else {
+        Err(Error::IdempotencyConflict)
+    }
 }
 
 fn security_key(instance: &CanonicalId) -> String {
@@ -1010,6 +1297,10 @@ fn security_key(instance: &CanonicalId) -> String {
 
 fn audit_key(instance: &CanonicalId, audit_id: &CanonicalId) -> String {
     format!("server/state/{instance}/audit/{audit_id}")
+}
+
+fn audit_head_key(instance: &CanonicalId) -> String {
+    format!("server/state/{instance}/audit-head")
 }
 
 fn validate_sha256(value: &str) -> Result<()> {

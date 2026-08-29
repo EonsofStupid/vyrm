@@ -2,6 +2,7 @@
 from typing import Final, Literal, TypedDict
 
 OperationId = Literal[
+    "audit-export",
     "audit-read",
     "backup-create",
     "backup-list",
@@ -46,6 +47,12 @@ class Endpoint(TypedDict):
 
 
 ENDPOINTS: Final[dict[OperationId, Endpoint]] = {
+    "audit-export": {
+        "authentication": "session_bearer",
+        "method": "POST",
+        "mutation": False,
+        "path": "/v1/audit/export",
+    },
     "audit-read": {
         "authentication": "session_bearer",
         "method": "POST",

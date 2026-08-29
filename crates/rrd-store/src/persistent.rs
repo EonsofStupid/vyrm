@@ -206,6 +206,16 @@ impl Engine for PersistentEngine {
         }
     }
 
+    fn commit_control_batch(
+        &self,
+        transitions: &[crate::ControlTransition],
+    ) -> Result<Vec<crate::ControlJournalEntry>> {
+        match self {
+            Self::Native(engine) => Engine::commit_control_batch(engine, transitions),
+            Self::FjallCompatibility(engine) => Engine::commit_control_batch(engine, transitions),
+        }
+    }
+
     fn commit_catalog_transition(
         &self,
         scope: &ScopeId,

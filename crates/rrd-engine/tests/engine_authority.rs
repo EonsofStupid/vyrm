@@ -522,16 +522,39 @@ fn one_authority_coordinates_security_data_catalogues_lifecycle_audit_and_reopen
             "operation-audit",
         )
         .unwrap();
-    assert_eq!(audit.records.len(), 3);
-    assert_eq!(audit.records[0].phase, AuditPhase::Authorized);
-    assert_eq!(audit.records[0].action, SecurityAction::LifecycleApply);
-    assert_eq!(audit.records[1].phase, AuditPhase::Completed);
-    assert_eq!(audit.records[1].decision, AuditDecision::Allowed);
-    assert_eq!(audit.records[1].action, SecurityAction::LifecycleApply);
-    assert_eq!(audit.records[2].phase, AuditPhase::Completed);
-    assert_eq!(audit.records[2].decision, AuditDecision::Denied);
-    assert_eq!(audit.records[2].action, SecurityAction::BackupCreate);
-    assert_eq!(diagnostic.audit.records, audit.records);
+    audit.validate().unwrap();
+    let lifecycle_audit = audit
+        .records
+        .iter()
+        .filter(|record| record.action == SecurityAction::LifecycleApply)
+        .collect::<Vec<_>>();
+    assert_eq!(lifecycle_audit.len(), 2);
+    assert_eq!(lifecycle_audit[0].phase, AuditPhase::Authorized);
+    assert_eq!(lifecycle_audit[1].phase, AuditPhase::Completed);
+    assert_eq!(lifecycle_audit[1].decision, AuditDecision::Allowed);
+    let denied_backup = audit
+        .records
+        .iter()
+        .find(|record| record.action == SecurityAction::BackupCreate)
+        .unwrap();
+    assert_eq!(denied_backup.phase, AuditPhase::Completed);
+    assert_eq!(denied_backup.decision, AuditDecision::Denied);
+    let estate_audit = audit
+        .records
+        .iter()
+        .filter(|record| record.action == SecurityAction::EstateAdmin)
+        .collect::<Vec<_>>();
+    assert!(estate_audit
+        .iter()
+        .any(|record| record.phase == AuditPhase::Authorized));
+    assert!(estate_audit.iter().any(|record| {
+        record.phase == AuditPhase::Completed && record.decision == AuditDecision::Allowed
+    }));
+    assert_eq!(
+        diagnostic.audit.records,
+        audit.records[..diagnostic.audit.records.len()],
+        "diagnostic and protected audit reads observe one shared ordered audit prefix"
+    );
 
     let closed = engine
         .close_session(

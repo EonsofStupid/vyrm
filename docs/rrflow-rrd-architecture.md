@@ -204,6 +204,16 @@ freshness, failure, and retry state are authoritative RRD data. A query that
 requires a projection must either prove its freshness at the transaction's read
 stamp, use an authoritative fallback, or fail explicitly.
 
+The G05 structured-audit foundation makes the accepted-operation boundary
+crash-visible before effects: supported adapters persist an authorization
+reservation, then append the terminal outcome. The audit record and its
+compare-and-swap chain head are one atomic control batch, and security-state
+administration includes its completion record in that same batch. A direct
+secured embedded call that omits the adapter lifecycle still leaves a
+reservation or terminal denial. Folding every terminal structured-audit record
+into the application data transaction remains a stricter canonical-commit
+target; absence of that coupling cannot erase the pre-effect reservation.
+
 ## Persistence and recovery
 
 RRD owns persistence as a complete product capability, not as a branded engine

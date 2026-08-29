@@ -7,7 +7,7 @@ Central publication remain open.
 
 `sdks/java` generates a closed `OperationId` enum from `rrd-contract`'s
 deterministic OpenAPI 3.1 document. The shell-free generator records method,
-path, authentication, and mutation classification for all 33 routes and
+path, authentication, and mutation classification for all 34 routes and
 supports checked-in drift detection.
 
 The client uses Java's standard HTTP client and Jackson 3.2 for bounded JSON
@@ -24,7 +24,7 @@ Maven compiles on Java 21 with all lint warnings promoted to errors. JUnit 6
 real-loopback tests cover dropped-connection retry, capability identity,
 API-key session creation, bearer query envelopes, resource identity,
 remote-cleartext and expired-deadline denial, typed permission errors, and all
-33 generated operations. The generator drift check and packaged JAR also pass.
+34 generated operations. The generator drift check and packaged JAR also pass.
 
 This is not the F5 exit gate. Async transport/caller cancellation, generated
 request/result models, dependency locking/verification, shared real-server

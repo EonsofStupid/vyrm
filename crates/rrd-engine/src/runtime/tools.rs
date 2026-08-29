@@ -576,7 +576,9 @@ fn runtime_tool_operation_for_action(action: SecurityAction) -> crate::Result<Rr
         | SecurityAction::SubscriptionConnect
         | SecurityAction::SubscriptionAck
         | SecurityAction::SubscriptionClose
+        | SecurityAction::AuditExport
         | SecurityAction::DiagnosticsRead
+        | SecurityAction::EstateAdmin
         | SecurityAction::SecurityAdmin
         | SecurityAction::RuntimeToolCatalogueRead => {
             return Err(ServiceError::Contract(format!(

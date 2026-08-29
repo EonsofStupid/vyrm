@@ -6,8 +6,8 @@
 //! runtime cursors stored in the batch.
 
 use crate::control::{
-    validate_control_key, verify_control_page, verify_control_tail, ControlJournalEntry,
-    ControlTransition,
+    validate_control_batch, validate_control_key, verify_control_page, verify_control_tail,
+    ControlJournalEntry, ControlTransition,
 };
 use crate::engine::{validate_idempotency, Engine, PhysicalStoreEvidence};
 use crate::error::{Error, Result};
@@ -544,6 +544,13 @@ impl Engine for NativeEngine {
         transition: &ControlTransition,
     ) -> Result<ControlJournalEntry> {
         commit_native_control_transition(self, transition, None).map(|(_, entry)| entry)
+    }
+
+    fn commit_control_batch(
+        &self,
+        transitions: &[ControlTransition],
+    ) -> Result<Vec<ControlJournalEntry>> {
+        commit_native_control_batch(self, transitions)
     }
 
     fn commit_catalog_transition(
@@ -1679,6 +1686,96 @@ fn commit_native_control_transition(
     }
     write(&mut database, operations, Durability::Authoritative)?;
     Ok((catalog_revision, entry))
+}
+
+fn commit_native_control_batch(
+    engine: &NativeEngine,
+    transitions: &[ControlTransition],
+) -> Result<Vec<ControlJournalEntry>> {
+    validate_control_batch(transitions)?;
+    let mut database = engine.lock()?;
+    let snapshot = database.snapshot();
+    for transition in transitions {
+        let current = get(
+            &database,
+            snapshot,
+            keyspaces::META,
+            transition.key.as_bytes(),
+        )?;
+        if current.as_deref() != transition.expected.as_deref() {
+            return Err(Error::ControlConflict(transition.key.clone()));
+        }
+    }
+    let current_sequence = read_sequence(&database, snapshot, keyspaces::CONTROL_JOURNAL_SEQUENCE)?;
+    let mut previous_digest = get(
+        &database,
+        snapshot,
+        keyspaces::META,
+        keyspaces::CONTROL_JOURNAL_LAST_DIGEST,
+    )?
+    .map(String::from_utf8)
+    .transpose()
+    .map_err(|error| Error::CorruptWatermark(error.to_string()))?;
+    let previous_entry = if current_sequence == 0 {
+        None
+    } else {
+        get(
+            &database,
+            snapshot,
+            keyspaces::META,
+            &keyspaces::control_journal_key(current_sequence),
+        )?
+        .map(|bytes| serde_json::from_slice(&bytes))
+        .transpose()?
+    };
+    verify_control_tail(
+        current_sequence,
+        previous_digest.as_deref(),
+        previous_entry.as_ref(),
+    )?;
+    let mut entries = Vec::with_capacity(transitions.len());
+    for (offset, transition) in transitions.iter().enumerate() {
+        let sequence = current_sequence
+            .checked_add(offset as u64 + 1)
+            .ok_or(Error::SequenceOverflow)?;
+        let entry = ControlJournalEntry::committed(sequence, transition, previous_digest.clone());
+        previous_digest = Some(entry.digest.clone());
+        entries.push(entry);
+    }
+    let mut operations = Vec::with_capacity(transitions.len() * 2 + 2);
+    for (transition, entry) in transitions.iter().zip(&entries) {
+        match &transition.replacement {
+            Some(value) => put(
+                &mut operations,
+                keyspaces::META,
+                transition.key.as_bytes(),
+                value.clone(),
+            ),
+            None => operations.push(Mutation::Delete {
+                key: encoded_storage_key(&database, keyspaces::META, transition.key.as_bytes())?,
+            }),
+        }
+        put(
+            &mut operations,
+            keyspaces::META,
+            &keyspaces::control_journal_key(entry.sequence),
+            serde_json::to_vec(entry)?,
+        );
+    }
+    let last = entries.last().expect("validated non-empty control batch");
+    put_sequence(
+        &mut operations,
+        keyspaces::CONTROL_JOURNAL_SEQUENCE,
+        last.sequence,
+    );
+    put(
+        &mut operations,
+        keyspaces::META,
+        keyspaces::CONTROL_JOURNAL_LAST_DIGEST,
+        last.digest.as_bytes().to_vec(),
+    );
+    write(&mut database, operations, Durability::Authoritative)?;
+    Ok(entries)
 }
 
 fn native_read_stamp(

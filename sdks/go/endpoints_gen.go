@@ -5,6 +5,7 @@ package rrd
 type OperationID string
 
 const (
+	OperationAuditExport              OperationID = "audit-export"
 	OperationAuditRead                OperationID = "audit-read"
 	OperationBackupCreate             OperationID = "backup-create"
 	OperationBackupList               OperationID = "backup-list"
@@ -41,6 +42,7 @@ const (
 )
 
 var endpoints = map[OperationID]Endpoint{
+	OperationAuditExport:              {Method: "POST", Path: "/v1/audit/export", Authentication: "session_bearer", Mutation: false},
 	OperationAuditRead:                {Method: "POST", Path: "/v1/audit/read", Authentication: "session_bearer", Mutation: false},
 	OperationBackupCreate:             {Method: "POST", Path: "/v1/backups", Authentication: "session_bearer", Mutation: true},
 	OperationBackupList:               {Method: "POST", Path: "/v1/backups/list", Authentication: "session_bearer", Mutation: false},

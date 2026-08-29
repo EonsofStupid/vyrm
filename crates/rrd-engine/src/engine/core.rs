@@ -10,6 +10,11 @@ pub struct RrdEngine {
     /// store already owns the cross-process writer lock; this closes the
     /// in-process race between publishing a unique index and committing data.
     pub(crate) transaction_gate: Mutex<()>,
+    /// Tracks invocation reservations currently executing through a supported
+    /// adapter. Session-backed methods use this to distinguish a correctly
+    /// wrapped call from a direct embedded call and make the latter leave a
+    /// durable authorization or denial record as well.
+    pub(crate) active_invocations: Mutex<BTreeMap<(String, String), std::thread::ThreadId>>,
 }
 impl RrdEngine {
     /// Opens a local engine authority for engine-owned control/bootstrap
@@ -43,6 +48,7 @@ impl RrdEngine {
             instance,
             token_key,
             transaction_gate: Mutex::new(()),
+            active_invocations: Mutex::new(BTreeMap::new()),
         })
     }
 
@@ -59,6 +65,7 @@ impl RrdEngine {
             instance,
             token_key,
             transaction_gate: Mutex::new(()),
+            active_invocations: Mutex::new(BTreeMap::new()),
         }
     }
 

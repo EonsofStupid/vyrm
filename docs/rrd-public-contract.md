@@ -93,15 +93,17 @@ active-instance filesystem path. The server owns generated locations and a
 restore always targets a new root.
 
 The F4 audit vocabulary freezes a closed security-action enum, authorization
-and completion phases, allow/deny/fail decisions, and a bounded cursor-addressed
-read. Public records contain principal/action/resource and request/operation
-coordinates plus request/response SHA-256 values; bodies, credentials, bearer
-tokens, and arbitrary headers are excluded. `through_sequence` is the scanned
-authenticated control-journal coordinate, so readers advance safely across
-unrelated control transitions.
+and completion phases, allow/deny/fail decisions, and bounded cursor-addressed
+read/export requests. Public records contain principal/action/resource and
+request/operation coordinates, request/response SHA-256 values, previous audit
+digest, and semantic record digest; bodies, credentials, bearer tokens, and
+arbitrary headers are excluded. Pages carry their chain anchor/head and global
+`through_sequence`, so readers validate lineage and advance safely across
+unrelated control transitions. Export returns canonical JSON Lines with an
+exact media type, count, content digest, and the same chain coordinates.
 
 F5 begins from `EndpointCatalogue`, not handwritten per-language route lists.
-It currently freezes 33 sorted HTTP operation identities plus the authenticated
+It currently freezes 34 sorted HTTP operation identities plus the authenticated
 subscription WebSocket descriptor, with method/path template, authentication
 mode, mutation/idempotency classification, fixed or descriptor-derived
 security action, and public request/response/frame type names.

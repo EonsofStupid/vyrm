@@ -560,6 +560,8 @@ fn diagnostic_audit(engine: &RrdEngine, after: u64, limit: usize) -> Result<Audi
     Ok(AuditPage {
         requested_after_sequence: after,
         through_sequence: page.through_sequence,
+        chain_anchor_sha256: page.chain_anchor_sha256,
+        chain_head_sha256: page.chain_head_sha256,
         records: page
             .records
             .into_iter()
@@ -577,6 +579,8 @@ fn diagnostic_audit(engine: &RrdEngine, after: u64, limit: usize) -> Result<Audi
                 status_code: record.status_code,
                 request_sha256: record.request_sha256,
                 response_sha256: record.response_sha256,
+                previous_audit_sha256: record.previous_audit_sha256,
+                audit_sha256: record.audit_sha256,
             })
             .collect(),
     })

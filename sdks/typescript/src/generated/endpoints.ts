@@ -1,5 +1,11 @@
 // Generated from rrd-contract; do not edit.
 export const endpoints = {
+  "audit-export": {
+    "method": "POST",
+    "path": "/v1/audit/export",
+    "authentication": "session_bearer",
+    "mutation": false
+  },
   "audit-read": {
     "method": "POST",
     "path": "/v1/audit/read",

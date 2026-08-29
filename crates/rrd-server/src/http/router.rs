@@ -3,12 +3,20 @@ use super::*;
 pub(super) async fn dispatch(State(state): State<Arc<AppState>>, request: Request) -> HttpResponse {
     let now = unix_time_ms();
     let (parts, body) = request.into_parts();
+    let path = parts.uri.path().to_owned();
+    let operation = route_operation(&parts.method, &path);
     let body = match to_bytes(body, RRD_MAX_BODY_BYTES).await {
         Ok(body) => body,
         Err(_) => {
             let context = generated_context(now, "body-limit");
-            return failure(
-                &context,
+            return state.rejected_response(
+                context,
+                instance_resource(state.service.instance_id()),
+                b"rrd-request-body-exceeded-transport-limit",
+                now,
+                HTTP_ID_COUNTER.fetch_add(1, Ordering::Relaxed),
+                operation,
+                None,
                 ApiError::new(
                     ErrorCode::ResourceExhausted,
                     "request body exceeds one MiB",
@@ -17,20 +25,74 @@ pub(super) async fn dispatch(State(state): State<Arc<AppState>>, request: Reques
             );
         }
     };
-    let path = parts.uri.path().to_owned();
+    let handler_state = Arc::clone(&state);
     match tokio::task::spawn_blocking(move || {
-        state.handle(parts.method, path, parts.headers, body, now)
+        handler_state.handle(parts.method, path, parts.headers, body, now)
     })
     .await
     {
         Ok(response) => response,
         Err(error) => {
             let context = generated_context(now, "handler-join");
-            failure(
-                &context,
+            state.rejected_response(
+                context,
+                instance_resource(state.service.instance_id()),
+                b"rrd-blocking-handler-join-failed",
+                now,
+                HTTP_ID_COUNTER.fetch_add(1, Ordering::Relaxed),
+                operation,
+                None,
                 ApiError::new(ErrorCode::Internal, error.to_string(), false),
             )
         }
+    }
+}
+
+fn route_operation(method: &Method, path: &str) -> RrdOperation {
+    match (method, path) {
+        (
+            &Method::GET,
+            "/v1/health/live"
+            | "/v1/health/ready"
+            | "/v1/capabilities"
+            | "/v1/schema/endpoints"
+            | "/v1/schema/openapi",
+        ) => RrdOperation::ServiceInspect,
+        (&Method::POST, "/v1/sessions") => RrdOperation::SessionCreate,
+        (&Method::POST, path) if session_action(path, "renew").is_some() => {
+            RrdOperation::SessionRenew
+        }
+        (&Method::DELETE, path) if session_id(path).is_some() => RrdOperation::SessionClose,
+        (&Method::POST, "/v1/transactions") => RrdOperation::TransactionBegin,
+        (&Method::POST, "/v1/query") => RrdOperation::QueryExecute,
+        (&Method::POST, "/v1/query/indexes/ensure") => RrdOperation::QueryIndexEnsure,
+        (&Method::POST, "/v1/query/indexes/list") => RrdOperation::QueryIndexList,
+        (&Method::POST, "/v1/query/live/poll") => RrdOperation::QueryLivePoll,
+        (&Method::POST, "/v1/runtime/tools/list") => RrdOperation::RuntimeToolCatalogueRead,
+        (&Method::POST, "/v1/backups") => RrdOperation::BackupCreate,
+        (&Method::POST, "/v1/backups/list") => RrdOperation::BackupList,
+        (&Method::POST, "/v1/restores") => RrdOperation::RestoreCreate,
+        (&Method::POST, "/v1/audit/read") => RrdOperation::AuditRead,
+        (&Method::POST, "/v1/audit/export") => RrdOperation::AuditExport,
+        (&Method::POST, "/v1/changes/read") => RrdOperation::ChangefeedRead,
+        (&Method::POST, "/v1/changes/follow") => RrdOperation::ChangefeedFollow,
+        (&Method::POST, "/v1/subscriptions/open") => RrdOperation::SubscriptionOpen,
+        (&Method::POST, "/v1/subscriptions/close") => RrdOperation::SubscriptionClose,
+        (&Method::POST, "/v1/diagnostics/read") => RrdOperation::DiagnosticsRead,
+        (&Method::POST, "/v1/vector/collections/ensure") => RrdOperation::VectorCollectionEnsure,
+        (&Method::POST, "/v1/vector/collections/list") => RrdOperation::VectorCollectionList,
+        (&Method::POST, "/v1/vector/points/scroll") => RrdOperation::VectorPointScroll,
+        (&Method::POST, "/v1/vector/points/retrieve") => RrdOperation::VectorPointRetrieve,
+        (&Method::POST, "/v1/vector/search") => RrdOperation::VectorSearch,
+        (&Method::POST, path) if estate_action(path, "read").is_some() => RrdOperation::EstateRead,
+        (&Method::POST, path) if transaction_action(path, "preview").is_some() => {
+            RrdOperation::TransactionPreview
+        }
+        (&Method::POST, path) if transaction_action(path, "commit").is_some() => {
+            RrdOperation::TransactionCommit
+        }
+        (&Method::DELETE, path) if transaction_id(path).is_some() => RrdOperation::TransactionAbort,
+        _ => RrdOperation::UnknownRequest,
     }
 }
 
@@ -118,6 +180,7 @@ impl AppState {
             (Method::POST, "/v1/backups/list") => self.list_instance_backups(&headers, &body, now),
             (Method::POST, "/v1/restores") => self.restore_instance_backup(&headers, &body, now),
             (Method::POST, "/v1/audit/read") => self.read_audit(&headers, &body, now),
+            (Method::POST, "/v1/audit/export") => self.export_audit(&headers, &body, now),
             (Method::POST, "/v1/changes/read") => self.read_changefeed(&headers, &body, now),
             (Method::POST, "/v1/changes/follow") => self.follow_changefeed(&headers, &body, now),
             (Method::POST, "/v1/subscriptions/open") => {

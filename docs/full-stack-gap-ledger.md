@@ -506,8 +506,8 @@ authentication, or organization-wide authorization.
 
 ### F4 — establish security and governance before remote management
 
-**Status:** identity/authorization foundation implemented; comprehensive audit
-remains in progress. One revisioned `rrd-security` authority persists bounded
+**Status:** identity/authorization and comprehensive structured-audit
+foundations implemented. One revisioned `rrd-security` authority persists bounded
 users/services/nodes, credential revisions, direct and inherited acyclic roles,
 RRD JWT issuers, exact post-verification third-party identity bindings, and
 most-specific action/resource grants. Complete-authority administration is a
@@ -526,16 +526,20 @@ constrained operations without an injector deny. Real-socket evidence covers
 allowed/forbidden fields, durable denied audit, restart replay, rotation, old
 JWT/lease rejection, and recursive secret exclusion.
 
-Typed redacted audit records remain immutable/idempotent in the authenticated
-control journal. Routed success, denial, and failure are available through the
-protected bounded read, and authorized routed work has a pre-effect audit
-reservation. TLS 1.3 mTLS is the only non-loopback listener: it requires
+Typed redacted audit records form an independent semantic hash chain. Record
+and compare-and-swap head publish atomically across memory, Fjall compatibility,
+and native storage; concurrent writers cannot fork it. Routed success, denial,
+failure, oversized input, public inspection, and unknown requests are available
+through protected bounded read and canonical JSON Lines export. Security admin
+publishes state plus completion audit atomically; estate administration and
+recovery paths emit authorization/completion records; direct secured embedded
+calls leave a reservation or terminal denial. TLS 1.3 mTLS is the only
+non-loopback listener: it requires
 initialized application security, a trusted client certificate, and exact
 server-name verification. External OIDC/JWK cryptographic verification remains
 an adapter responsibility. Certificate hot reload/revocation, secret providers,
-rate limits, application-mutation/audit-completion atomicity, complete
-security-admin audit, oversized-body/handler-failure coverage, retention, and
-external archival remain open under later F4 work.
+rate limits, application-mutation/audit-completion atomicity, retention policy,
+and external archival delivery remain later production hardening.
 
 The first provisioning boundary is now executable through
 `rrd-security-bootstrap`. A strict versioned manifest references mounted
@@ -567,7 +571,7 @@ every public mutation and prove denied actions do not partially apply.
 
 **Order:** Rust embedded/client → TypeScript → Python → Go → Java/.NET.
 
-**Status:** in progress. `rrd-contract::EndpointCatalogue` now freezes all 33
+**Status:** in progress. `rrd-contract::EndpointCatalogue` now freezes all 34
 current HTTP routes plus one WebSocket stream by canonical operation,
 method/path template, authentication,
 mutation rule, fixed or descriptor-derived security action, and public
@@ -578,10 +582,9 @@ catalogue rather than maintained separately. The server publishes both at
 unreviewed schema drift. This removes handwritten route and payload discovery
 as SDK sources. Rust, TypeScript, Python, Go, Java, and .NET now have executable
 walking skeletons; shared black-box conformance and release qualification
-remain open. The non-Rust checked-in route maps still cover the prior 31-route
-cut and must absorb subscription open/close plus their language-appropriate
-WebSocket client surface under G06-W04; they are not counted as G03-W06
-transport evidence.
+remain open. All six checked-in HTTP route maps are regenerated at the 34-route
+cut; language-appropriate WebSocket client surfaces remain G06-W04 work and
+are not counted as G03-W06 transport evidence.
 
 The first Rust client is now implemented in `rrd-client` and specified by
 [`rrd-rust-client-v1.md`](rrd-rust-client-v1.md). It is async, depends only on
@@ -609,7 +612,7 @@ client at walking-skeleton status.
 The Python walking skeleton is implemented in `sdks/python` and specified by
 [`rrd-python-client-v1.md`](rrd-python-client-v1.md). Its shell-free generator
 derives the closed operation/route/auth/mutation map from the same OpenAPI
-authority. The synchronous HTTPX client covers all 33 operations and enforces
+authority. The synchronous HTTPX client covers all 34 operations and enforces
 bounded responses, correlation, resource identity, mutation idempotency,
 absolute/per-attempt deadlines, safe retry, API-key/session authentication,
 typed errors, and loopback-only cleartext. Pydantic validates response
@@ -619,7 +622,7 @@ real-server conformance, and publication remain open.
 
 The Go walking skeleton is implemented in `sdks/go` and specified by
 [`rrd-go-client-v1.md`](rrd-go-client-v1.md). Its shell-free generator emits a
-closed operation constant set and route/auth/mutation map for all 33 operations
+closed operation constant set and route/auth/mutation map for all 34 operations
 from the same OpenAPI authority. The standard-library client uses caller
 contexts, bounded response reads, strict envelopes, correlated identities,
 resource validation, mutation idempotency, combined deadlines, safe transport
@@ -630,7 +633,7 @@ conformance, and publication remain open.
 
 The Java walking skeleton is implemented in `sdks/java` and specified by
 [`rrd-java-client-v1.md`](rrd-java-client-v1.md). Its generator emits a closed
-operation enum with route/auth/mutation metadata for all 33 operations. Java's
+operation enum with route/auth/mutation metadata for all 34 operations. Java's
 HTTP client plus Jackson 3.2 enforce bounded reads, exact envelopes, correlation,
 resources, mutation idempotency, combined deadlines, safe I/O retry,
 authentication, redirect denial, and loopback-only cleartext. Maven/Java 21
@@ -641,7 +644,7 @@ dependency verification, shared conformance, and publication remain open.
 The asynchronous .NET walking skeleton is implemented in `sdks/dotnet` and
 specified by [`rrd-dotnet-client-v1.md`](rrd-dotnet-client-v1.md). Its generator
 emits a closed operation enum/switch with route/auth/mutation metadata for all
-33 operations. `HttpClient` and `System.Text.Json` provide a third-party-free
+34 operations. `HttpClient` and `System.Text.Json` provide a third-party-free
 runtime with caller cancellation, bounded streaming, exact envelopes,
 correlation, resources, mutation idempotency, combined deadlines, safe retry,
 authentication, redirect denial, and loopback-only cleartext. .NET 10 nullable

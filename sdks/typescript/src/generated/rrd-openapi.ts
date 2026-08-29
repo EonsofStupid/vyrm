@@ -1,4 +1,21 @@
 export interface paths {
+    "/v1/audit/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** RRD audit-export */
+        post: operations["audit-export"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/audit/read": {
         parameters: {
             query?: never;
@@ -1938,6 +1955,145 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    "audit-export": {
+        parameters: {
+            query?: never;
+            header: {
+                "X-RRD-Session": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    context: {
+                        /** Format: uint64 */
+                        deadline_unix_ms?: number | null;
+                        idempotency_key?: string | null;
+                        operation_id: string;
+                        request_id: string;
+                    };
+                    payload: {
+                        /** Format: uint64 */
+                        after_sequence: number;
+                        /** Format: uint16 */
+                        limit: number;
+                    };
+                    protocol: string;
+                    /** Format: uint16 */
+                    protocol_version: number;
+                    /**
+                     * @description A fully explicit hierarchical identity. No field is inferred from process
+                     *     cwd, connection state, or a human label.
+                     */
+                    resource: {
+                        segments: {
+                            /**
+                             * @description A canonical public identifier component.
+                             *
+                             *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                             *     labels are separate data and may use arbitrary Unicode.
+                             */
+                            id: string;
+                            /** @enum {string} */
+                            kind: "organization" | "estate" | "project" | "instance" | "tenant" | "namespace" | "database" | "table" | "collection" | "record" | "point" | "relation" | "alias" | "cluster" | "node" | "shard" | "replica" | "segment" | "transaction" | "snapshot" | "backup" | "operation";
+                        }[];
+                    };
+                };
+            };
+        };
+        responses: {
+            /** @description Typed RRD response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        operation_id: string;
+                        outcome: {
+                            payload: {
+                                chain_anchor_sha256?: string | null;
+                                chain_head_sha256?: string | null;
+                                content_sha256: string;
+                                json_lines: string;
+                                media_type: string;
+                                /** Format: uint16 */
+                                record_count: number;
+                                /** Format: uint64 */
+                                requested_after_sequence: number;
+                                /** Format: uint64 */
+                                through_sequence: number;
+                            };
+                            /** @constant */
+                            status: "ok";
+                        } | {
+                            error: {
+                                /** @enum {string} */
+                                code: "invalid_argument" | "not_found" | "already_exists" | "conflict" | "failed_precondition" | "unauthenticated" | "permission_denied" | "resource_exhausted" | "deadline_exceeded" | "cancelled" | "unavailable" | "corruption" | "unsupported_version" | "internal";
+                                details?: {
+                                    [key: string]: string;
+                                };
+                                message: string;
+                                retryable: boolean;
+                            };
+                            /** @constant */
+                            status: "error";
+                        };
+                        protocol: string;
+                        /** Format: uint16 */
+                        protocol_version: number;
+                        request_id: string;
+                    };
+                };
+            };
+            /** @description Typed RRD error response */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        operation_id: string;
+                        outcome: {
+                            payload: {
+                                chain_anchor_sha256?: string | null;
+                                chain_head_sha256?: string | null;
+                                content_sha256: string;
+                                json_lines: string;
+                                media_type: string;
+                                /** Format: uint16 */
+                                record_count: number;
+                                /** Format: uint64 */
+                                requested_after_sequence: number;
+                                /** Format: uint64 */
+                                through_sequence: number;
+                            };
+                            /** @constant */
+                            status: "ok";
+                        } | {
+                            error: {
+                                /** @enum {string} */
+                                code: "invalid_argument" | "not_found" | "already_exists" | "conflict" | "failed_precondition" | "unauthenticated" | "permission_denied" | "resource_exhausted" | "deadline_exceeded" | "cancelled" | "unavailable" | "corruption" | "unsupported_version" | "internal";
+                                details?: {
+                                    [key: string]: string;
+                                };
+                                message: string;
+                                retryable: boolean;
+                            };
+                            /** @constant */
+                            status: "error";
+                        };
+                        protocol: string;
+                        /** Format: uint16 */
+                        protocol_version: number;
+                        request_id: string;
+                    };
+                };
+            };
+        };
+    };
     "audit-read": {
         parameters: {
             query?: never;
@@ -1997,9 +2153,11 @@ export interface operations {
                         operation_id: string;
                         outcome: {
                             payload: {
+                                chain_anchor_sha256?: string | null;
+                                chain_head_sha256?: string | null;
                                 records: {
                                     /** @enum {string} */
-                                    action: "service_inspect" | "unknown_request" | "session_create" | "session_renew" | "session_close" | "query_execute" | "query_live_poll" | "query_index_ensure" | "query_index_list" | "transaction_begin" | "transaction_preview" | "transaction_commit" | "transaction_abort" | "changefeed_read" | "changefeed_follow" | "subscription_open" | "subscription_connect" | "subscription_ack" | "subscription_close" | "vector_collection_ensure" | "vector_collection_list" | "vector_point_retrieve" | "vector_point_scroll" | "vector_search" | "backup_create" | "backup_list" | "restore_create" | "estate_read" | "audit_read" | "diagnostics_read" | "security_admin" | "memory_context_read" | "memory_inspect" | "memory_recall" | "memory_retire" | "memory_write" | "lifecycle_apply" | "project_attune" | "project_route" | "reasoning_read" | "reasoning_write" | "work_plan_read" | "work_plan_control" | "work_plan_verify_execute" | "runtime_tool_catalogue_read";
+                                    action: "service_inspect" | "unknown_request" | "session_create" | "session_renew" | "session_close" | "query_execute" | "query_live_poll" | "query_index_ensure" | "query_index_list" | "transaction_begin" | "transaction_preview" | "transaction_commit" | "transaction_abort" | "changefeed_read" | "changefeed_follow" | "subscription_open" | "subscription_connect" | "subscription_ack" | "subscription_close" | "vector_collection_ensure" | "vector_collection_list" | "vector_point_retrieve" | "vector_point_scroll" | "vector_search" | "backup_create" | "backup_list" | "restore_create" | "estate_read" | "estate_admin" | "audit_read" | "audit_export" | "diagnostics_read" | "security_admin" | "memory_context_read" | "memory_inspect" | "memory_recall" | "memory_retire" | "memory_write" | "lifecycle_apply" | "project_attune" | "project_route" | "reasoning_read" | "reasoning_write" | "work_plan_read" | "work_plan_control" | "work_plan_verify_execute" | "runtime_tool_catalogue_read";
                                     /** Format: uint64 */
                                     at_unix_ms: number;
                                     /**
@@ -2009,11 +2167,13 @@ export interface operations {
                                      *     labels are separate data and may use arbitrary Unicode.
                                      */
                                     audit_id: string;
+                                    audit_sha256: string;
                                     /** @enum {string} */
                                     decision: "allowed" | "denied" | "failed";
                                     operation_id: string;
                                     /** @enum {string} */
                                     phase: "authorized" | "completed";
+                                    previous_audit_sha256?: string | null;
                                     /**
                                      * @description A canonical public identifier component.
                                      *
@@ -2083,9 +2243,11 @@ export interface operations {
                         operation_id: string;
                         outcome: {
                             payload: {
+                                chain_anchor_sha256?: string | null;
+                                chain_head_sha256?: string | null;
                                 records: {
                                     /** @enum {string} */
-                                    action: "service_inspect" | "unknown_request" | "session_create" | "session_renew" | "session_close" | "query_execute" | "query_live_poll" | "query_index_ensure" | "query_index_list" | "transaction_begin" | "transaction_preview" | "transaction_commit" | "transaction_abort" | "changefeed_read" | "changefeed_follow" | "subscription_open" | "subscription_connect" | "subscription_ack" | "subscription_close" | "vector_collection_ensure" | "vector_collection_list" | "vector_point_retrieve" | "vector_point_scroll" | "vector_search" | "backup_create" | "backup_list" | "restore_create" | "estate_read" | "audit_read" | "diagnostics_read" | "security_admin" | "memory_context_read" | "memory_inspect" | "memory_recall" | "memory_retire" | "memory_write" | "lifecycle_apply" | "project_attune" | "project_route" | "reasoning_read" | "reasoning_write" | "work_plan_read" | "work_plan_control" | "work_plan_verify_execute" | "runtime_tool_catalogue_read";
+                                    action: "service_inspect" | "unknown_request" | "session_create" | "session_renew" | "session_close" | "query_execute" | "query_live_poll" | "query_index_ensure" | "query_index_list" | "transaction_begin" | "transaction_preview" | "transaction_commit" | "transaction_abort" | "changefeed_read" | "changefeed_follow" | "subscription_open" | "subscription_connect" | "subscription_ack" | "subscription_close" | "vector_collection_ensure" | "vector_collection_list" | "vector_point_retrieve" | "vector_point_scroll" | "vector_search" | "backup_create" | "backup_list" | "restore_create" | "estate_read" | "estate_admin" | "audit_read" | "audit_export" | "diagnostics_read" | "security_admin" | "memory_context_read" | "memory_inspect" | "memory_recall" | "memory_retire" | "memory_write" | "lifecycle_apply" | "project_attune" | "project_route" | "reasoning_read" | "reasoning_write" | "work_plan_read" | "work_plan_control" | "work_plan_verify_execute" | "runtime_tool_catalogue_read";
                                     /** Format: uint64 */
                                     at_unix_ms: number;
                                     /**
@@ -2095,11 +2257,13 @@ export interface operations {
                                      *     labels are separate data and may use arbitrary Unicode.
                                      */
                                     audit_id: string;
+                                    audit_sha256: string;
                                     /** @enum {string} */
                                     decision: "allowed" | "denied" | "failed";
                                     operation_id: string;
                                     /** @enum {string} */
                                     phase: "authorized" | "completed";
+                                    previous_audit_sha256?: string | null;
                                     /**
                                      * @description A canonical public identifier component.
                                      *
@@ -6928,9 +7092,11 @@ export interface operations {
                              */
                             payload: {
                                 audit: {
+                                    chain_anchor_sha256?: string | null;
+                                    chain_head_sha256?: string | null;
                                     records: {
                                         /** @enum {string} */
-                                        action: "service_inspect" | "unknown_request" | "session_create" | "session_renew" | "session_close" | "query_execute" | "query_live_poll" | "query_index_ensure" | "query_index_list" | "transaction_begin" | "transaction_preview" | "transaction_commit" | "transaction_abort" | "changefeed_read" | "changefeed_follow" | "subscription_open" | "subscription_connect" | "subscription_ack" | "subscription_close" | "vector_collection_ensure" | "vector_collection_list" | "vector_point_retrieve" | "vector_point_scroll" | "vector_search" | "backup_create" | "backup_list" | "restore_create" | "estate_read" | "audit_read" | "diagnostics_read" | "security_admin" | "memory_context_read" | "memory_inspect" | "memory_recall" | "memory_retire" | "memory_write" | "lifecycle_apply" | "project_attune" | "project_route" | "reasoning_read" | "reasoning_write" | "work_plan_read" | "work_plan_control" | "work_plan_verify_execute" | "runtime_tool_catalogue_read";
+                                        action: "service_inspect" | "unknown_request" | "session_create" | "session_renew" | "session_close" | "query_execute" | "query_live_poll" | "query_index_ensure" | "query_index_list" | "transaction_begin" | "transaction_preview" | "transaction_commit" | "transaction_abort" | "changefeed_read" | "changefeed_follow" | "subscription_open" | "subscription_connect" | "subscription_ack" | "subscription_close" | "vector_collection_ensure" | "vector_collection_list" | "vector_point_retrieve" | "vector_point_scroll" | "vector_search" | "backup_create" | "backup_list" | "restore_create" | "estate_read" | "estate_admin" | "audit_read" | "audit_export" | "diagnostics_read" | "security_admin" | "memory_context_read" | "memory_inspect" | "memory_recall" | "memory_retire" | "memory_write" | "lifecycle_apply" | "project_attune" | "project_route" | "reasoning_read" | "reasoning_write" | "work_plan_read" | "work_plan_control" | "work_plan_verify_execute" | "runtime_tool_catalogue_read";
                                         /** Format: uint64 */
                                         at_unix_ms: number;
                                         /**
@@ -6940,11 +7106,13 @@ export interface operations {
                                          *     labels are separate data and may use arbitrary Unicode.
                                          */
                                         audit_id: string;
+                                        audit_sha256: string;
                                         /** @enum {string} */
                                         decision: "allowed" | "denied" | "failed";
                                         operation_id: string;
                                         /** @enum {string} */
                                         phase: "authorized" | "completed";
+                                        previous_audit_sha256?: string | null;
                                         /**
                                          * @description A canonical public identifier component.
                                          *
@@ -8969,7 +9137,7 @@ export interface operations {
                                     protocol_version: number;
                                     tools: {
                                         /** @enum {string} */
-                                        action: "service_inspect" | "unknown_request" | "session_create" | "session_renew" | "session_close" | "query_execute" | "query_live_poll" | "query_index_ensure" | "query_index_list" | "transaction_begin" | "transaction_preview" | "transaction_commit" | "transaction_abort" | "changefeed_read" | "changefeed_follow" | "subscription_open" | "subscription_connect" | "subscription_ack" | "subscription_close" | "vector_collection_ensure" | "vector_collection_list" | "vector_point_retrieve" | "vector_point_scroll" | "vector_search" | "backup_create" | "backup_list" | "restore_create" | "estate_read" | "audit_read" | "diagnostics_read" | "security_admin" | "memory_context_read" | "memory_inspect" | "memory_recall" | "memory_retire" | "memory_write" | "lifecycle_apply" | "project_attune" | "project_route" | "reasoning_read" | "reasoning_write" | "work_plan_read" | "work_plan_control" | "work_plan_verify_execute" | "runtime_tool_catalogue_read";
+                                        action: "service_inspect" | "unknown_request" | "session_create" | "session_renew" | "session_close" | "query_execute" | "query_live_poll" | "query_index_ensure" | "query_index_list" | "transaction_begin" | "transaction_preview" | "transaction_commit" | "transaction_abort" | "changefeed_read" | "changefeed_follow" | "subscription_open" | "subscription_connect" | "subscription_ack" | "subscription_close" | "vector_collection_ensure" | "vector_collection_list" | "vector_point_retrieve" | "vector_point_scroll" | "vector_search" | "backup_create" | "backup_list" | "restore_create" | "estate_read" | "estate_admin" | "audit_read" | "audit_export" | "diagnostics_read" | "security_admin" | "memory_context_read" | "memory_inspect" | "memory_recall" | "memory_retire" | "memory_write" | "lifecycle_apply" | "project_attune" | "project_route" | "reasoning_read" | "reasoning_write" | "work_plan_read" | "work_plan_control" | "work_plan_verify_execute" | "runtime_tool_catalogue_read";
                                         /** @enum {string} */
                                         authorization: "public" | "governed";
                                         /**
@@ -9246,9 +9414,11 @@ export interface operations {
                              */
                             payload: {
                                 audit: {
+                                    chain_anchor_sha256?: string | null;
+                                    chain_head_sha256?: string | null;
                                     records: {
                                         /** @enum {string} */
-                                        action: "service_inspect" | "unknown_request" | "session_create" | "session_renew" | "session_close" | "query_execute" | "query_live_poll" | "query_index_ensure" | "query_index_list" | "transaction_begin" | "transaction_preview" | "transaction_commit" | "transaction_abort" | "changefeed_read" | "changefeed_follow" | "subscription_open" | "subscription_connect" | "subscription_ack" | "subscription_close" | "vector_collection_ensure" | "vector_collection_list" | "vector_point_retrieve" | "vector_point_scroll" | "vector_search" | "backup_create" | "backup_list" | "restore_create" | "estate_read" | "audit_read" | "diagnostics_read" | "security_admin" | "memory_context_read" | "memory_inspect" | "memory_recall" | "memory_retire" | "memory_write" | "lifecycle_apply" | "project_attune" | "project_route" | "reasoning_read" | "reasoning_write" | "work_plan_read" | "work_plan_control" | "work_plan_verify_execute" | "runtime_tool_catalogue_read";
+                                        action: "service_inspect" | "unknown_request" | "session_create" | "session_renew" | "session_close" | "query_execute" | "query_live_poll" | "query_index_ensure" | "query_index_list" | "transaction_begin" | "transaction_preview" | "transaction_commit" | "transaction_abort" | "changefeed_read" | "changefeed_follow" | "subscription_open" | "subscription_connect" | "subscription_ack" | "subscription_close" | "vector_collection_ensure" | "vector_collection_list" | "vector_point_retrieve" | "vector_point_scroll" | "vector_search" | "backup_create" | "backup_list" | "restore_create" | "estate_read" | "estate_admin" | "audit_read" | "audit_export" | "diagnostics_read" | "security_admin" | "memory_context_read" | "memory_inspect" | "memory_recall" | "memory_retire" | "memory_write" | "lifecycle_apply" | "project_attune" | "project_route" | "reasoning_read" | "reasoning_write" | "work_plan_read" | "work_plan_control" | "work_plan_verify_execute" | "runtime_tool_catalogue_read";
                                         /** Format: uint64 */
                                         at_unix_ms: number;
                                         /**
@@ -9258,11 +9428,13 @@ export interface operations {
                                          *     labels are separate data and may use arbitrary Unicode.
                                          */
                                         audit_id: string;
+                                        audit_sha256: string;
                                         /** @enum {string} */
                                         decision: "allowed" | "denied" | "failed";
                                         operation_id: string;
                                         /** @enum {string} */
                                         phase: "authorized" | "completed";
+                                        previous_audit_sha256?: string | null;
                                         /**
                                          * @description A canonical public identifier component.
                                          *
@@ -11287,7 +11459,7 @@ export interface operations {
                                     protocol_version: number;
                                     tools: {
                                         /** @enum {string} */
-                                        action: "service_inspect" | "unknown_request" | "session_create" | "session_renew" | "session_close" | "query_execute" | "query_live_poll" | "query_index_ensure" | "query_index_list" | "transaction_begin" | "transaction_preview" | "transaction_commit" | "transaction_abort" | "changefeed_read" | "changefeed_follow" | "subscription_open" | "subscription_connect" | "subscription_ack" | "subscription_close" | "vector_collection_ensure" | "vector_collection_list" | "vector_point_retrieve" | "vector_point_scroll" | "vector_search" | "backup_create" | "backup_list" | "restore_create" | "estate_read" | "audit_read" | "diagnostics_read" | "security_admin" | "memory_context_read" | "memory_inspect" | "memory_recall" | "memory_retire" | "memory_write" | "lifecycle_apply" | "project_attune" | "project_route" | "reasoning_read" | "reasoning_write" | "work_plan_read" | "work_plan_control" | "work_plan_verify_execute" | "runtime_tool_catalogue_read";
+                                        action: "service_inspect" | "unknown_request" | "session_create" | "session_renew" | "session_close" | "query_execute" | "query_live_poll" | "query_index_ensure" | "query_index_list" | "transaction_begin" | "transaction_preview" | "transaction_commit" | "transaction_abort" | "changefeed_read" | "changefeed_follow" | "subscription_open" | "subscription_connect" | "subscription_ack" | "subscription_close" | "vector_collection_ensure" | "vector_collection_list" | "vector_point_retrieve" | "vector_point_scroll" | "vector_search" | "backup_create" | "backup_list" | "restore_create" | "estate_read" | "estate_admin" | "audit_read" | "audit_export" | "diagnostics_read" | "security_admin" | "memory_context_read" | "memory_inspect" | "memory_recall" | "memory_retire" | "memory_write" | "lifecycle_apply" | "project_attune" | "project_route" | "reasoning_read" | "reasoning_write" | "work_plan_read" | "work_plan_control" | "work_plan_verify_execute" | "runtime_tool_catalogue_read";
                                         /** @enum {string} */
                                         authorization: "public" | "governed";
                                         /**
@@ -14188,7 +14360,7 @@ export interface operations {
                                 protocol_version: number;
                                 tools: {
                                     /** @enum {string} */
-                                    action: "service_inspect" | "unknown_request" | "session_create" | "session_renew" | "session_close" | "query_execute" | "query_live_poll" | "query_index_ensure" | "query_index_list" | "transaction_begin" | "transaction_preview" | "transaction_commit" | "transaction_abort" | "changefeed_read" | "changefeed_follow" | "subscription_open" | "subscription_connect" | "subscription_ack" | "subscription_close" | "vector_collection_ensure" | "vector_collection_list" | "vector_point_retrieve" | "vector_point_scroll" | "vector_search" | "backup_create" | "backup_list" | "restore_create" | "estate_read" | "audit_read" | "diagnostics_read" | "security_admin" | "memory_context_read" | "memory_inspect" | "memory_recall" | "memory_retire" | "memory_write" | "lifecycle_apply" | "project_attune" | "project_route" | "reasoning_read" | "reasoning_write" | "work_plan_read" | "work_plan_control" | "work_plan_verify_execute" | "runtime_tool_catalogue_read";
+                                    action: "service_inspect" | "unknown_request" | "session_create" | "session_renew" | "session_close" | "query_execute" | "query_live_poll" | "query_index_ensure" | "query_index_list" | "transaction_begin" | "transaction_preview" | "transaction_commit" | "transaction_abort" | "changefeed_read" | "changefeed_follow" | "subscription_open" | "subscription_connect" | "subscription_ack" | "subscription_close" | "vector_collection_ensure" | "vector_collection_list" | "vector_point_retrieve" | "vector_point_scroll" | "vector_search" | "backup_create" | "backup_list" | "restore_create" | "estate_read" | "estate_admin" | "audit_read" | "audit_export" | "diagnostics_read" | "security_admin" | "memory_context_read" | "memory_inspect" | "memory_recall" | "memory_retire" | "memory_write" | "lifecycle_apply" | "project_attune" | "project_route" | "reasoning_read" | "reasoning_write" | "work_plan_read" | "work_plan_control" | "work_plan_verify_execute" | "runtime_tool_catalogue_read";
                                     /** @enum {string} */
                                     authorization: "public" | "governed";
                                     /**
@@ -14250,7 +14422,7 @@ export interface operations {
                                 protocol_version: number;
                                 tools: {
                                     /** @enum {string} */
-                                    action: "service_inspect" | "unknown_request" | "session_create" | "session_renew" | "session_close" | "query_execute" | "query_live_poll" | "query_index_ensure" | "query_index_list" | "transaction_begin" | "transaction_preview" | "transaction_commit" | "transaction_abort" | "changefeed_read" | "changefeed_follow" | "subscription_open" | "subscription_connect" | "subscription_ack" | "subscription_close" | "vector_collection_ensure" | "vector_collection_list" | "vector_point_retrieve" | "vector_point_scroll" | "vector_search" | "backup_create" | "backup_list" | "restore_create" | "estate_read" | "audit_read" | "diagnostics_read" | "security_admin" | "memory_context_read" | "memory_inspect" | "memory_recall" | "memory_retire" | "memory_write" | "lifecycle_apply" | "project_attune" | "project_route" | "reasoning_read" | "reasoning_write" | "work_plan_read" | "work_plan_control" | "work_plan_verify_execute" | "runtime_tool_catalogue_read";
+                                    action: "service_inspect" | "unknown_request" | "session_create" | "session_renew" | "session_close" | "query_execute" | "query_live_poll" | "query_index_ensure" | "query_index_list" | "transaction_begin" | "transaction_preview" | "transaction_commit" | "transaction_abort" | "changefeed_read" | "changefeed_follow" | "subscription_open" | "subscription_connect" | "subscription_ack" | "subscription_close" | "vector_collection_ensure" | "vector_collection_list" | "vector_point_retrieve" | "vector_point_scroll" | "vector_search" | "backup_create" | "backup_list" | "restore_create" | "estate_read" | "estate_admin" | "audit_read" | "audit_export" | "diagnostics_read" | "security_admin" | "memory_context_read" | "memory_inspect" | "memory_recall" | "memory_retire" | "memory_write" | "lifecycle_apply" | "project_attune" | "project_route" | "reasoning_read" | "reasoning_write" | "work_plan_read" | "work_plan_control" | "work_plan_verify_execute" | "runtime_tool_catalogue_read";
                                     /** @enum {string} */
                                     authorization: "public" | "governed";
                                     /**
@@ -14326,7 +14498,7 @@ export interface operations {
                                      */
                                     action: {
                                         /** @enum {string} */
-                                        action: "service_inspect" | "unknown_request" | "session_create" | "session_renew" | "session_close" | "query_execute" | "query_live_poll" | "query_index_ensure" | "query_index_list" | "transaction_begin" | "transaction_preview" | "transaction_commit" | "transaction_abort" | "changefeed_read" | "changefeed_follow" | "subscription_open" | "subscription_connect" | "subscription_ack" | "subscription_close" | "vector_collection_ensure" | "vector_collection_list" | "vector_point_retrieve" | "vector_point_scroll" | "vector_search" | "backup_create" | "backup_list" | "restore_create" | "estate_read" | "audit_read" | "diagnostics_read" | "security_admin" | "memory_context_read" | "memory_inspect" | "memory_recall" | "memory_retire" | "memory_write" | "lifecycle_apply" | "project_attune" | "project_route" | "reasoning_read" | "reasoning_write" | "work_plan_read" | "work_plan_control" | "work_plan_verify_execute" | "runtime_tool_catalogue_read";
+                                        action: "service_inspect" | "unknown_request" | "session_create" | "session_renew" | "session_close" | "query_execute" | "query_live_poll" | "query_index_ensure" | "query_index_list" | "transaction_begin" | "transaction_preview" | "transaction_commit" | "transaction_abort" | "changefeed_read" | "changefeed_follow" | "subscription_open" | "subscription_connect" | "subscription_ack" | "subscription_close" | "vector_collection_ensure" | "vector_collection_list" | "vector_point_retrieve" | "vector_point_scroll" | "vector_search" | "backup_create" | "backup_list" | "restore_create" | "estate_read" | "estate_admin" | "audit_read" | "audit_export" | "diagnostics_read" | "security_admin" | "memory_context_read" | "memory_inspect" | "memory_recall" | "memory_retire" | "memory_write" | "lifecycle_apply" | "project_attune" | "project_route" | "reasoning_read" | "reasoning_write" | "work_plan_read" | "work_plan_control" | "work_plan_verify_execute" | "runtime_tool_catalogue_read";
                                         /** @constant */
                                         source: "fixed";
                                     } | {
@@ -14357,7 +14529,7 @@ export interface operations {
                                     authentication: "public" | "api_key" | "session_bearer";
                                     client_frame_type: string;
                                     /** @enum {string} */
-                                    connect_action: "service_inspect" | "unknown_request" | "session_create" | "session_renew" | "session_close" | "query_execute" | "query_live_poll" | "query_index_ensure" | "query_index_list" | "transaction_begin" | "transaction_preview" | "transaction_commit" | "transaction_abort" | "changefeed_read" | "changefeed_follow" | "subscription_open" | "subscription_connect" | "subscription_ack" | "subscription_close" | "vector_collection_ensure" | "vector_collection_list" | "vector_point_retrieve" | "vector_point_scroll" | "vector_search" | "backup_create" | "backup_list" | "restore_create" | "estate_read" | "audit_read" | "diagnostics_read" | "security_admin" | "memory_context_read" | "memory_inspect" | "memory_recall" | "memory_retire" | "memory_write" | "lifecycle_apply" | "project_attune" | "project_route" | "reasoning_read" | "reasoning_write" | "work_plan_read" | "work_plan_control" | "work_plan_verify_execute" | "runtime_tool_catalogue_read";
+                                    connect_action: "service_inspect" | "unknown_request" | "session_create" | "session_renew" | "session_close" | "query_execute" | "query_live_poll" | "query_index_ensure" | "query_index_list" | "transaction_begin" | "transaction_preview" | "transaction_commit" | "transaction_abort" | "changefeed_read" | "changefeed_follow" | "subscription_open" | "subscription_connect" | "subscription_ack" | "subscription_close" | "vector_collection_ensure" | "vector_collection_list" | "vector_point_retrieve" | "vector_point_scroll" | "vector_search" | "backup_create" | "backup_list" | "restore_create" | "estate_read" | "estate_admin" | "audit_read" | "audit_export" | "diagnostics_read" | "security_admin" | "memory_context_read" | "memory_inspect" | "memory_recall" | "memory_retire" | "memory_write" | "lifecycle_apply" | "project_attune" | "project_route" | "reasoning_read" | "reasoning_write" | "work_plan_read" | "work_plan_control" | "work_plan_verify_execute" | "runtime_tool_catalogue_read";
                                     /**
                                      * @description A canonical public identifier component.
                                      *
@@ -14411,7 +14583,7 @@ export interface operations {
                                      */
                                     action: {
                                         /** @enum {string} */
-                                        action: "service_inspect" | "unknown_request" | "session_create" | "session_renew" | "session_close" | "query_execute" | "query_live_poll" | "query_index_ensure" | "query_index_list" | "transaction_begin" | "transaction_preview" | "transaction_commit" | "transaction_abort" | "changefeed_read" | "changefeed_follow" | "subscription_open" | "subscription_connect" | "subscription_ack" | "subscription_close" | "vector_collection_ensure" | "vector_collection_list" | "vector_point_retrieve" | "vector_point_scroll" | "vector_search" | "backup_create" | "backup_list" | "restore_create" | "estate_read" | "audit_read" | "diagnostics_read" | "security_admin" | "memory_context_read" | "memory_inspect" | "memory_recall" | "memory_retire" | "memory_write" | "lifecycle_apply" | "project_attune" | "project_route" | "reasoning_read" | "reasoning_write" | "work_plan_read" | "work_plan_control" | "work_plan_verify_execute" | "runtime_tool_catalogue_read";
+                                        action: "service_inspect" | "unknown_request" | "session_create" | "session_renew" | "session_close" | "query_execute" | "query_live_poll" | "query_index_ensure" | "query_index_list" | "transaction_begin" | "transaction_preview" | "transaction_commit" | "transaction_abort" | "changefeed_read" | "changefeed_follow" | "subscription_open" | "subscription_connect" | "subscription_ack" | "subscription_close" | "vector_collection_ensure" | "vector_collection_list" | "vector_point_retrieve" | "vector_point_scroll" | "vector_search" | "backup_create" | "backup_list" | "restore_create" | "estate_read" | "estate_admin" | "audit_read" | "audit_export" | "diagnostics_read" | "security_admin" | "memory_context_read" | "memory_inspect" | "memory_recall" | "memory_retire" | "memory_write" | "lifecycle_apply" | "project_attune" | "project_route" | "reasoning_read" | "reasoning_write" | "work_plan_read" | "work_plan_control" | "work_plan_verify_execute" | "runtime_tool_catalogue_read";
                                         /** @constant */
                                         source: "fixed";
                                     } | {
@@ -14442,7 +14614,7 @@ export interface operations {
                                     authentication: "public" | "api_key" | "session_bearer";
                                     client_frame_type: string;
                                     /** @enum {string} */
-                                    connect_action: "service_inspect" | "unknown_request" | "session_create" | "session_renew" | "session_close" | "query_execute" | "query_live_poll" | "query_index_ensure" | "query_index_list" | "transaction_begin" | "transaction_preview" | "transaction_commit" | "transaction_abort" | "changefeed_read" | "changefeed_follow" | "subscription_open" | "subscription_connect" | "subscription_ack" | "subscription_close" | "vector_collection_ensure" | "vector_collection_list" | "vector_point_retrieve" | "vector_point_scroll" | "vector_search" | "backup_create" | "backup_list" | "restore_create" | "estate_read" | "audit_read" | "diagnostics_read" | "security_admin" | "memory_context_read" | "memory_inspect" | "memory_recall" | "memory_retire" | "memory_write" | "lifecycle_apply" | "project_attune" | "project_route" | "reasoning_read" | "reasoning_write" | "work_plan_read" | "work_plan_control" | "work_plan_verify_execute" | "runtime_tool_catalogue_read";
+                                    connect_action: "service_inspect" | "unknown_request" | "session_create" | "session_renew" | "session_close" | "query_execute" | "query_live_poll" | "query_index_ensure" | "query_index_list" | "transaction_begin" | "transaction_preview" | "transaction_commit" | "transaction_abort" | "changefeed_read" | "changefeed_follow" | "subscription_open" | "subscription_connect" | "subscription_ack" | "subscription_close" | "vector_collection_ensure" | "vector_collection_list" | "vector_point_retrieve" | "vector_point_scroll" | "vector_search" | "backup_create" | "backup_list" | "restore_create" | "estate_read" | "estate_admin" | "audit_read" | "audit_export" | "diagnostics_read" | "security_admin" | "memory_context_read" | "memory_inspect" | "memory_recall" | "memory_retire" | "memory_write" | "lifecycle_apply" | "project_attune" | "project_route" | "reasoning_read" | "reasoning_write" | "work_plan_read" | "work_plan_control" | "work_plan_verify_execute" | "runtime_tool_catalogue_read";
                                     /**
                                      * @description A canonical public identifier component.
                                      *

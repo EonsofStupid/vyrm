@@ -420,17 +420,32 @@ impl RrdEngine {
         request_id: &str,
         operation_id: &str,
     ) -> Result<(Vec<u8>, SessionState, Option<rrd_security::Authorization>)> {
-        let (bytes, mut state) = self.load_authenticated(session_id, token)?;
-        self.require_active_or_expire(
-            session_id,
-            bytes.clone(),
-            &mut state,
+        let mut principal_id = None;
+        let result = (|| {
+            let (bytes, mut state) = self.load_authenticated(session_id, token)?;
+            principal_id.clone_from(&state.principal_id);
+            self.require_active_or_expire(
+                session_id,
+                bytes.clone(),
+                &mut state,
+                now,
+                request_id,
+                operation_id,
+            )?;
+            let authorization =
+                self.compile_session_authorization(&state, action, resource, now)?;
+            Ok((bytes, state, authorization))
+        })();
+        self.record_direct_authorization(
+            principal_id,
+            action,
+            resource,
             now,
             request_id,
             operation_id,
+            result.as_ref().err(),
         )?;
-        let authorization = self.compile_session_authorization(&state, action, resource, now)?;
-        Ok((bytes, state, authorization))
+        result
     }
 
     pub(in crate::engine) fn load_authenticated(
