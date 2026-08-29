@@ -21,6 +21,7 @@ pub enum ServiceError {
     WrongScope,
     OperationDigestMismatch,
     Query(String),
+    Inference(String),
     Vector(String),
     VectorPressure(String),
     Changefeed(String),
@@ -66,6 +67,7 @@ impl ServiceError {
             | Self::Changefeed(_)
             | Self::Subscription(_)
             | Self::Query(_)
+            | Self::Inference(_)
             | Self::Function(_)
             | Self::Runtime(_)
             | Self::Vector(_)

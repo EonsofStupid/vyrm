@@ -123,6 +123,29 @@ pub fn product_capability_catalogue() -> ProductCapabilityCatalogue {
     );
     capabilities.push(embedded_functions);
 
+    let mut native_inference = ProductCapability {
+        id: "native-embedding-inference".into(),
+        label: "Native Embedding Inference".into(),
+        category: "ai_runtime".into(),
+        summary: "Run exact-model bounded batch inference and atomic embed-and-vector-search through an engine-owned registry with explicit local/offline and remote-provider trust boundaries.".into(),
+        bindings: bindings(
+            available("rrd-engine:RrdEngine::generate_embeddings"),
+            planned(ENGINE_SURFACE_PLAN_REASON),
+            planned(ENGINE_SURFACE_PLAN_REASON),
+            planned(ENGINE_SURFACE_PLAN_REASON),
+            planned(ENGINE_SURFACE_PLAN_REASON),
+        ),
+    };
+    expose(
+        binding(&mut native_inference, ProductSurface::Engine),
+        "rrd-engine:RrdEngine::list_embedding_models",
+    );
+    expose(
+        binding(&mut native_inference, ProductSurface::Engine),
+        "rrd-engine:RrdEngine::embed_and_search_vectors",
+    );
+    capabilities.push(native_inference);
+
     for (id, label, category, summary) in [
         (
             "document-ingest",

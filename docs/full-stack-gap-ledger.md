@@ -769,8 +769,11 @@ serving graph; unchanged configurations append only those versions into a new
 immutable generation while the prior generation serves. Active graph filters
 protect their typed payload indexes. Four-metric scalar/AVX2, nested filter,
 100/50/10/1% selectivity, eight-generation update/delete, and reopen corpora
-pass. Physical tier enforcement, compact graph/payload-bitmaps, generated
-administration bindings, and public inference administration remain open. A deterministic MSE TurboQuant codec and
+pass. Compact graph/payload-bitmaps and generated administration bindings
+remain open. Native inference now has an engine-owned exact-model registry,
+public bounded batch generation, explicit local/offline and remote-provider
+trust boundaries, and one-stamp embed-and-search with no temporary vector
+commit. A deterministic MSE TurboQuant codec and
 authenticated binary artifact now implement seeded rotation, fixed
 distribution-matched 4/2/1.5/1-bit packing, norm-corrected asymmetric scoring,
 catalogue/planner selection, corruption denial, and exact-f32 reranking. Public
@@ -814,7 +817,10 @@ identities.
   pass. Independent per-structure tiers, warming, and distributed residency
   remain open.
 - Physical GPU indexing with CPU byte/semantic differential and fallback.
-- Server/client inference for local and provider models with digest provenance.
+- Engine-native local/provider adapter registry, bounded batching, digest
+  provenance, and atomic embed-and-search are implemented. Generated
+  server/client bindings remain G06 work; live provider credentials/endpoints
+  require deployment certification without entering durable RRD state.
 
 **Exit gate:** exact-oracle correctness first, then recall/latency/memory/build/
 update/recovery matrices on fixed hardware and corpora against current Qdrant.

@@ -3,7 +3,8 @@
 
 use crate::{
     invalid, validate_digest, validate_text, EmbeddingBackend, EmbeddingBackendDescriptor,
-    EmbeddingModality, EmbeddingModelSpec, EmbeddingRequest, ExecutionTarget, NetworkRequirement,
+    EmbeddingModality, EmbeddingModelSpec, EmbeddingRequest, EmbeddingResourceLimits,
+    ExecutionTarget, InferenceTrustBoundary, NetworkRequirement,
 };
 use fastembed::{InitOptionsUserDefined, TextEmbedding, TokenizerFiles, UserDefinedEmbeddingModel};
 use rrd_core::{digest, Result, VectorNormalization, VectorValue};
@@ -64,20 +65,23 @@ impl FastEmbedLocalBackend {
                 reason: format!("cannot initialize local FastEmbed model: {error}"),
             }
         })?;
+        let model_spec = EmbeddingModelSpec {
+            provider: identity.provider,
+            model: identity.model,
+            revision: identity.revision,
+            model_digest,
+            modality: EmbeddingModality::Text,
+            dimensions: identity.dimensions,
+            normalization: identity.normalization,
+            maximum_input_bytes: identity.maximum_input_bytes,
+        };
         let descriptor = EmbeddingBackendDescriptor {
             id: "rrflow:fastembed:local:v1".into(),
-            model: EmbeddingModelSpec {
-                provider: identity.provider,
-                model: identity.model,
-                revision: identity.revision,
-                model_digest,
-                modality: EmbeddingModality::Text,
-                dimensions: identity.dimensions,
-                normalization: identity.normalization,
-                maximum_input_bytes: identity.maximum_input_bytes,
-            },
+            resources: EmbeddingResourceLimits::for_model(&model_spec, 256)?,
+            model: model_spec,
             execution: identity.execution,
             network: NetworkRequirement::None,
+            trust: InferenceTrustBoundary::LocalOffline,
             deterministic: identity.deterministic,
         };
         descriptor.validate()?;
@@ -91,28 +95,37 @@ impl EmbeddingBackend for FastEmbedLocalBackend {
     }
 
     fn embed(&mut self, request: &EmbeddingRequest) -> Result<VectorValue> {
-        if request.bytes.len() > self.descriptor.model.maximum_input_bytes as usize {
-            return invalid("FastEmbed input exceeds the declared model byte limit");
-        }
-        if !request.media_type.starts_with("text/") && request.media_type != "application/json" {
-            return invalid("local FastEmbed backend accepts text or JSON only");
-        }
-        let text =
-            std::str::from_utf8(&request.bytes).map_err(|_| rrd_core::Error::InvalidRuntime {
-                reason: "local FastEmbed input must be UTF-8".into(),
+        let mut output = self.embed_batch(std::slice::from_ref(request))?;
+        Ok(output.remove(0))
+    }
+
+    fn embed_batch(&mut self, requests: &[EmbeddingRequest]) -> Result<Vec<VectorValue>> {
+        let mut texts = Vec::with_capacity(requests.len());
+        for request in requests {
+            if request.bytes.len() > self.descriptor.model.maximum_input_bytes as usize {
+                return invalid("FastEmbed input exceeds the declared model byte limit");
+            }
+            if !request.media_type.starts_with("text/") && request.media_type != "application/json"
+            {
+                return invalid("local FastEmbed backend accepts text or JSON only");
+            }
+            let text = std::str::from_utf8(&request.bytes).map_err(|_| {
+                rrd_core::Error::InvalidRuntime {
+                    reason: "local FastEmbed input must be UTF-8".into(),
+                }
             })?;
-        let mut output =
-            self.model
-                .embed([text], Some(1))
-                .map_err(|error| rrd_core::Error::InvalidRuntime {
-                    reason: format!("local FastEmbed inference failed: {error}"),
-                })?;
-        if output.len() != 1 {
-            return invalid("local FastEmbed returned an unexpected batch shape");
+            texts.push(text);
         }
-        Ok(VectorValue::Dense {
-            values: output.remove(0),
-        })
+        let output = self
+            .model
+            .embed(texts, Some(requests.len()))
+            .map_err(|error| rrd_core::Error::InvalidRuntime {
+                reason: format!("local FastEmbed inference failed: {error}"),
+            })?;
+        Ok(output
+            .into_iter()
+            .map(|values| VectorValue::Dense { values })
+            .collect())
     }
 }
 

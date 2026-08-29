@@ -4,27 +4,27 @@ use rrd_contract::{
     CloseSession, CommitReceipt, CommitTransaction, CorrelationId, CreateInstanceBackup,
     DataCatalogueIdentity, DataLogicalModel, DataRecordSchema, DataReference, DataSchemaMode,
     DataSchemaRegistry, DataSnapshot, DataTableSchema, DataTarget, DeleteVectorCollection,
-    DeleteVectorPayloadIndex, DeploymentMode, EnsureQueryIndex, EnsureVectorCollection,
-    EnsureVectorIndex, EnsureVectorPayloadIndex, ErrorBody, ErrorCode,
-    EstateActivityPolicySnapshot, EstateBackupJobSnapshot, EstateBackupJobState,
-    EstateBackupJobsSnapshot, EstateMutationResult, EstateSnapshot, ExecuteQuery,
-    ExecuteQueryTransaction, ExecuteRetrievalQuery, FollowChangefeed, ForwardRollbackCounts,
-    ForwardRollbackRequest, HybridFusion, IdempotencyBinding, ListQueryIndexes,
-    ListVectorCollections, ListVectorPayloadIndexes, ListVectorQuantizationArtifacts, Liveness,
-    NamedVectorDefinition, PollLiveQuery, PreviewTransaction, ProductCapability,
-    ProductCapabilityCatalogue, ProductSurface, QueryBudget, QueryExecutionAnalysisSnapshot,
-    QueryExecutionSnapshot, QueryIndexKind, QueryPlanCandidate, QueryPlanSnapshot, QueryResult,
-    QueryRowSnapshot, QueryValue, ReadAudit, ReadChangefeed, ReadDataSnapshot, ReadEstate,
-    Readiness, RenewSession, RequestContext, RequestEnvelope, ResourceId, ResourceKind,
-    ResourcePath, ResponseEnvelope, ResponseOutcome, RestoreInstanceBackup,
-    RetireVectorQuantizationArtifact, RetrievalFusion, RetrievalPrefetch, RetrievalQuery,
-    RetrievalResultShape, SearchHybrid, SearchVectors, ServiceCapabilities, SessionEndState,
-    SessionLease, SessionLimits, SessionTermination, SurfaceBinding, SurfaceDisposition,
-    TransactionMutation, TransactionPreview, TransactionState, VectorIndexConfiguration,
-    VectorMemoryTier, VectorPayloadCondition, VectorPayloadFilter, VectorPayloadIndexKind,
-    VectorPayloadOperator, VectorProductCompression, VectorQuantizationBits,
-    VectorQuantizationMethod, VectorSearchMetric, VectorSearchMode, VectorSearchQuery,
-    VectorValueKind, PROTOCOL, PROTOCOL_VERSION,
+    DeleteVectorPayloadIndex, DeploymentMode, EmbedAndSearchVectors, EmbeddingInput,
+    EmbeddingNetworkPolicy, EnsureQueryIndex, EnsureVectorCollection, EnsureVectorIndex,
+    EnsureVectorPayloadIndex, ErrorBody, ErrorCode, EstateActivityPolicySnapshot,
+    EstateBackupJobSnapshot, EstateBackupJobState, EstateBackupJobsSnapshot, EstateMutationResult,
+    EstateSnapshot, ExecuteQuery, ExecuteQueryTransaction, ExecuteRetrievalQuery, FollowChangefeed,
+    ForwardRollbackCounts, ForwardRollbackRequest, GenerateEmbeddings, HybridFusion,
+    IdempotencyBinding, ListQueryIndexes, ListVectorCollections, ListVectorPayloadIndexes,
+    ListVectorQuantizationArtifacts, Liveness, NamedVectorDefinition, PollLiveQuery,
+    PreviewTransaction, ProductCapability, ProductCapabilityCatalogue, ProductSurface, QueryBudget,
+    QueryExecutionAnalysisSnapshot, QueryExecutionSnapshot, QueryIndexKind, QueryPlanCandidate,
+    QueryPlanSnapshot, QueryResult, QueryRowSnapshot, QueryValue, ReadAudit, ReadChangefeed,
+    ReadDataSnapshot, ReadEstate, Readiness, RenewSession, RequestContext, RequestEnvelope,
+    ResourceId, ResourceKind, ResourcePath, ResponseEnvelope, ResponseOutcome,
+    RestoreInstanceBackup, RetireVectorQuantizationArtifact, RetrievalFusion, RetrievalPrefetch,
+    RetrievalQuery, RetrievalResultShape, SearchHybrid, SearchVectors, ServiceCapabilities,
+    SessionEndState, SessionLease, SessionLimits, SessionTermination, SurfaceBinding,
+    SurfaceDisposition, TransactionMutation, TransactionPreview, TransactionState,
+    VectorIndexConfiguration, VectorMemoryTier, VectorPayloadCondition, VectorPayloadFilter,
+    VectorPayloadIndexKind, VectorPayloadOperator, VectorProductCompression,
+    VectorQuantizationBits, VectorQuantizationMethod, VectorSearchMetric, VectorSearchMode,
+    VectorSearchQuery, VectorValueKind, PROTOCOL, PROTOCOL_VERSION,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -1615,4 +1615,46 @@ fn recursive_retrieval_contract_is_strict_bounded_and_multimodal() {
     };
     prefetch[0].limit = 5;
     assert!(oversized_prefetch.validate().is_err());
+}
+
+#[test]
+fn public_embedding_contract_is_bounded_strict_and_collection_addressed() {
+    let input = EmbeddingInput {
+        id: CanonicalId::new("query-text").unwrap(),
+        media_type: "text/plain".into(),
+        bytes: b"source-grounded inference".to_vec(),
+    };
+    let batch = GenerateEmbeddings {
+        scope: "instance:alpha".into(),
+        backend_id: "rrflow:feature-hash:cpu:v1".into(),
+        network_policy: EmbeddingNetworkPolicy::Deny,
+        inputs: vec![input.clone()],
+    };
+    batch.validate().unwrap();
+    let encoded = serde_json::to_value(&batch).unwrap();
+    assert_eq!(
+        serde_json::from_value::<GenerateEmbeddings>(encoded.clone()).unwrap(),
+        batch
+    );
+    let mut unknown = encoded;
+    unknown["provider_api_key"] = serde_json::json!("must-not-cross-contract");
+    assert!(serde_json::from_value::<GenerateEmbeddings>(unknown).is_err());
+
+    let request = EmbedAndSearchVectors {
+        scope: "instance:alpha".into(),
+        backend_id: batch.backend_id,
+        network_policy: EmbeddingNetworkPolicy::Deny,
+        input,
+        valid_at: 10,
+        collection_id: CanonicalId::new("documents").unwrap(),
+        vector_name: CanonicalId::new("body").unwrap(),
+        filter: None,
+        top_k: 4,
+        mode: VectorSearchMode::Exact,
+        max_scanned_changes: 10_000,
+    };
+    request.validate().unwrap();
+    let mut invalid = request;
+    invalid.input.bytes.clear();
+    assert!(invalid.validate().is_err());
 }

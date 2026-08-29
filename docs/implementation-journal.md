@@ -3590,3 +3590,33 @@ index.
   `bbf2f27f80e47091a56df67b3383b965cbd0aabdcf5a60af1a4f66fb4aa753ed`
   because generated HTTP/MCP/CLI/SDK exposure is G06 work. RRFlow publication
   follows this candidate entry.
+
+## 2026-08-29 — G04-W06 native embedding and governed inference candidate
+
+- Extended `rrd-inference` with a revisioned exact-descriptor backend registry,
+  explicit `local_offline` and `remote_provider` trust boundaries, and hard
+  per-input, batch-count, batch-byte, and output-value limits. Network, source
+  digest, output shape, and normalization violations fail before admission;
+  provider/network and resource denials occur before backend dispatch.
+- Added a native batch method to the provider-neutral backend contract. The
+  default remains compatible with synchronous adapters, while FastEmbed sends
+  the validated text batch through one native model invocation. Executable
+  sessions and credentials remain process-local and non-serializable.
+- Added strict transport-neutral contracts for model catalogue inspection,
+  bounded batch generation, and collection-addressed embed-and-search. Public
+  results carry read-manifest/cursor, registry revision, backend execution,
+  trust/resource evidence, source SHA-256, exact model SHA-256, normalization,
+  and generated values.
+- Composed the registry into every `RrdEngine` mode with distinct
+  `embedding_model_list`, `embedding_generate`, and `embedding_search`
+  authorization actions. `embed_and_search_vectors` captures one read stamp,
+  validates the backend against the named-vector model contract, and reuses
+  `search_vectors_at`; it never commits a temporary query vector.
+- Added focused registry/provider/resource/digest tests plus an end-to-end
+  engine scenario that batch-generates two model-bound vectors, commits them
+  through the unified transaction authority, embeds a query, returns the exact
+  matching document, and proves the runtime cursor does not advance during the
+  query operation.
+- The reviewed public security schema advances the OpenAPI digest to
+  `98873117404c51a862e5811b51a372f99636bbfbf2cde2ee1db51bab31ca45d3`.
+  Generated outward HTTP/MCP/CLI/SDK bindings remain owned by G06.

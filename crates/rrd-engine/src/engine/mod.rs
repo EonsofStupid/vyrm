@@ -59,6 +59,12 @@ use rrd_contract::{
     VectorQuantizationMethod, VectorSearchHit, VectorSearchMetric, VectorSearchMode,
     VectorSearchQuery, VectorSearchResult, VectorValueKind, DIAGNOSTIC_SNAPSHOT_FORMAT_VERSION,
 };
+use rrd_contract::{
+    EmbedAndSearchVectors, EmbedAndSearchVectorsResult, EmbeddingBackendSnapshot,
+    EmbeddingExecutionTarget, EmbeddingModelCatalogue, EmbeddingNetworkPolicy,
+    EmbeddingResourceLimits, EmbeddingTrustBoundary, GenerateEmbeddings, GenerateEmbeddingsResult,
+    GeneratedEmbedding, ListEmbeddingModels,
+};
 use rrd_core::{
     digest, Claim, DataTransaction, EmbeddingProvenance, GeoPoint, GeoValue, ObjectReceipt,
     ObjectReference, Predicate, Producer, ProjectionId, ProjectionState, PromotionState, ReadStamp,
@@ -91,6 +97,7 @@ mod diagnostic;
 mod error;
 mod estate;
 mod estate_control;
+mod inference;
 mod invocation;
 mod model;
 mod query;

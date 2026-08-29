@@ -589,6 +589,9 @@ fn runtime_tool_operation_for_action(action: SecurityAction) -> crate::Result<Rr
         | SecurityAction::DiagnosticsRead
         | SecurityAction::EstateAdmin
         | SecurityAction::SecurityAdmin
+        | SecurityAction::EmbeddingModelList
+        | SecurityAction::EmbeddingGenerate
+        | SecurityAction::EmbeddingSearch
         | SecurityAction::RuntimeToolCatalogueRead => {
             return Err(ServiceError::Contract(format!(
                 "security action {action:?} is not a runtime-tool operation"

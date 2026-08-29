@@ -1,6 +1,6 @@
 # RRFlow embedding, compact artifact, accelerator, and edge contract (M6)
 
-Status: local executable kernel gate, 2026-08-19.
+Status: governed engine and local executable kernel gate, 2026-08-29.
 
 M6 closes the gap between canonical source bytes and a locally searchable,
 model-bound vector artifact. It does not make inference or an ANN index
@@ -34,6 +34,40 @@ provenance. The adapter cannot select a remote model. This follows
 [FastEmbed's user-defined model path](https://docs.rs/fastembed/5.17.4/fastembed/struct.UserDefinedEmbeddingModel.html)
 while making the no-network boundary a build feature rather than a cache
 assumption.
+
+## Engine-owned registry and public inference
+
+`RrdEngine` now owns one process-local `EmbeddingBackendRegistry` in memory,
+embedded, and daemon compositions. Installation binds executable backend code
+to one validated descriptor: exact model/revision/SHA-256, modality, dimensions,
+normalization, execution target, deterministic flag, trust boundary, and hard
+per-input, batch-input, batch-byte, and output-value limits. The registry is
+revisioned and publicly inspectable through `list_embedding_models`. Duplicate
+backend identities fail closed.
+
+Executable sessions, accelerator handles, and provider credentials remain
+process-local. They are deliberately absent from RRD records, public requests,
+audit properties, and model provenance. The descriptor makes the input trust
+boundary explicit:
+
+- `local_offline` permits CPU/GPU execution with no network requirement;
+- `remote_provider { provider }` must match the remote execution provider and
+  requires an explicit allow-network request; and
+- deny-network requests, inconsistent descriptors, corrupt source digests, and
+  batch/resource overruns are rejected before backend dispatch.
+
+`generate_embeddings` accepts a bounded batch and returns exact read-stamp,
+registry-revision, backend, source-digest, model-digest, normalization, and
+generation evidence. Backends may override the batch primitive; the local
+FastEmbed adapter sends the validated batch to one native FastEmbed call.
+
+`embed_and_search_vectors` is one authenticated engine operation. It captures
+one RRD read stamp, proves the selected backend exactly matches the named
+vector's model binding, generates one dense query embedding, and lowers it
+directly into the existing `search_vectors_at` planner/executor at that same
+stamp. No temporary query vector or second inference store is committed. A
+concurrent catalogue/data transition makes the stamped search fail instead of
+combining versions.
 
 ## Model-bound search
 
@@ -121,3 +155,6 @@ artifact/RSS/latency evidence budgets.
 - This gate does not establish superiority over Qdrant. A fixed-hardware,
   equivalent-workload comparison belongs after the remaining production paths
   exist.
+- Generated HTTP/MCP/CLI/SDK bindings remain G06 work. G04-W06 establishes the
+  transport-neutral contract and public Rust engine authority; live provider
+  endpoint/credential adapters still require deployment-specific certification.

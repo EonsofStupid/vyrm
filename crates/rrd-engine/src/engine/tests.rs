@@ -86,6 +86,7 @@ mod data_crud;
 mod deployment_conformance;
 mod index_foundation;
 mod lifecycle;
+mod native_inference;
 mod query_transaction;
 mod recovery;
 mod security;

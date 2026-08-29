@@ -4,11 +4,14 @@ use rrd_core::{
     VectorValue,
 };
 use rrd_inference::{
-    EmbeddingBackend, EmbeddingCoordinator, EmbeddingJob, EmbeddingRequest, EmbeddingSourceReader,
-    EmbeddingSourceSnapshot, ExecutionTarget, FeatureHashBackend, NetworkPolicy,
-    NetworkRequirement, EMBEDDING_CONTRACT_VERSION,
+    EmbeddingBackend, EmbeddingBackendRegistry, EmbeddingCoordinator, EmbeddingJob,
+    EmbeddingRequest, EmbeddingSourceReader, EmbeddingSourceSnapshot, ExecutionTarget,
+    FeatureHashBackend, InferenceTrustBoundary, NetworkPolicy, NetworkRequirement,
+    EMBEDDING_CONTRACT_VERSION,
 };
 use rrd_store::{Engine, MemoryEngine};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
 
 struct SequenceReader {
     snapshots: Vec<EmbeddingSourceSnapshot>,
@@ -99,6 +102,34 @@ struct MalformedBackend {
     descriptor: rrd_inference::EmbeddingBackendDescriptor,
 }
 
+struct CountingBackend {
+    descriptor: rrd_inference::EmbeddingBackendDescriptor,
+    calls: Arc<AtomicUsize>,
+}
+
+impl EmbeddingBackend for CountingBackend {
+    fn descriptor(&self) -> &rrd_inference::EmbeddingBackendDescriptor {
+        &self.descriptor
+    }
+
+    fn embed(&mut self, _request: &EmbeddingRequest) -> rrd_core::Result<VectorValue> {
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        let mut values = vec![0.0; self.descriptor.model.dimensions as usize];
+        values[0] = 1.0;
+        Ok(VectorValue::Dense { values })
+    }
+}
+
+fn embedding_request(id: &str, bytes: &[u8]) -> EmbeddingRequest {
+    EmbeddingRequest {
+        job_id: RuntimeId::new(id).unwrap(),
+        job_digest: digest::sha256_hex(format!("job:{id}").as_bytes()),
+        source_digest: digest::sha256_hex(bytes),
+        media_type: "text/plain".into(),
+        bytes: bytes.to_vec(),
+    }
+}
+
 impl EmbeddingBackend for MalformedBackend {
     fn descriptor(&self) -> &rrd_inference::EmbeddingBackendDescriptor {
         &self.descriptor
@@ -146,6 +177,9 @@ fn offline_policy_and_exact_model_identity_are_enforced_before_inference() {
         provider: "example".into(),
     };
     remote_descriptor.network = NetworkRequirement::Required;
+    remote_descriptor.trust = InferenceTrustBoundary::RemoteProvider {
+        provider: "example".into(),
+    };
     let mut remote = MalformedBackend {
         descriptor: remote_descriptor,
     };
@@ -165,6 +199,113 @@ fn offline_policy_and_exact_model_identity_are_enforced_before_inference() {
     let error = EmbeddingCoordinator::prepare(&job, &mut reader, &mut wrong_model).unwrap_err();
     assert!(error.to_string().contains("requested model"));
     assert_eq!(reader.reads, 0);
+}
+
+#[test]
+fn registry_batches_exact_models_and_rejects_duplicate_or_corrupt_input() {
+    let backend = FeatureHashBackend::new(32, 41).unwrap();
+    let descriptor = backend.descriptor().clone();
+    let mut registry = EmbeddingBackendRegistry::default();
+    assert_eq!(registry.install(Box::new(backend)).unwrap(), 1);
+    assert_eq!(registry.revision(), 1);
+    assert_eq!(registry.descriptors(), vec![descriptor.clone()]);
+
+    let requests = vec![
+        embedding_request("batch-a", b"alpha source"),
+        embedding_request("batch-b", b"beta source"),
+    ];
+    let result = registry
+        .embed_batch(
+            &descriptor.id,
+            &descriptor.model,
+            NetworkPolicy::Deny,
+            &requests,
+        )
+        .unwrap();
+    assert_eq!(result.registry_revision, 1);
+    assert_eq!(result.backend, descriptor);
+    assert_eq!(result.vectors.len(), 2);
+
+    assert!(registry
+        .install(Box::new(FeatureHashBackend::new(32, 41).unwrap()))
+        .unwrap_err()
+        .to_string()
+        .contains("already installed"));
+    let mut corrupt = embedding_request("corrupt", b"original");
+    corrupt.bytes = b"changed".to_vec();
+    assert!(registry
+        .embed_batch(
+            &result.backend.id,
+            &result.backend.model,
+            NetworkPolicy::Deny,
+            &[corrupt],
+        )
+        .unwrap_err()
+        .to_string()
+        .contains("source digest"));
+}
+
+#[test]
+fn registry_enforces_provider_trust_and_resource_limits_before_dispatch() {
+    let baseline = FeatureHashBackend::new(32, 43).unwrap();
+    let mut remote = baseline.descriptor().clone();
+    remote.id = "provider:test:v1".into();
+    remote.execution = ExecutionTarget::Remote {
+        provider: "test-provider".into(),
+    };
+    remote.network = NetworkRequirement::Required;
+    remote.trust = InferenceTrustBoundary::RemoteProvider {
+        provider: "test-provider".into(),
+    };
+    let calls = Arc::new(AtomicUsize::new(0));
+    let mut registry = EmbeddingBackendRegistry::default();
+    registry
+        .install(Box::new(CountingBackend {
+            descriptor: remote.clone(),
+            calls: Arc::clone(&calls),
+        }))
+        .unwrap();
+    let requests = vec![embedding_request("provider-a", b"provider input")];
+    assert!(registry
+        .embed_batch(&remote.id, &remote.model, NetworkPolicy::Deny, &requests,)
+        .unwrap_err()
+        .to_string()
+        .contains("denies the network"));
+    assert_eq!(calls.load(Ordering::SeqCst), 0);
+    assert_eq!(
+        registry
+            .embed_batch(&remote.id, &remote.model, NetworkPolicy::Allow, &requests,)
+            .unwrap()
+            .vectors
+            .len(),
+        1
+    );
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+
+    let mut bounded = baseline.descriptor().clone();
+    bounded.id = "bounded:test:v1".into();
+    bounded.resources.maximum_batch_inputs = 1;
+    let bounded_calls = Arc::new(AtomicUsize::new(0));
+    registry
+        .install(Box::new(CountingBackend {
+            descriptor: bounded.clone(),
+            calls: Arc::clone(&bounded_calls),
+        }))
+        .unwrap();
+    assert!(registry
+        .embed_batch(
+            &bounded.id,
+            &bounded.model,
+            NetworkPolicy::Deny,
+            &[
+                embedding_request("bounded-a", b"first"),
+                embedding_request("bounded-b", b"second"),
+            ],
+        )
+        .unwrap_err()
+        .to_string()
+        .contains("input count"));
+    assert_eq!(bounded_calls.load(Ordering::SeqCst), 0);
 }
 
 #[test]

@@ -8,6 +8,7 @@
 mod capability_surface;
 mod diagnostic;
 mod function;
+mod inference;
 mod lifecycle;
 mod platform;
 mod runtime_tool;
@@ -35,6 +36,13 @@ pub use function::{
     MAX_FUNCTIONS_PER_CATALOGUE, MAX_FUNCTION_INPUT_BYTES, MAX_FUNCTION_JSON_SAFE_INTEGER,
     MAX_FUNCTION_OUTPUT_BYTES, MAX_FUNCTION_SOURCE_BYTES, MAX_FUNCTION_TRIGGERS_PER_CATALOGUE,
     MAX_FUNCTION_VALUE_DEPTH, MAX_FUNCTION_VALUE_ITEMS, MAX_FUNCTION_WASM_BYTES,
+};
+pub use inference::{
+    EmbedAndSearchVectors, EmbedAndSearchVectorsResult, EmbeddingBackendSnapshot,
+    EmbeddingExecutionTarget, EmbeddingInput, EmbeddingModality, EmbeddingModelCatalogue,
+    EmbeddingNetworkPolicy, EmbeddingResourceLimits, EmbeddingTrustBoundary, GenerateEmbeddings,
+    GenerateEmbeddingsResult, GeneratedEmbedding, ListEmbeddingModels, MAX_EMBEDDING_BATCH_BYTES,
+    MAX_EMBEDDING_BATCH_INPUTS, MAX_EMBEDDING_INPUT_BYTES,
 };
 pub use lifecycle::{
     LifecycleEnforcementLevelV1, LifecycleEventCommandV1, LifecycleEventEnvelopeV1,
@@ -67,7 +75,7 @@ use std::fmt;
 pub const PROTOCOL: &str = "rrd";
 pub const PROTOCOL_VERSION: u16 = 1;
 pub const OPENAPI_DOCUMENT_SHA256: &str =
-    "bbf2f27f80e47091a56df67b3383b965cbd0aabdcf5a60af1a4f66fb4aa753ed";
+    "98873117404c51a862e5811b51a372f99636bbfbf2cde2ee1db51bab31ca45d3";
 pub const MAX_ID_BYTES: usize = 128;
 pub const MAX_MESSAGE_BYTES: usize = 4_096;
 pub const MAX_CAPABILITIES: usize = 512;
@@ -2803,6 +2811,9 @@ pub enum SecurityAction {
     VectorPointRetrieve,
     VectorPointScroll,
     VectorSearch,
+    EmbeddingModelList,
+    EmbeddingGenerate,
+    EmbeddingSearch,
     BackupCreate,
     BackupList,
     RestoreCreate,
