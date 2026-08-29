@@ -717,6 +717,79 @@ fn physical_storage_attributes(
                 before.filter_negatives,
                 after.filter_negatives,
             );
+            if let Some(mode) = &after.segment_io_requested_mode {
+                attributes.insert(
+                    "segment_io_requested_mode".into(),
+                    RuntimeValue::String(mode.clone()),
+                );
+            }
+            insert_counter(
+                &mut attributes,
+                "segment_io_mmap_segments",
+                after.segment_io_mmap_segments,
+            );
+            insert_counter(
+                &mut attributes,
+                "segment_io_uring_segments",
+                after.segment_io_uring_segments,
+            );
+            insert_counter(
+                &mut attributes,
+                "segment_io_bounded_segments",
+                after.segment_io_bounded_segments,
+            );
+            insert_delta(
+                &mut attributes,
+                "segment_io_fallbacks_delta",
+                before.segment_io_fallbacks,
+                after.segment_io_fallbacks,
+            );
+            if let Some(reason) = &after.segment_io_last_fallback {
+                attributes.insert(
+                    "segment_io_last_fallback".into(),
+                    RuntimeValue::String(reason.clone()),
+                );
+            }
+            insert_delta(
+                &mut attributes,
+                "segment_io_reads_delta",
+                before.segment_io_read_operations,
+                after.segment_io_read_operations,
+            );
+            insert_delta(
+                &mut attributes,
+                "segment_io_mmap_reads_delta",
+                before.segment_io_mmap_reads,
+                after.segment_io_mmap_reads,
+            );
+            insert_delta(
+                &mut attributes,
+                "segment_io_uring_reads_delta",
+                before.segment_io_uring_reads,
+                after.segment_io_uring_reads,
+            );
+            insert_delta(
+                &mut attributes,
+                "segment_io_bounded_reads_delta",
+                before.segment_io_bounded_reads,
+                after.segment_io_bounded_reads,
+            );
+            insert_delta(
+                &mut attributes,
+                "segment_io_bytes_read_delta",
+                before.segment_io_bytes_read,
+                after.segment_io_bytes_read,
+            );
+            insert_counter(
+                &mut attributes,
+                "segment_io_max_request_bytes",
+                after.segment_io_max_request_bytes,
+            );
+            insert_counter(
+                &mut attributes,
+                "segment_io_peak_request_bytes",
+                after.segment_io_peak_request_bytes,
+            );
         }
         (Err(before_error), Err(after_error)) => {
             attributes.insert(

@@ -90,7 +90,11 @@ pub use rrd_core::{
 pub use rrd_lsm::{
     publish_rename as publish_durable_rename, sync_directory as sync_directory_metadata,
 };
-pub use s3::{ConditionalPut, S3CompatibleObjectStore, S3ObjectClient, S3ObjectMetadata};
+pub use s3::{
+    ConditionalPut, S3Authentication, S3CompatibleObjectStore, S3MultipartUpload, S3ObjectClient,
+    S3ObjectMetadata, S3TransferPolicy, S3TransportCapabilities, S3UploadedPart,
+    DEFAULT_S3_RANGE_BYTES, S3_MAX_PARTS, S3_MAX_PART_BYTES, S3_MIN_PART_BYTES,
+};
 pub use store::{AppendOutcome, IdempotentAppendOutcome, Store};
 pub use upgrade::{
     migrate_native_format, migrate_native_format_with_fault, native_format_migration_edge,

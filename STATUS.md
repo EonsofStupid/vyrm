@@ -4,8 +4,8 @@
 
 The foundation is not complete, but progress is now recorded against one
 enforced 65-item board rather than an informal checklist. G00-W01 through
-G00-W05, G01-W01 through G01-W04, and G02-W01 through G02-W04 are verified:
-13/65. G02-W05 is active. The repository contains substantial executable
+G00-W05, G01-W01 through G01-W04, and G02-W01 through G02-W05 are verified:
+14/65. G02-W06 is active. The repository contains substantial executable
 storage, query, vector, reasoning, server, security, SDK, estate, and
 Connectome code under one `RrdEngine` composition root. Connectome is
 client-only, the CLI opens `RrdEngine`, and the security and estate product
@@ -19,6 +19,8 @@ is published at `b079151164d87873230aa24c7ff0a25d3515d96e` with all fourteen
 remote partitions and `pipeline / ci-gate` green in run `33217251152`.
 G02-W04 is locally committed at `b4187fe3cf18662bde8caec975ee4e24dbab2f93`
 and verified as `a3b092159ae48a9645c05b869d031396f1ac6f883f35090d2dd0f3f171c04c8a`;
+G02-W05 is locally committed at `a5ca5130d30a4e86acc93b0a64ca9eda549c2903`
+and verified as `9dd4891c180dc2c7d14610f586bd4c85d7beded05daafda2c971fb970bc8f9bc`;
 the next broad remote matrix is intentionally deferred to the G02 boundary.
 Canonical platform terminology is owned only by `docs/platform/README.md`, and
 the end-to-end execution/implementation map is owned only by
@@ -68,7 +70,7 @@ the end-to-end execution/implementation map is owned only by
   every implemented domain, and Connectome's parity test consumes the same
   validated runtime-tool and product-surface catalogues. Credentialed secured-daemon mode plus
   the cohesive workspace and remote matrices remain open.
-- G02-W05 currently has a locally green candidate for stable bitemporal query
+- G02-W05 supplies stable bitemporal query
   reads and forward structural rollback. RRFlowQL now bounds claim correction
   selection, schema/source watermarks, index selection, and log replay by the
   same literal `KNOWN` cursor. Memory, Fjall, native, and native-reopen tests
@@ -79,6 +81,16 @@ the end-to-end execution/implementation map is owned only by
   unchanged. Vector, geo, series, object, schema, event, and security-audit
   history are not silently rewritten; broader rollback scope remains explicit
   future work.
+- G02-W06 currently has a locally green cohesive tiered-persistence candidate.
+  The existing immutable-object port now requires authenticated signed
+  payloads, conditional writes, resumable multipart/list-parts, SHA-256,
+  version-bound ranged reads, and complete pagination before admitting an
+  S3-compatible transport. Upload retry reuses only exact parts and retains one
+  bounded part; remote reads retain one bounded range. The native LSM now uses
+  one explicit segment-I/O policy across mmap, runtime-probed Linux io_uring,
+  and positional fallback, with operation/byte/request/fallback evidence kept
+  separate from decoded block-cache residency. Local loss, remote transient
+  failure, remote corruption, archive transfer, and backend-parity tests pass.
 - Development doctor report v3 records 14 passing checks and five blockers. It
   now distinguishes MCP's clean engine dependency boundary from actual daemon
   readiness: MCP's embedded mode opens `RrdEngine`, while its mutually
@@ -492,8 +504,9 @@ Kubernetes operation, and authoritative Connectome management.
   transfer counters, with equal normalized results across Memory, Fjall, and
   native engines. Restart-reconstructed receiver telemetry separately exposes
   inventory, quotas, receipt replay, GC, denials, failures, and overflow without
-  object bytes. S3-compatible semantics exist, but that synchronous adapter
-  currently materializes one object; multipart/resumable cross-host transport
+  object bytes. The S3-compatible adapter now provides bounded resumable
+  multipart upload and version-bound ranged reads through the same immutable
+  object port; per-principal remote admission, live-endpoint certification,
   and independent-host evidence remain open.
 - A persisted, revisioned schema registry now governs typed runtime records,
   relations, and events. Unknown types and properties fail closed; property

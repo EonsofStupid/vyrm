@@ -1,9 +1,10 @@
+use crate::io::{IoContext, SharedIoContext};
 use crate::segment::{block_cache_stats, new_block_cache, SharedBlockCache};
 use crate::wal::replay_from;
 use crate::{
     recover_from, AppendReceipt, Checkpoint, Durability, Error, Manifest, ManifestStore, Memtable,
-    Result, Segment, SnapshotBundle, SnapshotBundleFile, SnapshotExportBoundary, SnapshotSegment,
-    VersionedValue, WalWriter, WriteBatch,
+    Result, Segment, SegmentIoPolicy, SegmentIoStats, SnapshotBundle, SnapshotBundleFile,
+    SnapshotExportBoundary, SnapshotSegment, VersionedValue, WalWriter, WriteBatch,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
@@ -90,6 +91,7 @@ impl CompactionPolicy {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DatabaseOptions {
     pub block_cache_bytes: usize,
+    pub segment_io: SegmentIoPolicy,
     pub maintenance: MaintenancePolicy,
     pub compaction: CompactionPolicy,
 }
@@ -98,6 +100,7 @@ impl Default for DatabaseOptions {
     fn default() -> Self {
         Self {
             block_cache_bytes: crate::DEFAULT_BLOCK_CACHE_BYTES,
+            segment_io: SegmentIoPolicy::default(),
             maintenance: MaintenancePolicy::default(),
             compaction: CompactionPolicy::default(),
         }
@@ -106,6 +109,7 @@ impl Default for DatabaseOptions {
 
 impl DatabaseOptions {
     fn validate(self) -> Result<Self> {
+        self.segment_io.validate()?;
         self.maintenance.validate()?;
         self.compaction.validate()?;
         Ok(self)
@@ -269,6 +273,7 @@ pub struct Database {
     memtable: Memtable,
     segments: Vec<Segment>,
     block_cache: SharedBlockCache,
+    segment_io: SharedIoContext,
     maintenance: MaintenancePolicy,
     compaction: CompactionPolicy,
     maintenance_stats: MaintenanceStats,
@@ -317,6 +322,7 @@ impl Database {
         application_format: Option<u64>,
     ) -> Result<Self> {
         let options = options.validate()?;
+        let segment_io = IoContext::new(options.segment_io)?;
         if root.exists() {
             if !root.is_dir() || std::fs::read_dir(root)?.next().is_some() {
                 return Err(Error::InvalidManifest(
@@ -340,6 +346,7 @@ impl Database {
             memtable: Memtable::default(),
             segments: Vec::new(),
             block_cache: new_block_cache(options.block_cache_bytes),
+            segment_io,
             maintenance: options.maintenance,
             compaction: options.compaction,
             maintenance_stats: MaintenanceStats::default(),
@@ -364,6 +371,7 @@ impl Database {
 
     pub fn open_with_options(root: &Path, options: DatabaseOptions) -> Result<Self> {
         let options = options.validate()?;
+        let segment_io = IoContext::new(options.segment_io)?;
         let manifests = ManifestStore::open(root)?;
         let (_, manifest) = manifests
             .current()?
@@ -371,11 +379,12 @@ impl Database {
         let block_cache = new_block_cache(options.block_cache_bytes);
         let mut segments = Vec::with_capacity(manifest.segments.len());
         for expected in &manifest.segments {
-            let mut segment = Segment::open_with_cache(
+            let mut segment = Segment::open_with_cache_and_io(
                 &root
                     .join(SEGMENT_DIRECTORY)
                     .join(format!("{}.seg", expected.id)),
                 Arc::clone(&block_cache),
+                Arc::clone(&segment_io),
             )?;
             segment.descriptor.level = expected.level;
             if &segment.descriptor != expected {
@@ -409,6 +418,7 @@ impl Database {
             memtable,
             segments,
             block_cache,
+            segment_io,
             maintenance: options.maintenance,
             compaction: options.compaction,
             maintenance_stats,
@@ -646,6 +656,7 @@ impl Database {
             &self.root.join(SEGMENT_DIRECTORY),
             &self.memtable,
             Arc::clone(&self.block_cache),
+            Arc::clone(&self.segment_io),
         )?;
         inject_failure(failure, FlushBoundary::SegmentSynced)?;
         let next_sequence = sequence
@@ -832,6 +843,7 @@ impl Database {
                 descriptor,
                 &bytes,
                 Arc::clone(&self.block_cache),
+                Arc::clone(&self.segment_io),
             )?);
         }
         inject_snapshot_install_failure(failure, SnapshotInstallBoundary::SegmentsSynced)?;
@@ -920,6 +932,7 @@ impl Database {
                 &bundled.descriptor,
                 &bundled.bytes,
                 Arc::clone(&self.block_cache),
+                Arc::clone(&self.segment_io),
             )?);
         }
         inject_snapshot_install_failure(failure, SnapshotInstallBoundary::SegmentsSynced)?;
@@ -1359,6 +1372,7 @@ impl Database {
             &self.root.join(SEGMENT_DIRECTORY),
             &table,
             Arc::clone(&self.block_cache),
+            Arc::clone(&self.segment_io),
         )?;
         segment.descriptor.level = target_level;
         Ok(segment)
@@ -1577,6 +1591,10 @@ impl Database {
     /// Current shared immutable-block residency and effectiveness counters.
     pub fn block_cache_stats(&self) -> crate::BlockCacheStats {
         block_cache_stats(&self.block_cache)
+    }
+
+    pub fn segment_io_stats(&self) -> SegmentIoStats {
+        self.segment_io.stats()
     }
 }
 

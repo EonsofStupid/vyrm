@@ -93,6 +93,19 @@ pub struct PhysicalStoreEvidence {
     pub block_bytes_decoded: Option<u64>,
     pub filter_checks: Option<u64>,
     pub filter_negatives: Option<u64>,
+    pub segment_io_requested_mode: Option<String>,
+    pub segment_io_mmap_segments: Option<u64>,
+    pub segment_io_uring_segments: Option<u64>,
+    pub segment_io_bounded_segments: Option<u64>,
+    pub segment_io_fallbacks: Option<u64>,
+    pub segment_io_last_fallback: Option<String>,
+    pub segment_io_read_operations: Option<u64>,
+    pub segment_io_mmap_reads: Option<u64>,
+    pub segment_io_uring_reads: Option<u64>,
+    pub segment_io_bounded_reads: Option<u64>,
+    pub segment_io_bytes_read: Option<u64>,
+    pub segment_io_max_request_bytes: Option<u64>,
+    pub segment_io_peak_request_bytes: Option<u64>,
 }
 
 impl PhysicalStoreEvidence {
@@ -142,6 +155,19 @@ impl PhysicalStoreEvidence {
             block_bytes_decoded: None,
             filter_checks: None,
             filter_negatives: None,
+            segment_io_requested_mode: None,
+            segment_io_mmap_segments: None,
+            segment_io_uring_segments: None,
+            segment_io_bounded_segments: None,
+            segment_io_fallbacks: None,
+            segment_io_last_fallback: None,
+            segment_io_read_operations: None,
+            segment_io_mmap_reads: None,
+            segment_io_uring_reads: None,
+            segment_io_bounded_reads: None,
+            segment_io_bytes_read: None,
+            segment_io_max_request_bytes: None,
+            segment_io_peak_request_bytes: None,
         }
     }
 }

@@ -56,7 +56,7 @@ pub trait ImmutableObjectStore: Send + Sync {
     fn put(&self, bytes: &[u8]) -> Result<VerifiedObject>;
     /// Opens a verified object for bounded-memory transfer. Implementations
     /// must authenticate digest and length before returning the reader.
-    fn open_verified(&self, reference: &ObjectReference) -> Result<Box<dyn Read + Send>>;
+    fn open_verified(&self, reference: &ObjectReference) -> Result<Box<dyn Read + Send + '_>>;
     /// Consumes exactly one declared content address. Extra, truncated, or
     /// substituted bytes fail before the object becomes addressable.
     fn put_verified_stream(
@@ -94,7 +94,7 @@ impl LocalObjectStore {
         self.put_with_hook(bytes, |_| Ok(()))
     }
 
-    pub fn open_verified(&self, reference: &ObjectReference) -> Result<Box<dyn Read + Send>> {
+    pub fn open_verified(&self, reference: &ObjectReference) -> Result<Box<dyn Read + Send + '_>> {
         let path = self.verified_path(reference)?;
         Ok(Box::new(File::open(path)?))
     }
@@ -449,7 +449,7 @@ impl ImmutableObjectStore for LocalObjectStore {
         LocalObjectStore::put(self, bytes)
     }
 
-    fn open_verified(&self, reference: &ObjectReference) -> Result<Box<dyn Read + Send>> {
+    fn open_verified(&self, reference: &ObjectReference) -> Result<Box<dyn Read + Send + '_>> {
         LocalObjectStore::open_verified(self, reference)
     }
 

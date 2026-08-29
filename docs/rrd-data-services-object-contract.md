@@ -46,13 +46,15 @@ explicit orphan inventory/reclamation. It never constructs a path from an
 unvalidated digest.
 
 `S3CompatibleObjectStore<C>` owns the same content semantics over the narrow
-`S3ObjectClient` port. The transport must provide a real conditional
-`put_if_absent`; the adapter refuses to emulate it with unsafe HEAD-then-PUT.
-ETags are retained as backend evidence but never assumed to be content hashes.
-Endpoint authentication, signing, retry, timeout, and TLS policy belong to the
-transport implementation. The current differential uses a deterministic S3
-transport fixture; a live endpoint certification is deployment evidence, not a
-different canonical contract.
+`S3ObjectClient` port. Admission requires SigV4 or mTLS authentication, signed
+payloads, real conditional PUT and multipart completion, SHA-256 checksums,
+version-bound ranged reads, complete pagination, and resumable multipart/list
+parts. The adapter refuses HEAD-then-PUT emulation. It streams one bounded part,
+reuses a listed part only after exact length and SHA-256 comparison, requires
+consecutive parts, conditionally completes the canonical key, and verifies the
+published object through bounded ranges. Only transport-classified transient
+errors receive a bounded retry. ETags remain opaque evidence, never content
+hashes.
 
 ## Transactional evidence
 
@@ -77,13 +79,18 @@ outcome. Rejected transactions produce none of them.
 Unit tests inject failure at every local publication boundary, detect missing
 and corrupt bytes, quarantine corruption, reclaim only explicit orphan
 candidates, and differential-test local versus S3-compatible object semantics.
+The S3 matrix additionally refuses anonymous/incomplete transports, resumes an
+interrupted multipart upload without repeating verified parts, exhausts a
+bounded transient retry, transfers an actual logical archive, restores local
+loss through a ranged reader, and rejects corrupt remote bytes.
 
 ## Remaining deployment evidence
 
-M4 does not certify a particular cloud endpoint. Before a production S3-like
-service is named supported, its transport must prove conditional-create,
-version/ETag preservation, pagination, error mapping, credentials, retries,
-timeouts, and fault behavior against that service. Retention-aware automated GC
+The provider-neutral S3 protocol is executable and qualified; it does not
+certify a particular cloud account or endpoint. Before one is named supported,
+its concrete transport/deployment must prove credentials, endpoint/TLS policy,
+service error mapping, timeouts, conditional operations, pagination, and the
+same fault matrix against that service. Retention-aware automated GC
 also remains gated on mapping runtime snapshot pins to object reachability; the
 current reclamation API deletes only an explicit caller-proven digest set.
 
@@ -91,7 +98,7 @@ M7 now carries canonical object references through physical Raft snapshots and
 hydrates their immutable bytes before activating a replica. The transfer
 manifest is not trusted by itself: the target scans the authenticated RRD LSM
 bundle and requires the exact project-scoped `runtime_objects` closure. Local
-streaming is fixed-buffer and content-addressed; the current synchronous
-S3-compatible client still materializes one object. Multipart/resumable remote
-transport, admission/backpressure, and independent-host fault evidence remain
-deployment gates.
+streaming is fixed-buffer and content-addressed; the S3-compatible path now
+uses resumable multipart upload and ranged download. Per-principal
+admission/backpressure and independent-host fault evidence remain deployment
+gates.

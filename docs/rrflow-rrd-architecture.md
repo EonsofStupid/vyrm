@@ -219,6 +219,16 @@ underneath another database. The target storage plane includes:
 - local, object-store, and later distributed durability implementations behind
   capability-checked ports.
 
+Immutable V3 segments share one configured physical-I/O boundary: mmap,
+runtime-probed Linux io_uring, or bounded positional fallback all feed the same
+authenticated block decoder and bounded decoded cache. Backend operations,
+bytes, peak request size, and fallback are measured separately from compute
+cache residency. Large archives/artifacts use the same immutable object port;
+an S3-compatible transport is admitted only with authenticated signed payloads,
+conditional publication, checksums, resumable multipart state, pagination, and
+version-bound ranged reads. This is tiering inside RRD, not another database or
+transaction authority.
+
 The existing native LSM/MVCC code is retained and migrated into RRD. This is the
 physical work that competes with Fjall. The Fjall path remains a temporary
 compatibility reader and differential oracle; it is never an RRD engine mode or

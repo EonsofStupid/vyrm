@@ -151,16 +151,13 @@ catalogue and generated Kubernetes workload use the same initialize-then-serve
 contract. This is D1 evidence, not distributed or managed-cloud qualification.
 
 It is not yet a complete persistent product because these surrounding gates
-remain open:
-
-- object-complete portable logical export/import (the current archive preserves
-  canonical runtime data but declares object payloads referenced-only);
-- version-to-version upgrade and resumable general data/schema migration;
-- retention policy, active-root cutover and recovery-objective enforcement;
-- long-duration, disk-full and independent-host qualification;
-- estate-owned backup identities and recovery objectives;
-- authenticated remote client/session transaction boundaries;
-- public stable SDK/API compatibility.
+remain open: live-provider endpoint certification; long-duration, disk-full,
+and independent-host qualification; authenticated remote client/session
+transaction boundaries; distributed placement/failover; and public stable
+SDK/API compatibility. Object-complete archives, estate-owned recovery policy,
+exact-successor format migration, audited structural rollback, and the
+provider-neutral tiered-persistence contract are executable foundation rather
+than remaining placeholders.
 
 ### Frozen cohesive breadth requirements — 2026-08-25
 
@@ -173,6 +170,7 @@ claimed from a UI card, type, or isolated physical component:
 | Real-time live queries and changefeeds | Bounded engine/HTTP/MCP poll, read and follow operations exist | Push/subscription transport, backpressure, retention and distributed ordering qualification |
 | Vector and full-text retrieval | Dense/sparse/multi-dense storage plus MCP collection, point and exact-search paths exist; HNSW/TurboQuant engine artifacts also exist | Collection-bound approximate serving, full-text engine/index implementation, hybrid planner and production recall/latency evidence |
 | Time travel and rollback | RRFlowQL binds schema, source watermarks, claims, index selection and authoritative replay to one valid-time/known-at coordinate across memory, Fjall, native and reopen; `rrflow_data_rollback` appends idempotent record/relation compensations plus immutable evidence through the normal audited transaction | Extend selected-state rollback beyond records/relations without rewriting append-only event, series, object, schema, vector, geo or security-audit history; qualify the complete public-surface matrix |
+| Object and tiered persistence | Authenticated capability admission, resumable/checksummed/conditional S3 multipart archive and artifact transfer, version-bound ranged recovery, and native mmap/io_uring/bounded segment I/O share the existing RRD storage authority with measured physical/cache separation | Certify named provider transports/endpoints and extend qualified hot/cold policy to vector artifacts under G04 |
 | In-memory, embedded, single-node, browser/WASM, mobile/edge and distributed modes | Embedded persistent and single-node daemon paths exist; underlying test/memory and experimental edge/distributed pieces exist | One logical conformance suite and platform-specific durability/security/resource qualification for every advertised mode |
 | Autonomous agent memory | Bitemporal facts, exact recall, context, routing, reasoning events, attunement and lifecycle enforcement exist | Hybrid recall, reflection, ingestion, semantic code search, governed retirement and evaluation evidence under one RRD authority |
 | Managed cloud | Kubernetes and estate foundations exist | Tenant control plane, autoscaling, granular capability administration, secure outbound-network policy, upgrades, recovery and Multi-AZ qualification |

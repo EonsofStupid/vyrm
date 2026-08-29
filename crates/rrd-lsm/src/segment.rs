@@ -1,5 +1,7 @@
-use crate::{Error, Memtable, Result, SegmentDescriptor, VersionedValue};
+use crate::io::{IoContext, SelectedIo, SharedIoContext};
+use crate::{Error, Memtable, Result, SegmentDescriptor, SegmentIoPolicy, VersionedValue};
 use lz4_flex::block::{compress_prepend_size, decompress_size_prepended};
+use memmap2::{Mmap, MmapOptions};
 use std::cmp::Reverse;
 use std::collections::{BTreeMap, BinaryHeap, HashMap};
 use std::fmt;
@@ -129,7 +131,15 @@ fn record_filter_probe(cache: &SharedBlockCache, negative: bool) -> Result<()> {
 
 #[derive(Debug, Clone)]
 enum BlockSource {
-    File(Arc<Mutex<File>>),
+    File {
+        file: Arc<File>,
+        selected: SelectedIo,
+        io: SharedIoContext,
+    },
+    Mapped {
+        bytes: Arc<Mmap>,
+        io: SharedIoContext,
+    },
     Bytes(Arc<Vec<u8>>),
 }
 
@@ -327,6 +337,7 @@ impl Segment {
             directory,
             table,
             new_block_cache(DEFAULT_BLOCK_CACHE_BYTES),
+            IoContext::new(SegmentIoPolicy::default())?,
         )
     }
 
@@ -334,12 +345,13 @@ impl Segment {
         directory: &Path,
         table: &Memtable,
         cache: SharedBlockCache,
+        io: SharedIoContext,
     ) -> Result<(Self, PathBuf)> {
         let (bytes, digest) = encode_v3(table)?;
         let path = directory.join(format!("{digest}.seg"));
         std::fs::create_dir_all(directory)?;
         if path.exists() {
-            let segment = Self::open_with_cache(&path, cache)?;
+            let segment = Self::open_with_cache_and_io(&path, cache, io)?;
             if segment.descriptor.id != digest {
                 return invalid("existing content-addressed segment has another identity");
             }
@@ -362,14 +374,22 @@ impl Segment {
             let _ = std::fs::remove_file(&temporary);
             return Err(Error::Io(error));
         }
-        Ok((Self::open_with_cache(&path, cache)?, path))
+        Ok((Self::open_with_cache_and_io(&path, cache, io)?, path))
     }
 
     pub fn open(path: &Path) -> Result<Self> {
-        Self::open_with_cache(path, new_block_cache(DEFAULT_BLOCK_CACHE_BYTES))
+        Self::open_with_cache_and_io(
+            path,
+            new_block_cache(DEFAULT_BLOCK_CACHE_BYTES),
+            IoContext::new(SegmentIoPolicy::default())?,
+        )
     }
 
-    pub(crate) fn open_with_cache(path: &Path, cache: SharedBlockCache) -> Result<Self> {
+    pub(crate) fn open_with_cache_and_io(
+        path: &Path,
+        cache: SharedBlockCache,
+        io: SharedIoContext,
+    ) -> Result<Self> {
         let metadata = std::fs::metadata(path)?;
         if metadata.len() > MAX_SEGMENT_BYTES {
             return invalid("segment exceeds the 1 GiB physical safety limit");
@@ -382,7 +402,7 @@ impl Segment {
         file.read_exact(&mut prefix)?;
         let version = u16::from_be_bytes(prefix[8..10].try_into().expect("fixed version"));
         if version == SEGMENT_FORMAT_VERSION && &prefix[..8] == SEGMENT_V3_MAGIC {
-            decode_v3_file(path, metadata.len(), cache)
+            decode_v3_file(path, metadata.len(), cache, io)
         } else {
             decode_legacy(std::fs::read(path)?)
         }
@@ -441,12 +461,13 @@ impl Segment {
         expected: &SegmentDescriptor,
         bytes: &[u8],
         cache: SharedBlockCache,
+        io: SharedIoContext,
     ) -> Result<Self> {
         Self::validate_snapshot_descriptor(expected, bytes)?;
         std::fs::create_dir_all(directory)?;
         let path = directory.join(format!("{}.seg", expected.id));
         if path.exists() {
-            let mut existing = Self::open_with_cache(&path, cache)?;
+            let mut existing = Self::open_with_cache_and_io(&path, cache, io)?;
             existing.descriptor.level = expected.level;
             if &existing.descriptor != expected || !file_equals_bytes(&path, bytes)? {
                 return invalid(format!(
@@ -474,7 +495,7 @@ impl Segment {
             let _ = std::fs::remove_file(&temporary);
             return Err(Error::Io(error));
         }
-        let mut installed = Self::open_with_cache(&path, cache)?;
+        let mut installed = Self::open_with_cache_and_io(&path, cache, io)?;
         installed.descriptor.level = expected.level;
         Ok(installed)
     }
@@ -1063,17 +1084,17 @@ fn append_record(output: &mut Vec<u8>, key: &[u8], version: &VersionedValue) {
     output.extend_from_slice(value);
 }
 
-fn decode_v3_file(path: &Path, physical_bytes: u64, cache: SharedBlockCache) -> Result<Segment> {
+fn decode_v3_file(
+    path: &Path,
+    physical_bytes: u64,
+    cache: SharedBlockCache,
+    io: SharedIoContext,
+) -> Result<Segment> {
     let actual = verify_file_digest(path, physical_bytes)?;
     let mut file = File::open(path)?;
     let (descriptor, blocks, filters) = read_v3_metadata(&mut file, physical_bytes, actual)?;
-    build_blocked_segment(
-        descriptor,
-        BlockSource::File(Arc::new(Mutex::new(file))),
-        blocks,
-        filters,
-        cache,
-    )
+    let source = open_block_source(file, io)?;
+    build_blocked_segment(descriptor, source, blocks, filters, cache)
 }
 
 fn decode_v3_bytes(bytes: Vec<u8>, cache: SharedBlockCache) -> Result<Segment> {
@@ -1367,15 +1388,55 @@ fn build_blocked_segment(
     })
 }
 
+fn open_block_source(file: File, io: SharedIoContext) -> Result<BlockSource> {
+    let selected = io.file_backend()?;
+    if selected == SelectedIo::Mmap {
+        let mapped = unsafe { MmapOptions::new().map(&file) };
+        match mapped {
+            Ok(bytes) => {
+                io.record_segment(SelectedIo::Mmap);
+                return Ok(BlockSource::Mapped {
+                    bytes: Arc::new(bytes),
+                    io,
+                });
+            }
+            Err(error) if io.policy().allow_fallback => {
+                io.record_fallback(&format!("mmap failed: {error}"));
+            }
+            Err(error) => return Err(Error::Io(error)),
+        }
+    }
+    let selected = if selected == SelectedIo::Mmap {
+        SelectedIo::Bounded
+    } else {
+        selected
+    };
+    io.record_segment(selected);
+    Ok(BlockSource::File {
+        file: Arc::new(file),
+        selected,
+        io,
+    })
+}
+
 fn read_and_decode_block(source: &BlockSource, block: &BlockDescriptor) -> Result<Vec<u8>> {
     let mut compressed = vec![0u8; block.physical_bytes];
     match source {
-        BlockSource::File(file) => {
-            let mut file = file
-                .lock()
-                .map_err(|_| Error::InvalidSegment("segment file lock poisoned".into()))?;
-            file.seek(SeekFrom::Start(block.offset))?;
-            file.read_exact(&mut compressed)?;
+        BlockSource::File { file, selected, io } => {
+            io.read_exact_at(*selected, file, block.offset, &mut compressed)?;
+        }
+        BlockSource::Mapped { bytes, io } => {
+            let start = usize::try_from(block.offset)
+                .map_err(|_| Error::InvalidSegment("v3 block offset exceeds usize".into()))?;
+            let end = start
+                .checked_add(block.physical_bytes)
+                .ok_or_else(|| Error::InvalidSegment("v3 block range overflow".into()))?;
+            compressed.copy_from_slice(
+                bytes
+                    .get(start..end)
+                    .ok_or_else(|| Error::InvalidSegment("v3 block range is absent".into()))?,
+            );
+            io.record_read(SelectedIo::Mmap, compressed.len());
         }
         BlockSource::Bytes(bytes) => {
             let start = usize::try_from(block.offset)

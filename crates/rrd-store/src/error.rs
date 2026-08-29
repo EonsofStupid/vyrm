@@ -45,6 +45,9 @@ pub enum Error {
     ReadStampMismatch(String),
     /// Object-tier I/O or capability error.
     Object(String),
+    /// A transport-classified remote failure that the bounded object retry
+    /// policy may repeat. All other errors fail immediately.
+    RemoteObjectTransient(String),
     /// Explicit storage migration failed closed.
     Migration(String),
     /// Logical archive export, validation, or restore failed closed.
@@ -106,6 +109,9 @@ impl fmt::Display for Error {
                 write!(f, "runtime read stamp does not match retained state: {id}")
             }
             Error::Object(message) => write!(f, "object store: {message}"),
+            Error::RemoteObjectTransient(message) => {
+                write!(f, "transient remote object store: {message}")
+            }
             Error::Migration(message) => write!(f, "storage migration: {message}"),
             Error::Archive(message) => write!(f, "logical archive: {message}"),
             Error::ObjectMissing(digest) => write!(f, "object missing: {digest}"),

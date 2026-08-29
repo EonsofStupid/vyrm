@@ -95,9 +95,11 @@ immutable-object manifest, streaming object payload copies, and the vector/index
 catalogue manifest in one backup identity. Restore verifies every component
 before target publication. Manifest entry counts and bytes have explicit V1
 bounds. Projections remain rebuild-required; invocation telemetry and snapshot
-leases remain excluded. Retention/RPO/RTO policy belongs to G02-W03, general
-format migration to G02-W04, signer identity/encryption to G05 security work,
-and remote/S3 low-memory qualification to G02-W06.
+leases remain excluded. Retention/RPO/RTO policy belongs to G02-W03 and general
+format migration to G02-W04. Signer identity, encryption, and key
+administration belong to G05 security work. G02-W06 supplies the
+provider-neutral authenticated/resumable S3-compatible multipart and bounded
+ranged-I/O contract; certifying a named endpoint remains deployment evidence.
 
 ## Backup catalogue v1
 

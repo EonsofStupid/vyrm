@@ -256,6 +256,21 @@ fn traced_query_is_observer_safe_causal_and_equal_across_all_engines() {
         .contains_key("block_bytes_loaded_delta"));
     assert!(native_traces[7]
         .attributes
+        .contains_key("segment_io_requested_mode"));
+    assert!(native_traces[7]
+        .attributes
+        .contains_key("segment_io_reads_delta"));
+    assert!(native_traces[7]
+        .attributes
+        .contains_key("segment_io_bytes_read_delta"));
+    assert!(native_traces[7]
+        .attributes
+        .contains_key("segment_io_max_request_bytes"));
+    assert!(native_traces[7]
+        .attributes
+        .contains_key("segment_io_peak_request_bytes"));
+    assert!(native_traces[7]
+        .attributes
         .contains_key("filter_checks_delta"));
     assert!(native_traces[7]
         .attributes

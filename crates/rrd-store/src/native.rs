@@ -334,6 +334,7 @@ impl Engine for NativeEngine {
         let database = self.lock()?;
         let manifest = database.manifest();
         let cache = database.block_cache_stats();
+        let segment_io = database.segment_io_stats();
         let maintenance = database.maintenance_policy();
         let compaction = database.compaction_policy();
         let maintenance_stats = database.maintenance_stats();
@@ -385,6 +386,19 @@ impl Engine for NativeEngine {
             block_bytes_decoded: Some(cache.bytes_decoded),
             filter_checks: Some(cache.filter_checks),
             filter_negatives: Some(cache.filter_negatives),
+            segment_io_requested_mode: Some(segment_io.requested_mode.as_str().into()),
+            segment_io_mmap_segments: Some(segment_io.mmap_segments),
+            segment_io_uring_segments: Some(segment_io.io_uring_segments),
+            segment_io_bounded_segments: Some(segment_io.bounded_segments),
+            segment_io_fallbacks: Some(segment_io.fallback_count),
+            segment_io_last_fallback: segment_io.last_fallback_reason,
+            segment_io_read_operations: Some(segment_io.read_operations),
+            segment_io_mmap_reads: Some(segment_io.mmap_read_operations),
+            segment_io_uring_reads: Some(segment_io.io_uring_read_operations),
+            segment_io_bounded_reads: Some(segment_io.bounded_read_operations),
+            segment_io_bytes_read: Some(segment_io.bytes_read),
+            segment_io_max_request_bytes: Some(segment_io.configured_max_request_bytes as u64),
+            segment_io_peak_request_bytes: Some(segment_io.peak_request_bytes as u64),
         })
     }
 

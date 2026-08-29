@@ -413,9 +413,12 @@ content-addressed. Deterministic-clock tests cover quota refusal, stale reclaim,
 restart reconstruction, receipt replay/expiry, and distinct-session concurrency.
 
 The synchronous S3-compatible port has the same verify-before-publish
-semantics, but currently materializes one object because its transport contract
-does not expose multipart streaming. Multipart S3, retained large-closure soak,
-automatic telemetry collection/export, and independent-machine chaos remain
+semantics and now exposes authenticated resumable multipart upload plus
+version-bound ranged download. It retains one bounded part/range, reuses only
+exact listed parts, conditionally completes the content address, and retries
+only explicitly transient failures within a fixed attempt bound. Retained
+large-closure soak, automatic telemetry collection/export, per-principal remote
+admission, live endpoint certification, and independent-machine chaos remain
 required before calling this production artifact replication.
 
 ## Operational telemetry and per-identity admission

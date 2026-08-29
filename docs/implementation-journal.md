@@ -3072,3 +3072,27 @@ index.
   queryability, invalid target denial, capability/discovery parity, and reopen
   replay. Append-only events and other non-structural families are deliberately
   excluded pending their own restoration semantics.
+
+## 2026-08-29 — G02-W06 tiered persistence candidate
+
+- Replaced the whole-object S3 compatibility shim with capability-gated,
+  authenticated multipart semantics. Admitted transports must provide signed
+  payloads, conditional PUT/completion, SHA-256, complete pagination,
+  resumable multipart/list-parts, and version-bound ranged reads.
+- Added fixed part/range and attempt policies. Restart discovers the existing
+  upload and reuses only exact part-number/length/digest matches; transient
+  transport failures retry within the fixed bound, while corruption and
+  metadata divergence fail immediately.
+- Changed the immutable object reader contract to permit a borrowed bounded
+  remote range reader. Logical archives and cluster artifacts can therefore
+  use the same verified streaming path without allocating the whole remote
+  object.
+- Added one native immutable-segment I/O policy across mmap, actual Linux
+  io_uring after setup/opcode probing, and portable positional fallback. Every
+  backend feeds the existing block checksum, decompression, and shared cache;
+  operation count, bytes, peak request, selected backend, and fallback evidence
+  are exposed separately from decoded cache residency.
+- Fault tests cover anonymous capability refusal, interrupted multipart resume,
+  bounded transient retry, actual logical-archive upload, local loss/ranged
+  recovery, remote corruption, mmap/bounded parity, and io_uring execution or
+  explicit fallback on the running kernel.
