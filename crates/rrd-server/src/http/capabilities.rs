@@ -49,7 +49,7 @@ pub(super) fn capabilities(
                 rrd_contract::MAX_CHANGEFEED_WAIT_MS,
             )]),
             limitation: Some(
-                "bounded authenticated long-poll over retained replay; streaming transport, durable subscription leases, and server push remain open"
+                "bounded authenticated long-poll fallback over the same commit-ordered replay used by durable WebSocket subscriptions"
                     .into(),
             ),
         },
@@ -104,7 +104,7 @@ pub(super) fn capabilities(
                 ),
             ]),
             limitation: Some(
-                "exact session-scoped RRFlowQL/RRD query engine reads; mutating RRFlowQL and live queries remain open"
+                "exact session-scoped RRFlowQL/RRD query engine reads; mutating RRFlowQL remains open"
                     .into(),
             ),
         },
@@ -112,10 +112,16 @@ pub(super) fn capabilities(
             name: CanonicalId::new("endpoint-catalogue").unwrap(),
             contract_version: 1,
             status: CapabilityStatus::Available,
-            limits: BTreeMap::from([(
-                CanonicalId::new("endpoint-count").unwrap(),
-                rrd_contract::endpoint_catalogue().endpoints.len() as u64,
-            )]),
+            limits: BTreeMap::from([
+                (
+                    CanonicalId::new("http-endpoint-count").unwrap(),
+                    rrd_contract::endpoint_catalogue().endpoints.len() as u64,
+                ),
+                (
+                    CanonicalId::new("websocket-endpoint-count").unwrap(),
+                    rrd_contract::endpoint_catalogue().websocket_endpoints.len() as u64,
+                ),
+            ]),
             limitation: Some(
                 "machine-readable operation catalogue and OpenAPI 3.1 schemas; generated language packages and shared conformance remain F5 work"
                     .into(),
@@ -137,6 +143,25 @@ pub(super) fn capabilities(
             status: CapabilityStatus::Available,
             limits: BTreeMap::new(),
             limitation: None,
+        },
+        CapabilityDescriptor {
+            name: CanonicalId::new("live-subscriptions").unwrap(),
+            contract_version: 1,
+            status: CapabilityStatus::Available,
+            limits: BTreeMap::from([
+                (
+                    CanonicalId::new("max-in-flight").unwrap(),
+                    u64::from(rrd_contract::MAX_SUBSCRIPTION_IN_FLIGHT),
+                ),
+                (
+                    CanonicalId::new("max-retention-cursors").unwrap(),
+                    rrd_contract::MAX_SUBSCRIPTION_RETENTION_CURSORS,
+                ),
+            ]),
+            limitation: Some(
+                "authenticated WebSocket push with durable ACK cursors, fenced reconnect, bounded delivery windows, and one global commit-cursor order"
+                    .into(),
+            ),
         },
         CapabilityDescriptor {
             name: CanonicalId::new("local-transport-leases").unwrap(),

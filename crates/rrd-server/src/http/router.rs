@@ -120,6 +120,12 @@ impl AppState {
             (Method::POST, "/v1/audit/read") => self.read_audit(&headers, &body, now),
             (Method::POST, "/v1/changes/read") => self.read_changefeed(&headers, &body, now),
             (Method::POST, "/v1/changes/follow") => self.follow_changefeed(&headers, &body, now),
+            (Method::POST, "/v1/subscriptions/open") => {
+                self.open_subscription(&headers, &body, now)
+            }
+            (Method::POST, "/v1/subscriptions/close") => {
+                self.close_subscription(&headers, &body, now)
+            }
             (Method::POST, "/v1/diagnostics/read") => {
                 self.read_diagnostic_snapshot(&headers, &body, now)
             }

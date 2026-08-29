@@ -2,21 +2,22 @@ use axum::body::{to_bytes, Body, Bytes};
 use axum::extract::{Request, State};
 use axum::http::{header, HeaderMap, HeaderValue, Method, StatusCode};
 use axum::response::Response;
-use axum::routing::any;
+use axum::routing::{any, get};
 use axum::Router;
 use hyper::server::conn::http1;
 use hyper_util::rt::TokioIo;
 use hyper_util::service::TowerToHyperService;
 use rrd_contract::{
     AbortTransaction, AuditDecision, BeginTransaction, CanonicalId, CapabilityDescriptor,
-    CapabilityStatus, CloseSession, CommitTransaction, CorrelationId, CreateInstanceBackup,
-    CreateSession, DeploymentMode, EnsureQueryIndex, EnsureVectorCollection, ErrorBody, ErrorCode,
-    ExecuteQuery, FollowChangefeed, ListInstanceBackups, ListQueryIndexes, ListRuntimeTools,
-    ListVectorCollections, Liveness, PollLiveQuery, PreviewTransaction, ReadAudit, ReadChangefeed,
-    ReadDiagnosticSnapshot, ReadEstate, Readiness, RenewSession, RequestContext, RequestEnvelope,
-    ResourceId, ResourceKind, ResponseEnvelope, ResponseOutcome, RestoreInstanceBackup,
-    RetrieveVectorPoints, RuntimeToolInvocation, ScrollVectorPoints, SearchVectors,
-    ServiceCapabilities, PROTOCOL, PROTOCOL_VERSION,
+    CapabilityStatus, CloseSession, CloseSubscription, CommitTransaction, CorrelationId,
+    CreateInstanceBackup, CreateSession, DeploymentMode, EnsureQueryIndex, EnsureVectorCollection,
+    ErrorBody, ErrorCode, ExecuteQuery, FollowChangefeed, ListInstanceBackups, ListQueryIndexes,
+    ListRuntimeTools, ListVectorCollections, Liveness, OpenSubscription, PollLiveQuery,
+    PreviewTransaction, ReadAudit, ReadChangefeed, ReadDiagnosticSnapshot, ReadEstate, Readiness,
+    RenewSession, RequestContext, RequestEnvelope, ResourceId, ResourceKind, ResponseEnvelope,
+    ResponseOutcome, RestoreInstanceBackup, RetrieveVectorPoints, RuntimeToolInvocation,
+    ScrollVectorPoints, SearchVectors, ServiceCapabilities, SubscriptionClientFrame,
+    SubscriptionServerFrame, PROTOCOL, PROTOCOL_VERSION,
 };
 use rrd_engine::{
     product_capability_catalogue, runtime_tool_contract_catalogue, runtime_tool_operation,
@@ -48,6 +49,7 @@ mod handlers;
 mod response;
 mod router;
 mod server;
+mod websocket;
 
 use auth::{api_key_identity, authenticated_session, header_values};
 use capabilities::{
@@ -56,11 +58,12 @@ use capabilities::{
 };
 use envelope::{invocation_completion, required_idempotency};
 use response::{
-    api_error, failure, generated_context, instance_resource, sha256_hex, success, ApiError,
-    HttpResponse, ResponseDigest,
+    api_error, failure, generated_context, instance_resource, sha256_hex, success, websocket_error,
+    ApiError, HttpResponse, ResponseDigest,
 };
 use router::dispatch;
 use server::AppState;
+use websocket::subscription_websocket_upgrade;
 
 pub use server::{RrdHttpServer, RrdMutualTlsServerConfig};
 

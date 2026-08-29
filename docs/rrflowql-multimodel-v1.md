@@ -2,8 +2,9 @@
 
 Status: executable stamped reads for records, relations, events, claims,
 time-series samples, geospatial values, and bounded recursive graph traversal,
-with typed scalar comparison predicates. Indexes, full text, mutating
-statements, and push subscriptions remain open.
+with typed scalar comparison predicates. Unified indexes, configurable BM25,
+and durable push subscriptions are present; richer mutating statements remain
+open.
 
 RRFlowQL sources now include:
 
@@ -53,9 +54,9 @@ scan.
 
 The initial index catalogue/lifecycle and planner rejection evidence are
 documented in [`rrflowql-index-catalogue-v1.md`](rrflowql-index-catalogue-v1.md).
-Materialized index execution, spatial operators, planner statistics, full text,
-mutating RRFlowQL, streaming responses, and push live subscriptions remain
-explicit gaps. Exact-cursor semantic delta polling is implemented internally
-and documented in [`rrflowql-live-query-v1.md`](rrflowql-live-query-v1.md). Its
-authenticated RRD polling route and generated SDK route catalogues now exist;
-wakeup, streaming/backpressure, and retained subscriptions remain open.
+Filtered materialized views, geo selection, planner analysis, BM25, and durable
+push live queries now use the same stamped execution authority. Richer mutating
+RRFlowQL remains an explicit gap. Exact-cursor semantic delta polling is
+documented in [`rrflowql-live-query-v1.md`](rrflowql-live-query-v1.md), and its
+WebSocket delivery contract is documented in
+[`rrd-live-subscriptions-v1.md`](rrd-live-subscriptions-v1.md).

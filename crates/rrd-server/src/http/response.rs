@@ -117,6 +117,28 @@ pub(in crate::http) fn api_error(error: ServiceError) -> ApiError {
     ApiError::new(code, message, retryable)
 }
 
+pub(in crate::http) fn websocket_error(error: ServiceError) -> ErrorBody {
+    let message = error.to_string();
+    let retryable = error.retryable();
+    let code = match error.kind() {
+        ServiceErrorKind::InvalidArgument => ErrorCode::InvalidArgument,
+        ServiceErrorKind::NotFound => ErrorCode::NotFound,
+        ServiceErrorKind::Unauthenticated => ErrorCode::Unauthenticated,
+        ServiceErrorKind::PermissionDenied => ErrorCode::PermissionDenied,
+        ServiceErrorKind::Conflict => ErrorCode::Conflict,
+        ServiceErrorKind::FailedPrecondition => ErrorCode::FailedPrecondition,
+        ServiceErrorKind::ResourceExhausted => ErrorCode::ResourceExhausted,
+        ServiceErrorKind::DeadlineExceeded => ErrorCode::DeadlineExceeded,
+        ServiceErrorKind::Internal => ErrorCode::Internal,
+    };
+    ErrorBody {
+        code,
+        message,
+        retryable,
+        details: BTreeMap::new(),
+    }
+}
+
 pub(in crate::http) fn sha256_hex(bytes: &[u8]) -> String {
     let hash = Sha256::digest(bytes);
     let mut output = String::with_capacity(hash.len() * 2);

@@ -57,7 +57,7 @@ use std::fmt;
 pub const PROTOCOL: &str = "rrd";
 pub const PROTOCOL_VERSION: u16 = 1;
 pub const OPENAPI_DOCUMENT_SHA256: &str =
-    "327c4eb616053138feb5231c133b1f2db8496e23c6b1cc4f84030f7b0e2b7260";
+    "89ea3a3fe1abd5f672475bf0b964773c10f7f8091ba8f3ce2ff4dd2f0e24331f";
 pub const MAX_ID_BYTES: usize = 128;
 pub const MAX_MESSAGE_BYTES: usize = 4_096;
 pub const MAX_CAPABILITIES: usize = 512;
@@ -83,6 +83,10 @@ pub const MAX_VECTOR_SEARCH_TOP_K: u64 = 100_000;
 pub const MAX_VECTOR_POINT_PAGE: u64 = 4_096;
 pub const MAX_CHANGEFEED_PAGE: u64 = 4_096;
 pub const MAX_CHANGEFEED_WAIT_MS: u64 = 5_000;
+pub const MAX_SUBSCRIPTION_IN_FLIGHT: u16 = 64;
+pub const MAX_SUBSCRIPTION_RETENTION_CURSORS: u64 = 10_000_000;
+pub const MIN_SUBSCRIPTION_HEARTBEAT_MS: u64 = 100;
+pub const MAX_SUBSCRIPTION_HEARTBEAT_MS: u64 = 30_000;
 pub const MIN_LEASE_MS: u64 = 1_000;
 pub const MAX_LEASE_MS: u64 = 3_600_000;
 
@@ -1564,6 +1568,198 @@ pub struct ChangefeedFollowResult {
     pub page: ChangefeedPage,
 }
 
+/// The immutable source definition owned by a durable push subscription.
+/// Delivery state is deliberately separate: reconnecting never changes which
+/// data a subscription means.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "stream", rename_all = "snake_case", deny_unknown_fields)]
+pub enum SubscriptionStream {
+    Changefeed {
+        scope: String,
+    },
+    LiveQuery {
+        scope: String,
+        query: String,
+        #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+        parameters: BTreeMap<String, QueryValue>,
+        #[serde(default)]
+        budget: QueryBudget,
+        max_delta_rows: u64,
+    },
+}
+
+impl SubscriptionStream {
+    pub fn validate(&self, after_cursor: u64, batch_size: u64) -> Result<()> {
+        match self {
+            Self::Changefeed { scope } => ReadChangefeed {
+                scope: scope.clone(),
+                after_cursor,
+                limit: batch_size,
+            }
+            .validate(),
+            Self::LiveQuery {
+                scope,
+                query,
+                parameters,
+                budget,
+                max_delta_rows,
+            } => PollLiveQuery {
+                scope: scope.clone(),
+                query: query.clone(),
+                parameters: parameters.clone(),
+                after_cursor,
+                budget: budget.clone(),
+                max_delta_rows: *max_delta_rows,
+                wait_timeout_ms: 0,
+            }
+            .validate(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct OpenSubscription {
+    pub subscription_id: CorrelationId,
+    pub stream: SubscriptionStream,
+    pub after_cursor: u64,
+    pub batch_size: u64,
+    pub max_in_flight: u16,
+    pub retention_cursor_window: u64,
+    pub lease_ms: u64,
+    pub heartbeat_interval_ms: u64,
+}
+
+impl OpenSubscription {
+    pub fn validate(&self) -> Result<()> {
+        if self.batch_size == 0 || self.batch_size > MAX_CHANGEFEED_PAGE {
+            return invalid(format!(
+                "subscription batch_size must be in 1..={MAX_CHANGEFEED_PAGE}"
+            ));
+        }
+        self.stream.validate(self.after_cursor, self.batch_size)?;
+        if self.max_in_flight == 0 || self.max_in_flight > MAX_SUBSCRIPTION_IN_FLIGHT {
+            return invalid(format!(
+                "subscription max_in_flight must be in 1..={MAX_SUBSCRIPTION_IN_FLIGHT}"
+            ));
+        }
+        if self.retention_cursor_window < self.batch_size
+            || self.retention_cursor_window > MAX_SUBSCRIPTION_RETENTION_CURSORS
+        {
+            return invalid(format!(
+                "subscription retention_cursor_window must be between batch_size and {MAX_SUBSCRIPTION_RETENTION_CURSORS}"
+            ));
+        }
+        if !(MIN_LEASE_MS..=MAX_LEASE_MS).contains(&self.lease_ms) {
+            return invalid(format!(
+                "subscription lease_ms must be in {MIN_LEASE_MS}..={MAX_LEASE_MS}"
+            ));
+        }
+        if !(MIN_SUBSCRIPTION_HEARTBEAT_MS..=MAX_SUBSCRIPTION_HEARTBEAT_MS)
+            .contains(&self.heartbeat_interval_ms)
+        {
+            return invalid(format!(
+                "subscription heartbeat_interval_ms must be in {MIN_SUBSCRIPTION_HEARTBEAT_MS}..={MAX_SUBSCRIPTION_HEARTBEAT_MS}"
+            ));
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum SubscriptionStatus {
+    Open,
+    Closed,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SubscriptionSnapshot {
+    pub subscription_id: CorrelationId,
+    pub stream_sha256: String,
+    pub acknowledged_cursor: u64,
+    pub retention_floor_cursor: u64,
+    pub head_cursor: u64,
+    pub batch_size: u64,
+    pub max_in_flight: u16,
+    pub connection_generation: u64,
+    pub lease_expires_at_unix_ms: u64,
+    pub heartbeat_interval_ms: u64,
+    pub status: SubscriptionStatus,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct OpenSubscriptionResult {
+    pub subscription: SubscriptionSnapshot,
+    pub idempotent_replay: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct CloseSubscription {
+    pub subscription_id: CorrelationId,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct CloseSubscriptionResult {
+    pub subscription: SubscriptionSnapshot,
+    pub idempotent_replay: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
+pub enum SubscriptionClientFrame {
+    Ack {
+        connection_generation: u64,
+        delivery_sequence: u64,
+        through_cursor: u64,
+    },
+    Heartbeat {
+        connection_generation: u64,
+    },
+    Close {
+        connection_generation: u64,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
+pub enum SubscriptionServerFrame {
+    Opened {
+        subscription: SubscriptionSnapshot,
+    },
+    Changefeed {
+        connection_generation: u64,
+        delivery_sequence: u64,
+        page: ChangefeedPage,
+    },
+    LiveQuery {
+        connection_generation: u64,
+        delivery_sequence: u64,
+        delta: LiveQueryDeltaResult,
+    },
+    Heartbeat {
+        connection_generation: u64,
+        acknowledged_cursor: u64,
+        head_cursor: u64,
+        lease_expires_at_unix_ms: u64,
+    },
+    Acknowledged {
+        subscription: SubscriptionSnapshot,
+    },
+    Error {
+        error: ErrorBody,
+        acknowledged_cursor: u64,
+    },
+    Closed {
+        acknowledged_cursor: u64,
+        reason: String,
+    },
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum BackupCoverageSnapshot {
@@ -1709,6 +1905,10 @@ pub enum SecurityAction {
     TransactionAbort,
     ChangefeedRead,
     ChangefeedFollow,
+    SubscriptionOpen,
+    SubscriptionConnect,
+    SubscriptionAck,
+    SubscriptionClose,
     VectorCollectionEnsure,
     VectorCollectionList,
     VectorPointRetrieve,
@@ -1852,10 +2052,22 @@ pub struct EndpointDescriptor {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
+pub struct WebSocketEndpointDescriptor {
+    pub operation: CanonicalId,
+    pub path: String,
+    pub authentication: EndpointAuthentication,
+    pub connect_action: SecurityAction,
+    pub client_frame_type: String,
+    pub server_frame_type: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct EndpointCatalogue {
     pub protocol: String,
     pub protocol_version: u16,
     pub endpoints: Vec<EndpointDescriptor>,
+    pub websocket_endpoints: Vec<WebSocketEndpointDescriptor>,
 }
 
 impl EndpointCatalogue {
@@ -1863,6 +2075,9 @@ impl EndpointCatalogue {
         validate_protocol(&self.protocol, self.protocol_version)?;
         if self.endpoints.is_empty() || self.endpoints.len() > 256 {
             return invalid("endpoint catalogue must contain 1..=256 endpoints");
+        }
+        if self.websocket_endpoints.len() > 32 {
+            return invalid("endpoint catalogue may contain at most 32 WebSocket endpoints");
         }
         let mut operations = BTreeSet::new();
         let mut routes = BTreeSet::new();
@@ -1908,6 +2123,36 @@ impl EndpointCatalogue {
             .any(|pair| pair[0].operation > pair[1].operation)
         {
             return invalid("endpoint descriptors must be sorted by operation");
+        }
+        let mut websocket_operations = BTreeSet::new();
+        let mut websocket_paths = BTreeSet::new();
+        for endpoint in &self.websocket_endpoints {
+            if endpoint.path.is_empty()
+                || endpoint.path.len() > 256
+                || !endpoint.path.starts_with("/v1/")
+                || !endpoint.path.is_ascii()
+                || endpoint.client_frame_type.is_empty()
+                || endpoint.client_frame_type.len() > 128
+                || endpoint.server_frame_type.is_empty()
+                || endpoint.server_frame_type.len() > 128
+                || !endpoint.client_frame_type.is_ascii()
+                || !endpoint.server_frame_type.is_ascii()
+                || endpoint.authentication != EndpointAuthentication::SessionBearer
+            {
+                return invalid("WebSocket endpoint descriptor is invalid");
+            }
+            if !websocket_operations.insert(endpoint.operation.clone())
+                || !websocket_paths.insert(endpoint.path.clone())
+            {
+                return invalid("WebSocket endpoint operations and paths must be unique");
+            }
+        }
+        if self
+            .websocket_endpoints
+            .windows(2)
+            .any(|pair| pair[0].operation > pair[1].operation)
+        {
+            return invalid("WebSocket endpoint descriptors must be sorted by operation");
         }
         Ok(())
     }
@@ -2139,6 +2384,26 @@ pub fn endpoint_catalogue() -> EndpointCatalogue {
             "SessionLease",
         ),
         endpoint(
+            "subscription-close",
+            HttpMethod::Post,
+            "/v1/subscriptions/close",
+            EndpointAuthentication::SessionBearer,
+            true,
+            SecurityAction::SubscriptionClose,
+            "CloseSubscription",
+            "CloseSubscriptionResult",
+        ),
+        endpoint(
+            "subscription-open",
+            HttpMethod::Post,
+            "/v1/subscriptions/open",
+            EndpointAuthentication::SessionBearer,
+            true,
+            SecurityAction::SubscriptionOpen,
+            "OpenSubscription",
+            "OpenSubscriptionResult",
+        ),
+        endpoint(
             "transaction-abort",
             HttpMethod::Delete,
             "/v1/transactions/{transaction}",
@@ -2234,6 +2499,15 @@ pub fn endpoint_catalogue() -> EndpointCatalogue {
         protocol: PROTOCOL.into(),
         protocol_version: PROTOCOL_VERSION,
         endpoints,
+        websocket_endpoints: vec![WebSocketEndpointDescriptor {
+            operation: CanonicalId::new("subscription-stream")
+                .expect("static WebSocket operation is canonical"),
+            path: "/v1/subscriptions/{subscription}/stream".into(),
+            authentication: EndpointAuthentication::SessionBearer,
+            connect_action: SecurityAction::SubscriptionConnect,
+            client_frame_type: "SubscriptionClientFrame".into(),
+            server_frame_type: "SubscriptionServerFrame".into(),
+        }],
     };
     debug_assert!(catalogue.validate().is_ok());
     catalogue
@@ -2249,6 +2523,16 @@ pub fn openapi_document() -> Result<serde_json::Value> {
     catalogue.validate()?;
     let query_value_schema = openapi_query_value_schema()?;
     let vector_payload_filter_schema = openapi_vector_payload_filter_schema()?;
+    let mut subscription_client_frame_schema = schema_json::<SubscriptionClientFrame>();
+    rebase_local_schema_refs(
+        &mut subscription_client_frame_schema,
+        "#/components/schemas/SubscriptionClientFrame",
+    );
+    let mut subscription_server_frame_schema = schema_json::<SubscriptionServerFrame>();
+    rebase_local_schema_refs(
+        &mut subscription_server_frame_schema,
+        "#/components/schemas/SubscriptionServerFrame",
+    );
     let mut paths = serde_json::Map::new();
     for descriptor in &catalogue.endpoints {
         let method = match descriptor.method {
@@ -2361,6 +2645,8 @@ pub fn openapi_document() -> Result<serde_json::Value> {
         "components": {
             "schemas": {
                 "QueryValue": query_value_schema,
+                "SubscriptionClientFrame": subscription_client_frame_schema,
+                "SubscriptionServerFrame": subscription_server_frame_schema,
                 "VectorPayloadFilter": vector_payload_filter_schema
             },
             "securitySchemes": {
@@ -2379,7 +2665,9 @@ pub fn openapi_document() -> Result<serde_json::Value> {
         },
         "x-rrd-protocol": PROTOCOL,
         "x-rrd-protocol-version": PROTOCOL_VERSION,
-        "x-rrd-endpoint-count": catalogue.endpoints.len()
+        "x-rrd-endpoint-count": catalogue.endpoints.len(),
+        "x-rrd-websocket-endpoint-count": catalogue.websocket_endpoints.len(),
+        "x-rrd-websocket-endpoints": catalogue.websocket_endpoints
     })))
 }
 
@@ -2524,6 +2812,7 @@ fn request_envelope_schema(name: &str) -> Result<serde_json::Value> {
         "ListQueryIndexes" => schema_json::<RequestEnvelope<ListQueryIndexes>>(),
         "ListRuntimeTools" => schema_json::<RequestEnvelope<ListRuntimeTools>>(),
         "ListVectorCollections" => schema_json::<RequestEnvelope<ListVectorCollections>>(),
+        "OpenSubscription" => schema_json::<RequestEnvelope<OpenSubscription>>(),
         "PollLiveQuery" => schema_json::<RequestEnvelope<PollLiveQuery>>(),
         "FollowChangefeed" => schema_json::<RequestEnvelope<FollowChangefeed>>(),
         "ListInstanceBackups" => schema_json::<RequestEnvelope<ListInstanceBackups>>(),
@@ -2538,6 +2827,7 @@ fn request_envelope_schema(name: &str) -> Result<serde_json::Value> {
         "RetrieveVectorPoints" => schema_json::<RequestEnvelope<RetrieveVectorPoints>>(),
         "ScrollVectorPoints" => schema_json::<RequestEnvelope<ScrollVectorPoints>>(),
         "SearchVectors" => schema_json::<RequestEnvelope<SearchVectors>>(),
+        "CloseSubscription" => schema_json::<RequestEnvelope<CloseSubscription>>(),
         _ => return invalid(format!("no public request schema for {name}")),
     };
     Ok(schema)
@@ -2549,6 +2839,7 @@ fn response_envelope_schema(name: &str) -> Result<serde_json::Value> {
         "ChangefeedFollowResult" => schema_json::<ResponseEnvelope<ChangefeedFollowResult>>(),
         "ChangefeedPage" => schema_json::<ResponseEnvelope<ChangefeedPage>>(),
         "CommitReceipt" => schema_json::<ResponseEnvelope<CommitReceipt>>(),
+        "CloseSubscriptionResult" => schema_json::<ResponseEnvelope<CloseSubscriptionResult>>(),
         "CreateInstanceBackupResult" => {
             schema_json::<ResponseEnvelope<CreateInstanceBackupResult>>()
         }
@@ -2561,6 +2852,7 @@ fn response_envelope_schema(name: &str) -> Result<serde_json::Value> {
         "Liveness" => schema_json::<ResponseEnvelope<Liveness>>(),
         "LiveQueryDeltaResult" => schema_json::<ResponseEnvelope<LiveQueryDeltaResult>>(),
         "OpenApiDocument" => schema_json::<ResponseEnvelope<serde_json::Value>>(),
+        "OpenSubscriptionResult" => schema_json::<ResponseEnvelope<OpenSubscriptionResult>>(),
         "QueryResult" => schema_json::<ResponseEnvelope<QueryResult>>(),
         "EnsureQueryIndexResult" => schema_json::<ResponseEnvelope<EnsureQueryIndexResult>>(),
         "EnsureVectorCollectionResult" => {

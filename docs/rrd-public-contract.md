@@ -57,10 +57,12 @@ non-claim mutation. `through_cursor`, rather than the final matching change,
 is the sole resume coordinate so scoped feeds cannot stall on unrelated global
 activity.
 
-The bounded follow contract wraps that exact read coordinate with a maximum
-five-second wait. Its result distinguishes a timeout from delivered data and
-always returns a normal replay page, keeping disconnect/reconnect behavior
-independent of server-local subscription state.
+The bounded follow contract remains a maximum five-second compatibility path.
+Durable subscriptions persist an immutable changefeed or live-query definition,
+owner session, acknowledged cursor, lease, retention floor, connection
+generation, and bounded outstanding-delivery window in the engine control
+journal. WebSocket reconnect replays from the durable ACK; transport state
+never becomes a second ordering authority.
 
 Managed backup/restore is path-closed at the public boundary. A create request
 contains only a bounded safe label and event time; a restore request contains a
@@ -79,9 +81,10 @@ authenticated control-journal coordinate, so readers advance safely across
 unrelated control transitions.
 
 F5 begins from `EndpointCatalogue`, not handwritten per-language route lists.
-It currently freezes 31 sorted operation identities with HTTP method/path template,
-authentication mode, mutation/idempotency classification, fixed or
-descriptor-derived security action, and public request/response type names.
+It currently freezes 33 sorted HTTP operation identities plus the authenticated
+subscription WebSocket descriptor, with method/path template, authentication
+mode, mutation/idempotency classification, fixed or descriptor-derived
+security action, and public request/response/frame type names.
 `GET /v1/schema/endpoints` serves the exact
 catalogue used by the server. Duplicate operations/routes, GET mutations,
 private Rust paths, invalid names, and ordering drift fail contract tests.

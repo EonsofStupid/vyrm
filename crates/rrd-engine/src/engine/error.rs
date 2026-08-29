@@ -23,6 +23,17 @@ pub enum ServiceError {
     Query(String),
     Vector(String),
     Changefeed(String),
+    Subscription(String),
+    SubscriptionNotFound,
+    SubscriptionExpired {
+        requested: u64,
+        retention_floor: u64,
+        head: u64,
+    },
+    SubscriptionLeaseExpired,
+    SubscriptionClosed,
+    SubscriptionConnectionReplaced,
+    SubscriptionBackpressure,
     Backup(String),
     Runtime(String),
     PermissionDenied,
@@ -48,12 +59,15 @@ impl ServiceError {
         match self {
             Self::Contract(_)
             | Self::Changefeed(_)
+            | Self::Subscription(_)
             | Self::Query(_)
             | Self::Runtime(_)
             | Self::Vector(_)
             | Self::OperationDigestMismatch
             | Self::WrongScope => ServiceErrorKind::InvalidArgument,
-            Self::SessionNotFound | Self::TransactionNotFound => ServiceErrorKind::NotFound,
+            Self::SessionNotFound | Self::TransactionNotFound | Self::SubscriptionNotFound => {
+                ServiceErrorKind::NotFound
+            }
             Self::Unauthenticated => ServiceErrorKind::Unauthenticated,
             Self::PermissionDenied => ServiceErrorKind::PermissionDenied,
             Self::IdempotencyConflict => ServiceErrorKind::Conflict,
@@ -61,8 +75,14 @@ impl ServiceError {
             | Self::TransactionExpired
             | Self::TransactionClosed
             | Self::CommitInProgress
+            | Self::SubscriptionExpired { .. }
+            | Self::SubscriptionLeaseExpired
+            | Self::SubscriptionClosed
+            | Self::SubscriptionConnectionReplaced
             | Self::ProjectBindingMismatch => ServiceErrorKind::FailedPrecondition,
-            Self::TransactionQuota | Self::RenewalQuota => ServiceErrorKind::ResourceExhausted,
+            Self::TransactionQuota | Self::RenewalQuota | Self::SubscriptionBackpressure => {
+                ServiceErrorKind::ResourceExhausted
+            }
             Self::DeadlineExceeded => ServiceErrorKind::DeadlineExceeded,
             Self::StorageConflict(_) => ServiceErrorKind::Conflict,
             Self::Storage(_) | Self::Backup(_) | Self::Estate(_) => ServiceErrorKind::Internal,

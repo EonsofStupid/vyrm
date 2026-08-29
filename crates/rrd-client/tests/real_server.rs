@@ -4,9 +4,10 @@ use rcgen::{
 };
 use rrd_client::{is_unauthenticated, ClientConfig, Error, RequestOptions, RrdClient};
 use rrd_contract::{
-    AbortTransaction, BeginTransaction, CanonicalId, CreateSession, ExecuteQuery,
-    PreviewTransaction, QueryBudget, ReadAudit, ReadChangefeed, ReadDiagnosticSnapshot, ResourceId,
-    ResourceKind, ResourcePath, SessionLimits, TransactionMutation,
+    AbortTransaction, BeginTransaction, CanonicalId, CloseSubscription, CreateSession,
+    ExecuteQuery, OpenSubscription, PreviewTransaction, QueryBudget, ReadAudit, ReadChangefeed,
+    ReadDiagnosticSnapshot, ResourceId, ResourceKind, ResourcePath, SessionLimits,
+    SubscriptionServerFrame, SubscriptionStream, TransactionMutation,
 };
 use rrd_core::{
     digest, RuntimeCommit, RuntimeProperties, RuntimePropertySchema, RuntimeRecord,
@@ -70,7 +71,7 @@ fn instance_resource() -> ResourcePath {
     }
 }
 
-fn seed(engine: &PersistentEngine) {
+fn seed(engine: &PersistentEngine, scope: &str) {
     let mut registry = RuntimeSchemaRegistry::empty(1, "Rust SDK fixture");
     registry.records.insert(
         RuntimeType::new("document").unwrap(),
@@ -84,7 +85,7 @@ fn seed(engine: &PersistentEngine) {
     );
     engine
         .commit_runtime(&RuntimeCommit {
-            scope: ScopeId::new("instance:sdk-test").unwrap(),
+            scope: ScopeId::new(scope).unwrap(),
             at: 100,
             actor: "rrd-client-fixture".into(),
             expected_cursor: 0,
@@ -115,7 +116,7 @@ async fn rust_client_negotiates_authenticates_queries_and_reads_audit() {
     let binding = InstanceBinding::discover(&project).unwrap();
     let root = binding.expected_store();
     let storage = PersistentEngine::open(&root).unwrap();
-    seed(&storage);
+    seed(&storage, "instance:sdk-test");
     let runtime_head = storage.runtime_cursor().unwrap();
     storage
         .open_runtime_snapshot(
@@ -148,6 +149,11 @@ async fn rust_client_negotiates_authenticates_queries_and_reads_audit() {
             Action::TransactionPreview,
             Action::TransactionAbort,
             Action::ChangefeedRead,
+            Action::ChangefeedFollow,
+            Action::SubscriptionOpen,
+            Action::SubscriptionConnect,
+            Action::SubscriptionAck,
+            Action::SubscriptionClose,
             Action::RuntimeToolCatalogueRead,
             Action::ServiceInspect,
             Action::DiagnosticsRead,
@@ -230,9 +236,9 @@ async fn rust_client_negotiates_authenticates_queries_and_reads_audit() {
         rrd_engine::product_capability_catalogue()
     );
     let catalogue = client.endpoint_catalogue().await.unwrap();
-    assert_eq!(catalogue.endpoints.len(), 31);
+    assert_eq!(catalogue.endpoints.len(), 33);
     let openapi = client.openapi_document().await.unwrap();
-    assert_eq!(openapi["x-rrd-endpoint-count"], 31);
+    assert_eq!(openapi["x-rrd-endpoint-count"], 33);
 
     let session_request = CreateSession {
         limits: SessionLimits {
@@ -262,6 +268,137 @@ async fn rust_client_negotiates_authenticates_queries_and_reads_audit() {
         )
         .await
         .unwrap();
+    let subscription_id = rrd_contract::CorrelationId::new("rust-sdk-subscription").unwrap();
+    let opened = client
+        .open_subscription(
+            &session,
+            OpenSubscription {
+                subscription_id: subscription_id.clone(),
+                stream: SubscriptionStream::Changefeed {
+                    scope: "instance:sdk-test".into(),
+                },
+                after_cursor: 0,
+                batch_size: 1,
+                max_in_flight: 1,
+                retention_cursor_window: 128,
+                lease_ms: 60_000,
+                heartbeat_interval_ms: 100,
+            },
+            RequestOptions::mutation(
+                "request-subscription-open",
+                "operation-subscription-open",
+                "subscription-open-key",
+            )
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(opened.subscription.acknowledged_cursor, 0);
+    let (mut subscription, first_connection) = client
+        .connect_subscription(&session, subscription_id.clone())
+        .await
+        .unwrap();
+    assert_eq!(first_connection.connection_generation, 1);
+    let first = tokio::time::timeout(Duration::from_secs(2), subscription.receive())
+        .await
+        .unwrap()
+        .unwrap();
+    let (first_delivery, first_cursor) = match first {
+        SubscriptionServerFrame::Changefeed {
+            delivery_sequence,
+            page,
+            ..
+        } => {
+            assert_eq!(page.requested_after_cursor, 0);
+            assert_eq!(page.through_cursor, 1);
+            (delivery_sequence, page.through_cursor)
+        }
+        frame => panic!("expected pushed changefeed frame, got {frame:?}"),
+    };
+    subscription
+        .acknowledge(first_delivery, first_cursor)
+        .await
+        .unwrap();
+    loop {
+        let frame = tokio::time::timeout(Duration::from_secs(2), subscription.receive())
+            .await
+            .unwrap()
+            .unwrap();
+        if matches!(
+            frame,
+            SubscriptionServerFrame::Acknowledged {
+                ref subscription
+            } if subscription.acknowledged_cursor == 1
+        ) {
+            break;
+        }
+    }
+    let unacknowledged = tokio::time::timeout(Duration::from_secs(2), subscription.receive())
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(matches!(
+        unacknowledged,
+        SubscriptionServerFrame::Changefeed { ref page, .. }
+            if page.requested_after_cursor == 1 && page.through_cursor == 2
+    ));
+    drop(subscription);
+
+    let (mut subscription, reconnected) = client
+        .connect_subscription(&session, subscription_id.clone())
+        .await
+        .unwrap();
+    assert_eq!(reconnected.connection_generation, 2);
+    assert_eq!(reconnected.acknowledged_cursor, 1);
+    let replay = tokio::time::timeout(Duration::from_secs(2), subscription.receive())
+        .await
+        .unwrap()
+        .unwrap();
+    let (replay_delivery, replay_cursor) = match replay {
+        SubscriptionServerFrame::Changefeed {
+            delivery_sequence,
+            page,
+            ..
+        } => {
+            assert_eq!(page.requested_after_cursor, 1);
+            assert_eq!(page.through_cursor, 2);
+            (delivery_sequence, page.through_cursor)
+        }
+        frame => panic!("expected replayed changefeed frame, got {frame:?}"),
+    };
+    subscription
+        .acknowledge(replay_delivery, replay_cursor)
+        .await
+        .unwrap();
+    subscription.close().await.unwrap();
+    loop {
+        let frame = tokio::time::timeout(Duration::from_secs(2), subscription.receive())
+            .await
+            .unwrap()
+            .unwrap();
+        if matches!(frame, SubscriptionServerFrame::Closed { .. }) {
+            break;
+        }
+    }
+    let closed = client
+        .close_subscription(
+            &session,
+            CloseSubscription {
+                subscription_id: subscription_id.clone(),
+            },
+            RequestOptions::mutation(
+                "request-subscription-close",
+                "operation-subscription-close",
+                "subscription-close-key",
+            )
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        closed.subscription.status,
+        rrd_contract::SubscriptionStatus::Closed
+    );
     let runtime_catalogue = client
         .runtime_tool_catalogue(
             &session,
@@ -475,7 +612,7 @@ async fn rust_client_negotiates_authenticates_queries_and_reads_audit() {
             &session,
             ReadAudit {
                 after_sequence: 0,
-                limit: 32,
+                limit: 128,
             },
             RequestOptions::read("request-audit", "operation-audit").unwrap(),
         )
@@ -489,6 +626,16 @@ async fn rust_client_negotiates_authenticates_queries_and_reads_audit() {
         record.action == rrd_contract::SecurityAction::MemoryContextRead
             && record.principal_id.as_ref().map(CanonicalId::as_str) == Some("rust-sdk")
             && record.decision == rrd_contract::AuditDecision::Denied
+    }));
+    assert!(audit.records.iter().any(|record| {
+        record.action == rrd_contract::SecurityAction::SubscriptionConnect
+            && record.phase == rrd_contract::AuditPhase::Completed
+            && record.decision == rrd_contract::AuditDecision::Allowed
+    }));
+    assert!(audit.records.iter().any(|record| {
+        record.action == rrd_contract::SecurityAction::SubscriptionAck
+            && record.phase == rrd_contract::AuditPhase::Completed
+            && record.decision == rrd_contract::AuditDecision::Allowed
     }));
 
     assert!(matches!(
@@ -528,6 +675,7 @@ async fn remote_transport_requires_mutual_tls_and_exact_server_identity() {
     let root = temporary.path().join("mtls-instance");
     let storage = PersistentEngine::open(&root).unwrap();
     let instance = CanonicalId::new("mtls-sdk-test").unwrap();
+    seed(&storage, "instance:mtls-sdk-test");
     let principal = Principal {
         id: CanonicalId::new("mtls-client").unwrap(),
         kind: PrincipalKind::Service,
@@ -535,12 +683,22 @@ async fn remote_transport_requires_mutual_tls_and_exact_server_identity() {
         not_before_unix_ms: 1,
         expires_at_unix_ms: u64::MAX,
         disabled: false,
-        grants: vec![ResourceGrant {
-            action: Action::SessionCreate,
+        grants: [
+            Action::SessionCreate,
+            Action::ChangefeedFollow,
+            Action::SubscriptionOpen,
+            Action::SubscriptionConnect,
+            Action::SubscriptionAck,
+            Action::SubscriptionClose,
+        ]
+        .into_iter()
+        .map(|action| ResourceGrant {
+            action,
             resource_prefix: ResourcePath {
                 segments: vec![ResourceId::new(ResourceKind::Instance, instance.as_str()).unwrap()],
             },
-        }],
+        })
+        .collect(),
     };
     SecurityRepository::new(&storage, instance.clone())
         .initialize(
@@ -626,6 +784,66 @@ async fn remote_transport_requires_mutual_tls_and_exact_server_identity() {
             .status,
         rrd_contract::CapabilityStatus::Experimental
     );
+    let session = client
+        .create_session(
+            CanonicalId::new("mtls-client").unwrap(),
+            "mtls-api-key",
+            CreateSession {
+                limits: SessionLimits {
+                    idle_timeout_ms: 60_000,
+                    absolute_timeout_ms: 300_000,
+                    max_open_transactions: 1,
+                },
+            },
+            RequestOptions::mutation(
+                "request-mtls-session",
+                "operation-mtls-session",
+                "mtls-session-key",
+            )
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    let subscription_id = rrd_contract::CorrelationId::new("mtls-subscription").unwrap();
+    client
+        .open_subscription(
+            &session,
+            OpenSubscription {
+                subscription_id: subscription_id.clone(),
+                stream: SubscriptionStream::Changefeed {
+                    scope: "instance:mtls-sdk-test".into(),
+                },
+                after_cursor: 0,
+                batch_size: 2,
+                max_in_flight: 1,
+                retention_cursor_window: 128,
+                lease_ms: 60_000,
+                heartbeat_interval_ms: 100,
+            },
+            RequestOptions::mutation(
+                "request-mtls-subscription",
+                "operation-mtls-subscription",
+                "mtls-subscription-key",
+            )
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    let (mut socket, connected) = client
+        .connect_subscription(&session, subscription_id)
+        .await
+        .unwrap();
+    assert_eq!(connected.connection_generation, 1);
+    let pushed = tokio::time::timeout(Duration::from_secs(2), socket.receive())
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(matches!(
+        pushed,
+        SubscriptionServerFrame::Changefeed { ref page, .. }
+            if page.requested_after_cursor == 0 && page.through_cursor == 2
+    ));
+    socket.close().await.unwrap();
 
     drop(client);
     drop(anonymous);

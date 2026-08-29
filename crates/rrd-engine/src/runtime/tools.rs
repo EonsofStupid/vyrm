@@ -568,6 +568,10 @@ fn runtime_tool_operation_for_action(action: SecurityAction) -> crate::Result<Rr
         | SecurityAction::TransactionBegin
         | SecurityAction::TransactionPreview
         | SecurityAction::TransactionAbort
+        | SecurityAction::SubscriptionOpen
+        | SecurityAction::SubscriptionConnect
+        | SecurityAction::SubscriptionAck
+        | SecurityAction::SubscriptionClose
         | SecurityAction::DiagnosticsRead
         | SecurityAction::SecurityAdmin
         | SecurityAction::RuntimeToolCatalogueRead => {

@@ -138,7 +138,13 @@ impl RrdHttpServer {
             capabilities,
             project_root,
         });
-        let app = Router::new().fallback(any(dispatch)).with_state(state);
+        let app = Router::new()
+            .route(
+                "/v1/subscriptions/{subscription}/stream",
+                get(subscription_websocket_upgrade),
+            )
+            .fallback(any(dispatch))
+            .with_state(state);
         Ok(Self { listener, app, tls })
     }
 
@@ -196,10 +202,10 @@ where
                 connections.spawn(async move {
                     let stream = acceptor.accept(stream).await.map_err(io::Error::other)?;
                     let service = TowerToHyperService::new(app);
-                    let mut builder = http1::Builder::new();
-                    builder.keep_alive(false);
+                    let builder = http1::Builder::new();
                     builder
                         .serve_connection(TokioIo::new(stream), service)
+                        .with_upgrades()
                         .await
                         .map_err(io::Error::other)
                 });

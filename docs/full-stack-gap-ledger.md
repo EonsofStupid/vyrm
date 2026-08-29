@@ -167,7 +167,7 @@ claimed from a UI card, type, or isolated physical component:
 | Requirement | Current executable truth | Missing gate |
 |---|---|---|
 | Concurrent document, relational, native graph-edge, vector, event, time-series and geo storage | One typed RRD transaction can atomically create, update, retire and recreate every logical family; bounded RRFlowQL transaction programs bind the same mutations and delegate to that authority | Complete public administration, indexes, query/search parity and cross-model transaction qualification |
-| Real-time live queries and changefeeds | Bounded engine/HTTP/MCP poll, read and follow operations exist | Push/subscription transport, backpressure, retention and distributed ordering qualification |
+| Real-time live queries and changefeeds | Engine-owned durable subscriptions provide authenticated WebSocket push, cumulative ACK, bounded in-flight windows, retained resume floors, fenced reconnect/restart replay, semantic query deltas, and one global cursor/hash-chain order across writers; HTTP/MCP poll/read/follow remain bounded fallbacks | Cross-region fan-out placement and managed gateway scale qualification under later topology work |
 | Vector and full-text retrieval | Dense/sparse/multi-dense storage plus MCP collection, point and exact-search paths exist; HNSW/TurboQuant engine artifacts also exist | Collection-bound approximate serving, full-text engine/index implementation, hybrid planner and production recall/latency evidence |
 | Time travel and rollback | RRFlowQL binds schema, source watermarks, claims, index selection and authoritative replay to one valid-time/known-at coordinate across memory, Fjall, native and reopen; `rrflow_data_rollback` appends idempotent record/relation compensations plus immutable evidence through the normal audited transaction | Extend selected-state rollback beyond records/relations without rewriting append-only event, series, object, schema, vector, geo or security-audit history; qualify the complete public-surface matrix |
 | Object and tiered persistence | Authenticated capability admission, resumable/checksummed/conditional S3 multipart archive and artifact transfer, version-bound ranged recovery, and native mmap/io_uring/bounded segment I/O share the existing RRD storage authority with measured physical/cache separation | Certify named provider transports/endpoints and extend qualified hot/cold policy to vector artifacts under G04 |
@@ -386,18 +386,18 @@ lossless claim provenance, typed data mutation, and prior/current change
 digests; the page carries authenticated-read method/cost evidence and advances
 through unrelated global cursors safely. The socket fixture verifies
 authentication denial, `3 + 8` pagination of one eleven-change transaction,
-digest-chain continuity, and exact resume after server restart. Streaming
-push, subscription leases, backpressure, and reconnect heartbeats remain open
-before calling this a real-time live-query surface.
+digest-chain continuity, and exact resume after server restart. Durable
+WebSocket subscriptions now layer push, ACK/backpressure, leases, retention,
+and fenced reconnect over this exact replay coordinate.
 
 `POST /v1/changes/follow` now adds bounded five-second long-poll delivery over
 that same retained coordinate. A concurrent real-socket test waits after
 cursor two, commits an event at cursor three, receives exactly that typed
-event, and then verifies an explicit empty timeout at cursor three. Streaming
-SSE/WebSocket transport, durable subscription ownership, server-driven
-heartbeats, cancellation on disconnect, and fan-out backpressure remain open;
-the capability is advertised as experimental follow rather than complete live
-queries.
+event, and then verifies an explicit empty timeout at cursor three. HTTP follow
+remains a compatibility path. WebSocket transport, durable
+subscription ownership, heartbeats, disconnect replay, and bounded fan-out
+backpressure now share the engine subscription authority. The live-subscription
+capability is available; cross-region fan-out remains later topology work.
 
 Managed logical recovery is now also operable through the public server:
 `POST /v1/backups`, `POST /v1/backups/list`, and `POST /v1/restores` use
@@ -560,8 +560,9 @@ every public mutation and prove denied actions do not partially apply.
 
 **Order:** Rust embedded/client → TypeScript → Python → Go → Java/.NET.
 
-**Status:** in progress. `rrd-contract::EndpointCatalogue` now freezes all 31
-current routes by canonical operation, method/path template, authentication,
+**Status:** in progress. `rrd-contract::EndpointCatalogue` now freezes all 33
+current HTTP routes plus one WebSocket stream by canonical operation,
+method/path template, authentication,
 mutation rule, fixed or descriptor-derived security action, and public
 request/response type. Every public
 wire type derives JSON Schema, and deterministic OpenAPI 3.1 is built from that
@@ -570,7 +571,10 @@ catalogue rather than maintained separately. The server publishes both at
 unreviewed schema drift. This removes handwritten route and payload discovery
 as SDK sources. Rust, TypeScript, Python, Go, Java, and .NET now have executable
 walking skeletons; shared black-box conformance and release qualification
-remain open.
+remain open. The non-Rust checked-in route maps still cover the prior 31-route
+cut and must absorb subscription open/close plus their language-appropriate
+WebSocket client surface under G06-W04; they are not counted as G03-W06
+transport evidence.
 
 The first Rust client is now implemented in `rrd-client` and specified by
 [`rrd-rust-client-v1.md`](rrd-rust-client-v1.md). It is async, depends only on

@@ -848,7 +848,7 @@ fn diagnostic_read_contract_is_bounded_strict_and_separately_authorized() {
 fn endpoint_catalogue_is_complete_sorted_and_transport_neutral() {
     let catalogue = rrd_contract::endpoint_catalogue();
     catalogue.validate().unwrap();
-    assert_eq!(catalogue.endpoints.len(), 31);
+    assert_eq!(catalogue.endpoints.len(), 33);
     assert_eq!(catalogue.endpoints[0].operation.as_str(), "audit-read");
     let create = catalogue
         .endpoints
@@ -898,6 +898,16 @@ fn openapi_is_derived_from_every_catalogue_operation_and_wire_type() {
     assert_eq!(document["x-rrd-protocol"], PROTOCOL);
     assert_eq!(document["x-rrd-protocol-version"], PROTOCOL_VERSION);
     assert_eq!(document["x-rrd-endpoint-count"], catalogue.endpoints.len());
+    assert_eq!(
+        document["x-rrd-websocket-endpoint-count"],
+        catalogue.websocket_endpoints.len()
+    );
+    assert_eq!(
+        document["x-rrd-websocket-endpoints"],
+        serde_json::to_value(&catalogue.websocket_endpoints).unwrap()
+    );
+    assert!(document["components"]["schemas"]["SubscriptionClientFrame"].is_object());
+    assert!(document["components"]["schemas"]["SubscriptionServerFrame"].is_object());
     for endpoint in catalogue.endpoints {
         let method = match endpoint.method {
             rrd_contract::HttpMethod::Get => "get",
@@ -920,6 +930,94 @@ fn openapi_is_derived_from_every_catalogue_operation_and_wire_type() {
         sha256_for_test(&pretty),
         rrd_contract::OPENAPI_DOCUMENT_SHA256,
         "OpenAPI drift requires an intentional protocol/schema review"
+    );
+}
+
+#[test]
+fn durable_subscription_contract_bounds_retention_backpressure_and_stream_shape() {
+    let mut request = rrd_contract::OpenSubscription {
+        subscription_id: CorrelationId::new("subscription-contract").unwrap(),
+        stream: rrd_contract::SubscriptionStream::Changefeed {
+            scope: "instance:test-instance".into(),
+        },
+        after_cursor: 7,
+        batch_size: 16,
+        max_in_flight: 4,
+        retention_cursor_window: 1_024,
+        lease_ms: 10_000,
+        heartbeat_interval_ms: 500,
+    };
+    request.validate().unwrap();
+    let encoded = serde_json::to_value(&request).unwrap();
+    assert_eq!(
+        serde_json::from_value::<rrd_contract::OpenSubscription>(encoded).unwrap(),
+        request
+    );
+    request.max_in_flight = 0;
+    assert!(request.validate().is_err());
+    request.max_in_flight = 1;
+    request.retention_cursor_window = 15;
+    assert!(request.validate().is_err());
+
+    let live = rrd_contract::OpenSubscription {
+        subscription_id: CorrelationId::new("subscription-live-contract").unwrap(),
+        stream: rrd_contract::SubscriptionStream::LiveQuery {
+            scope: "instance:test-instance".into(),
+            query: "SELECT * FROM document AT VALID 1000 ORDER BY @id ASC".into(),
+            parameters: std::collections::BTreeMap::new(),
+            budget: rrd_contract::QueryBudget::default(),
+            max_delta_rows: 128,
+        },
+        after_cursor: 0,
+        batch_size: 16,
+        max_in_flight: 1,
+        retention_cursor_window: 1_024,
+        lease_ms: 10_000,
+        heartbeat_interval_ms: 500,
+    };
+    live.validate().unwrap();
+
+    let frame = rrd_contract::SubscriptionClientFrame::Ack {
+        connection_generation: 3,
+        delivery_sequence: 9,
+        through_cursor: 42,
+    };
+    assert_eq!(
+        serde_json::from_value::<rrd_contract::SubscriptionClientFrame>(
+            serde_json::to_value(&frame).unwrap()
+        )
+        .unwrap(),
+        frame
+    );
+    let catalogue = rrd_contract::endpoint_catalogue();
+    assert_eq!(catalogue.websocket_endpoints.len(), 1);
+    assert_eq!(
+        catalogue.websocket_endpoints[0].path,
+        "/v1/subscriptions/{subscription}/stream"
+    );
+    assert_eq!(
+        catalogue.websocket_endpoints[0].connect_action,
+        rrd_contract::SecurityAction::SubscriptionConnect
+    );
+    assert_eq!(
+        catalogue
+            .endpoints
+            .iter()
+            .find(|endpoint| endpoint.operation.as_str() == "subscription-open")
+            .unwrap()
+            .action
+            .fixed_action(),
+        Some(rrd_contract::SecurityAction::SubscriptionOpen)
+    );
+    assert_eq!(
+        catalogue
+            .endpoints
+            .iter()
+            .find(|endpoint| endpoint.operation.as_str() == "subscription-close")
+            .unwrap()
+            .action
+            .fixed_action(),
+        Some(rrd_contract::SecurityAction::SubscriptionClose)
     );
 }
 

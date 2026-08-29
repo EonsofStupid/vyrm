@@ -2,8 +2,8 @@
 
 Status: asynchronous loopback plus experimental mTLS client walking skeleton
 implemented against the entire currently published RRD operation catalogue.
-Distributed qualification, streaming subscriptions, generated API reference,
-and released-version matrix remain open.
+Distributed qualification, generated API reference, and a released-version
+matrix remain open.
 
 `rrd-client` is the first supported-client boundary. It depends on
 `rrd-contract` and HTTP transport crates, never on RRFlow storage, RRFlowQL/RRD query executor,
@@ -35,7 +35,9 @@ dev-only black-box fixtures.
 
 The client covers capability, endpoint, and OpenAPI negotiation; session create/renew/
 close; transaction begin/preview/commit/abort; RRFlowQL query; vector search;
-changefeed read/follow; backup create/list/restore; estate read; and audit read.
+changefeed read/follow; durable subscription open/connect/receive/ACK/heartbeat/
+close over `ws://` or mTLS `wss://`; backup create/list/restore; estate read;
+and audit read.
 `RequestOptions` makes correlation, deadline, and mutation idempotency explicit.
 API errors retain stable `ErrorCode`, message, retryability and HTTP status.
 
@@ -46,13 +48,13 @@ front of it, drops the first connection, and proves capability negotiation
 recovers within the configured attempt bound. It then proves endpoint-catalogue
 decoding, typed wrong-key error mapping, principal session creation, exact query
 results, client-side expired-deadline denial, transaction begin/preview/abort,
-retained changefeed decoding, protected audit decoding, and cleartext remote
-endpoint denial. A second live fixture proves valid mTLS negotiation and exact
-remote-listen capability reporting, missing-client-certificate denial, and
-wrong-server-name denial.
+retained changefeed decoding, durable WebSocket push/reconnect replay, protected
+audit decoding, and cleartext remote endpoint denial. A second live fixture
+proves valid mTLS HTTP and WebSocket negotiation, exact remote-listen capability
+reporting, missing-client-certificate denial, and wrong-server-name denial.
 
 This is not the F5 exit gate. Commit and vector mutations, renewal/closure,
-backup/restore, estate projection, follow timeout/reconnect, response-limit
+backup/restore, estate projection, response-limit
 faults, server-version mismatches, and released package compatibility need
 additional black-box rows. TypeScript, Python, Go, Java and .NET clients must
 then pass the same semantic fixture.

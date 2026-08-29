@@ -5,6 +5,7 @@
 //! an explicit mutually authenticated TLS configuration.
 
 use bytes::{BufMut, Bytes, BytesMut};
+use futures_util::{SinkExt, StreamExt};
 use http_body_util::{BodyExt, Full};
 use hyper::header::CONTENT_TYPE;
 use hyper::{Method, Request, StatusCode, Uri};
@@ -14,16 +15,18 @@ use hyper_util::client::legacy::Client;
 use hyper_util::rt::TokioExecutor;
 use rrd_contract::{
     AbortTransaction, AuditPage, BeginTransaction, CanonicalId, ChangefeedFollowResult,
-    ChangefeedPage, CloseSession, CommitReceipt, CommitTransaction, CorrelationId,
-    CreateInstanceBackup, CreateInstanceBackupResult, CreateSession, DiagnosticSnapshot,
-    EndpointCatalogue, EnsureVectorCollection, EnsureVectorCollectionResult, ErrorBody, ErrorCode,
-    EstateSnapshot, ExecuteQuery, FollowChangefeed, InstanceBackupCatalogueSnapshot,
-    ListInstanceBackups, ListRuntimeTools, ListVectorCollections, PreviewTransaction, QueryResult,
-    ReadAudit, ReadChangefeed, ReadDiagnosticSnapshot, ReadEstate, RenewSession, RequestContext,
-    RequestEnvelope, ResourceId, ResourceKind, ResourcePath, ResponseEnvelope, ResponseOutcome,
-    RestoreInstanceBackup, RestoreInstanceBackupResult, RetrieveVectorPoints, RuntimeToolCatalogue,
-    RuntimeToolInvocation, RuntimeToolInvocationResult, ScrollVectorPoints, SearchVectors,
-    ServiceCapabilities, SessionLease, SessionTermination, TransactionLease, TransactionPreview,
+    ChangefeedPage, CloseSession, CloseSubscription, CloseSubscriptionResult, CommitReceipt,
+    CommitTransaction, CorrelationId, CreateInstanceBackup, CreateInstanceBackupResult,
+    CreateSession, DiagnosticSnapshot, EndpointCatalogue, EnsureVectorCollection,
+    EnsureVectorCollectionResult, ErrorBody, ErrorCode, EstateSnapshot, ExecuteQuery,
+    FollowChangefeed, InstanceBackupCatalogueSnapshot, ListInstanceBackups, ListRuntimeTools,
+    ListVectorCollections, OpenSubscription, OpenSubscriptionResult, PreviewTransaction,
+    QueryResult, ReadAudit, ReadChangefeed, ReadDiagnosticSnapshot, ReadEstate, RenewSession,
+    RequestContext, RequestEnvelope, ResourceId, ResourceKind, ResourcePath, ResponseEnvelope,
+    ResponseOutcome, RestoreInstanceBackup, RestoreInstanceBackupResult, RetrieveVectorPoints,
+    RuntimeToolCatalogue, RuntimeToolInvocation, RuntimeToolInvocationResult, ScrollVectorPoints,
+    SearchVectors, ServiceCapabilities, SessionLease, SessionTermination, SubscriptionClientFrame,
+    SubscriptionServerFrame, SubscriptionSnapshot, TransactionLease, TransactionPreview,
     VectorCollectionCatalogueSnapshot, VectorPointBatch, VectorPointPage, VectorSearchResult,
     PROTOCOL, PROTOCOL_VERSION,
 };
@@ -32,7 +35,12 @@ use serde::de::DeserializeOwned;
 use serde::Serialize;
 use std::fmt;
 use std::net::SocketAddr;
+use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use tokio::net::TcpStream;
+use tokio_tungstenite::tungstenite::client::IntoClientRequest;
+use tokio_tungstenite::tungstenite::Message;
+use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 
 pub const MAX_RESPONSE_BYTES: usize = 4 * 1024 * 1024;
 
@@ -45,6 +53,10 @@ pub enum Error {
     Timeout,
     ResponseTooLarge,
     Decode(String),
+    Subscription {
+        error: ErrorBody,
+        acknowledged_cursor: u64,
+    },
     Api {
         status: StatusCode,
         error: ErrorBody,
@@ -64,6 +76,16 @@ impl fmt::Display for Error {
             Self::Timeout => formatter.write_str("RRD request timed out"),
             Self::ResponseTooLarge => formatter.write_str("RRD response exceeded four MiB"),
             Self::Decode(message) => write!(formatter, "RRD response decode failed: {message}"),
+            Self::Subscription {
+                error,
+                acknowledged_cursor,
+            } => {
+                write!(
+                    formatter,
+                    "RRD subscription {:?} after cursor {acknowledged_cursor}: {}",
+                    error.code, error.message,
+                )
+            }
             Self::Api { status, error } => {
                 write!(
                     formatter,
@@ -159,6 +181,13 @@ pub struct RrdClient {
     endpoint: String,
     instance: CanonicalId,
     config: ClientConfig,
+    websocket_tls: Option<Arc<RustlsClientConfig>>,
+}
+
+pub struct SubscriptionSocket {
+    stream: WebSocketStream<MaybeTlsStream<TcpStream>>,
+    subscription_id: CorrelationId,
+    connection_generation: u64,
 }
 
 #[derive(Clone)]
@@ -186,6 +215,7 @@ impl RrdClient {
             endpoint: format!("http://{address}"),
             instance,
             config,
+            websocket_tls: None,
         })
     }
 
@@ -210,6 +240,7 @@ impl RrdClient {
                 "RRD TLS endpoint must be an https origin without a path or query".into(),
             ));
         }
+        let websocket_tls = Some(Arc::new(tls.clone()));
         let connector = HttpsConnectorBuilder::new()
             .with_tls_config(tls)
             .https_only()
@@ -221,6 +252,7 @@ impl RrdClient {
             endpoint: endpoint.trim_end_matches('/').into(),
             instance,
             config,
+            websocket_tls,
         })
     }
 
@@ -557,6 +589,115 @@ impl RrdClient {
             false,
         )
         .await
+    }
+
+    pub async fn open_subscription(
+        &self,
+        session: &Session,
+        request: OpenSubscription,
+        options: RequestOptions,
+    ) -> Result<OpenSubscriptionResult> {
+        self.session_call(
+            Method::POST,
+            "/v1/subscriptions/open",
+            session,
+            request,
+            options,
+            true,
+        )
+        .await
+    }
+
+    pub async fn close_subscription(
+        &self,
+        session: &Session,
+        request: CloseSubscription,
+        options: RequestOptions,
+    ) -> Result<CloseSubscriptionResult> {
+        self.session_call(
+            Method::POST,
+            "/v1/subscriptions/close",
+            session,
+            request,
+            options,
+            true,
+        )
+        .await
+    }
+
+    /// Connects or reconnects the durable subscription. The server increments
+    /// its fencing generation and replays from the last durably acknowledged
+    /// runtime cursor.
+    pub async fn connect_subscription(
+        &self,
+        session: &Session,
+        subscription_id: CorrelationId,
+    ) -> Result<(SubscriptionSocket, SubscriptionSnapshot)> {
+        let origin = if let Some(rest) = self.endpoint.strip_prefix("http://") {
+            format!("ws://{rest}")
+        } else if let Some(rest) = self.endpoint.strip_prefix("https://") {
+            format!("wss://{rest}")
+        } else {
+            return Err(Error::Contract(
+                "RRD endpoint has no WebSocket scheme".into(),
+            ));
+        };
+        let url = format!(
+            "{origin}/v1/subscriptions/{}/stream",
+            subscription_id.as_str()
+        );
+        let mut request = url.into_client_request().map_err(contract)?;
+        request.headers_mut().insert(
+            "x-rrd-session",
+            session
+                .lease
+                .session_id
+                .as_str()
+                .parse()
+                .map_err(contract)?,
+        );
+        request.headers_mut().insert(
+            "authorization",
+            format!("Bearer {}", session.lease.token.as_str())
+                .parse()
+                .map_err(contract)?,
+        );
+        let connector = match &self.websocket_tls {
+            Some(tls) => tokio_tungstenite::Connector::Rustls(Arc::clone(tls)),
+            None => tokio_tungstenite::Connector::Plain,
+        };
+        let connected = tokio::time::timeout(
+            self.config.request_timeout,
+            tokio_tungstenite::connect_async_tls_with_config(request, None, false, Some(connector)),
+        )
+        .await
+        .map_err(|_| Error::Timeout)?
+        .map_err(websocket_connect_error)?;
+        let mut socket = SubscriptionSocket {
+            stream: connected.0,
+            subscription_id,
+            connection_generation: 0,
+        };
+        let opened = socket.receive().await?;
+        match opened {
+            SubscriptionServerFrame::Opened { subscription }
+                if subscription.subscription_id == socket.subscription_id
+                    && subscription.connection_generation > 0 =>
+            {
+                socket.connection_generation = subscription.connection_generation;
+                Ok((socket, subscription))
+            }
+            SubscriptionServerFrame::Error {
+                error,
+                acknowledged_cursor,
+            } => Err(Error::Subscription {
+                error,
+                acknowledged_cursor,
+            }),
+            _ => Err(Error::Decode(
+                "subscription WebSocket did not begin with an opened frame".into(),
+            )),
+        }
     }
 
     pub async fn create_backup(
@@ -911,6 +1052,96 @@ impl RrdClient {
     }
 }
 
+impl SubscriptionSocket {
+    pub fn subscription_id(&self) -> &CorrelationId {
+        &self.subscription_id
+    }
+
+    pub fn connection_generation(&self) -> u64 {
+        self.connection_generation
+    }
+
+    pub async fn receive(&mut self) -> Result<SubscriptionServerFrame> {
+        loop {
+            match self.stream.next().await {
+                Some(Ok(Message::Text(text))) => {
+                    let frame =
+                        serde_json::from_str::<SubscriptionServerFrame>(&text).map_err(decode)?;
+                    if let SubscriptionServerFrame::Opened { subscription }
+                    | SubscriptionServerFrame::Acknowledged { subscription } = &frame
+                    {
+                        if subscription.subscription_id != self.subscription_id {
+                            return Err(Error::ResponseIdentityMismatch);
+                        }
+                        self.connection_generation = subscription.connection_generation;
+                    }
+                    if let SubscriptionServerFrame::Error {
+                        error,
+                        acknowledged_cursor,
+                    } = &frame
+                    {
+                        return Err(Error::Subscription {
+                            error: error.clone(),
+                            acknowledged_cursor: *acknowledged_cursor,
+                        });
+                    }
+                    return Ok(frame);
+                }
+                Some(Ok(Message::Ping(bytes))) => self
+                    .stream
+                    .send(Message::Pong(bytes))
+                    .await
+                    .map_err(|error| Error::Transport(error.to_string()))?,
+                Some(Ok(Message::Pong(_))) => {}
+                Some(Ok(Message::Binary(_))) => {
+                    return Err(Error::Decode(
+                        "subscription server sent an unsupported binary frame".into(),
+                    ));
+                }
+                Some(Ok(Message::Close(frame))) => {
+                    return Err(Error::Transport(format!(
+                        "subscription WebSocket closed: {frame:?}"
+                    )));
+                }
+                Some(Err(error)) => return Err(Error::Transport(error.to_string())),
+                None => return Err(Error::Transport("subscription WebSocket ended".into())),
+                Some(Ok(Message::Frame(_))) => {}
+            }
+        }
+    }
+
+    pub async fn acknowledge(&mut self, delivery_sequence: u64, through_cursor: u64) -> Result<()> {
+        self.send(SubscriptionClientFrame::Ack {
+            connection_generation: self.connection_generation,
+            delivery_sequence,
+            through_cursor,
+        })
+        .await
+    }
+
+    pub async fn heartbeat(&mut self) -> Result<()> {
+        self.send(SubscriptionClientFrame::Heartbeat {
+            connection_generation: self.connection_generation,
+        })
+        .await
+    }
+
+    pub async fn close(&mut self) -> Result<()> {
+        self.send(SubscriptionClientFrame::Close {
+            connection_generation: self.connection_generation,
+        })
+        .await
+    }
+
+    async fn send(&mut self, frame: SubscriptionClientFrame) -> Result<()> {
+        let text = serde_json::to_string(&frame).map_err(decode)?;
+        self.stream
+            .send(Message::Text(text.into()))
+            .await
+            .map_err(|error| Error::Transport(error.to_string()))
+    }
+}
+
 fn outcome<T>(
     status: StatusCode,
     response: ResponseEnvelope<T>,
@@ -968,10 +1199,31 @@ fn decode(error: impl fmt::Display) -> Error {
     Error::Decode(error.to_string())
 }
 
+fn websocket_connect_error(error: tokio_tungstenite::tungstenite::Error) -> Error {
+    match error {
+        tokio_tungstenite::tungstenite::Error::Http(response) => {
+            let status = response.status();
+            let body = response
+                .body()
+                .as_deref()
+                .and_then(|bytes| std::str::from_utf8(bytes).ok())
+                .unwrap_or("empty response body");
+            Error::Transport(format!("WebSocket upgrade failed with {status}: {body}"))
+        }
+        error => Error::Transport(error.to_string()),
+    }
+}
+
 pub fn is_unauthenticated(error: &Error) -> bool {
     matches!(
         error,
         Error::Api {
+            error: ErrorBody {
+                code: ErrorCode::Unauthenticated,
+                ..
+            },
+            ..
+        } | Error::Subscription {
             error: ErrorBody {
                 code: ErrorCode::Unauthenticated,
                 ..

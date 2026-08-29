@@ -29,6 +29,10 @@ pub enum RrdOperation {
     VectorPointRetrieve,
     ChangefeedRead,
     ChangefeedFollow,
+    SubscriptionOpen,
+    SubscriptionConnect,
+    SubscriptionAck,
+    SubscriptionClose,
     AuditRead,
     DiagnosticsRead,
     MemoryContextRead,
@@ -57,6 +61,10 @@ impl RrdOperation {
                 | Self::TransactionBegin
                 | Self::TransactionCommit
                 | Self::TransactionAbort
+                | Self::SubscriptionOpen
+                | Self::SubscriptionConnect
+                | Self::SubscriptionAck
+                | Self::SubscriptionClose
                 | Self::QueryIndexEnsure
                 | Self::BackupCreate
                 | Self::RestoreCreate
@@ -98,6 +106,10 @@ impl RrdOperation {
             Self::VectorPointRetrieve => SecurityAction::VectorPointRetrieve,
             Self::ChangefeedRead => SecurityAction::ChangefeedRead,
             Self::ChangefeedFollow => SecurityAction::ChangefeedFollow,
+            Self::SubscriptionOpen => SecurityAction::SubscriptionOpen,
+            Self::SubscriptionConnect => SecurityAction::SubscriptionConnect,
+            Self::SubscriptionAck => SecurityAction::SubscriptionAck,
+            Self::SubscriptionClose => SecurityAction::SubscriptionClose,
             Self::AuditRead => SecurityAction::AuditRead,
             Self::DiagnosticsRead => SecurityAction::DiagnosticsRead,
             Self::MemoryContextRead => SecurityAction::MemoryContextRead,

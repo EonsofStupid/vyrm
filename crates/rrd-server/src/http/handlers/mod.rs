@@ -5,4 +5,5 @@ mod data;
 mod diagnostic;
 mod runtime;
 mod session;
+mod subscription;
 mod vector;

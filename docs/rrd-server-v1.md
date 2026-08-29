@@ -104,8 +104,12 @@ places that secret elsewhere. `X-RRD-Session` carries the session identifier;
 - `POST /v1/changes/follow` waits at most five seconds for the first retained
   page after the supplied cursor and returns either that page or an explicit
   timeout at the newest observed `through_cursor`. It uses the same typed replay
-  contract, so reconnect never depends on transient server memory. Streaming
-  transport and durable subscription leases remain open.
+  contract and remains the non-streaming compatibility path.
+- `POST /v1/subscriptions/open` and `/close` administer engine-owned durable
+  changefeed/live-query definitions. The authenticated
+  `/v1/subscriptions/{subscription}/stream` WebSocket provides push delivery,
+  cumulative ACK, bounded in-flight backpressure, renewable leases, retention
+  floors, fenced reconnect, and restart-safe replay from the global cursor.
 - `POST /v1/backups` creates and verifies a logical archive in the server's
   generated per-instance backup root. The operation is durably prepared before
   the archive effect, bound to its idempotency key and operation digest, and

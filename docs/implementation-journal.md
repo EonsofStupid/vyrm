@@ -3229,3 +3229,32 @@ index.
   highlighting. Lifecycle tests cover Memory/Fjall/native/reopen, all index
   families, generation reconciliation, stale authoritative fallback,
   corruption denial, and public transaction rejection without cursor advance.
+
+## 2026-08-29 — G03-W06 durable WebSocket subscriptions candidate
+
+- Added one engine-owned durable subscription record for changefeeds and
+  semantic live RRFlowQL queries. Immutable stream definition, owner session,
+  durable ACK cursor, retained resume window, lease, fencing generation,
+  delivery sequence, and bounded outstanding batches are committed through the
+  existing CAS control journal.
+- The runtime commit cursor remains the sole ordering coordinate. Deliveries
+  are recorded before send; ACKs identify exact outstanding deliveries and are
+  cumulative. Reconnect increments a fencing generation, abandons only the
+  unacknowledged window, and replays from the durable ACK across process reopen.
+- Added authenticated subscription open/close HTTP operations and a dedicated
+  Axum WebSocket upgrade route outside the body-consuming fallback. Typed
+  opened/changefeed/live-query/heartbeat/acknowledged/error/closed frames are
+  shared with the supported Rust client, including custom Rustls mTLS reuse for
+  `wss://`.
+- Backpressure stops new delivery at the negotiated in-flight bound. Heartbeat
+  and ACK frames renew the lease. Resume below `head - retention_window`, stale
+  generations, wrong owners, expired leases, malformed frames, and future
+  cursors fail closed.
+- Subscription operations have distinct policy actions and also require the
+  underlying changefeed-follow or live-query-poll grant. Tests cover policy
+  denial, ownership, retention, fencing, cumulative ACK, semantic deltas,
+  interleaved-writer global ordering, native reopen, real WebSocket push, and
+  reconnect replay.
+- The additive HTTP/WebSocket catalogue and frame schemas advance the generated
+  OpenAPI digest to
+  `89ea3a3fe1abd5f672475bf0b964773c10f7f8091ba8f3ce2ff4dd2f0e24331f`.

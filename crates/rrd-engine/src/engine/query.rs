@@ -125,6 +125,16 @@ impl RrdEngine {
             request_id,
             operation_id,
         )?;
+        self.poll_live_query_page(request)
+    }
+
+    pub(in crate::engine) fn poll_live_query_page(
+        &self,
+        request: &PollLiveQuery,
+    ) -> Result<LiveQueryDeltaResult> {
+        request
+            .validate()
+            .map_err(|error| ServiceError::Query(error.to_string()))?;
         let expected_scope = format!("instance:{}", self.instance);
         if request.scope != expected_scope {
             return Err(ServiceError::WrongScope);
