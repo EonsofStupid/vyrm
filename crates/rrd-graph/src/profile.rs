@@ -157,13 +157,22 @@ fn walk(dir: &Path, out: &mut Vec<PathBuf>, depth: usize) -> std::io::Result<()>
     if depth == 0 {
         return Ok(());
     }
-    let entries = match std::fs::read_dir(dir) {
-        Ok(entries) => entries,
-        // An unreadable directory is skipped rather than failing the walk: a
-        // permissions problem in one subtree must not prevent indexing the rest.
-        Err(_) => return Ok(()),
-    };
-    for entry in entries.flatten() {
+    let entries = std::fs::read_dir(dir).map_err(|error| {
+        std::io::Error::new(
+            error.kind(),
+            format!(
+                "cannot inspect project directory {}: {error}",
+                dir.display()
+            ),
+        )
+    })?;
+    for entry in entries {
+        let entry = entry.map_err(|error| {
+            std::io::Error::new(
+                error.kind(),
+                format!("cannot inspect an entry in {}: {error}", dir.display()),
+            )
+        })?;
         let path = entry.path();
         let name = entry.file_name().to_string_lossy().to_string();
         if path.is_dir() {

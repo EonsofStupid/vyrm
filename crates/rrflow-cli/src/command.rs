@@ -1666,6 +1666,8 @@ pub fn execute(
                         "generation": ready.generation,
                         "files": ready.files,
                         "symbols": ready.symbols,
+                        "topology_sha256": ready.topology_sha256,
+                        "profile_sha256": ready.profile_sha256,
                         "refresh": {
                             "added": ready.refresh.added,
                             "changed": ready.refresh.changed,

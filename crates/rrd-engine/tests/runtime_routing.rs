@@ -1,7 +1,8 @@
 use rrd_core::Reader;
 use rrd_core::ReasoningPayload;
 use rrd_engine::{
-    ensure_routing_fresh, handle, load_routing, preflight, reset_routing, HookContext, HookEvent,
+    ensure_routing_fresh, handle, load_project_artifacts, load_routing, preflight, reset_routing,
+    HookContext, HookEvent,
 };
 use rrd_store::{Engine, MemoryEngine, PersistentEngine};
 
@@ -211,4 +212,66 @@ fn a_projection_is_bound_to_one_canonical_project_root() {
         .to_string();
     assert!(error.contains("belongs to"));
     assert!(error.contains("reset-routing"));
+}
+
+#[test]
+fn automatic_refresh_and_manual_rebuild_persist_identical_project_artifacts() {
+    let root = tempfile::tempdir().unwrap();
+    std::fs::write(
+        root.path().join("Cargo.toml"),
+        "[package]\nname='topology'\nversion='0.1.0'\n",
+    )
+    .unwrap();
+    std::fs::write(root.path().join("lib.rs"), "pub fn topology() {}\n").unwrap();
+    let store = MemoryEngine::new();
+
+    let automatic = ensure_routing_fresh(&store, root.path()).unwrap();
+    let (topology, profile) = load_project_artifacts(&store, root.path())
+        .unwrap()
+        .unwrap();
+    assert_eq!(automatic.topology_sha256, topology.digest);
+    assert_eq!(automatic.profile_sha256, profile.digest);
+
+    let manual = reset_routing(&store, root.path()).unwrap();
+    let (rebuilt_topology, rebuilt_profile) = load_project_artifacts(&store, root.path())
+        .unwrap()
+        .unwrap();
+    assert_eq!(manual.topology_sha256, automatic.topology_sha256);
+    assert_eq!(manual.profile_sha256, automatic.profile_sha256);
+    assert_eq!(rebuilt_topology, topology);
+    assert_eq!(rebuilt_profile, profile);
+}
+
+#[test]
+fn project_artifacts_survive_reopen_and_malformed_evidence_denies_refresh() {
+    let root = tempfile::tempdir().unwrap();
+    rrd_engine::InstanceManifest::ensure_dedicated(root.path()).unwrap();
+    std::fs::write(
+        root.path().join("package.json"),
+        "{\"name\":\"durable\",\"scripts\":{\"test\":\"vitest\"}}",
+    )
+    .unwrap();
+    std::fs::write(
+        root.path().join("pnpm-workspace.yaml"),
+        "packages:\n  - .\n",
+    )
+    .unwrap();
+    let database = root.path().join(".rrflow/rrd");
+    let expected = {
+        let store = PersistentEngine::open(&database).unwrap();
+        let ready = ensure_routing_fresh(&store, root.path()).unwrap();
+        (ready.topology_sha256, ready.profile_sha256)
+    };
+    let store = PersistentEngine::open(&database).unwrap();
+    let (topology, profile) = load_project_artifacts(&store, root.path())
+        .unwrap()
+        .unwrap();
+    assert_eq!(expected, (topology.digest, profile.digest));
+
+    std::fs::write(root.path().join("package.json"), "{broken").unwrap();
+    let error = ensure_routing_fresh(&store, root.path())
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("package.json"));
+    assert!(error.contains("malformed"));
 }

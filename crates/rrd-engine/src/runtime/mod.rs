@@ -85,7 +85,9 @@ pub use reasoning::{
     active_reasoning_run, reasoning_run, reasoning_runs, record_reasoning, REASONING_SCOPE,
 };
 pub use registry::{Harness, HookProtocol, Registry, Verification, VERIFICATION_TTL_MS};
-pub use routing::{ensure_routing_fresh, load_routing, reset_routing, RoutingReady};
+pub use routing::{
+    ensure_routing_fresh, load_project_artifacts, load_routing, reset_routing, RoutingReady,
+};
 pub use stack::{
     detect, package_run_event, package_run_event_argv, PackageManager, PackageRunEvent,
     StackProfile,

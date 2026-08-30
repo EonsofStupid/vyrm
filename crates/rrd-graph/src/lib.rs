@@ -22,9 +22,16 @@
 pub mod profile;
 pub mod route;
 pub mod symbols;
+pub mod topology;
 
 pub use profile::{Language, Profile};
 pub use route::{
     attune_and_index, Grounding, Index, IndexedFile, Justification, Refresh, RoutedFile,
 };
 pub use symbols::{Occurrence, Role};
+pub use topology::{
+    Ecosystem, EvidenceFingerprint, EvidenceKind, ExcludedPath, ProjectAttunement, ProjectMember,
+    ProjectProfile, ProjectTask, ProjectTopology, Runner, TaskClass, TopologyEdge,
+    TopologyEdgeKind, TopologyNode, TopologyNodeKind, TopologyRefresh, PROJECT_PROFILE_FORMAT,
+    PROJECT_TOPOLOGY_FORMAT,
+};

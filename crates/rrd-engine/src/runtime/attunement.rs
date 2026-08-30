@@ -1,8 +1,8 @@
 //! Durable evidence that planning inspected the current project state.
 
-use super::{load_routing, RoutingReady, REASONING_SCOPE};
+use super::{load_project_artifacts, load_routing, RoutingReady, REASONING_SCOPE};
 use rrd_core::{digest, ReadStamp, ScopeId};
-use rrd_graph::Profile;
+use rrd_graph::ProjectProfile;
 use rrd_store::{ControlTransition, Engine};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -22,6 +22,7 @@ pub struct ProjectAttunementReceipt {
     pub format: u16,
     pub project_root: PathBuf,
     pub project_root_sha256: String,
+    pub topology_sha256: String,
     pub profile_sha256: String,
     pub source_tree_sha256: String,
     pub source_files: usize,
@@ -108,6 +109,7 @@ pub fn require_fresh_attunement<E: Engine>(
     let current = derive_receipt(store, &root, ready, receipt.issued_at, &receipt.actor, None)?;
     if receipt.project_root != current.project_root
         || receipt.project_root_sha256 != current.project_root_sha256
+        || receipt.topology_sha256 != current.topology_sha256
         || receipt.profile_sha256 != current.profile_sha256
         || receipt.source_tree_sha256 != current.source_tree_sha256
         || receipt.source_files != current.source_files
@@ -292,14 +294,18 @@ fn derive_receipt<E: Engine>(
     actor: &str,
     prompt_sha256: Option<String>,
 ) -> Result<ProjectAttunementReceipt, Box<dyn std::error::Error>> {
-    let profile = Profile::attune(root)?;
+    let (topology, profile) =
+        load_project_artifacts(store, root)?.ok_or("project topology/profile is absent")?;
     let index = load_routing(store, root)?.ok_or("routing projection is absent")?;
     if index.generation() != ready.generation {
         return Err("routing generation changed while creating attunement receipt".into());
     }
     let root_text = root.to_string_lossy();
     let project_root_sha256 = digest::sha256_hex(root_text.as_bytes());
-    let profile_sha256 = digest::sha256_hex(&serde_json::to_vec(&profile)?);
+    if topology.digest != ready.topology_sha256 || profile.digest != ready.profile_sha256 {
+        return Err("project topology/profile changed while creating attunement receipt".into());
+    }
+    let planning_sources = planning_source_fingerprints(root, &profile)?;
     let mut source_bytes = b"rrflow-source-tree-v1\0".to_vec();
     for file in index.files() {
         let relative = file.path.strip_prefix(root).unwrap_or(&file.path);
@@ -313,10 +319,11 @@ fn derive_receipt<E: Engine>(
         format: RECEIPT_FORMAT,
         project_root: root.to_path_buf(),
         project_root_sha256,
-        profile_sha256,
+        topology_sha256: topology.digest,
+        profile_sha256: profile.digest,
         source_tree_sha256: digest::sha256_hex(&source_bytes),
         source_files: index.file_count(),
-        planning_sources: planning_source_fingerprints(root, &profile)?,
+        planning_sources,
         routing_generation: ready.generation,
         indexed_symbols: ready.symbols,
         read: store.runtime_read_stamp(&ScopeId::new(REASONING_SCOPE)?)?,
@@ -332,12 +339,12 @@ fn derive_receipt<E: Engine>(
 
 fn planning_source_fingerprints(
     root: &Path,
-    profile: &Profile,
+    profile: &ProjectProfile,
 ) -> Result<Vec<PlanningSourceFingerprint>, Box<dyn std::error::Error>> {
     let mut paths = profile
         .evidence
         .iter()
-        .map(|path| root.join(path))
+        .map(|evidence| root.join(&evidence.path))
         .collect::<Vec<_>>();
     for relative in [
         "Cargo.lock",

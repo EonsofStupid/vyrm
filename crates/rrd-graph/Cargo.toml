@@ -10,6 +10,7 @@ description = "rrflow routing projection: attunement, symbol and dependency inde
 rrd-core = { path = "../rrd-core" }
 serde = { workspace = true }
 serde_json = { workspace = true }
+toml = { workspace = true }
 tracing = { workspace = true }
 tree-sitter = "0.26"
 tree-sitter-rust = "0.24"

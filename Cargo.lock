@@ -4600,6 +4600,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
+ "toml",
  "tracing",
  "tree-sitter",
  "tree-sitter-javascript",

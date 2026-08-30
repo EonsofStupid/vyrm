@@ -200,8 +200,10 @@ pub fn preflight<E: Engine>(
     }
     if let Some(receipt) = &attunement {
         lines.push(format!(
-            "[rrflow] attunement: receipt={} tree={} planning_sources={}",
+            "[rrflow] attunement: receipt={} topology={} profile={} tree={} planning_sources={}",
             receipt.receipt_sha256,
+            receipt.topology_sha256,
+            receipt.profile_sha256,
             receipt.source_tree_sha256,
             receipt.planning_sources.len()
         ));
