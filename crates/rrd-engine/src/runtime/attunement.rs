@@ -107,20 +107,40 @@ pub fn require_fresh_attunement<E: Engine>(
         return Err("project-attunement receipt failed format or digest verification".into());
     }
     let current = derive_receipt(store, &root, ready, receipt.issued_at, &receipt.actor, None)?;
-    if receipt.project_root != current.project_root
-        || receipt.project_root_sha256 != current.project_root_sha256
-        || receipt.topology_sha256 != current.topology_sha256
-        || receipt.profile_sha256 != current.profile_sha256
-        || receipt.source_tree_sha256 != current.source_tree_sha256
-        || receipt.source_files != current.source_files
-        || receipt.planning_sources != current.planning_sources
-        || receipt.routing_generation != current.routing_generation
-        || receipt.indexed_symbols != current.indexed_symbols
-    {
-        return Err(
-            "project files, manifests, policy, or routing changed after planning; run RRFlow preflight again"
-                .into(),
-        );
+    let mut drift = Vec::new();
+    if receipt.project_root != current.project_root {
+        drift.push("project_root");
+    }
+    if receipt.project_root_sha256 != current.project_root_sha256 {
+        drift.push("project_root_sha256");
+    }
+    if receipt.topology_sha256 != current.topology_sha256 {
+        drift.push("topology_sha256");
+    }
+    if receipt.profile_sha256 != current.profile_sha256 {
+        drift.push("profile_sha256");
+    }
+    if receipt.source_tree_sha256 != current.source_tree_sha256 {
+        drift.push("source_tree_sha256");
+    }
+    if receipt.source_files != current.source_files {
+        drift.push("source_files");
+    }
+    if receipt.planning_sources != current.planning_sources {
+        drift.push("planning_sources");
+    }
+    if receipt.routing_generation != current.routing_generation {
+        drift.push("routing_generation");
+    }
+    if receipt.indexed_symbols != current.indexed_symbols {
+        drift.push("indexed_symbols");
+    }
+    if !drift.is_empty() {
+        return Err(format!(
+            "project files, manifests, policy, or routing changed after planning (drift: {}); run RRFlow preflight again",
+            drift.join(", ")
+        )
+        .into());
     }
     Ok(receipt)
 }

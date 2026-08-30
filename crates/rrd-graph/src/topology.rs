@@ -16,6 +16,7 @@ use std::path::Path;
 pub const PROJECT_TOPOLOGY_FORMAT: u16 = 1;
 pub const PROJECT_PROFILE_FORMAT: u16 = 1;
 const MAX_INSPECTED_FILE_BYTES: u64 = 4 * 1024 * 1024;
+const RUNTIME_STATE_MARKER: &str = ".rrflow/<runtime-state>";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -342,6 +343,12 @@ fn scan_project(root: &Path) -> io::Result<ScannedProject> {
         excluded: Vec::new(),
     };
     walk_project(root, root, &mut project)?;
+    if root.join(".rrflow").is_dir() {
+        project.excluded.push(ExcludedPath {
+            path: RUNTIME_STATE_MARKER.into(),
+            reason: "runtime_state".into(),
+        });
+    }
     project
         .files
         .sort_by(|left, right| left.path.cmp(&right.path));
@@ -393,10 +400,12 @@ fn walk_project(root: &Path, directory: &Path, project: &mut ScannedProject) -> 
                 )));
             }
             if let Some(reason) = excluded_directory(&relative, &name) {
-                project.excluded.push(ExcludedPath {
-                    path: relative,
-                    reason: reason.into(),
-                });
+                if reason != "runtime_state" {
+                    project.excluded.push(ExcludedPath {
+                        path: relative,
+                        reason: reason.into(),
+                    });
+                }
             } else {
                 walk_project(root, &path, project)?;
             }

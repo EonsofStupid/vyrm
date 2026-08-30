@@ -197,6 +197,33 @@ fn artifact_digests_are_independent_of_absolute_checkout_path() {
 }
 
 #[test]
+fn engine_owned_runtime_directories_do_not_change_project_identity() {
+    let root = mixed_project();
+    write(
+        root.path(),
+        ".rrflow/instance.toml",
+        "format = 1\nid = \"test\"\nmode = \"dedicated\"\nmembers = [\".\"]\n",
+    );
+    let before = ProjectAttunement::materialize(root.path()).unwrap();
+    assert!(before
+        .topology
+        .excluded
+        .iter()
+        .any(|path| path.path == ".rrflow/<runtime-state>"));
+
+    write(root.path(), ".rrflow/rrd/manifests/0001", "runtime bytes");
+    write(
+        root.path(),
+        ".rrflow/verification/check-stdout.log",
+        "verification bytes",
+    );
+    let after = ProjectAttunement::materialize(root.path()).unwrap();
+
+    assert_eq!(before.topology, after.topology);
+    assert_eq!(before.profile, after.profile);
+}
+
+#[test]
 fn unreadable_or_malformed_evidence_fails_closed() {
     let malformed = tempfile::tempdir().unwrap();
     write(malformed.path(), "package.json", "{not-json");

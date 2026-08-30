@@ -34,7 +34,16 @@ fn the_runtime_layer_is_generic_over_the_port() {
     let reader = rrd_core::Reader::new("test:port").unwrap();
     let dir = tempfile::tempdir().unwrap();
     rrd_engine::InstanceManifest::ensure_dedicated(dir.path()).unwrap();
-    let flight = rrd_engine::preflight(&engine, dir.path(), None, &reader, 2_000, 1_500).unwrap();
+    let flight = rrd_engine::preflight_task(
+        &engine,
+        dir.path(),
+        None,
+        &reader,
+        2_000,
+        1_500,
+        Some("what is blocking deploy?"),
+    )
+    .unwrap();
     assert!(flight.context.contains("blocked-on-migration"));
     assert_eq!(
         engine.observe_count(),

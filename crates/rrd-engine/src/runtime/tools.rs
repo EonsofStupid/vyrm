@@ -6,8 +6,8 @@
 
 use super::{
     active_reasoning_run, append_lifecycle_event, ensure_routing_fresh, execute_traced_query,
-    handle, load_routing, preflight, query_parameters_from_json, reasoning_run, record_reasoning,
-    ExecutionBudget, HookContext, HookEvent, InstanceBinding, REASONING_SCOPE,
+    handle, load_routing, preflight_task, query_parameters_from_json, reasoning_run,
+    record_reasoning, ExecutionBudget, HookContext, HookEvent, InstanceBinding, REASONING_SCOPE,
 };
 use crate::{
     load_or_create_token_key, product_capability_catalogue, Invocation, InvocationCompletion,
@@ -850,8 +850,8 @@ pub fn runtime_tool_catalogue() -> Vec<RuntimeToolDefinition> {
         ),
         tool(
             "rrflow_preflight",
-            "Attune the project, refresh routing, and inject current memory before reasoning",
-            json!({"type":"object","properties":{"at":{"type":"integer"},"budget":{"type":"integer"},"harness":{"type":"string"}}}),
+            "Attune the project and assemble a persisted task-specific source and memory context before reasoning",
+            json!({"type":"object","properties":{"at":{"type":"integer"},"budget":{"type":"integer"},"harness":{"type":"string"},"task":{"type":"string"}}}),
             true,
             RuntimeToolLifecyclePolicy::ControlTransition,
         ),
@@ -1391,7 +1391,8 @@ fn execute_runtime_tool(
             let at = arg_u64(args, "at").unwrap_or(invocation_at);
             let budget = arg_u64(args, "budget").unwrap_or(1_500) as usize;
             let harness = args.get("harness").and_then(Value::as_str);
-            let flight = preflight(store, root, harness, &reader, at, budget)?;
+            let task = args.get("task").and_then(Value::as_str);
+            let flight = preflight_task(store, root, harness, &reader, at, budget, task)?;
             Ok(ExecutedTool {
                 text: flight.context,
                 effectiveness: Some(flight.effectiveness),

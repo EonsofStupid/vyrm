@@ -9,19 +9,25 @@
 //! survives compaction" mechanical: the harness re-fires the event after
 //! compaction and the preflight re-injects.
 
+use super::context::{assemble_task_context, select_task_subjects};
 use super::registry::{Registry, Verification};
 use super::routing::{ensure_routing_fresh, RoutingReady};
 use super::stack;
 use super::workflow::{WorkflowCatalog, WorkflowPreflight, WORKFLOW_FILE};
 use super::InstanceBinding;
-use super::{record_attunement_receipt, sync_project_work_plan};
-use rrd_core::{recall, Millis, Reader, RecallQuery};
+use super::{
+    read_work_plan, record_attunement_receipt, sync_project_work_plan, TaskPreflightReceipt,
+};
+use rrd_core::{digest, recall, Millis, Reader, RecallQuery};
 use rrd_store::{Effectiveness, Engine, ProjectionStatus, RecallOutcome};
 
 /// What a preflight produced. `context` is the injectable text; everything
 /// else is the evidence behind it.
 #[derive(Debug)]
 pub struct Preflight {
+    /// Effective task used for source and knowledge routing. Explicit prompts
+    /// win; otherwise the active work item supplies the task.
+    pub task: String,
     pub stacks: Vec<&'static str>,
     /// Persisted source-routing state established before recall is injected.
     /// `None` means freshness could not be established and `warnings` says
@@ -30,6 +36,8 @@ pub struct Preflight {
     /// Durable evidence binding the inspected project tree and planning inputs
     /// to the RRD state visible during this preflight.
     pub attunement: Option<super::ProjectAttunementReceipt>,
+    /// Persisted receipt for the bounded task-specific context packet.
+    pub context_receipt: Option<TaskPreflightReceipt>,
     /// Authoritative execution board when the project carries a checked-in
     /// RRFlow work plan.
     pub work_plan: Option<super::WorkPlanSnapshot>,
@@ -56,6 +64,21 @@ pub fn preflight<E: Engine>(
     reader: &Reader,
     now: Millis,
     budget: usize,
+) -> Result<Preflight, Box<dyn std::error::Error>> {
+    preflight_task(store, root, harness, reader, now, budget, None)
+}
+
+/// Runs the same preflight with an explicit prompt/task. All adapters call this
+/// path rather than maintaining their own subject matching or source routing.
+#[tracing::instrument(level = "debug", skip_all)]
+pub fn preflight_task<E: Engine>(
+    store: &E,
+    root: &std::path::Path,
+    harness: Option<&str>,
+    reader: &Reader,
+    now: Millis,
+    budget: usize,
+    requested_task: Option<&str>,
 ) -> Result<Preflight, Box<dyn std::error::Error>> {
     let binding = InstanceBinding::discover(root)?;
     binding.require_runtime_ready()?;
@@ -132,6 +155,7 @@ pub fn preflight<E: Engine>(
             None
         }
     };
+    let task = resolve_task(root, requested_task, work_plan.as_ref());
 
     // Estate health: a quarantined projection is surfaced, and recall
     // proceeds from the authoritative claims keyspace regardless — the gate
@@ -168,9 +192,9 @@ pub fn preflight<E: Engine>(
         }
     }
 
-    let subjects = store.subjects()?;
+    let subject_selection = select_task_subjects(store, &task)?;
     let query = RecallQuery {
-        subjects,
+        subjects: subject_selection.subjects.clone(),
         predicates: None,
         as_of: now,
     };
@@ -178,10 +202,43 @@ pub fn preflight<E: Engine>(
     for claim in &set.claims {
         store.observe(reader, &claim.subject, &claim.predicate, now)?;
     }
+    let context_assembly = match (routing.as_ref(), attunement.as_ref()) {
+        (Some(ready), Some(receipt)) => match assemble_task_context(
+            store,
+            root,
+            &task,
+            ready,
+            receipt,
+            &workflows,
+            &set,
+            subject_selection.truncated,
+            now,
+            budget,
+        ) {
+            Ok(assembly) => Some(assembly),
+            Err(error) => {
+                warnings.push(format!(
+                    "task-specific context receipt could not be persisted: {error}"
+                ));
+                None
+            }
+        },
+        _ => {
+            warnings.push(
+                "task-specific context receipt is unavailable because project attunement is incomplete"
+                    .into(),
+            );
+            None
+        }
+    };
+    if let Some(assembly) = &context_assembly {
+        warnings.extend(assembly.warnings.iter().cloned());
+    }
 
     let mut lines = Vec::new();
     lines.push(format!(
-        "[rrflow] preflight: stack={}; {} claim(s) in force, ~{} token(s){}",
+        "[rrflow] preflight: task={} stack={}; {} selected claim(s), ~{} token(s){}",
+        &digest::sha256_hex(task.as_bytes())[..12],
         if stacks.is_empty() {
             "none detected".to_string()
         } else {
@@ -189,7 +246,7 @@ pub fn preflight<E: Engine>(
         },
         set.claims.len(),
         set.token_estimate,
-        if set.truncated {
+        if set.truncated || subject_selection.truncated {
             ", TRUNCATED by budget"
         } else {
             ""
@@ -206,6 +263,17 @@ pub fn preflight<E: Engine>(
             receipt.profile_sha256,
             receipt.source_tree_sha256,
             receipt.planning_sources.len()
+        ));
+    }
+    if let Some(assembly) = &context_assembly {
+        lines.push(format!(
+            "[rrflow] context receipt: {} route={} pattern={} policy={} projection={} reads={}",
+            assembly.receipt.receipt_sha256,
+            assembly.receipt.route_sha256,
+            assembly.receipt.pattern_sha256,
+            assembly.receipt.policy_sha256,
+            assembly.receipt.projection_sha256,
+            assembly.receipt.rrd_reads_sha256,
         ));
     }
     if let Some(snapshot) = &work_plan {
@@ -236,20 +304,31 @@ pub fn preflight<E: Engine>(
     for warning in &warnings {
         lines.push(format!("[rrflow] WARNING: {warning}"));
     }
-    for claim in &set.claims {
-        lines.push(format!(
-            "{} {} = {}  [valid_from={} tx={} by {}]",
-            claim.subject.as_str(),
-            claim.predicate.as_str(),
-            claim.object,
-            claim.valid_from,
-            claim.tx_time,
-            claim.producer.actor,
-        ));
+    if let Some(assembly) = &context_assembly {
+        lines.push(assembly.rendered.clone());
+    } else {
+        for claim in &set.claims {
+            lines.push(format!(
+                "{} {} = {}  [valid_from={} tx={} by {}]",
+                claim.subject.as_str(),
+                claim.predicate.as_str(),
+                claim.object,
+                claim.valid_from,
+                claim.tx_time,
+                claim.producer.actor,
+            ));
+        }
+        if set.claims.is_empty() {
+            lines.push("[rrflow] EXCLUDED recall: no task-relevant claim".into());
+        }
     }
 
     let effectiveness = Effectiveness {
-        query: format!("preflight:{}", query.subjects.len()),
+        query: format!(
+            "preflight-task:{}:{}",
+            &digest::sha256_hex(task.as_bytes())[..12],
+            query.subjects.len()
+        ),
         claims_returned: set.claims.len(),
         tokens_emitted: set.token_estimate as u64,
         baseline_tokens: None,
@@ -268,13 +347,33 @@ pub fn preflight<E: Engine>(
         "preflight"
     );
     Ok(Preflight {
+        task,
         stacks,
         routing,
         attunement,
+        context_receipt: context_assembly.map(|assembly| assembly.receipt),
         work_plan,
         workflows,
         warnings,
         context: lines.join("\n"),
         effectiveness,
     })
+}
+
+fn resolve_task(
+    root: &std::path::Path,
+    requested: Option<&str>,
+    work_plan: Option<&super::WorkPlanSnapshot>,
+) -> String {
+    if let Some(task) = requested.map(str::trim).filter(|task| !task.is_empty()) {
+        return task.to_owned();
+    }
+    if let Some(active) = work_plan.and_then(|snapshot| snapshot.active_item_id.as_deref()) {
+        if let Ok(definition) = read_work_plan(root) {
+            if let Some(item) = definition.item.iter().find(|item| item.id == active) {
+                return format!("{}: {}", item.title, item.acceptance.join("; "));
+            }
+        }
+    }
+    "project session attunement".into()
 }

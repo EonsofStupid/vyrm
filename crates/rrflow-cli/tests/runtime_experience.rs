@@ -353,8 +353,8 @@ fn a_scripted_session_recall_arrives_before_reasoning_and_runs_are_journaled() {
         None,
     );
 
-    // Session start: the preflight injects stack, fact, and — because the
-    // adapter has never been audited — the drift alarm.
+    // Session start injects task-scoped project state and the drift alarm. It
+    // must not inject an unrelated claim before a task names it.
     let root_str = root.to_str().unwrap();
     let (ok, out, err) = rrflow(
         &db,
@@ -370,10 +370,7 @@ fn a_scripted_session_recall_arrives_before_reasoning_and_runs_are_journaled() {
     );
     assert!(ok, "session-start failed: {err}");
     assert!(out.contains("stack=cargo"), "stack not detected: {out}");
-    assert!(
-        out.contains("blocked-on-migration"),
-        "recall not injected before reasoning: {out}"
-    );
+    assert!(!out.contains("blocked-on-migration"));
     assert!(
         out.contains("never been audited"),
         "drift alarm silent on unaudited adapter: {out}"
@@ -405,12 +402,12 @@ fn a_scripted_session_recall_arrives_before_reasoning_and_runs_are_journaled() {
         Some("{}"),
     );
     assert!(
-        !out.contains("WARNING"),
+        !out.contains("harness adapter claude-code"),
         "audited adapter still warns: {out}"
     );
 
     // A prompt naming a known subject gets its recall; one naming nothing
-    // injects nothing at all.
+    // receives an explicit empty task-context outcome.
     let (ok, out, _) = rrflow(
         &db,
         &["hook", "user-prompt-submit", "--root", root_str],
@@ -428,8 +425,12 @@ fn a_scripted_session_recall_arrives_before_reasoning_and_runs_are_journaled() {
     );
     assert!(ok);
     assert!(
-        out.is_empty(),
-        "unmatched prompt must inject nothing: {out:?}"
+        out.contains("recall=empty"),
+        "empty recall is implicit: {out}"
+    );
+    assert!(
+        out.contains("EXCLUDED recall"),
+        "unmatched prompt omitted exclusion evidence: {out}"
     );
 
     // The application journal: an exact pre-tool authorization binds the

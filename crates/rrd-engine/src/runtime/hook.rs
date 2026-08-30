@@ -11,7 +11,7 @@
 mod supervision;
 
 use super::policy::{is_project_mutation_tool, tool_request_digest};
-use super::preflight::{preflight, Preflight};
+use super::preflight::{preflight, preflight_task, Preflight};
 use super::reasoning::active_reasoning_run;
 use super::routing::ensure_routing_fresh;
 use super::stack;
@@ -19,18 +19,15 @@ use super::sync_project_work_plan;
 use super::workflow::{
     resolve_package_argv, resolve_package_command, WorkflowDecision, WorkflowObservation,
 };
-use super::{
-    authorize_attuned_tool, complete_attuned_tool, record_attunement_receipt,
-    require_fresh_attunement,
-};
+use super::{authorize_attuned_tool, complete_attuned_tool, require_fresh_attunement};
 use super::{evaluate_tool, DurableTraceSpan, ToolPolicy};
 use rrd_core::{
-    digest, recall, resolve_as_of, Check, CheckStatus, Claim, Evidence, Millis, Predicate,
-    Producer, Reader, ReasoningPayload, ReasoningState, RecallQuery, RuntimeCommit,
-    RuntimeEventSchema, RuntimeMutation, RuntimeProperties, RuntimeSchemaRegistry, RuntimeType,
-    RuntimeValue, ScopeId, Subject, TraceDataClass, TraceDomain, TraceLink, TraceOutcome,
+    digest, resolve_as_of, Check, CheckStatus, Claim, Evidence, Millis, Predicate, Producer,
+    Reader, ReasoningPayload, ReasoningState, RuntimeCommit, RuntimeEventSchema, RuntimeMutation,
+    RuntimeProperties, RuntimeSchemaRegistry, RuntimeType, RuntimeValue, ScopeId, Subject,
+    TraceDataClass, TraceDomain, TraceLink, TraceOutcome,
 };
-use rrd_store::{Effectiveness, Engine, ProjectionStatus, RecallOutcome};
+use rrd_store::{Effectiveness, Engine, ProjectionStatus};
 use serde_json::Value;
 
 /// Lifecycle events the dispatcher answers. Kebab-case names match the CLI
@@ -215,86 +212,16 @@ fn handle_inner<E: Engine>(
 
         HookEvent::UserPromptSubmit => {
             let prompt = input.get("prompt").and_then(Value::as_str).unwrap_or("");
-            let ready = ensure_routing_fresh(store, root)?;
-            record_attunement_receipt(
-                store,
-                root,
-                &ready,
-                now,
-                &format!("hook:{}", harness.unwrap_or("unknown")),
-                Some(digest::sha256_hex(prompt.as_bytes())),
-            )?;
-            let work_plan = sync_project_work_plan(
-                store,
-                root,
-                now,
-                &format!("hook:{}", harness.unwrap_or("unknown")),
-            )?;
-            let work_plan_context = work_plan.as_ref().map(|snapshot| {
-                let verified = snapshot
-                    .items
-                    .iter()
-                    .filter(|item| item.status == super::WorkItemStatus::Verified)
-                    .count();
-                format!(
-                    "[rrflow] enforced work plan {}: verified={}/{} active={} revision={} digest={}",
-                    snapshot.plan_id,
-                    verified,
-                    snapshot.items.len(),
-                    snapshot.active_item_id.as_deref().unwrap_or("none"),
-                    snapshot.revision,
-                    snapshot.plan_sha256,
-                )
-            });
-            let matched = matched_subjects(store, prompt)?;
-            if matched.is_empty() {
-                return Ok(HookResponse {
-                    stdout: context_output(
-                        harness,
-                        HookEvent::UserPromptSubmit,
-                        work_plan_context.unwrap_or_default(),
-                    ),
-                    ..HookResponse::default()
-                });
-            }
-            let query = RecallQuery {
-                subjects: matched,
-                predicates: None,
-                as_of: now,
-            };
-            let set = recall(store, &query, budget)?;
-            for claim in &set.claims {
-                store.observe(reader, &claim.subject, &claim.predicate, now)?;
-            }
-            let mut lines = vec![format!(
-                "[rrflow] recall for this prompt ({} claim(s), ~{} token(s)):",
-                set.claims.len(),
-                set.token_estimate
-            )];
-            if let Some(context) = work_plan_context {
-                lines.insert(0, context);
-            }
-            lines.extend(set.claims.iter().map(render_claim));
-            let effectiveness = Effectiveness {
-                query: query
-                    .subjects
-                    .iter()
-                    .map(|s| s.as_str())
-                    .collect::<Vec<_>>()
-                    .join(","),
-                claims_returned: set.claims.len(),
-                tokens_emitted: set.token_estimate as u64,
-                baseline_tokens: None,
-                baseline_mode: None,
-                provider: harness
-                    .map(|h| format!("harness:{h}"))
-                    .unwrap_or_else(|| "operator:cli".into()),
-                outcome: RecallOutcome::Unknown,
-            };
+            let Preflight {
+                context,
+                effectiveness,
+                warnings,
+                ..
+            } = preflight_task(store, root, harness, reader, now, budget, Some(prompt))?;
             Ok(HookResponse {
-                stdout: context_output(harness, HookEvent::UserPromptSubmit, lines.join("\n")),
+                stdout: context_output(harness, HookEvent::UserPromptSubmit, context),
                 effectiveness: Some(effectiveness),
-                detail: None,
+                detail: (!warnings.is_empty()).then(|| format!("{} warning(s)", warnings.len())),
                 ..HookResponse::default()
             })
         }
@@ -880,37 +807,6 @@ fn exact_exec_argv(input: &Value) -> Result<Vec<String>, Box<dyn std::error::Err
         return Err("RRFlowExec argv is empty or contains NUL".into());
     }
     Ok(argv)
-}
-
-/// Subjects whose name appears in the prompt as a whole word
-/// (case-insensitive). Substring matching would recall `repo` for
-/// "repository"; word boundaries keep recall answerable for what it injects.
-fn matched_subjects<E: Engine>(
-    store: &E,
-    prompt: &str,
-) -> Result<Vec<Subject>, Box<dyn std::error::Error>> {
-    let lowered = prompt.to_lowercase();
-    let words: std::collections::BTreeSet<&str> = lowered
-        .split(|c: char| !(c.is_alphanumeric() || c == '-' || c == '_'))
-        .filter(|w| !w.is_empty())
-        .collect();
-    Ok(store
-        .subjects()?
-        .into_iter()
-        .filter(|s| words.contains(s.as_str().to_lowercase().as_str()))
-        .collect())
-}
-
-fn render_claim(claim: &Claim) -> String {
-    format!(
-        "{} {} = {}  [valid_from={} tx={} by {}]",
-        claim.subject.as_str(),
-        claim.predicate.as_str(),
-        claim.object,
-        claim.valid_from,
-        claim.tx_time,
-        claim.producer.actor,
-    )
 }
 
 /// Exit code of a Bash run, wherever the harness put it. Absent means the

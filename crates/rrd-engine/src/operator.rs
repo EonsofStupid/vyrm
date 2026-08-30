@@ -217,6 +217,18 @@ impl RrdEngine {
         crate::preflight(&self.storage, root, harness, reader, now, budget)
     }
 
+    pub fn runtime_task_preflight(
+        &self,
+        root: &Path,
+        harness: Option<&str>,
+        reader: &Reader,
+        now: Millis,
+        budget: usize,
+        task: Option<&str>,
+    ) -> OperatorResult<crate::Preflight> {
+        crate::preflight_task(&self.storage, root, harness, reader, now, budget, task)
+    }
+
     pub fn handle_runtime_hook(
         &self,
         request: RuntimeHookRequest<'_>,

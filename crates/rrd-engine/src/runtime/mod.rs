@@ -20,6 +20,7 @@
 
 mod attunement;
 pub mod cluster_transfer;
+pub mod context;
 pub mod data_plane;
 pub mod hook;
 pub mod init;
@@ -49,6 +50,11 @@ pub use cluster_transfer::{
     execute_traced_artifact_transfer, record_artifact_transfer_observation,
     DurableArtifactTransferObserver,
 };
+pub use context::{
+    classify_task, load_task_preflight_receipt, ContextSourceRoute, EvidenceDisposition,
+    NamedReadStamp, TaskClassification, TaskPreflightReceipt, GOLDEN_PATTERN_SELECTION_PROJECTION,
+    TASK_PREFLIGHT_RECEIPT_FORMAT, TASK_PREFLIGHT_RECEIPT_PROJECTION,
+};
 pub use data_plane::{
     execute_traced_embedding, execute_traced_vector_search, TracedEmbeddingExecution,
     TracedVectorSearch,
@@ -76,7 +82,7 @@ pub use operator_knowledge::{
     TracedOperatorSync,
 };
 pub use policy::{evaluate_tool, ContractDifferential, ToolPolicy};
-pub use preflight::{preflight, Preflight};
+pub use preflight::{preflight, preflight_task, Preflight};
 pub use query::{
     execute_traced_query, query_parameters_from_json, ExecutionBudget, Parameters,
     TracedQueryExecution,

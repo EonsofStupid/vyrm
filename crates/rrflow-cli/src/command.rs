@@ -182,8 +182,8 @@ pub enum Command {
         root: std::path::PathBuf,
     },
     /// The moment of attunement (`PLAN.md` Step P): detect the stack, check
-    /// estate health and adapter verification, and emit a budgeted recall of
-    /// every claim in force, rendered for context injection.
+    /// estate health and adapter verification, and assemble a task-specific
+    /// bounded source and memory context.
     Preflight {
         /// Project root for stack detection.
         #[arg(long, default_value = ".")]
@@ -191,6 +191,10 @@ pub enum Command {
         /// Harness adapter in use, so its verification drift can make noise.
         #[arg(long)]
         harness: Option<String>,
+        /// Prompt or task used for deterministic source and claim routing.
+        /// When absent, the active work item supplies the task.
+        #[arg(long)]
+        task: Option<String>,
         #[arg(long, default_value_t = 1500)]
         budget: usize,
     },
@@ -647,6 +651,7 @@ impl Command {
             Command::Preflight {
                 root,
                 harness,
+                task,
                 budget,
             } => {
                 let mut a = vec![
@@ -655,6 +660,9 @@ impl Command {
                 ];
                 if let Some(h) = harness {
                     a.push(format!("harness={h}"));
+                }
+                if let Some(task) = task {
+                    a.push(format!("task={task}"));
                 }
                 a
             }
@@ -1287,10 +1295,18 @@ pub fn execute(
         Command::Preflight {
             root,
             harness,
+            task,
             budget,
         } => {
             verify_instance_store(store, root)?;
-            let flight = store.runtime_preflight(root, harness.as_deref(), reader, now, *budget)?;
+            let flight = store.runtime_task_preflight(
+                root,
+                harness.as_deref(),
+                reader,
+                now,
+                *budget,
+                task.as_deref(),
+            )?;
             let detail = (!flight.warnings.is_empty())
                 .then(|| format!("{} warning(s)", flight.warnings.len()));
             return Ok(Execution {
