@@ -10,6 +10,7 @@ description = "stdio MCP adapter for the RRFlow reasoning runtime"
 rrd-client = { path = "../rrd-client" }
 rrd-contract = { path = "../rrd-contract" }
 rrd-engine = { path = "../rrd-engine" }
+serde = { workspace = true }
 serde_json = { workspace = true }
 tokio = { version = "1", features = ["rt", "time"] }
 

@@ -7,6 +7,8 @@ use authority::RuntimeAuthority;
 use serde_json::{json, Value};
 use std::io::{BufRead, Write};
 
+const INSTRUCTIONS: &str = "Call rrflow_preflight before reasoning. Provider hook payloads use rrflow_hook; rrflow_lifecycle accepts only strict canonical lifecycle envelopes. Standalone MCP is cooperative and cannot intercept host-owned tools.";
+
 fn main() {
     if let Err(error) = run() {
         eprintln!("rrflow-mcp: {error}");
@@ -62,7 +64,8 @@ fn dispatch(authority: &mut RuntimeAuthority, id: Value, request: &Value) -> Val
                 "resultType":"complete",
                 "supportedVersions":["2026-07-28","2025-11-25","2025-06-18"],
                 "capabilities":{"tools":{}},
-                "instructions":"Call rrflow_preflight before reasoning. Provider hook payloads use rrflow_hook; rrflow_lifecycle accepts only strict canonical lifecycle envelopes."
+                "instructions":INSTRUCTIONS,
+                "_meta":{"io.rrflow/runtimeProfile":authority.profile()}
             }
         }),
         "initialize" => {
@@ -82,7 +85,8 @@ fn dispatch(authority: &mut RuntimeAuthority, id: Value, request: &Value) -> Val
                     "protocolVersion": negotiated,
                     "capabilities": {"tools": {"listChanged": false}},
                     "serverInfo": {"name": "rrflow-mcp", "version": env!("CARGO_PKG_VERSION")},
-                    "instructions": "Call rrflow_preflight before reasoning. Provider hook payloads use rrflow_hook; rrflow_lifecycle accepts only strict canonical lifecycle envelopes."
+                    "instructions": INSTRUCTIONS,
+                    "_meta":{"io.rrflow/runtimeProfile":authority.profile()}
                 }
             })
         }
@@ -93,7 +97,10 @@ fn dispatch(authority: &mut RuntimeAuthority, id: Value, request: &Value) -> Val
                 "id":id,
                 "result":{
                     "tools":tools(authority),
-                    "_meta":{"io.rrflow/taskCatalogue":rrd_engine::mcp_task_catalogue()}
+                    "_meta":{
+                        "io.rrflow/taskCatalogue":rrd_engine::mcp_task_catalogue(),
+                        "io.rrflow/runtimeProfile":authority.profile()
+                    }
                 }
             })
         }

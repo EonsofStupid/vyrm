@@ -4821,6 +4821,7 @@ dependencies = [
  "rrd-security",
  "rrd-server",
  "rrd-store",
+ "serde",
  "serde_json",
  "tempfile",
  "tokio",

@@ -55,6 +55,18 @@ fn stdio_server_negotiates_lists_tools_and_uses_the_shared_contract_gate() {
         "notification must not receive a response"
     );
     assert_eq!(responses[0]["result"]["protocolVersion"], "2025-11-25");
+    let embedded_profile = &responses[0]["result"]["_meta"]["io.rrflow/runtimeProfile"];
+    assert_eq!(embedded_profile["mode"], "embedded");
+    assert_eq!(
+        embedded_profile["execution_authority"],
+        "embedded_rrd_engine"
+    );
+    assert_eq!(embedded_profile["storage_access"], "exclusive_bound_engine");
+    assert_eq!(embedded_profile["caller_authentication"], "none");
+    assert_eq!(embedded_profile["enforcement_level"], "cooperative");
+    assert_eq!(embedded_profile["planning_enforced"], false);
+    assert_eq!(embedded_profile["mutation_enforced"], false);
+    assert_eq!(embedded_profile["host_tool_interception"], false);
     let listed = responses[1]["result"]["tools"].as_array().unwrap();
     let executable = rrd_engine::runtime_tool_catalogue();
     assert_eq!(listed.len(), executable.len());
@@ -69,6 +81,10 @@ fn stdio_server_negotiates_lists_tools_and_uses_the_shared_contract_gate() {
             .collect::<Vec<_>>()
     );
     let task_catalogue = &responses[1]["result"]["_meta"]["io.rrflow/taskCatalogue"];
+    assert_eq!(
+        responses[1]["result"]["_meta"]["io.rrflow/runtimeProfile"],
+        *embedded_profile
+    );
     assert_eq!(
         task_catalogue["dispositions"].as_array().unwrap().len(),
         rrd_engine::McpTaskDomain::ALL.len()

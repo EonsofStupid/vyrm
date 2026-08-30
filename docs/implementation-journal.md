@@ -3697,3 +3697,19 @@ index.
   Black-box stdio evidence requires terminal structured-audit records for the
   exercised advertised domains. G06-W03 still owns authenticated daemon
   topology qualification.
+
+## 2026-08-30 — G06-W03 authenticated daemon MCP candidate
+
+- Daemon MCP now negotiates the server's public capability document and fails
+  closed unless persistent security policy is initialized; an API-key-shaped
+  value can no longer create an apparently authenticated session on an
+  unsecured development server.
+- Initialize, stateless discovery, and tool discovery expose one authority
+  profile for the selected mode. It distinguishes embedded engine ownership
+  from `rrd-client`-only daemon access and uses the canonical `cooperative`
+  lifecycle level while explicitly denying host planning, mutation, and tool
+  interception claims.
+- The secured process-level daemon test retains the server's sole writer while
+  proving the same principal is allowed `ServiceInspect`, denied
+  `MemoryContextRead`, and preserved with both granular decisions in durable
+  audit. A separate process test rejects an unsecured daemon at startup.

@@ -1,10 +1,11 @@
 # RRFlow MCP embedded/daemon contract
 
-**Status:** authoritative pre-release implementation gate as of 2026-08-25.
-D0 through D4 are implemented and locally verified. Embedded MCP and the
-loopback authenticated daemon-client profile are executable. Remote mTLS,
-every-domain daemon differentials, and D5 topology qualification remain
-incomplete and must not be advertised as complete.
+**Status:** authoritative pre-release implementation gate as of 2026-08-30.
+D0 through D4 and the G06-W03 local daemon contract are implemented and
+locally verified. Embedded MCP and the loopback authenticated daemon-client
+profile are executable. Remote mTLS, every-domain daemon differentials, and
+full-topology qualification remain incomplete and must not be advertised as
+complete.
 
 ## Purpose
 
@@ -75,6 +76,9 @@ sessions may manage leases but cannot downgrade or replace that principal.
   produced in embedded and daemon modes.
 - MCP remains cooperative unless its host provides an intercepting or
   orchestrated boundary. Daemon transport does not falsely upgrade enforcement.
+  Initialize, stateless discovery, and tool discovery all publish the same
+  runtime-authority profile with `enforcement_level = cooperative`, false host
+  planning/mutation enforcement, and false host-tool interception.
 
 ## Conformance gates
 
@@ -116,7 +120,7 @@ subscription WebSocket. Two HTTP operations are the daemon runtime boundary:
 - `POST /v1/runtime/tools/list` requires a session and the dedicated
   `runtime_tool_catalogue_read` grant;
 - `POST /v1/runtime/tools/invoke` requires a session, resolves the selected
-  tool against the engine-owned 28-tool catalogue, derives its actual mutation
+  tool against the engine-owned generated catalogue, derives its actual mutation
   bit and granular `SecurityAction`, and uses only the server's persisted
   project root.
 
@@ -137,8 +141,10 @@ project binding. Daemon mode accepts no database or project path. It:
 
 1. accepts loopback HTTP only in the currently qualified local profile;
 2. reads a bounded, owner-only, visible-ASCII API key from an absolute path;
-3. creates a principal-bound RRD session and fetches the server catalogue;
-4. rejects startup if that catalogue differs from the MCP build;
+3. requires the server's public capabilities to report initialized security,
+   then creates a principal-bound RRD session and fetches the server catalogue;
+4. rejects startup if security is unavailable or the catalogue differs from
+   the MCP build;
 5. invokes every call through `rrd-client` with descriptor-derived
    idempotency, retry, deadline, and granular authorization semantics;
 6. re-authenticates after an expired session and rejects catalogue drift;
@@ -146,8 +152,11 @@ project binding. Daemon mode accepts no database or project path. It:
 
 The black-box daemon test starts one secured, project-bound `rrd-server`, then
 runs the MCP process using only URL/instance/principal/credential-reference.
-It proves 28-tool name/schema parity, a real authenticated service-status
-result, clean session close, and the original MCP principal in durable audit.
+It proves generated name/schema parity, the explicit cooperative authority
+profile, a real authenticated service-status result, a different action denied
+under the same principal, clean session close, and the original MCP principal
+with each granular action/decision in durable audit. A second black-box test
+proves that an unsecured daemon is rejected before session creation.
 The development doctor now derives this as a passing boundary check. Full
 mutation-domain parity, response-loss replay, and remote mTLS remain explicit
 D5/full-conformance work. The supervised RRD + authenticated Connectome

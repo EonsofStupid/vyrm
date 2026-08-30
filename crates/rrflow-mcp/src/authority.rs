@@ -1,9 +1,10 @@
 use crate::config::RuntimeConfig;
 use rrd_client::{ClientConfig, RequestOptions, RrdClient, Session};
 use rrd_contract::{
-    runtime_tool_arguments_sha256, runtime_tool_invocation_sha256, CanonicalId, CloseSession,
-    CorrelationId, CreateSession, RequestContext, ResourceId, ResourceKind, ResourcePath,
-    RuntimeToolCatalogue, RuntimeToolInvocation, SessionLimits, RUNTIME_TOOL_CATALOGUE_VERSION,
+    runtime_tool_arguments_sha256, runtime_tool_invocation_sha256, CanonicalId, CapabilityStatus,
+    CloseSession, CorrelationId, CreateSession, LifecycleEnforcementLevelV1, RequestContext,
+    ResourceId, ResourceKind, ResourcePath, RuntimeToolCatalogue, RuntimeToolInvocation,
+    SessionLimits, RUNTIME_TOOL_CATALOGUE_VERSION,
 };
 use rrd_engine::{
     runtime_tool_contract_catalogue, InstanceBinding, Invocation, InvocationCredential, RrdEngine,
@@ -24,8 +25,23 @@ pub(crate) enum RuntimeAuthority {
         engine: Box<RrdEngine>,
         project_root: PathBuf,
         catalogue: RuntimeToolCatalogue,
+        security_enforced: bool,
     },
     Daemon(Box<DaemonAuthority>),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub(crate) struct RuntimeAuthorityProfile {
+    pub mode: &'static str,
+    pub execution_authority: &'static str,
+    pub storage_access: &'static str,
+    pub caller_authentication: &'static str,
+    pub security_enforced: bool,
+    pub tool_policy_enforced: bool,
+    pub enforcement_level: LifecycleEnforcementLevelV1,
+    pub planning_enforced: bool,
+    pub mutation_enforced: bool,
+    pub host_tool_interception: bool,
 }
 
 pub(crate) struct DaemonAuthority {
@@ -47,10 +63,12 @@ impl RuntimeAuthority {
                 let binding = InstanceBinding::discover(&project_root)?;
                 binding.verify_store_path(&database)?;
                 let engine = RrdEngine::open_bound(&binding)?;
+                let security_enforced = engine.security_enforced()?;
                 Ok(Self::Embedded {
                     engine: Box::new(engine),
                     project_root: binding.project_root,
                     catalogue: runtime_tool_contract_catalogue(),
+                    security_enforced,
                 })
             }
             RuntimeConfig::Daemon {
@@ -65,6 +83,20 @@ impl RuntimeAuthority {
                     .enable_all()
                     .build()?;
                 let client = RrdClient::connect_local(address, instance, ClientConfig::default())?;
+                let capabilities = runtime.block_on(client.capabilities())?;
+                let security_enforced = capabilities.capabilities.iter().any(|capability| {
+                    capability.name.as_str() == "security-policy"
+                        && matches!(
+                            capability.status,
+                            CapabilityStatus::Experimental | CapabilityStatus::Available
+                        )
+                });
+                if !security_enforced {
+                    return Err(
+                        "daemon MCP requires an initialized RRD security policy; unsecured development sessions are not authenticated"
+                            .into(),
+                    );
+                }
                 let session = runtime.block_on(client.create_session(
                     principal.clone(),
                     &api_key,
@@ -98,6 +130,40 @@ impl RuntimeAuthority {
         match self {
             Self::Embedded { catalogue, .. } => catalogue,
             Self::Daemon(authority) => &authority.catalogue,
+        }
+    }
+
+    pub(crate) fn profile(&self) -> RuntimeAuthorityProfile {
+        let (mode, execution_authority, storage_access, caller_authentication, security_enforced) =
+            match self {
+                Self::Embedded {
+                    security_enforced, ..
+                } => (
+                    "embedded",
+                    "embedded_rrd_engine",
+                    "exclusive_bound_engine",
+                    "none",
+                    *security_enforced,
+                ),
+                Self::Daemon(_) => (
+                    "daemon",
+                    "rrd_server_via_rrd_client",
+                    "none",
+                    "principal_api_key_session",
+                    true,
+                ),
+            };
+        RuntimeAuthorityProfile {
+            mode,
+            execution_authority,
+            storage_access,
+            caller_authentication,
+            security_enforced,
+            tool_policy_enforced: true,
+            enforcement_level: LifecycleEnforcementLevelV1::Cooperative,
+            planning_enforced: false,
+            mutation_enforced: false,
+            host_tool_interception: false,
         }
     }
 
