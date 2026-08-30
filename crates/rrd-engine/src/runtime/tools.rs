@@ -21,8 +21,8 @@ use rrd_contract::{
     PollLiveQuery, ReadAudit, ReadChangefeed, RequestContext, RestoreInstanceBackup,
     RetrieveVectorPoints, RuntimeToolCatalogue, RuntimeToolDescriptor, RuntimeToolInvocation,
     RuntimeToolInvocationResult, ScrollVectorPoints, SearchVectors, SecurityAction,
-    TransactionMutation, MAX_LEASE_MS, MIN_LEASE_MS, PROTOCOL, PROTOCOL_VERSION,
-    RUNTIME_TOOL_CATALOGUE_VERSION,
+    SurfaceDisposition, TransactionMutation, MAX_LEASE_MS, MIN_LEASE_MS, PROTOCOL,
+    PROTOCOL_VERSION, RUNTIME_TOOL_CATALOGUE_VERSION,
 };
 pub use rrd_contract::{RuntimeToolAuthorization, RuntimeToolLifecyclePolicy};
 use rrd_core::{
@@ -35,6 +35,7 @@ use rrd_store::{
 };
 use schemars::{schema_for, JsonSchema};
 use serde_json::{json, Value};
+use std::collections::BTreeSet;
 use std::path::Path;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
@@ -70,6 +71,175 @@ pub struct RuntimeToolDefinition {
     pub authorization: RuntimeToolAuthorization,
     pub action: SecurityAction,
     pub lifecycle: RuntimeToolLifecyclePolicy,
+    pub task_domains: &'static [McpTaskDomain],
+}
+
+pub const MCP_TASK_CATALOGUE_VERSION: u16 = 1;
+
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum McpTaskDomain {
+    Memory,
+    Ingest,
+    SemanticCodeSearch,
+    Crud,
+    Schema,
+    Graph,
+    Vector,
+    Query,
+    Live,
+    Transaction,
+    Backup,
+    Restore,
+    Estate,
+    Security,
+    Audit,
+    Diagnostics,
+    Lifecycle,
+    WorkPlan,
+}
+
+impl McpTaskDomain {
+    pub const ALL: [Self; 18] = [
+        Self::Memory,
+        Self::Ingest,
+        Self::SemanticCodeSearch,
+        Self::Crud,
+        Self::Schema,
+        Self::Graph,
+        Self::Vector,
+        Self::Query,
+        Self::Live,
+        Self::Transaction,
+        Self::Backup,
+        Self::Restore,
+        Self::Estate,
+        Self::Security,
+        Self::Audit,
+        Self::Diagnostics,
+        Self::Lifecycle,
+        Self::WorkPlan,
+    ];
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct McpTaskDisposition {
+    pub domain: McpTaskDomain,
+    pub disposition: SurfaceDisposition,
+    pub tools: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct McpTaskCatalogue {
+    pub catalogue_version: u16,
+    pub dispositions: Vec<McpTaskDisposition>,
+}
+
+impl McpTaskCatalogue {
+    pub fn validate(&self) -> std::result::Result<(), String> {
+        if self.catalogue_version != MCP_TASK_CATALOGUE_VERSION {
+            return Err("unsupported MCP task catalogue version".into());
+        }
+        if self.dispositions.len() != McpTaskDomain::ALL.len() {
+            return Err("MCP task catalogue must declare every canonical domain".into());
+        }
+        let definitions = runtime_tool_catalogue();
+        let advertised = definitions
+            .iter()
+            .map(|definition| definition.name)
+            .collect::<BTreeSet<_>>();
+        let mut projected = BTreeSet::new();
+        for (expected, row) in McpTaskDomain::ALL.into_iter().zip(&self.dispositions) {
+            if row.domain != expected {
+                return Err("MCP task domains must follow canonical order".into());
+            }
+            if row.tools.windows(2).any(|pair| pair[0] >= pair[1]) {
+                return Err("MCP task tools must be sorted and unique".into());
+            }
+            match row.disposition {
+                SurfaceDisposition::Available if !row.tools.is_empty() && row.reason.is_none() => {}
+                SurfaceDisposition::Planned
+                    if row.tools.is_empty()
+                        && row
+                            .reason
+                            .as_deref()
+                            .is_some_and(|reason| !reason.is_empty()) => {}
+                _ => return Err("MCP task disposition does not match its executable tools".into()),
+            }
+            for name in &row.tools {
+                let definition = definitions
+                    .iter()
+                    .find(|definition| definition.name == name)
+                    .ok_or_else(|| format!("MCP task row advertises unknown tool {name}"))?;
+                if !definition.task_domains.contains(&row.domain) {
+                    return Err(format!("MCP task row misclassifies tool {name}"));
+                }
+                projected.insert(name.as_str());
+            }
+        }
+        if projected != advertised {
+            return Err("every advertised runtime tool must belong to an MCP task domain".into());
+        }
+        Ok(())
+    }
+}
+
+/// Projects task-level MCP truth from the executable runtime registry. This is
+/// metadata over the registry, never a second discovery or dispatch list.
+pub fn mcp_task_catalogue() -> McpTaskCatalogue {
+    let tools = runtime_tool_catalogue();
+    let dispositions = McpTaskDomain::ALL
+        .into_iter()
+        .map(|domain| {
+            let names = tools
+                .iter()
+                .filter(|tool| tool.task_domains.contains(&domain))
+                .map(|tool| tool.name.to_owned())
+                .collect::<Vec<_>>();
+            if names.is_empty() {
+                McpTaskDisposition {
+                    domain,
+                    disposition: SurfaceDisposition::Planned,
+                    tools: names,
+                    reason: Some(planned_task_reason(domain).into()),
+                }
+            } else {
+                McpTaskDisposition {
+                    domain,
+                    disposition: SurfaceDisposition::Available,
+                    tools: names,
+                    reason: None,
+                }
+            }
+        })
+        .collect();
+    let catalogue = McpTaskCatalogue {
+        catalogue_version: MCP_TASK_CATALOGUE_VERSION,
+        dispositions,
+    };
+    catalogue
+        .validate()
+        .expect("generated MCP task catalogue must match executable runtime tools");
+    catalogue
+}
+
+fn planned_task_reason(domain: McpTaskDomain) -> &'static str {
+    match domain {
+        McpTaskDomain::Ingest => {
+            "Governed document parsing, chunking, source closure, and projection cleanup remain planned."
+        }
+        McpTaskDomain::SemanticCodeSearch => {
+            "Structural code embeddings, freshness, and bounded semantic retrieval remain planned."
+        }
+        McpTaskDomain::Security => {
+            "Task-level principal, policy, grant, and credential-reference administration remains planned."
+        }
+        _ => "No executable runtime tool currently satisfies this task domain.",
+    }
 }
 
 #[derive(JsonSchema)]
@@ -919,6 +1089,7 @@ fn tool(
     if lifecycle == RuntimeToolLifecyclePolicy::PlannedMutation {
         lifecycle::add_coordinates_schema(&mut input_schema);
     }
+    let action = runtime_tool_action(name);
     RuntimeToolDefinition {
         name,
         capability_id: None,
@@ -926,8 +1097,9 @@ fn tool(
         input_schema,
         mutation,
         authorization: RuntimeToolAuthorization::Governed,
-        action: runtime_tool_action(name),
+        action,
         lifecycle,
+        task_domains: task_domains_for_action(action),
     }
 }
 
@@ -944,6 +1116,7 @@ fn typed_tool<T: JsonSchema>(
     if lifecycle == RuntimeToolLifecyclePolicy::PlannedMutation {
         lifecycle::add_coordinates_schema(&mut input_schema);
     }
+    let action = runtime_tool_action(name);
     RuntimeToolDefinition {
         name,
         capability_id,
@@ -951,8 +1124,77 @@ fn typed_tool<T: JsonSchema>(
         input_schema,
         mutation,
         authorization,
-        action: runtime_tool_action(name),
+        action,
         lifecycle,
+        task_domains: task_domains_for_action(action),
+    }
+}
+
+fn task_domains_for_action(action: SecurityAction) -> &'static [McpTaskDomain] {
+    use McpTaskDomain as Domain;
+    match action {
+        SecurityAction::ServiceInspect
+        | SecurityAction::UnknownRequest
+        | SecurityAction::DiagnosticsRead
+        | SecurityAction::RuntimeToolCatalogueRead => &[Domain::Diagnostics],
+        SecurityAction::SessionCreate
+        | SecurityAction::SessionRenew
+        | SecurityAction::SessionClose
+        | SecurityAction::LifecycleApply => &[Domain::Lifecycle],
+        SecurityAction::QueryExecute => {
+            &[Domain::Crud, Domain::Schema, Domain::Graph, Domain::Query]
+        }
+        SecurityAction::QueryLivePoll
+        | SecurityAction::ChangefeedRead
+        | SecurityAction::ChangefeedFollow
+        | SecurityAction::SubscriptionOpen
+        | SecurityAction::SubscriptionConnect
+        | SecurityAction::SubscriptionAck
+        | SecurityAction::SubscriptionClose => &[Domain::Live],
+        SecurityAction::QueryIndexEnsure
+        | SecurityAction::QueryIndexList
+        | SecurityAction::FunctionCatalogueRead
+        | SecurityAction::FunctionCatalogueWrite
+        | SecurityAction::FunctionExecute => &[Domain::Query],
+        SecurityAction::TransactionBegin
+        | SecurityAction::TransactionPreview
+        | SecurityAction::TransactionCommit
+        | SecurityAction::TransactionAbort => &[
+            Domain::Crud,
+            Domain::Schema,
+            Domain::Graph,
+            Domain::Vector,
+            Domain::Transaction,
+        ],
+        SecurityAction::VectorCollectionEnsure
+        | SecurityAction::VectorCollectionList
+        | SecurityAction::VectorCollectionDelete
+        | SecurityAction::VectorPayloadIndexEnsure
+        | SecurityAction::VectorPayloadIndexList
+        | SecurityAction::VectorPayloadIndexDelete
+        | SecurityAction::VectorPointRetrieve
+        | SecurityAction::VectorPointScroll
+        | SecurityAction::VectorSearch
+        | SecurityAction::EmbeddingModelList
+        | SecurityAction::EmbeddingGenerate
+        | SecurityAction::EmbeddingSearch => &[Domain::Vector],
+        SecurityAction::BackupCreate | SecurityAction::BackupList => &[Domain::Backup],
+        SecurityAction::RestoreCreate => &[Domain::Restore],
+        SecurityAction::EstateRead | SecurityAction::EstateAdmin => &[Domain::Estate],
+        SecurityAction::AuditRead | SecurityAction::AuditExport => &[Domain::Audit],
+        SecurityAction::SecurityAdmin => &[Domain::Security],
+        SecurityAction::MemoryContextRead
+        | SecurityAction::MemoryInspect
+        | SecurityAction::MemoryRecall
+        | SecurityAction::MemoryRetire
+        | SecurityAction::MemoryWrite
+        | SecurityAction::ProjectAttune
+        | SecurityAction::ProjectRoute
+        | SecurityAction::ReasoningRead
+        | SecurityAction::ReasoningWrite => &[Domain::Memory],
+        SecurityAction::WorkPlanRead
+        | SecurityAction::WorkPlanControl
+        | SecurityAction::WorkPlanVerifyExecute => &[Domain::WorkPlan],
     }
 }
 
@@ -1044,6 +1286,7 @@ fn execute_runtime_tool(
         "rrflow_service_status" => {
             let at = arg_u64(args, "at").unwrap_or(invocation_at);
             let tools = runtime_tool_catalogue();
+            let mcp_tasks = mcp_task_catalogue();
             let endpoints = endpoint_catalogue();
             let capabilities = product_capability_catalogue();
             Ok(ExecutedTool {
@@ -1056,6 +1299,7 @@ fn execute_runtime_tool(
                     "endpoints": endpoints,
                     "executable_mcp_tool_count": tools.len(),
                     "executable_mcp_tools": tools.iter().map(|tool| tool.name).collect::<Vec<_>>(),
+                    "mcp_task_catalogue": mcp_tasks,
                     "product_capabilities": capabilities,
                 }))?,
                 effectiveness: None,

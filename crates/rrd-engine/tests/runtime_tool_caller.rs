@@ -49,6 +49,45 @@ fn invocation(
 }
 
 #[test]
+fn generated_mcp_task_catalogue_is_total_and_only_advertises_executable_tools() {
+    use rrd_contract::SurfaceDisposition;
+    use rrd_engine::McpTaskDomain;
+
+    let definitions = rrd_engine::runtime_tool_catalogue();
+    let catalogue = rrd_engine::mcp_task_catalogue();
+    catalogue.validate().unwrap();
+    assert_eq!(catalogue.dispositions.len(), McpTaskDomain::ALL.len());
+
+    for definition in &definitions {
+        assert!(!definition.task_domains.is_empty(), "{}", definition.name);
+        rrd_engine::runtime_tool_operation(definition.name)
+            .unwrap_or_else(|error| panic!("{} has no policy operation: {error}", definition.name));
+        assert!(catalogue.dispositions.iter().any(|row| {
+            row.disposition == SurfaceDisposition::Available
+                && row.tools.iter().any(|tool| tool == definition.name)
+        }));
+    }
+
+    for domain in [
+        McpTaskDomain::Ingest,
+        McpTaskDomain::SemanticCodeSearch,
+        McpTaskDomain::Security,
+    ] {
+        let row = catalogue
+            .dispositions
+            .iter()
+            .find(|row| row.domain == domain)
+            .unwrap();
+        assert_eq!(row.disposition, SurfaceDisposition::Planned);
+        assert!(row.tools.is_empty());
+        assert!(row
+            .reason
+            .as_deref()
+            .is_some_and(|reason| !reason.is_empty()));
+    }
+}
+
+#[test]
 fn runtime_dispatch_preserves_api_key_and_session_principals_through_nested_execution_and_audit() {
     let temporary = tempfile::tempdir().unwrap();
     let database = temporary.path().join("rrd");

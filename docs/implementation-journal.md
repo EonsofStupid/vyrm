@@ -3680,3 +3680,20 @@ index.
   `74432cc158bed22d9db4216684654f763f7a915ae05084356fa70ffb4f2653d0`.
   Complete task-level MCP/CLI coverage and shared SDK black-box qualification
   remain G06-W02 through G06-W05 rather than being implied by catalogue rows.
+
+## 2026-08-30 — G06-W02 task-level MCP foundation candidate
+
+- Added one ordered MCP task-domain projection generated from the executable
+  runtime registry and each tool's canonical security action. All required
+  memory, CRUD, schema, graph, vector, query, live, transaction, backup,
+  restore, estate, audit, diagnostics, lifecycle, and work-plan rows name exact
+  executable tools. Ingest, semantic code search, and security administration
+  remain explicit planned rows with no advertised entrypoints.
+- MCP `tools/list` now publishes the generated catalogue plus per-tool domain
+  metadata; `rrflow_service_status` returns the same projection. Neither path
+  owns another dispatch list.
+- Corrected embedded MCP to construct a public `RuntimeToolInvocation` and use
+  `RrdEngine::invoke_runtime_tool`, matching daemon policy/audit semantics.
+  Black-box stdio evidence requires terminal structured-audit records for the
+  exercised advertised domains. G06-W03 still owns authenticated daemon
+  topology qualification.

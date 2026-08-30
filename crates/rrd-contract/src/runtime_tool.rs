@@ -239,6 +239,13 @@ pub fn runtime_tool_arguments_sha256(arguments: &Value) -> Result<String> {
     Ok(sha256_hex(&encoded))
 }
 
+pub fn runtime_tool_invocation_sha256(invocation: &RuntimeToolInvocation) -> Result<String> {
+    invocation.validate()?;
+    let encoded =
+        serde_json::to_vec(invocation).map_err(|error| crate::ContractError(error.to_string()))?;
+    Ok(sha256_hex(&encoded))
+}
+
 fn sha256_hex(bytes: &[u8]) -> String {
     let digest = Sha256::digest(bytes);
     let mut output = String::with_capacity(64);

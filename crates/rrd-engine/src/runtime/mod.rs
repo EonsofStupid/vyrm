@@ -91,8 +91,10 @@ pub use stack::{
     StackProfile,
 };
 pub use tools::{
-    is_runtime_tool, runtime_tool_catalogue, runtime_tool_contract_catalogue,
-    runtime_tool_operation, RuntimeToolDefinition, RuntimeToolLifecyclePolicy, RuntimeToolResult,
+    is_runtime_tool, mcp_task_catalogue, runtime_tool_catalogue, runtime_tool_contract_catalogue,
+    runtime_tool_operation, McpTaskCatalogue, McpTaskDisposition, McpTaskDomain,
+    RuntimeToolDefinition, RuntimeToolLifecyclePolicy, RuntimeToolResult,
+    MCP_TASK_CATALOGUE_VERSION,
 };
 pub use trace::{
     install_runtime_trace_contract, record_runtime_trace, DurableTraceSpan, TraceIdentity,

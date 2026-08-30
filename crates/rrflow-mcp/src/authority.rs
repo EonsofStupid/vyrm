@@ -1,7 +1,13 @@
 use crate::config::RuntimeConfig;
 use rrd_client::{ClientConfig, RequestOptions, RrdClient, Session};
-use rrd_contract::{CanonicalId, CloseSession, CreateSession, RuntimeToolCatalogue, SessionLimits};
-use rrd_engine::{runtime_tool_contract_catalogue, InstanceBinding, RrdEngine};
+use rrd_contract::{
+    runtime_tool_arguments_sha256, runtime_tool_invocation_sha256, CanonicalId, CloseSession,
+    CorrelationId, CreateSession, RequestContext, ResourceId, ResourceKind, ResourcePath,
+    RuntimeToolCatalogue, RuntimeToolInvocation, SessionLimits, RUNTIME_TOOL_CATALOGUE_VERSION,
+};
+use rrd_engine::{
+    runtime_tool_contract_catalogue, InstanceBinding, Invocation, InvocationCredential, RrdEngine,
+};
 use serde_json::Value;
 use std::fs::File;
 use std::io::Read;
@@ -109,10 +115,7 @@ impl RuntimeAuthority {
                 engine,
                 project_root,
                 ..
-            } => engine
-                .call_runtime_tool(project_root, name, arguments, now())
-                .map(|result| result.text)
-                .map_err(|error| error.to_string()),
+            } => invoke_embedded(engine, project_root, tool, arguments, mutation),
             Self::Daemon(authority) => {
                 let options = request_options(mutation).map_err(|error| error.to_string())?;
                 let first = authority
@@ -188,8 +191,7 @@ impl DaemonAuthority {
 }
 
 fn request_options(mutation: bool) -> rrd_client::Result<RequestOptions> {
-    let sequence = REQUEST_COUNTER.fetch_add(1, Ordering::Relaxed);
-    let coordinate = format!("rrflow-mcp-{}-{sequence}", now());
+    let coordinate = next_coordinate();
     if mutation {
         RequestOptions::mutation(
             &format!("request-{coordinate}"),
@@ -202,6 +204,63 @@ fn request_options(mutation: bool) -> rrd_client::Result<RequestOptions> {
             &format!("operation-{coordinate}"),
         )
     }
+}
+
+fn invoke_embedded(
+    engine: &RrdEngine,
+    project_root: &Path,
+    tool: CanonicalId,
+    arguments: &Value,
+    mutation: bool,
+) -> Result<String, String> {
+    let observed_at_unix_ms = now();
+    let coordinate = next_coordinate();
+    let request = RuntimeToolInvocation {
+        catalogue_version: RUNTIME_TOOL_CATALOGUE_VERSION,
+        arguments_sha256: runtime_tool_arguments_sha256(arguments)
+            .map_err(|error| error.to_string())?,
+        tool,
+        arguments: arguments.clone(),
+    };
+    let request_sha256 =
+        runtime_tool_invocation_sha256(&request).map_err(|error| error.to_string())?;
+    let context = RequestContext {
+        request_id: CorrelationId::new(format!("request-{coordinate}"))
+            .map_err(|error| error.to_string())?,
+        operation_id: CorrelationId::new(format!("operation-{coordinate}"))
+            .map_err(|error| error.to_string())?,
+        idempotency_key: mutation
+            .then(|| CorrelationId::new(format!("idempotency-{coordinate}")))
+            .transpose()
+            .map_err(|error| error.to_string())?,
+        deadline_unix_ms: Some(observed_at_unix_ms.saturating_add(60_000)),
+    };
+    let resource = ResourcePath {
+        segments: vec![
+            ResourceId::new(ResourceKind::Instance, engine.instance_id().as_str())
+                .map_err(|error| error.to_string())?,
+        ],
+    };
+    engine
+        .invoke_runtime_tool(
+            project_root,
+            &request,
+            Invocation {
+                context,
+                resource,
+                observed_at_unix_ms,
+                attempt: 1,
+                request_sha256,
+            },
+            InvocationCredential::Anonymous,
+        )
+        .map(|result| result.content)
+        .map_err(|error| error.to_string())
+}
+
+fn next_coordinate() -> String {
+    let sequence = REQUEST_COUNTER.fetch_add(1, Ordering::Relaxed);
+    format!("rrflow-mcp-{}-{sequence}", now())
 }
 
 fn parse_loopback_url(url: &str) -> Result<SocketAddr, Box<dyn std::error::Error>> {

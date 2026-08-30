@@ -68,6 +68,16 @@ fn stdio_server_negotiates_lists_tools_and_uses_the_shared_contract_gate() {
             .map(|definition| definition.name)
             .collect::<Vec<_>>()
     );
+    let task_catalogue = &responses[1]["result"]["_meta"]["io.rrflow/taskCatalogue"];
+    assert_eq!(
+        task_catalogue["dispositions"].as_array().unwrap().len(),
+        rrd_engine::McpTaskDomain::ALL.len()
+    );
+    assert!(listed
+        .iter()
+        .all(|tool| tool["_meta"]["io.rrflow/taskDomains"]
+            .as_array()
+            .is_some_and(|domains| !domains.is_empty())));
     for operation in rrd_engine::WorkPlanOperation::ALL {
         assert!(
             listed
@@ -159,6 +169,32 @@ fn stdio_server_negotiates_lists_tools_and_uses_the_shared_contract_gate() {
         rrd_engine::runtime_tool_catalogue().len()
     );
     assert_eq!(service["security_enforced"], false);
+    assert_eq!(service["mcp_task_catalogue"], *task_catalogue);
+
+    let binding = rrd_engine::InstanceBinding::discover(root.path()).unwrap();
+    let instance = rrd_contract::CanonicalId::new(binding.manifest.id).unwrap();
+    let storage = rrd_store::PersistentEngine::open(&db).unwrap();
+    let audit = rrd_security::SecurityRepository::new(&storage, instance)
+        .audit_since(0, 1_024)
+        .unwrap();
+    for action in [
+        rrd_contract::SecurityAction::ProjectAttune,
+        rrd_contract::SecurityAction::LifecycleApply,
+        rrd_contract::SecurityAction::QueryExecute,
+        rrd_contract::SecurityAction::MemoryWrite,
+        rrd_contract::SecurityAction::MemoryInspect,
+        rrd_contract::SecurityAction::MemoryContextRead,
+        rrd_contract::SecurityAction::MemoryRetire,
+        rrd_contract::SecurityAction::MemoryRecall,
+        rrd_contract::SecurityAction::ServiceInspect,
+    ] {
+        assert!(
+            audit.records.iter().any(|(_, record)| {
+                record.action == action && record.phase == rrd_contract::AuditPhase::Completed
+            }),
+            "embedded MCP call omitted structured audit for {action:?}"
+        );
+    }
 }
 
 #[test]

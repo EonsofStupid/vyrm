@@ -54,8 +54,8 @@ pub use lifecycle::{
 };
 pub use platform::{PlatformTermDefinition, PlatformTermRole, PLATFORM_TERMS};
 pub use runtime_tool::{
-    runtime_tool_arguments_sha256, ListRuntimeTools, RuntimeToolAuthorization,
-    RuntimeToolCatalogue, RuntimeToolDescriptor, RuntimeToolInvocation,
+    runtime_tool_arguments_sha256, runtime_tool_invocation_sha256, ListRuntimeTools,
+    RuntimeToolAuthorization, RuntimeToolCatalogue, RuntimeToolDescriptor, RuntimeToolInvocation,
     RuntimeToolInvocationResult, RuntimeToolLifecyclePolicy, MAX_RUNTIME_TOOL_ARGUMENT_BYTES,
     MAX_RUNTIME_TOOL_RESULT_BYTES, RUNTIME_TOOL_CATALOGUE_VERSION,
 };

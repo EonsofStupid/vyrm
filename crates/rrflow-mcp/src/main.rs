@@ -88,7 +88,14 @@ fn dispatch(authority: &mut RuntimeAuthority, id: Value, request: &Value) -> Val
         }
         "ping" => json!({"jsonrpc":"2.0","id":id,"result":{}}),
         "tools/list" => {
-            json!({"jsonrpc":"2.0","id":id,"result":{"tools":tools(authority)}})
+            json!({
+                "jsonrpc":"2.0",
+                "id":id,
+                "result":{
+                    "tools":tools(authority),
+                    "_meta":{"io.rrflow/taskCatalogue":rrd_engine::mcp_task_catalogue()}
+                }
+            })
         }
         "tools/call" => {
             let params = request.get("params").cloned().unwrap_or_else(|| json!({}));
@@ -125,12 +132,17 @@ fn dispatch(authority: &mut RuntimeAuthority, id: Value, request: &Value) -> Val
 }
 
 fn tools(authority: &RuntimeAuthority) -> Value {
+    let definitions = rrd_engine::runtime_tool_catalogue();
     Value::Array(
         authority
             .catalogue()
             .tools
             .iter()
             .map(|descriptor| {
+                let definition = definitions
+                    .iter()
+                    .find(|definition| definition.name == descriptor.name.as_str())
+                    .expect("MCP authority catalogue must match the local executable registry");
                 json!({
                     "name": descriptor.name,
                     "description": descriptor.description,
@@ -138,7 +150,8 @@ fn tools(authority: &RuntimeAuthority) -> Value {
                     "annotations": {
                         "readOnlyHint": !descriptor.mutation,
                         "destructiveHint": descriptor.name.as_str() == "rrflow_forget"
-                    }
+                    },
+                    "_meta":{"io.rrflow/taskDomains":definition.task_domains}
                 })
             })
             .collect(),

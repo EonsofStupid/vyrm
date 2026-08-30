@@ -1,6 +1,6 @@
 # RRFlow MCP foundation
 
-**Status:** authoritative implementation map as of 2026-08-25. This document
+**Status:** authoritative implementation map as of 2026-08-30. This document
 does not promote planned tools to executable capability.
 
 ## Contract
@@ -10,14 +10,23 @@ transactions, indexes, or audit truth. Tool discovery is generated from the
 same typed registry that dispatches execution and feeds the product capability
 catalogue. An advertised tool without executable dispatch is a conformance
 failure; an executable tool omitted from discovery is also a conformance
-failure.
+failure. `rrd-engine::mcp_task_catalogue` now generates the complete ordered
+task-domain projection from each executable tool's canonical `SecurityAction`;
+this document explains that registry and does not replace it.
 
 MCP exposes task-level operations. RRD transport mechanics such as session
 renewal and transaction lease management remain internal to the adapter. They
 must still cross the ordinary RRD session, authorization, idempotency,
 transaction, and audit paths; they are not bypassed or reimplemented.
 
-## Executable now — 28
+## Executable now — generated registry
+
+MCP `tools/list` carries `io.rrflow/taskCatalogue` metadata for all required
+task domains and `io.rrflow/taskDomains` metadata on every advertised tool.
+Available rows name only executable tools. Document ingest, semantic code
+search, and security administration remain explicit `planned` rows with no
+advertised entrypoint. Lifecycle and enforced-work-plan control are additional
+internal task domains, so every advertised tool belongs to at least one row.
 
 | Tool | Authority | Honest limit |
 |---|---|---|
@@ -76,8 +85,9 @@ RRD engine/client boundary, and retain authorization/idempotency/audit evidence.
 | A16 — implemented | `rrflow_estate_read` | persisted estate authority | authorized read |
 | A17 — implemented | `rrflow_audit_read` | security audit journal | privileged bounded read |
 
-The A-series adapter map now contains 28 executable tools with exact
-generated-list/dispatch parity. Its complete exit gate additionally requires
+The A-series adapter map supplies the product task tools; the generated
+registry also includes lifecycle and enforced-work-plan controls with exact
+list/dispatch parity. Its complete exit gate additionally requires
 real stdio calls for every domain, persistence/reopen tests for every
 mutation, initialized-security denial/allowance tests, and matching capability
 dispositions in Connectome. The number 28 is an output of this reviewed
@@ -211,9 +221,11 @@ capability and generated request schema.
 The interactive process-level stdio suite now calls every implemented domain,
 including dependent backup-to-restore execution using the returned content
 digest. Connectome's capability view consumes the exact runtime-tool and
-product-surface catalogues, and its parity test passes with the 28-tool map.
-The remaining A-series gates are credentialed secured-daemon allowance and the
-cohesive workspace/remote platform matrix.
+product-surface catalogues. Embedded MCP now constructs the same public
+`RuntimeToolInvocation` used by daemon mode and calls
+`RrdEngine::invoke_runtime_tool`; every advertised call therefore crosses the
+same policy operation and structured authorized/completed audit path. The
+remaining daemon credential/topology qualification belongs to G06-W03.
 
 ## Missing engine capability — do not advertise yet
 
