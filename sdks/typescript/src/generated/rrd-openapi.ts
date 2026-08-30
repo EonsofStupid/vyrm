@@ -1,4 +1,4 @@
-// OpenAPI SHA-256: 74432cc158bed22d9db4216684654f763f7a915ae05084356fa70ffb4f2653d0
+// OpenAPI SHA-256: 9817762c1185131328eb7363a0702fe3d5da5983469b044edaadef4bb275f655
 export interface paths {
     "/v1/audit/export": {
         parameters: {
@@ -8116,6 +8116,77 @@ export interface operations {
                                         /** Format: uint64 */
                                         stale_after_ms: number;
                                     };
+                                    authority: {
+                                        catalogue_sha256: string;
+                                        /** Format: uint32 */
+                                        idempotency_binding_count: number;
+                                        receipts: {
+                                            /** Format: uint64 */
+                                            at_unix_ms: number;
+                                            /** @enum {string} */
+                                            boundary: "desired_accepted" | "assigned" | "applied" | "observed" | "completed" | "failed";
+                                            evidence_sha256: string;
+                                            /**
+                                             * @description A canonical public identifier component.
+                                             *
+                                             *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                             *     labels are separate data and may use arbitrary Unicode.
+                                             */
+                                            id: string;
+                                            /** Format: uint64 */
+                                            lease_epoch: number;
+                                            /**
+                                             * @description A canonical public identifier component.
+                                             *
+                                             *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                             *     labels are separate data and may use arbitrary Unicode.
+                                             */
+                                            operation_id: string;
+                                            /**
+                                             * @description A canonical public identifier component.
+                                             *
+                                             *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                             *     labels are separate data and may use arbitrary Unicode.
+                                             */
+                                            resource_id: string;
+                                        }[];
+                                        resources: {
+                                            /** Format: uint64 */
+                                            created_at_unix_ms: number;
+                                            desired?: {
+                                                /** Format: uint64 */
+                                                generation: number;
+                                                spec_sha256: string;
+                                                /** Format: uint64 */
+                                                updated_at_unix_ms: number;
+                                            } | null;
+                                            /**
+                                             * @description A canonical public identifier component.
+                                             *
+                                             *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                             *     labels are separate data and may use arbitrary Unicode.
+                                             */
+                                            id: string;
+                                            /** @enum {string} */
+                                            kind: "organisation" | "account" | "entitlement" | "project" | "environment" | "instance" | "node" | "shard" | "job" | "assignment" | "health" | "secret_reference";
+                                            name: string;
+                                            observed?: {
+                                                error?: string | null;
+                                                evidence_sha256: string;
+                                                /** Format: uint64 */
+                                                generation: number;
+                                                /** Format: uint64 */
+                                                observed_at_unix_ms: number;
+                                                /** @enum {string} */
+                                                status: "pending" | "ready" | "degraded" | "failed" | "retired";
+                                            } | null;
+                                            parent_ids?: string[];
+                                            secret_reference_ids?: string[];
+                                            spec_sha256: string;
+                                            /** Format: uint64 */
+                                            updated_at_unix_ms: number;
+                                        }[];
+                                    };
                                     /** Format: uint64 */
                                     created_at_unix_ms: number;
                                     /** Format: uint16 */
@@ -10457,6 +10528,77 @@ export interface operations {
                                         /** Format: uint64 */
                                         stale_after_ms: number;
                                     };
+                                    authority: {
+                                        catalogue_sha256: string;
+                                        /** Format: uint32 */
+                                        idempotency_binding_count: number;
+                                        receipts: {
+                                            /** Format: uint64 */
+                                            at_unix_ms: number;
+                                            /** @enum {string} */
+                                            boundary: "desired_accepted" | "assigned" | "applied" | "observed" | "completed" | "failed";
+                                            evidence_sha256: string;
+                                            /**
+                                             * @description A canonical public identifier component.
+                                             *
+                                             *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                             *     labels are separate data and may use arbitrary Unicode.
+                                             */
+                                            id: string;
+                                            /** Format: uint64 */
+                                            lease_epoch: number;
+                                            /**
+                                             * @description A canonical public identifier component.
+                                             *
+                                             *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                             *     labels are separate data and may use arbitrary Unicode.
+                                             */
+                                            operation_id: string;
+                                            /**
+                                             * @description A canonical public identifier component.
+                                             *
+                                             *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                             *     labels are separate data and may use arbitrary Unicode.
+                                             */
+                                            resource_id: string;
+                                        }[];
+                                        resources: {
+                                            /** Format: uint64 */
+                                            created_at_unix_ms: number;
+                                            desired?: {
+                                                /** Format: uint64 */
+                                                generation: number;
+                                                spec_sha256: string;
+                                                /** Format: uint64 */
+                                                updated_at_unix_ms: number;
+                                            } | null;
+                                            /**
+                                             * @description A canonical public identifier component.
+                                             *
+                                             *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                             *     labels are separate data and may use arbitrary Unicode.
+                                             */
+                                            id: string;
+                                            /** @enum {string} */
+                                            kind: "organisation" | "account" | "entitlement" | "project" | "environment" | "instance" | "node" | "shard" | "job" | "assignment" | "health" | "secret_reference";
+                                            name: string;
+                                            observed?: {
+                                                error?: string | null;
+                                                evidence_sha256: string;
+                                                /** Format: uint64 */
+                                                generation: number;
+                                                /** Format: uint64 */
+                                                observed_at_unix_ms: number;
+                                                /** @enum {string} */
+                                                status: "pending" | "ready" | "degraded" | "failed" | "retired";
+                                            } | null;
+                                            parent_ids?: string[];
+                                            secret_reference_ids?: string[];
+                                            spec_sha256: string;
+                                            /** Format: uint64 */
+                                            updated_at_unix_ms: number;
+                                        }[];
+                                    };
                                     /** Format: uint64 */
                                     created_at_unix_ms: number;
                                     /** Format: uint16 */
@@ -11824,6 +11966,77 @@ export interface operations {
                                     /** Format: uint64 */
                                     stale_after_ms: number;
                                 };
+                                authority: {
+                                    catalogue_sha256: string;
+                                    /** Format: uint32 */
+                                    idempotency_binding_count: number;
+                                    receipts: {
+                                        /** Format: uint64 */
+                                        at_unix_ms: number;
+                                        /** @enum {string} */
+                                        boundary: "desired_accepted" | "assigned" | "applied" | "observed" | "completed" | "failed";
+                                        evidence_sha256: string;
+                                        /**
+                                         * @description A canonical public identifier component.
+                                         *
+                                         *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                         *     labels are separate data and may use arbitrary Unicode.
+                                         */
+                                        id: string;
+                                        /** Format: uint64 */
+                                        lease_epoch: number;
+                                        /**
+                                         * @description A canonical public identifier component.
+                                         *
+                                         *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                         *     labels are separate data and may use arbitrary Unicode.
+                                         */
+                                        operation_id: string;
+                                        /**
+                                         * @description A canonical public identifier component.
+                                         *
+                                         *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                         *     labels are separate data and may use arbitrary Unicode.
+                                         */
+                                        resource_id: string;
+                                    }[];
+                                    resources: {
+                                        /** Format: uint64 */
+                                        created_at_unix_ms: number;
+                                        desired?: {
+                                            /** Format: uint64 */
+                                            generation: number;
+                                            spec_sha256: string;
+                                            /** Format: uint64 */
+                                            updated_at_unix_ms: number;
+                                        } | null;
+                                        /**
+                                         * @description A canonical public identifier component.
+                                         *
+                                         *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                         *     labels are separate data and may use arbitrary Unicode.
+                                         */
+                                        id: string;
+                                        /** @enum {string} */
+                                        kind: "organisation" | "account" | "entitlement" | "project" | "environment" | "instance" | "node" | "shard" | "job" | "assignment" | "health" | "secret_reference";
+                                        name: string;
+                                        observed?: {
+                                            error?: string | null;
+                                            evidence_sha256: string;
+                                            /** Format: uint64 */
+                                            generation: number;
+                                            /** Format: uint64 */
+                                            observed_at_unix_ms: number;
+                                            /** @enum {string} */
+                                            status: "pending" | "ready" | "degraded" | "failed" | "retired";
+                                        } | null;
+                                        parent_ids?: string[];
+                                        secret_reference_ids?: string[];
+                                        spec_sha256: string;
+                                        /** Format: uint64 */
+                                        updated_at_unix_ms: number;
+                                    }[];
+                                };
                                 /** Format: uint64 */
                                 created_at_unix_ms: number;
                                 /** Format: uint16 */
@@ -11984,6 +12197,77 @@ export interface operations {
                                     neglected_after_ms: number;
                                     /** Format: uint64 */
                                     stale_after_ms: number;
+                                };
+                                authority: {
+                                    catalogue_sha256: string;
+                                    /** Format: uint32 */
+                                    idempotency_binding_count: number;
+                                    receipts: {
+                                        /** Format: uint64 */
+                                        at_unix_ms: number;
+                                        /** @enum {string} */
+                                        boundary: "desired_accepted" | "assigned" | "applied" | "observed" | "completed" | "failed";
+                                        evidence_sha256: string;
+                                        /**
+                                         * @description A canonical public identifier component.
+                                         *
+                                         *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                         *     labels are separate data and may use arbitrary Unicode.
+                                         */
+                                        id: string;
+                                        /** Format: uint64 */
+                                        lease_epoch: number;
+                                        /**
+                                         * @description A canonical public identifier component.
+                                         *
+                                         *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                         *     labels are separate data and may use arbitrary Unicode.
+                                         */
+                                        operation_id: string;
+                                        /**
+                                         * @description A canonical public identifier component.
+                                         *
+                                         *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                         *     labels are separate data and may use arbitrary Unicode.
+                                         */
+                                        resource_id: string;
+                                    }[];
+                                    resources: {
+                                        /** Format: uint64 */
+                                        created_at_unix_ms: number;
+                                        desired?: {
+                                            /** Format: uint64 */
+                                            generation: number;
+                                            spec_sha256: string;
+                                            /** Format: uint64 */
+                                            updated_at_unix_ms: number;
+                                        } | null;
+                                        /**
+                                         * @description A canonical public identifier component.
+                                         *
+                                         *     IDs are lowercase ASCII and intentionally URL/path safe. Human-facing
+                                         *     labels are separate data and may use arbitrary Unicode.
+                                         */
+                                        id: string;
+                                        /** @enum {string} */
+                                        kind: "organisation" | "account" | "entitlement" | "project" | "environment" | "instance" | "node" | "shard" | "job" | "assignment" | "health" | "secret_reference";
+                                        name: string;
+                                        observed?: {
+                                            error?: string | null;
+                                            evidence_sha256: string;
+                                            /** Format: uint64 */
+                                            generation: number;
+                                            /** Format: uint64 */
+                                            observed_at_unix_ms: number;
+                                            /** @enum {string} */
+                                            status: "pending" | "ready" | "degraded" | "failed" | "retired";
+                                        } | null;
+                                        parent_ids?: string[];
+                                        secret_reference_ids?: string[];
+                                        spec_sha256: string;
+                                        /** Format: uint64 */
+                                        updated_at_unix_ms: number;
+                                    }[];
                                 };
                                 /** Format: uint64 */
                                 created_at_unix_ms: number;

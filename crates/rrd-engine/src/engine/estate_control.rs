@@ -77,7 +77,7 @@ pub enum EstateAdminAction {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(untagged)]
 pub enum EstateAdminResult {
-    Mutation(rrd_contract::EstateMutationResult),
+    Mutation(Box<rrd_contract::EstateMutationResult>),
     Backup(Box<rrd_contract::EstateBackupMutationResult>),
     Recovery(Box<rrd_contract::EstateRecoveryMutationResult>),
 }
@@ -224,12 +224,12 @@ impl RrdEngine {
         let result = (|| match action {
             EstateAdminAction::Create => {
                 let outcome = repository.create_idempotent(&context)?;
-                Ok(EstateAdminResult::Mutation(
+                Ok(EstateAdminResult::Mutation(Box::new(
                     rrd_contract::EstateMutationResult {
                         estate: rrd_estate::public_snapshot(&outcome.document),
                         idempotent_replay: outcome.idempotent_replay,
                     },
-                ))
+                )))
             }
             EstateAdminAction::SetDesired {
                 instance,
@@ -255,12 +255,12 @@ impl RrdEngine {
                         configuration_sha256,
                     },
                 })?;
-                Ok(EstateAdminResult::Mutation(
+                Ok(EstateAdminResult::Mutation(Box::new(
                     rrd_contract::EstateMutationResult {
                         estate: rrd_estate::public_snapshot(&outcome.document),
                         idempotent_replay: outcome.idempotent_replay,
                     },
-                ))
+                )))
             }
             EstateAdminAction::ScheduleBackup {
                 instance,

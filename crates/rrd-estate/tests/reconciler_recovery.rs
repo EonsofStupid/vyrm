@@ -203,6 +203,24 @@ fn reopen_between_every_boundary_converges_and_deduplicates_a_lost_ack() {
     let journal = reopened.control_journal_since(0, 20).unwrap();
     assert_eq!(journal.len(), 7);
     assert!(journal.iter().all(|entry| entry.verify()));
+    assert_eq!(
+        journal
+            .iter()
+            .map(|entry| entry.action.as_str())
+            .collect::<Vec<_>>(),
+        vec![
+            "estate.create",
+            "estate.desired.set",
+            "estate.operation.lease",
+            "estate.operation.receipt",
+            "estate.operation.receipt",
+            "estate.instance.observe",
+            "estate.operation.receipt",
+        ]
+    );
+    assert!(journal
+        .windows(2)
+        .all(|entries| entries[1].previous_digest.as_deref() == Some(entries[0].digest.as_str())));
 }
 
 #[test]

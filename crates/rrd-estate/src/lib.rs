@@ -4,6 +4,7 @@
 //! reconciliation boundaries. Connectome is a projection of these records,
 //! never their source of truth.
 
+mod authority;
 mod backup_job;
 mod backup_reconcile;
 mod local_authorization;
@@ -11,6 +12,12 @@ mod local_process;
 mod reconcile;
 mod recovery;
 
+pub use authority::{
+    ApplyAuthority, AuthorityDesiredState, AuthorityIdempotencyBinding, AuthorityMutationOutcome,
+    AuthorityObservedState, AuthorityReceipt, AuthorityReceiptBoundary, AuthorityResource,
+    AuthorityResourceKind, AuthorityStatus, EstateAuthorityState, ESTATE_AUTHORITY_FORMAT,
+    MAX_AUTHORITY_IDEMPOTENCY_BINDINGS, MAX_AUTHORITY_RECEIPTS, MAX_AUTHORITY_RESOURCES,
+};
 pub use backup_job::{
     public_backup_job, public_backup_jobs, BackupCompleteRequest, BackupFailRequest,
     BackupIdempotencyBinding, BackupJobReceipt, BackupJobState, BackupLeaseRequest,
@@ -319,6 +326,8 @@ pub struct EstateDocument {
     pub created_at: u64,
     pub updated_at: u64,
     pub activity_policy: ActivityPolicy,
+    #[serde(default)]
+    pub authority: EstateAuthorityState,
     pub instances: BTreeMap<String, ManagedInstance>,
     pub operations: BTreeMap<String, EstateOperation>,
     pub idempotency: BTreeMap<String, IdempotencyBinding>,
@@ -350,6 +359,7 @@ impl EstateDocument {
             created_at: at,
             updated_at: at,
             activity_policy: ActivityPolicy::default(),
+            authority: EstateAuthorityState::default(),
             instances: BTreeMap::new(),
             operations: BTreeMap::new(),
             idempotency: BTreeMap::new(),
@@ -378,6 +388,7 @@ impl EstateDocument {
             ));
         }
         self.activity_policy.validate()?;
+        self.authority.validate()?;
         if self.instances.len() > MAX_INSTANCES
             || self.operations.len() > MAX_OPERATIONS
             || self.idempotency.len() > MAX_IDEMPOTENCY_BINDINGS
@@ -488,6 +499,61 @@ pub fn public_snapshot(document: &EstateDocument) -> rrd_contract::EstateSnapsho
             idle_after_ms: document.activity_policy.idle_after_ms,
             stale_after_ms: document.activity_policy.stale_after_ms,
             neglected_after_ms: document.activity_policy.neglected_after_ms,
+        },
+        authority: rrd_contract::EstateAuthoritySnapshot {
+            catalogue_sha256: document.authority.catalogue_sha256(),
+            resources: document
+                .authority
+                .resources
+                .values()
+                .map(|resource| rrd_contract::EstateAuthorityResourceSnapshot {
+                    id: resource.id.clone(),
+                    kind: public_authority_kind(resource.kind),
+                    parent_ids: resource
+                        .parent_id
+                        .iter()
+                        .chain(resource.secondary_parent_id.iter())
+                        .cloned()
+                        .collect(),
+                    name: resource.name.clone(),
+                    spec_sha256: resource.spec_sha256.clone(),
+                    desired: resource.desired.as_ref().map(|state| {
+                        rrd_contract::EstateAuthorityDesiredSnapshot {
+                            generation: state.generation,
+                            spec_sha256: state.spec_sha256.clone(),
+                            updated_at_unix_ms: state.updated_at,
+                        }
+                    }),
+                    observed: resource.observed.as_ref().map(|state| {
+                        rrd_contract::EstateAuthorityObservedSnapshot {
+                            generation: state.generation,
+                            status: public_authority_status(state.status),
+                            observed_at_unix_ms: state.observed_at,
+                            evidence_sha256: state.evidence_sha256.clone(),
+                            error: state.error.clone(),
+                        }
+                    }),
+                    secret_reference_ids: resource.secret_reference_ids.clone(),
+                    created_at_unix_ms: resource.created_at,
+                    updated_at_unix_ms: resource.updated_at,
+                })
+                .collect(),
+            receipts: document
+                .authority
+                .receipts
+                .values()
+                .map(|receipt| rrd_contract::EstateAuthorityReceiptSnapshot {
+                    id: receipt.id.clone(),
+                    resource_id: receipt.resource_id.clone(),
+                    operation_id: receipt.operation_id.clone(),
+                    lease_epoch: receipt.lease_epoch,
+                    boundary: public_authority_receipt_boundary(receipt.boundary),
+                    at_unix_ms: receipt.at,
+                    evidence_sha256: receipt.evidence_sha256.clone(),
+                })
+                .collect(),
+            idempotency_binding_count: u32::try_from(document.authority.idempotency.len())
+                .expect("bounded authority idempotency count fits u32"),
         },
         instances: document
             .instances
@@ -771,6 +837,61 @@ impl<'a, E: Engine + ?Sized> EstateRepository<'a, E> {
             .control_record(&self.key)?
             .map(|bytes| decode(&bytes))
             .transpose()
+    }
+
+    pub fn apply_authority(&self, request: &ApplyAuthority) -> Result<AuthorityMutationOutcome> {
+        validate_context(&request.context)?;
+        validate_ascii_key(&request.idempotency_key, "authority idempotency key")?;
+        let request_sha256 = authority::authority_request_sha256(request);
+        let Some(current_bytes) = self.engine.control_record(&self.key)? else {
+            return Err(Error::NotFound(self.estate_id.to_string()));
+        };
+        let mut document = decode(&current_bytes)?;
+        if let Some(binding) = document.authority.idempotency.get(&request.idempotency_key) {
+            if binding.request_sha256 != request_sha256
+                || binding.operation_id != request.context.operation_id
+            {
+                return Err(Error::IdempotencyConflict(request.idempotency_key.clone()));
+            }
+            return Ok(AuthorityMutationOutcome {
+                document,
+                idempotent_replay: true,
+            });
+        }
+        if document
+            .authority
+            .idempotency
+            .values()
+            .any(|binding| binding.operation_id == request.context.operation_id)
+        {
+            return Err(Error::IdempotencyConflict(
+                request.context.operation_id.to_string(),
+            ));
+        }
+        if document.authority.idempotency.len() == MAX_AUTHORITY_IDEMPOTENCY_BINDINGS {
+            return Err(Error::Invalid(
+                "estate authority idempotency limit exceeded".into(),
+            ));
+        }
+        document.authority.apply_batch(request)?;
+        document.authority.idempotency.insert(
+            request.idempotency_key.clone(),
+            AuthorityIdempotencyBinding {
+                operation_id: request.context.operation_id.clone(),
+                request_sha256,
+                bound_at: request.context.at,
+            },
+        );
+        self.commit(
+            current_bytes,
+            document,
+            &request.context,
+            "estate.authority.apply",
+        )
+        .map(|document| AuthorityMutationOutcome {
+            document,
+            idempotent_replay: false,
+        })
     }
 
     pub fn set_desired(&self, request: &SetDesired) -> Result<DesiredOutcome> {
@@ -1136,6 +1257,62 @@ fn desired_request_sha256(request: &SetDesired) -> String {
     ))
     .expect("desired request fields serialize");
     digest::sha256_hex(&bytes)
+}
+
+fn public_authority_kind(kind: AuthorityResourceKind) -> rrd_contract::EstateAuthorityResourceKind {
+    match kind {
+        AuthorityResourceKind::Organisation => {
+            rrd_contract::EstateAuthorityResourceKind::Organisation
+        }
+        AuthorityResourceKind::Account => rrd_contract::EstateAuthorityResourceKind::Account,
+        AuthorityResourceKind::Entitlement => {
+            rrd_contract::EstateAuthorityResourceKind::Entitlement
+        }
+        AuthorityResourceKind::Project => rrd_contract::EstateAuthorityResourceKind::Project,
+        AuthorityResourceKind::Environment => {
+            rrd_contract::EstateAuthorityResourceKind::Environment
+        }
+        AuthorityResourceKind::Instance => rrd_contract::EstateAuthorityResourceKind::Instance,
+        AuthorityResourceKind::Node => rrd_contract::EstateAuthorityResourceKind::Node,
+        AuthorityResourceKind::Shard => rrd_contract::EstateAuthorityResourceKind::Shard,
+        AuthorityResourceKind::Job => rrd_contract::EstateAuthorityResourceKind::Job,
+        AuthorityResourceKind::Assignment => rrd_contract::EstateAuthorityResourceKind::Assignment,
+        AuthorityResourceKind::Health => rrd_contract::EstateAuthorityResourceKind::Health,
+        AuthorityResourceKind::SecretReference => {
+            rrd_contract::EstateAuthorityResourceKind::SecretReference
+        }
+    }
+}
+
+fn public_authority_status(status: AuthorityStatus) -> rrd_contract::EstateAuthorityStatus {
+    match status {
+        AuthorityStatus::Pending => rrd_contract::EstateAuthorityStatus::Pending,
+        AuthorityStatus::Ready => rrd_contract::EstateAuthorityStatus::Ready,
+        AuthorityStatus::Degraded => rrd_contract::EstateAuthorityStatus::Degraded,
+        AuthorityStatus::Failed => rrd_contract::EstateAuthorityStatus::Failed,
+        AuthorityStatus::Retired => rrd_contract::EstateAuthorityStatus::Retired,
+    }
+}
+
+fn public_authority_receipt_boundary(
+    boundary: AuthorityReceiptBoundary,
+) -> rrd_contract::EstateAuthorityReceiptBoundary {
+    match boundary {
+        AuthorityReceiptBoundary::DesiredAccepted => {
+            rrd_contract::EstateAuthorityReceiptBoundary::DesiredAccepted
+        }
+        AuthorityReceiptBoundary::Assigned => {
+            rrd_contract::EstateAuthorityReceiptBoundary::Assigned
+        }
+        AuthorityReceiptBoundary::Applied => rrd_contract::EstateAuthorityReceiptBoundary::Applied,
+        AuthorityReceiptBoundary::Observed => {
+            rrd_contract::EstateAuthorityReceiptBoundary::Observed
+        }
+        AuthorityReceiptBoundary::Completed => {
+            rrd_contract::EstateAuthorityReceiptBoundary::Completed
+        }
+        AuthorityReceiptBoundary::Failed => rrd_contract::EstateAuthorityReceiptBoundary::Failed,
+    }
 }
 
 fn operation_kind(previous: Option<&ManagedInstance>, target: &DesiredTarget) -> OperationKind {

@@ -94,7 +94,7 @@ use std::fmt;
 pub const PROTOCOL: &str = "rrd";
 pub const PROTOCOL_VERSION: u16 = 1;
 pub const OPENAPI_DOCUMENT_SHA256: &str =
-    "74432cc158bed22d9db4216684654f763f7a915ae05084356fa70ffb4f2653d0";
+    "9817762c1185131328eb7363a0702fe3d5da5983469b044edaadef4bb275f655";
 pub const MAX_ID_BYTES: usize = 128;
 pub const MAX_MESSAGE_BYTES: usize = 4_096;
 pub const MAX_CAPABILITIES: usize = 512;
@@ -4189,6 +4189,118 @@ pub struct EstateActivityPolicySnapshot {
     pub neglected_after_ms: u64,
 }
 
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum EstateAuthorityResourceKind {
+    Organisation,
+    Account,
+    Entitlement,
+    Project,
+    Environment,
+    Instance,
+    Node,
+    Shard,
+    Job,
+    Assignment,
+    Health,
+    SecretReference,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum EstateAuthorityStatus {
+    Pending,
+    Ready,
+    Degraded,
+    Failed,
+    Retired,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum EstateAuthorityReceiptBoundary {
+    DesiredAccepted,
+    Assigned,
+    Applied,
+    Observed,
+    Completed,
+    Failed,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct EstateAuthorityDesiredSnapshot {
+    pub generation: u64,
+    pub spec_sha256: String,
+    pub updated_at_unix_ms: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct EstateAuthorityObservedSnapshot {
+    pub generation: u64,
+    pub status: EstateAuthorityStatus,
+    pub observed_at_unix_ms: u64,
+    pub evidence_sha256: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct EstateAuthorityResourceSnapshot {
+    pub id: CanonicalId,
+    pub kind: EstateAuthorityResourceKind,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub parent_ids: Vec<CanonicalId>,
+    pub name: String,
+    pub spec_sha256: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub desired: Option<EstateAuthorityDesiredSnapshot>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub observed: Option<EstateAuthorityObservedSnapshot>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub secret_reference_ids: Vec<CanonicalId>,
+    pub created_at_unix_ms: u64,
+    pub updated_at_unix_ms: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct EstateAuthorityReceiptSnapshot {
+    pub id: CanonicalId,
+    pub resource_id: CanonicalId,
+    pub operation_id: CanonicalId,
+    pub lease_epoch: u64,
+    pub boundary: EstateAuthorityReceiptBoundary,
+    pub at_unix_ms: u64,
+    pub evidence_sha256: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct EstateAuthoritySnapshot {
+    pub catalogue_sha256: String,
+    pub resources: Vec<EstateAuthorityResourceSnapshot>,
+    pub receipts: Vec<EstateAuthorityReceiptSnapshot>,
+    pub idempotency_binding_count: u32,
+}
+
+impl EstateAuthoritySnapshot {
+    pub fn empty() -> Self {
+        Self {
+            catalogue_sha256: sha256_bytes(
+                br#"{"format":1,"resources":{},"receipts":{},"idempotency":{}}"#,
+            ),
+            resources: Vec::new(),
+            receipts: Vec::new(),
+            idempotency_binding_count: 0,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct EstateDesiredSnapshot {
@@ -4283,6 +4395,7 @@ pub struct EstateSnapshot {
     pub created_at_unix_ms: u64,
     pub updated_at_unix_ms: u64,
     pub activity_policy: EstateActivityPolicySnapshot,
+    pub authority: EstateAuthoritySnapshot,
     pub instances: Vec<EstateInstanceSnapshot>,
     pub operations: Vec<EstateOperationSnapshot>,
     pub idempotency_binding_count: u32,
