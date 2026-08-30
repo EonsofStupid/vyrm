@@ -1,0 +1,321 @@
+{
+  "format_version": 1,
+  "measured_at_unix_ms": 1787245236287,
+  "architecture": "x86_64",
+  "operating_system": "linux",
+  "logical_cpus": 8,
+  "aggregation": "median of per-trial metrics; latency percentiles are medians of each isolated trial's percentile",
+  "config": {
+    "trials": 3,
+    "operations": 70000,
+    "batch_size": 128,
+    "reads": 2048,
+    "read_width": 64
+  },
+  "fjall_trials": [
+    {
+      "backend": "fjall",
+      "correctness_verified": true,
+      "write_operations_per_second": 96024.78330519264,
+      "write_batch_latency": {
+        "samples": 547,
+        "minimum_ns": 1168855,
+        "p50_ns": 1329428,
+        "p95_ns": 1450657,
+        "p99_ns": 1572551,
+        "maximum_ns": 2377598
+      },
+      "read_operations_per_second": 5794.394905260172,
+      "read_latency": {
+        "samples": 2048,
+        "minimum_ns": 144582,
+        "p50_ns": 170744,
+        "p95_ns": 189668,
+        "p99_ns": 198415,
+        "maximum_ns": 312246
+      },
+      "recovery_ns": 438248507,
+      "uncompacted_recovery_ns": null,
+      "maintenance_ns": null,
+      "write_peak_rss_kib": 82536,
+      "peak_rss_kib": 79680,
+      "maintenance_peak_rss_kib": null,
+      "disk_bytes": 33227894,
+      "semantic_sequence": 70000,
+      "native_maintenance": null
+    },
+    {
+      "backend": "fjall",
+      "correctness_verified": true,
+      "write_operations_per_second": 93545.39013094932,
+      "write_batch_latency": {
+        "samples": 547,
+        "minimum_ns": 1196212,
+        "p50_ns": 1358189,
+        "p95_ns": 1526924,
+        "p99_ns": 1661516,
+        "maximum_ns": 1788861
+      },
+      "read_operations_per_second": 5912.341619648515,
+      "read_latency": {
+        "samples": 2048,
+        "minimum_ns": 151275,
+        "p50_ns": 167283,
+        "p95_ns": 184729,
+        "p99_ns": 195232,
+        "maximum_ns": 323845
+      },
+      "recovery_ns": 437193169,
+      "uncompacted_recovery_ns": null,
+      "maintenance_ns": null,
+      "write_peak_rss_kib": 82612,
+      "peak_rss_kib": 79584,
+      "maintenance_peak_rss_kib": null,
+      "disk_bytes": 33227894,
+      "semantic_sequence": 70000,
+      "native_maintenance": null
+    },
+    {
+      "backend": "fjall",
+      "correctness_verified": true,
+      "write_operations_per_second": 99954.42720683543,
+      "write_batch_latency": {
+        "samples": 547,
+        "minimum_ns": 1082015,
+        "p50_ns": 1268906,
+        "p95_ns": 1407041,
+        "p99_ns": 1528349,
+        "maximum_ns": 1668109
+      },
+      "read_operations_per_second": 5799.711927062551,
+      "read_latency": {
+        "samples": 2048,
+        "minimum_ns": 150192,
+        "p50_ns": 170208,
+        "p95_ns": 189742,
+        "p99_ns": 203763,
+        "maximum_ns": 470321
+      },
+      "recovery_ns": 440714670,
+      "uncompacted_recovery_ns": null,
+      "maintenance_ns": null,
+      "write_peak_rss_kib": 82644,
+      "peak_rss_kib": 79472,
+      "maintenance_peak_rss_kib": null,
+      "disk_bytes": 33227894,
+      "semantic_sequence": 70000,
+      "native_maintenance": null
+    }
+  ],
+  "native_trials": [
+    {
+      "backend": "native",
+      "correctness_verified": true,
+      "write_operations_per_second": 117548.95641573028,
+      "write_batch_latency": {
+        "samples": 547,
+        "minimum_ns": 968004,
+        "p50_ns": 1074537,
+        "p95_ns": 1227032,
+        "p99_ns": 1304992,
+        "maximum_ns": 1636074
+      },
+      "read_operations_per_second": 7418.095039641188,
+      "read_latency": {
+        "samples": 2048,
+        "minimum_ns": 96487,
+        "p50_ns": 133111,
+        "p95_ns": 152701,
+        "p99_ns": 165094,
+        "maximum_ns": 201747
+      },
+      "recovery_ns": 120119742,
+      "uncompacted_recovery_ns": 257658940,
+      "maintenance_ns": 1147230762,
+      "write_peak_rss_kib": 132464,
+      "peak_rss_kib": 53536,
+      "maintenance_peak_rss_kib": 196380,
+      "disk_bytes": 10541479,
+      "semantic_sequence": 70000,
+      "native_maintenance": {
+        "wal_payload_bytes": 47729952,
+        "wal_payload_max_bytes": 67108864,
+        "memtable_versions": 140547,
+        "memtable_max_versions": 524288,
+        "memtable_bytes": 50532140,
+        "automatic_flushes": 0,
+        "write_stalls": 0,
+        "failed_flushes": 0,
+        "oversized_batches": 0
+      }
+    },
+    {
+      "backend": "native",
+      "correctness_verified": true,
+      "write_operations_per_second": 115826.56347477362,
+      "write_batch_latency": {
+        "samples": 547,
+        "minimum_ns": 957846,
+        "p50_ns": 1096157,
+        "p95_ns": 1237121,
+        "p99_ns": 1317848,
+        "maximum_ns": 1454575
+      },
+      "read_operations_per_second": 7498.129677956062,
+      "read_latency": {
+        "samples": 2048,
+        "minimum_ns": 93784,
+        "p50_ns": 132835,
+        "p95_ns": 145143,
+        "p99_ns": 151714,
+        "maximum_ns": 352769
+      },
+      "recovery_ns": 118089394,
+      "uncompacted_recovery_ns": 256095592,
+      "maintenance_ns": 1132079785,
+      "write_peak_rss_kib": 132100,
+      "peak_rss_kib": 53544,
+      "maintenance_peak_rss_kib": 195944,
+      "disk_bytes": 10541479,
+      "semantic_sequence": 70000,
+      "native_maintenance": {
+        "wal_payload_bytes": 47729952,
+        "wal_payload_max_bytes": 67108864,
+        "memtable_versions": 140547,
+        "memtable_max_versions": 524288,
+        "memtable_bytes": 50532140,
+        "automatic_flushes": 0,
+        "write_stalls": 0,
+        "failed_flushes": 0,
+        "oversized_batches": 0
+      }
+    },
+    {
+      "backend": "native",
+      "correctness_verified": true,
+      "write_operations_per_second": 116536.68087590647,
+      "write_batch_latency": {
+        "samples": 547,
+        "minimum_ns": 957399,
+        "p50_ns": 1089304,
+        "p95_ns": 1246321,
+        "p99_ns": 1345030,
+        "maximum_ns": 1502958
+      },
+      "read_operations_per_second": 7476.784219919795,
+      "read_latency": {
+        "samples": 2048,
+        "minimum_ns": 94055,
+        "p50_ns": 133219,
+        "p95_ns": 146206,
+        "p99_ns": 154878,
+        "maximum_ns": 209217
+      },
+      "recovery_ns": 117404464,
+      "uncompacted_recovery_ns": 263587354,
+      "maintenance_ns": 1184811462,
+      "write_peak_rss_kib": 132468,
+      "peak_rss_kib": 53536,
+      "maintenance_peak_rss_kib": 196356,
+      "disk_bytes": 10541479,
+      "semantic_sequence": 70000,
+      "native_maintenance": {
+        "wal_payload_bytes": 47729952,
+        "wal_payload_max_bytes": 67108864,
+        "memtable_versions": 140547,
+        "memtable_max_versions": 524288,
+        "memtable_bytes": 50532140,
+        "automatic_flushes": 0,
+        "write_stalls": 0,
+        "failed_flushes": 0,
+        "oversized_batches": 0
+      }
+    }
+  ],
+  "fjall": {
+    "backend": "fjall",
+    "correctness_verified": true,
+    "write_operations_per_second": 96024.78330519264,
+    "write_batch_latency": {
+      "samples": 1641,
+      "minimum_ns": 1168855,
+      "p50_ns": 1329428,
+      "p95_ns": 1450657,
+      "p99_ns": 1572551,
+      "maximum_ns": 1788861
+    },
+    "read_operations_per_second": 5799.711927062551,
+    "read_latency": {
+      "samples": 6144,
+      "minimum_ns": 150192,
+      "p50_ns": 170208,
+      "p95_ns": 189668,
+      "p99_ns": 198415,
+      "maximum_ns": 323845
+    },
+    "recovery_ns": 438248507,
+    "uncompacted_recovery_ns": null,
+    "maintenance_ns": null,
+    "write_peak_rss_kib": 82612,
+    "peak_rss_kib": 79584,
+    "maintenance_peak_rss_kib": null,
+    "disk_bytes": 33227894,
+    "semantic_sequence": 70000,
+    "native_maintenance": null
+  },
+  "native": {
+    "backend": "native",
+    "correctness_verified": true,
+    "write_operations_per_second": 116536.68087590647,
+    "write_batch_latency": {
+      "samples": 1641,
+      "minimum_ns": 957846,
+      "p50_ns": 1089304,
+      "p95_ns": 1237121,
+      "p99_ns": 1317848,
+      "maximum_ns": 1502958
+    },
+    "read_operations_per_second": 7476.784219919795,
+    "read_latency": {
+      "samples": 6144,
+      "minimum_ns": 94055,
+      "p50_ns": 133111,
+      "p95_ns": 146206,
+      "p99_ns": 154878,
+      "maximum_ns": 209217
+    },
+    "recovery_ns": 118089394,
+    "uncompacted_recovery_ns": 257658940,
+    "maintenance_ns": 1147230762,
+    "write_peak_rss_kib": 132464,
+    "peak_rss_kib": 53536,
+    "maintenance_peak_rss_kib": 196356,
+    "disk_bytes": 10541479,
+    "semantic_sequence": 70000,
+    "native_maintenance": {
+      "wal_payload_bytes": 47729952,
+      "wal_payload_max_bytes": 67108864,
+      "memtable_versions": 140547,
+      "memtable_max_versions": 524288,
+      "memtable_bytes": 50532140,
+      "automatic_flushes": 0,
+      "write_stalls": 0,
+      "failed_flushes": 0,
+      "oversized_batches": 0
+    }
+  },
+  "ratios": {
+    "native_to_fjall_write_throughput": 1.2136104541420467,
+    "native_to_fjall_read_throughput": 1.2891647574824723,
+    "native_to_fjall_write_p95": 0.8528004897091456,
+    "native_to_fjall_read_p95": 0.7708522259948963,
+    "native_to_fjall_recovery": 0.2694576070740613,
+    "native_to_fjall_peak_rss": 0.6726980297547246,
+    "native_to_fjall_disk": 0.31724788215587785
+  },
+  "promotion": {
+    "policy": "correctness required; native must be equal-or-better in every measured dimension",
+    "passes": true,
+    "failures": []
+  }
+}

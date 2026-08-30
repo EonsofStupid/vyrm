@@ -1,31 +1,38 @@
 [workspace]
 resolver = "2"
 members = [
-    "crates/vyrm-core",
-    "crates/vyrm-ql",
-    "crates/vyrm-store",
-    "crates/vyrm-mx",
-    "crates/vyrm-vector",
-    "crates/vyrm-embed",
-    "crates/vyrm-edge",
-    "crates/vyrm-cluster",
-    "crates/vyrm-kv",
-    "crates/vyrm-graph",
-    "crates/vyrm-node",
-    "crates/vyrm-cli",
-    "crates/vyrmd",
-    "crates/vyrm-eval",
+    "crates/rrd-contract",
+    "crates/rrd-client",
+    "crates/rrd-estate",
+    "crates/rrd-security",
+    "crates/rrd-engine",
+    "crates/rrd-server",
+    "crates/rrd-core",
+    "crates/rrd-query",
+    "crates/rrd-store",
+    "crates/rrd-vector",
+    "crates/rrd-operator-knowledge",
+    "crates/rrd-inference",
+    "crates/rrflow-edge",
+    "crates/rrd-cluster",
+    "crates/rrd-kubernetes",
+    "crates/rrd-maintenance",
+    "crates/rrd-lsm",
+    "crates/rrd-graph",
+    "crates/rrflow-cli",
+    "crates/rrflow-mcp",
+    "crates/rrflow-eval",
     "crates/connectome-ui",
 ]
 
 # Remaining future member. Current dependency arrows point inward:
-# core <- {store, graph} <- node <- {cli, vyrmd}; eval is standalone.
-#   "crates/vyrm-gate",
+# core <- {store, graph} <- runtime <- {cli, MCP}; eval is standalone.
 
 [workspace.package]
+version = "0.1.0"
 edition = "2021"
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/EonsofStupid/vyrm"
+repository = "https://github.com/EonsofStupid/rrflow"
 publish = false
 
 [workspace.dependencies]
@@ -33,6 +40,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 toml = "0.8"
 # Step T: spans at subsystem boundaries, zero-cost with no subscriber
-# installed. The kernel (vyrm-core) stays out — serde is its only dependency.
+# installed. The kernel (rrd-core) stays out — serde is its only dependency.
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+unicode-normalization = "0.1"

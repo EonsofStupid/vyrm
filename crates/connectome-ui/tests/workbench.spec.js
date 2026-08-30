@@ -2,177 +2,56 @@ import { test, expect } from '@playwright/test';
 
 const baseURL = process.env.CONNECTOME_URL || 'http://127.0.0.1:4387';
 
-test('developer lenses remain navigable and inspectable', async ({ page }) => {
-  await page.goto(baseURL);
-  await expect(page.getByRole('heading', { name: 'Runtime overview' })).toBeVisible();
-  await expect(page.locator('.metric-card')).toHaveCount(4);
+test('renders the canonical stamped RRD snapshot', async ({ page, request }) => {
+  const response = await request.get(`${baseURL}/api/snapshot`);
+  expect(response.ok()).toBeTruthy();
+  const snapshot = await response.json();
+  expect(snapshot.format_version).toBe(1);
+  expect(snapshot.read.assembly_attempts).toBeGreaterThan(0);
+  expect(snapshot.read.runtime_cursor).toBe(snapshot.readiness.runtime_cursor);
+  expect(snapshot.product_capabilities.capabilities.length).toBeGreaterThan(0);
 
-  await page.getByRole('button', { name: /Claims/ }).click();
-  await expect(page).toHaveURL(/#claims$/);
-  await expect(page.getByRole('heading', { name: 'Current claims' })).toBeVisible();
-  await page.locator('tbody tr').first().click();
-  await expect(page.locator('#inspector-body')).toContainText('Digest');
+  await page.goto(baseURL);
+  await expect(page.getByRole('heading', { name: 'One engine, one read stamp' })).toBeVisible();
+  await expect(page.locator('#status')).toHaveText('RRD connected');
+  await expect(page.locator('.metric')).toHaveCount(4);
+  await expect(page.locator('#stamp')).toContainText(`cursor ${snapshot.read.runtime_cursor}`);
+});
+
+test('models graph activity and capabilities render from one contract', async ({ page }) => {
+  await page.goto(baseURL);
+  await expect(page.locator('#status')).toHaveText('RRD connected');
+
+  await page.getByRole('button', { name: /Models/ }).click();
+  await expect(page.getByRole('heading', { name: 'Logical models' })).toBeVisible();
 
   await page.getByRole('button', { name: /Graph/ }).click();
-  await expect(page).toHaveURL(/#graph$/);
-  await expect(page.locator('#graph .graph-node')).not.toHaveCount(0);
+  await expect(page.getByRole('heading', { name: 'Temporal graph' })).toBeVisible();
+
+  await page.getByRole('button', { name: /Activity/ }).click();
+  await expect(page.getByRole('heading', { name: 'Committed activity' })).toBeVisible();
+
+  await page.getByRole('button', { name: /Capabilities/ }).click();
+  await expect(page.getByRole('heading', { name: 'Surface dispositions' })).toBeVisible();
+  await expect(page.locator('.cap')).not.toHaveCount(0);
 });
 
-test('source routing and read-only transport are enforced', async ({ page, request }) => {
-  await page.goto(`${baseURL}/#routes`);
-  await page.locator('#route-query').fill('connectome_runtime');
-  await page.getByRole('button', { name: 'Route source' }).click();
-  await expect(page.locator('.route-result')).toHaveCount(1);
-  await expect(page.locator('.route-result')).toContainText('lib.rs');
-
-  const response = await request.post(`${baseURL}/api/snapshot`, { data: {} });
-  expect(response.status()).toBe(405);
-  expect((await response.json()).error).toContain('read-only');
+test('query execution crosses the public scope-bound API', async ({ page }) => {
+  await page.goto(baseURL);
+  await expect(page.locator('#status')).toHaveText('RRD connected');
+  await page.getByRole('button', { name: /Query/ }).click();
+  await page.locator('#query-source').fill('FROM record:document KNOWN HEAD PROJECT id EXPLAIN CONTRACT');
+  await page.getByRole('button', { name: 'Run query' }).click();
+  await expect(page.locator('#query-result pre')).toBeVisible();
+  await expect(page.locator('#query-result')).toContainText('known_at_cursor');
 });
 
-test('prompt flights can be launched, frozen, expanded, and compared', async ({ page }) => {
-  await page.goto(`${baseURL}/#flight`);
-  await expect(page.getByRole('heading', { name: 'Reasoning flight lab' })).toBeVisible();
-  await page.locator('#flight-prompt').fill('Inspect runtime routing and verify the observed file path.');
-  await page.locator('#flight-context').selectOption('fresh');
-  await page.locator('#flight-provider').selectOption('observe');
-  await page.locator('[data-reasoning-profile="high"]').click();
-  const launch = page.locator('.launch-button');
-  await launch.click();
-  await expect(launch).toBeEnabled({ timeout: 15_000 });
-
-  await expect(page.locator('.flight-visual')).toBeVisible();
-  await expect(page.locator('.flight-switcher')).toContainText('CONFIGURED high');
-  await expect(page.locator('.telemetry-lane')).toHaveCount(4);
-  await expect(page.locator('.telemetry-packet')).not.toHaveCount(0);
-  await expect(page.locator('.film-frame')).not.toHaveCount(0);
-  await page.locator('.film-frame').nth(1).click();
-  await expect(page.locator('.micro-event')).toContainText('Baseline context purged');
-  await page.getByRole('button', { name: 'Inspect raw event' }).click();
-  await expect(page.locator('#inspector-body')).toContainText('prompt flight event');
-});
-
-test('global temporal evidence can be frozen rewound and inspected', async ({ page, request }) => {
-  const seeded = await request.post(`${baseURL}/api/flights`, {
-    data: {
-      prompt: 'Persist a flight so its runtime mutations enter the global evidence stream.',
-      provider: 'observe',
-      context_mode: 'fresh',
-      budget: 512,
-      acceptance_marker: '',
-      reasoning_profile: 'default',
-    },
-  });
-  expect(seeded.ok()).toBeTruthy();
-
-  await page.goto(`${baseURL}/#stream`);
-  await expect(page.getByRole('heading', { name: 'Temporal evidence stream' })).toBeVisible();
-  await expect(page.locator('.stream-lane')).toHaveCount(6);
-  await expect(page.locator('.stream-packet')).not.toHaveCount(0);
-  await page.getByTitle('First mutation').click();
-  await expect(page.locator('.stream-event-detail')).toContainText('cursor');
-  await page.getByTitle('Fast-forward mutations').click();
-  await expect(page.getByTitle('Play or freeze stream')).toContainText('Freeze time');
-  await page.locator('.stream-packet').last().click();
-  await expect(page.getByTitle('Play or freeze stream')).toContainText('Resume time');
-  await page.getByRole('button', { name: 'Inspect mutation + audit' }).click();
-  await expect(page.locator('#inspector-body')).toContainText('runtime mutation');
-  await expect(page.locator('#inspector-body')).toContainText('Audit digest');
-});
-
-test('reasoning profiles expose exact effort and bidirectional event playback', async ({ page }) => {
-  await page.goto(`${baseURL}/#flight`);
-  await page.locator('[data-prompt-preset="strong"]').click();
-  await page.locator('[data-reasoning-profile="extreme"]').click();
-  await page.locator('#flight-context').selectOption('fresh');
-  await page.locator('#flight-provider').selectOption('observe');
-  const launch = page.locator('.launch-button');
-  await launch.click();
-  await expect(launch).toBeEnabled({ timeout: 15_000 });
-
-  await expect(page.locator('.flight-switcher')).toContainText('Extreme');
-  await expect(page.locator('.flight-switcher')).toContainText('xhigh');
-  await expect(page.locator('.visual-readout')).toContainText('EVENT MASS');
-  await expect(page.locator('.telemetry-river')).toBeVisible();
-
-  await page.getByTitle('Latest event').click();
-  await expect(page.locator('.micro-event')).toBeVisible();
-  await page.getByTitle('Rewind through time').click();
-  await expect(page.getByTitle('Play or freeze')).toContainText('Freeze time');
-  await page.locator('.telemetry-packet').first().click();
-  await expect(page.getByTitle('Play or freeze')).toContainText('Resume time');
-  await expect(page.locator('.event-data-strip')).toContainText('signal volume');
-  await expect(page.locator('.payload-breakdown')).toBeVisible();
-  await page.locator('.event-envelope').click();
-  await expect(page.locator('.event-envelope pre')).toBeVisible();
-});
-
-test('persisted schema is readable as a developer contract', async ({ page, request }) => {
-  const response = await request.post(`${baseURL}/api/flights`, {
-    data: {
-      prompt: 'Install and inspect the governed prompt-flight types.',
-      provider: 'observe',
-      context_mode: 'fresh',
-      budget: 512,
-      acceptance_marker: '',
-      reasoning_profile: 'default',
-    },
-  });
-  expect(response.ok()).toBeTruthy();
-
-  const schemaResponse = await request.get(`${baseURL}/api/runtime/schema`);
-  expect(schemaResponse.ok()).toBeTruthy();
-  const schema = await schemaResponse.json();
-  expect(schema.revision).toBeGreaterThan(0);
-  expect(schema.records.prompt_flight.properties.status.required).toBeTruthy();
-
-  const retentionResponse = await request.get(`${baseURL}/api/runtime/retention`);
-  expect(retentionResponse.ok()).toBeTruthy();
-  const retention = await retentionResponse.json();
-  expect(Array.isArray(retention.snapshots)).toBeTruthy();
-  expect(Array.isArray(retention.pins)).toBeTruthy();
-
-  await page.goto(`${baseURL}/#schema`);
-  await expect(page.getByRole('heading', { name: 'Runtime schema' })).toBeVisible();
-  await expect(page.locator('.schema-revision')).toContainText('prompt flight');
-  await expect(page.locator('.schema-groups')).toContainText('prompt flight');
-  await expect(page.locator('.schema-groups')).toContainText('required');
-  await expect(page.locator('.schema-contract-line')).toContainText('Deny or commit');
-});
-
-test('query lab exposes exact plan evidence and deterministic rows', async ({ page, request }) => {
-  const seed = await request.post(`${baseURL}/api/flights`, {
-    data: {
-      prompt: 'Create a typed runtime row for query inspection.',
-      provider: 'observe',
-      context_mode: 'fresh',
-      budget: 512,
-      acceptance_marker: '',
-      reasoning_profile: 'default',
-    },
-  });
-  expect(seed.ok()).toBeTruthy();
-
-  await page.goto(`${baseURL}/#query`);
-  await expect(page.getByRole('heading', { name: 'vyrmQL contract lab' })).toBeVisible();
-  await page.locator('#query-source').fill(
-    `FROM record:prompt_flight AT VALID ${Date.now()} KNOWN HEAD PROJECT id, status LIMIT 5 EXPLAIN CONTRACT`,
-  );
-  await page.getByRole('button', { name: 'Plan and execute' }).click();
-  await expect(page.locator('.query-contract-grid')).toContainText('Exact');
-  await expect(page.locator('.query-paths .selected')).toContainText('authoritative log scan');
-  await expect(page.locator('.query-paths .rejected')).toContainText('no projection generation');
-  await expect(page.locator('.query-rows')).toContainText('record:prompt_flight:');
-});
-
-test('custom prompt editing is stable while live snapshots and flight polling continue', async ({ page }) => {
-  await page.goto(`${baseURL}/#flight`);
-  const prompt = 'Compare the runtime graph and report verified evidence with a stop condition.';
-  await page.locator('#flight-prompt').fill(prompt);
-  await expect(page.locator('#prompt-contract')).toContainText('explicit signals');
-  await page.waitForTimeout(5500);
-  await expect(page.locator('#flight-prompt')).toHaveValue(prompt);
-  await expect(page.locator('.contract-signals .present')).not.toHaveCount(0);
-  await page.locator('#flight-prompt').pressSequentially(' scope');
-  await expect(page).toHaveURL(/#flight$/);
+test('legacy ungoverned mutations fail explicitly', async ({ request }) => {
+  for (const endpoint of ['/api/flights', '/api/demos/prompt-strength', '/api/cluster/samples']) {
+    const response = await request.post(`${baseURL}${endpoint}`, { data: {} });
+    expect(response.status()).toBe(501);
+    expect((await response.json()).required_action).toContain('rrd-contract/rrd-engine');
+  }
+  const wrongMethod = await request.post(`${baseURL}/api/snapshot`, { data: {} });
+  expect(wrongMethod.status()).toBe(405);
 });

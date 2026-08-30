@@ -1,0 +1,292 @@
+{
+  "access_key at=1234 reader=agent:x wp3/status": "3030303030303030303030303030303031323334006167656e743a780077703300737461747573",
+  "claim_json": {
+    "confidence": null,
+    "object": "active",
+    "predicate": "status",
+    "producer": {
+      "actor": "golden"
+    },
+    "promotion_state": "unpromoted",
+    "subject": "wp3",
+    "tier": "local",
+    "tx_time": 210,
+    "valid_from": 200,
+    "valid_to": null
+  },
+  "claim_key": {
+    "newer_sorts_before_older": true,
+    "wp3/status valid_from=1000 tx=2000": "632f77703300737461747573003138343436373434303733373039353530363135003138343436373434303733373039353439363135",
+    "wp3/status valid_from=1001 tx=2000": "632f77703300737461747573003138343436373434303733373039353530363134003138343436373434303733373039353439363135"
+  },
+  "comment": "regenerate with GOLDEN_WRITE=1; a diff here is a wire-format break",
+  "data_runtime_v1": {
+    "audit_envelope": {
+      "actor": "agent:golden",
+      "at": 1200,
+      "contract_version": 1,
+      "decision": "allow",
+      "digest": "75d6ac9656537d43332e7d1627fd03d50f983f60ce246d5ada62da6f8a6c528e",
+      "duration_ms": 12,
+      "operation": "runtime.commit",
+      "outcome_cursor": 8,
+      "parent_request_id": "request:parent",
+      "previous_digest": "4444444444444444444444444444444444444444444444444444444444444444",
+      "read": {
+        "catalog_revision": 2,
+        "commit_cursor": 7,
+        "contract_version": 1,
+        "head_digest": "1111111111111111111111111111111111111111111111111111111111111111",
+        "manifest_id": "ac559e3a071339b02aabcd86d3f5725696c1d2efaf8ebc9054f21eef195f6731",
+        "schema_revision": 3,
+        "scope": "instance:golden"
+      },
+      "request_id": "request:golden",
+      "resource": "transaction:golden",
+      "scope": "instance:golden"
+    },
+    "data_transaction": {
+      "digest": "aa39ac703644915063259dd14b87ec68020bd1ef4c32e5c09c16f49b67cb75f8",
+      "envelope": {
+        "commit": {
+          "actor": "agent:golden",
+          "at": 1100,
+          "expected_cursor": 7,
+          "mutations": [
+            {
+              "event": {
+                "kind": "golden_event",
+                "properties": {}
+              },
+              "mutation": "event"
+            }
+          ],
+          "scope": "instance:golden"
+        },
+        "contract_version": 1,
+        "read": {
+          "catalog_revision": 2,
+          "commit_cursor": 7,
+          "contract_version": 1,
+          "head_digest": "1111111111111111111111111111111111111111111111111111111111111111",
+          "manifest_id": "ac559e3a071339b02aabcd86d3f5725696c1d2efaf8ebc9054f21eef195f6731",
+          "schema_revision": 3,
+          "scope": "instance:golden"
+        }
+      },
+      "read_your_writes_view": {
+        "contract_version": 1,
+        "pending": [
+          {
+            "event": {
+              "kind": "golden_event",
+              "properties": {}
+            },
+            "mutation": "event"
+          }
+        ],
+        "pending_mutations": 1,
+        "prospective_cursor": 8,
+        "read": {
+          "catalog_revision": 2,
+          "commit_cursor": 7,
+          "contract_version": 1,
+          "head_digest": "1111111111111111111111111111111111111111111111111111111111111111",
+          "manifest_id": "ac559e3a071339b02aabcd86d3f5725696c1d2efaf8ebc9054f21eef195f6731",
+          "schema_revision": 3,
+          "scope": "instance:golden"
+        },
+        "records": [
+          {
+            "id": "cursor:8",
+            "kind": "golden_event",
+            "properties": {},
+            "valid_from": 1100
+          }
+        ],
+        "relations": [],
+        "transaction_digest": "aa39ac703644915063259dd14b87ec68020bd1ef4c32e5c09c16f49b67cb75f8",
+        "valid_at": 1200
+      }
+    },
+    "projection_stamp": {
+      "artifact_digest": "3333333333333333333333333333333333333333333333333333333333333333",
+      "config_digest": "2222222222222222222222222222222222222222222222222222222222222222",
+      "contract_version": 1,
+      "generation": 1,
+      "id": "vector:documents",
+      "source_cursor": 7,
+      "state": "ready"
+    },
+    "read_stamp": {
+      "catalog_revision": 2,
+      "commit_cursor": 7,
+      "contract_version": 1,
+      "head_digest": "1111111111111111111111111111111111111111111111111111111111111111",
+      "manifest_id": "ac559e3a071339b02aabcd86d3f5725696c1d2efaf8ebc9054f21eef195f6731",
+      "schema_revision": 3,
+      "scope": "instance:golden"
+    },
+    "retention_pin": {
+      "contract_version": 1,
+      "expires_at": 6000,
+      "id": "d77f607f8ade149cf1edbd51e841552d6ff9940a73632674781e4f1111b5f40e",
+      "manifest_id": "ac559e3a071339b02aabcd86d3f5725696c1d2efaf8ebc9054f21eef195f6731",
+      "minimum_cursor": 7,
+      "scope": "instance:golden",
+      "snapshot_id": "139b7600371970b8c42aff7e5c6bdd340f5d8a9f3a29a4daee8520bcaaaaf909"
+    },
+    "snapshot_handle": {
+      "contract_version": 1,
+      "created_at": 1000,
+      "expires_at": 6000,
+      "id": "139b7600371970b8c42aff7e5c6bdd340f5d8a9f3a29a4daee8520bcaaaaf909",
+      "owner": "agent:golden",
+      "read": {
+        "catalog_revision": 2,
+        "commit_cursor": 7,
+        "contract_version": 1,
+        "head_digest": "1111111111111111111111111111111111111111111111111111111111111111",
+        "manifest_id": "ac559e3a071339b02aabcd86d3f5725696c1d2efaf8ebc9054f21eef195f6731",
+        "schema_revision": 3,
+        "scope": "instance:golden"
+      }
+    }
+  },
+  "invert": {
+    "0": 18446744073709551615,
+    "1000": 18446744073709550615
+  },
+  "prefixes": {
+    "prefix_end(subject_prefix wp3)": "632f77703301",
+    "seek_key wp3/status as_of=1500": "632f7770330073746174757300313834343637343430373337303935353031313500",
+    "subject_prefix wp3": "632f77703300",
+    "version_prefix wp3/status": "632f7770330073746174757300"
+  },
+  "reasoning_run_v1": {
+    "events": [
+      {
+        "actor": "agent:golden",
+        "at": 1300,
+        "digest": "23d6eb108013d6e4c80b670a3a348471595a8bba4f10ed15ce8ff84638ec9135",
+        "ordinal": 1,
+        "payload": {
+          "acceptance": [
+            "golden vectors round-trip"
+          ],
+          "kind": "goal",
+          "statement": "freeze the portable runtime contract"
+        },
+        "run_id": "run:golden"
+      },
+      {
+        "actor": "agent:golden",
+        "at": 1301,
+        "digest": "118e5d33918fe54a2b55bc1aa893831dd9113e99d1812d96ebdd887d015b3623",
+        "ordinal": 2,
+        "payload": {
+          "hypothesis": "canonical event bytes prevent adapter drift",
+          "kind": "plan",
+          "steps": [
+            "generate",
+            "compare"
+          ]
+        },
+        "previous_digest": "23d6eb108013d6e4c80b670a3a348471595a8bba4f10ed15ce8ff84638ec9135",
+        "run_id": "run:golden"
+      },
+      {
+        "actor": "agent:golden",
+        "at": 1302,
+        "digest": "24679d7eac3aa88b86e5ecf81b926d26bf68082dbad89add692b9dfe06d214c5",
+        "ordinal": 3,
+        "payload": {
+          "actions": [
+            "cargo test -p rrd-core --test golden"
+          ],
+          "kind": "attempt",
+          "summary": "generated the vectors"
+        },
+        "previous_digest": "118e5d33918fe54a2b55bc1aa893831dd9113e99d1812d96ebdd887d015b3623",
+        "run_id": "run:golden"
+      },
+      {
+        "actor": "tool:test",
+        "at": 1303,
+        "digest": "4da0946148cd5d3564d174bd388ee9fa63ea358a203c15b3d2376862b6e0ac69",
+        "ordinal": 4,
+        "payload": {
+          "evidence": [
+            {
+              "digest": "5555555555555555555555555555555555555555555555555555555555555555",
+              "source": "cargo test --workspace",
+              "summary": "workspace passed"
+            }
+          ],
+          "kind": "observation",
+          "summary": "the fixture matched"
+        },
+        "previous_digest": "24679d7eac3aa88b86e5ecf81b926d26bf68082dbad89add692b9dfe06d214c5",
+        "run_id": "run:golden"
+      },
+      {
+        "actor": "agent:golden",
+        "at": 1304,
+        "digest": "2f96dee8e01125f01d9d492ddc630e3024f8e814d6eaffaadddcf4a75df0f000",
+        "ordinal": 5,
+        "payload": {
+          "decision": "verify",
+          "kind": "decision",
+          "rationale": "the candidate is ready for the contract gate"
+        },
+        "previous_digest": "4da0946148cd5d3564d174bd388ee9fa63ea358a203c15b3d2376862b6e0ac69",
+        "run_id": "run:golden"
+      },
+      {
+        "actor": "tool:test",
+        "at": 1305,
+        "digest": "bc3b6efd83b57173e3253c35fae83605aad5906c5cdba50ef5ec2e5af8082713",
+        "ordinal": 6,
+        "payload": {
+          "checks": [
+            {
+              "evidence": [
+                {
+                  "digest": "5555555555555555555555555555555555555555555555555555555555555555",
+                  "source": "cargo test --workspace",
+                  "summary": "workspace passed"
+                }
+              ],
+              "name": "golden round-trip",
+              "status": "passed"
+            }
+          ],
+          "kind": "verification"
+        },
+        "previous_digest": "2f96dee8e01125f01d9d492ddc630e3024f8e814d6eaffaadddcf4a75df0f000",
+        "run_id": "run:golden"
+      },
+      {
+        "actor": "agent:golden",
+        "at": 1306,
+        "digest": "477e01016290e3a7a290293f200e5f88d08252c41371e6bcc484fc2ed4da1060",
+        "ordinal": 7,
+        "payload": {
+          "kind": "outcome",
+          "outcome": "succeeded",
+          "summary": "the portable contract is frozen"
+        },
+        "previous_digest": "bc3b6efd83b57173e3253c35fae83605aad5906c5cdba50ef5ec2e5af8082713",
+        "run_id": "run:golden"
+      }
+    ],
+    "state": "complete"
+  },
+  "recall wp3 as_of=300 budget=10000": {
+    "claims_returned": 1,
+    "current_object": "active",
+    "digest": "0e8753cd7f5a518c11bdd922457fb16e7f4acd14de947f9a369025ad6380b01d",
+    "token_estimate": 6
+  },
+  "sequence_key 42": "3030303030303030303030303030303030303432"
+}

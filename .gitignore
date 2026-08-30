@@ -1,5 +1,16 @@
 # Build artifacts (workspace also builds into CARGO_TARGET_DIR when set)
 /target
+**/node_modules/
+**/.venv/
+**/__pycache__/
+**/.pytest_cache/
+**/.mypy_cache/
+**/.ruff_cache/
+**/dist/
+.tools/
+**/target/
+/sdks/dotnet/**/bin/
+/sdks/dotnet/**/obj/
 
 # Session transcripts and hooks — operator-local, never part of the product
 /.chat
@@ -7,6 +18,9 @@
 # Local substrate instances created by ad-hoc runs
 *.fjall
 /store
+/.rrflow/dev/
+/.rrflow/rrd/
+/.rrflow/verification/
 
 # chatmirror — local AI session mirrors (never commit: may contain tokens)
 .chat/

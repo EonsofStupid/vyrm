@@ -1,0 +1,336 @@
+#[path = "support/planned_lifecycle.rs"]
+mod planned_lifecycle;
+
+use rrd_core::{digest, DecisionKind, Reader, ReasoningPayload, ReasoningState};
+use rrd_engine::{
+    activate_work_item, active_reasoning_run, consume_attuned_tool_authorization, handle,
+    load_lifecycle_session, preflight, record_reasoning, record_work_item_plan, HookContext,
+    HookEvent, InstanceBinding, LifecycleEnforcementLevelV1, LifecyclePhaseV1, WorkItemPlanRecord,
+    REASONING_SCOPE,
+};
+use rrd_store::MemoryEngine;
+
+use planned_lifecycle::{seed_planned_lifecycle, PlannedLifecycleFixture};
+
+#[test]
+fn one_attempt_authorizes_one_tool_and_post_tool_closes_it_with_evidence() {
+    let root = tempfile::tempdir().unwrap();
+    rrd_engine::InstanceManifest::ensure_dedicated(root.path()).unwrap();
+    std::fs::write(root.path().join("lib.rs"), "pub fn item() {}\n").unwrap();
+    let store = MemoryEngine::new();
+    for (at, payload) in [
+        (
+            1,
+            ReasoningPayload::Goal {
+                statement: "change item".into(),
+                acceptance: vec!["tests pass".into()],
+            },
+        ),
+        (
+            2,
+            ReasoningPayload::Plan {
+                hypothesis: "one edit fixes it".into(),
+                steps: vec!["edit".into(), "test".into()],
+            },
+        ),
+        (
+            3,
+            ReasoningPayload::Attempt {
+                summary: "edit item".into(),
+                actions: vec!["Edit lib.rs".into()],
+            },
+        ),
+    ] {
+        record_reasoning(&store, "policy-run", at, "agent", payload).unwrap();
+    }
+    let reader = Reader::new("test:policy").unwrap();
+    let ctx = HookContext {
+        store: &store,
+        root: root.path(),
+        harness: Some("test"),
+        reader: &reader,
+        now: 4,
+        budget: 1_500,
+    };
+    let flight = preflight(&store, root.path(), Some("test"), &reader, 4, 1_500).unwrap();
+    assert!(flight.attunement.is_some());
+    let edit = serde_json::json!({
+        "tool_name": "Edit",
+        "tool_input": {"file_path": "lib.rs"},
+        "tool_response": {"success": true}
+    });
+    assert!(handle(&ctx, HookEvent::PreToolUse, &edit)
+        .unwrap()
+        .stdout
+        .is_empty());
+    let tool_request_sha256 = digest::sha256_hex(
+        &serde_json::to_vec(&serde_json::json!({
+            "tool_name": edit["tool_name"],
+            "tool_input": edit["tool_input"],
+        }))
+        .unwrap(),
+    );
+    consume_attuned_tool_authorization(
+        &store,
+        root.path(),
+        &tool_request_sha256,
+        4,
+        "test:adapter",
+    )
+    .unwrap();
+    let replay = consume_attuned_tool_authorization(
+        &store,
+        root.path(),
+        &tool_request_sha256,
+        4,
+        "test:adapter",
+    )
+    .unwrap_err();
+    assert!(replay
+        .to_string()
+        .contains("already consumed before execution"));
+    let competing = serde_json::json!({
+        "tool_name": "Edit",
+        "tool_input": {"file_path": "other.rs"}
+    });
+    let denied = handle(&ctx, HookEvent::PreToolUse, &competing).unwrap();
+    assert!(denied.stdout.contains("permissionDecision"));
+    assert!(denied.stdout.contains("another unobserved tool request"));
+    let post = handle(&ctx, HookEvent::PostToolUse, &edit).unwrap();
+    assert!(post.detail.unwrap().contains("observation #4"));
+    assert_eq!(
+        active_reasoning_run(&store).unwrap().unwrap().state(),
+        ReasoningState::NeedsDecision
+    );
+    let denied = handle(&ctx, HookEvent::PreToolUse, &edit).unwrap();
+    assert!(denied.stdout.contains("permissionDecision"));
+    assert!(denied.stdout.contains("NeedsDecision"));
+
+    record_reasoning(
+        &store,
+        "policy-run",
+        5,
+        "agent",
+        ReasoningPayload::Decision {
+            decision: DecisionKind::Verify,
+            rationale: "edit result is ready for tests".into(),
+        },
+    )
+    .unwrap();
+    let verify = serde_json::json!({
+        "tool_name": "Bash",
+        "tool_input": {"command": "cargo test"},
+        "tool_response": {"exitCode": 0}
+    });
+    let verify_ctx = HookContext { now: 6, ..ctx };
+    assert!(handle(&verify_ctx, HookEvent::PreToolUse, &verify)
+        .unwrap()
+        .stdout
+        .is_empty());
+    handle(&verify_ctx, HookEvent::PostToolUse, &verify).unwrap();
+    assert_eq!(
+        active_reasoning_run(&store).unwrap().unwrap().state(),
+        ReasoningState::NeedsOutcome
+    );
+}
+
+#[test]
+fn checked_in_work_plan_denies_unscoped_mutation_and_allows_bound_work() {
+    let root = tempfile::tempdir().unwrap();
+    rrd_engine::InstanceManifest::ensure_dedicated(root.path()).unwrap();
+    std::fs::write(root.path().join("lib.rs"), "pub fn item() {}\n").unwrap();
+    std::fs::write(
+        root.path().join("rrflow.workplan.toml"),
+        r#"
+schema_version = 1
+plan_id = "foundation"
+title = "Foundation"
+authority = "RRD"
+status_policy = "Evidence only"
+
+[[gate]]
+id = "G00"
+title = "Control"
+depends_on = []
+
+[[item]]
+id = "G00-W01"
+gate = "G00"
+title = "Enforcement"
+depends_on = []
+acceptance = ["hook denies unscoped mutation"]
+"#,
+    )
+    .unwrap();
+    let store = MemoryEngine::new();
+    for (at, payload) in [
+        (
+            1,
+            ReasoningPayload::Goal {
+                statement: "change item".into(),
+                acceptance: vec!["tests pass".into()],
+            },
+        ),
+        (
+            2,
+            ReasoningPayload::Plan {
+                hypothesis: "one edit fixes it".into(),
+                steps: vec!["edit".into()],
+            },
+        ),
+        (
+            3,
+            ReasoningPayload::Attempt {
+                summary: "edit item".into(),
+                actions: vec!["Edit lib.rs".into()],
+            },
+        ),
+    ] {
+        record_reasoning(&store, "workplan-run", at, "agent", payload).unwrap();
+    }
+    let reader = Reader::new("test:workplan-policy").unwrap();
+    let flight = preflight(&store, root.path(), None, &reader, 4, 1_500).unwrap();
+    let receipt = flight.attunement.unwrap();
+    assert_eq!(
+        flight.work_plan.unwrap().plan_id,
+        "foundation",
+        "preflight must install the checked-in plan"
+    );
+    let edit = serde_json::json!({
+        "tool_name": "Edit",
+        "tool_input": {"file_path": "lib.rs"},
+        "tool_response": {"success": true}
+    });
+    let ctx = HookContext {
+        store: &store,
+        root: root.path(),
+        harness: Some("test"),
+        reader: &reader,
+        now: 5,
+        budget: 1_500,
+    };
+    let denied = handle(&ctx, HookEvent::PreToolUse, &edit).unwrap();
+    assert!(denied.stdout.contains("no active item"));
+
+    activate_work_item(&store, "foundation", "G00-W01", 6, "agent", "activate-1").unwrap();
+    record_work_item_plan(
+        &store,
+        "foundation",
+        WorkItemPlanRecord {
+            work_item_id: "G00-W01".into(),
+            execution_mode: rrd_engine::WorkItemExecutionMode::Change,
+            source_tree_sha256: receipt.source_tree_sha256.clone(),
+            attunement_receipt_sha256: receipt.receipt_sha256.clone(),
+            plan_payload_sha256: digest::sha256_hex(b"reviewed plan"),
+            verification_commands: vec![vec!["cargo".into(), "test".into()]],
+        },
+        7,
+        "agent",
+        "plan-1",
+    )
+    .unwrap();
+    let missing_session =
+        handle(&HookContext { now: 8, ..ctx }, HookEvent::PreToolUse, &edit).unwrap();
+    assert!(missing_session.stdout.contains("canonical session_id"));
+
+    let binding = InstanceBinding::discover(root.path()).unwrap();
+    seed_planned_lifecycle(
+        &store,
+        &receipt,
+        PlannedLifecycleFixture {
+            project_id: &binding.manifest.id,
+            session_id: "session-workplan-1",
+            plan_id: "foundation",
+            work_item_id: "G00-W01",
+            reasoning_run_id: "workplan-run",
+            actor: "hook:claude-code",
+            adapter_kind: "claude-code",
+            enforcement_level: LifecycleEnforcementLevelV1::Intercepting,
+            start_at: 8,
+        },
+    );
+    let edit = serde_json::json!({
+        "session_id": "session-workplan-1",
+        "tool_use_id": "tool-edit-1",
+        "tool_name": "Edit",
+        "tool_input": {"file_path": "lib.rs"},
+        "tool_response": {"success": true}
+    });
+    let allowed = handle(
+        &HookContext {
+            harness: Some("claude-code"),
+            now: 23,
+            ..ctx
+        },
+        HookEvent::PreToolUse,
+        &edit,
+    )
+    .unwrap();
+    assert!(allowed.stdout.is_empty());
+    assert!(allowed
+        .detail
+        .as_deref()
+        .unwrap()
+        .contains("canonical lifecycle bound work item G00-W01"));
+    assert!(allowed.detail.unwrap().contains("authorization consumed"));
+    assert!(allowed.lifecycle_context.is_some());
+    assert!(allowed.lifecycle_authorization.is_some());
+    assert_eq!(
+        load_lifecycle_session(
+            &store,
+            REASONING_SCOPE,
+            &binding.manifest.id,
+            "session-workplan-1",
+        )
+        .unwrap()
+        .unwrap()
+        .phase,
+        LifecyclePhaseV1::ToolStarted,
+    );
+    std::fs::write(
+        root.path().join("lib.rs"),
+        "pub fn item() { let changed = true; assert!(changed); }\n",
+    )
+    .unwrap();
+    handle(
+        &HookContext {
+            harness: Some("claude-code"),
+            now: 24,
+            ..ctx
+        },
+        HookEvent::PostToolUse,
+        &edit,
+    )
+    .unwrap();
+    let completed = load_lifecycle_session(
+        &store,
+        REASONING_SCOPE,
+        &binding.manifest.id,
+        "session-workplan-1",
+    )
+    .unwrap()
+    .unwrap();
+    assert_eq!(completed.phase, LifecyclePhaseV1::ProjectionReady);
+    handle(
+        &HookContext {
+            harness: Some("claude-code"),
+            now: 25,
+            ..ctx
+        },
+        HookEvent::PostToolUse,
+        &edit,
+    )
+    .unwrap();
+    assert_eq!(
+        load_lifecycle_session(
+            &store,
+            REASONING_SCOPE,
+            &binding.manifest.id,
+            "session-workplan-1",
+        )
+        .unwrap()
+        .unwrap()
+        .event_count,
+        completed.event_count,
+    );
+}

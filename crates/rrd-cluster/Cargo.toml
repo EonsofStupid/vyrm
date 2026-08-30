@@ -1,0 +1,41 @@
+[package]
+name = "rrd-cluster"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Canonical Multi-AZ contracts and deterministic failure simulation for Rrd."
+
+[features]
+default = []
+object-transfer = ["dep:rrd-store"]
+openraft-adapter = ["dep:openraft", "dep:rrd-lsm", "object-transfer"]
+openraft-transport = [
+    "openraft-adapter",
+    "dep:rustls",
+    "dep:tokio",
+    "dep:tokio-rustls",
+    "dep:x509-parser",
+]
+
+[dependencies]
+rrd-core = { path = "../rrd-core" }
+rrd-lsm = { path = "../rrd-lsm", optional = true }
+rrd-store = { path = "../rrd-store", optional = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+openraft = { version = "=0.9.25", optional = true, features = ["serde", "storage-v2"] }
+rustls = { version = "0.23", optional = true, default-features = false, features = ["ring", "std"] }
+tokio = { version = "1", optional = true, features = ["fs", "io-std", "io-util", "net", "rt", "sync", "time"] }
+tokio-rustls = { version = "0.26", optional = true, default-features = false, features = ["ring"] }
+x509-parser = { version = "0.18", optional = true }
+
+[dev-dependencies]
+rcgen = "0.14"
+tempfile = "3"
+tokio = { version = "1", features = ["fs", "io-util", "rt-multi-thread", "sync", "time"] }
+
+[[bin]]
+name = "rrd-cluster-node"
+path = "src/bin/rrd-cluster-node.rs"
+required-features = ["openraft-transport"]

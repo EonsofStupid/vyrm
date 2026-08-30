@@ -1,0 +1,159 @@
+{
+  "schema_version": 1,
+  "fixtures": [
+    {
+      "name": "claude-code-pre-tool",
+      "adapter": "claude_code",
+      "adapter_version": "hooks-2026-08",
+      "native_event": "PreToolUse",
+      "payload": {
+        "session_id": "claude-session",
+        "tool_use_id": "claude-call",
+        "tool_name": "Edit",
+        "tool_input": {"file_path": "src/lib.rs", "old_string": "a", "new_string": "b"}
+      },
+      "expected": {
+        "canonical_event": "tool.proposed",
+        "session_id": "claude-session",
+        "tool_call_id": "claude-call",
+        "tool_name": "Edit",
+        "mutation_class": "patch"
+      }
+    },
+    {
+      "name": "codex-pre-tool",
+      "adapter": "codex",
+      "adapter_version": "hooks-2026-08",
+      "native_event": "PreToolUse",
+      "payload": {
+        "session_id": "codex-session",
+        "tool_use_id": "codex-call",
+        "tool_name": "apply_patch",
+        "tool_input": {"command": "*** Begin Patch"}
+      },
+      "expected": {
+        "canonical_event": "tool.proposed",
+        "session_id": "codex-session",
+        "tool_call_id": "codex-call",
+        "tool_name": "apply_patch",
+        "mutation_class": "patch"
+      }
+    },
+    {
+      "name": "gemini-before-tool",
+      "adapter": "gemini",
+      "adapter_version": "hooks-2026-08",
+      "native_event": "BeforeTool",
+      "payload": {
+        "session_id": "gemini-session",
+        "tool_name": "write_file",
+        "tool_input": {"file_path": "src/lib.rs", "content": "changed"}
+      },
+      "expected": {
+        "canonical_event": "tool.proposed",
+        "session_id": "gemini-session",
+        "tool_call_id": null,
+        "tool_name": "write_file",
+        "mutation_class": "patch"
+      }
+    },
+    {
+      "name": "github-copilot-pre-tool",
+      "adapter": "copilot",
+      "adapter_version": "hooks-2026-08",
+      "native_event": "preToolUse",
+      "payload": {
+        "sessionId": "copilot-session",
+        "toolCallId": "copilot-call",
+        "toolName": "edit",
+        "toolArgs": {"path": "src/lib.rs", "patch": "changed"}
+      },
+      "expected": {
+        "canonical_event": "tool.proposed",
+        "session_id": "copilot-session",
+        "tool_call_id": "copilot-call",
+        "tool_name": "edit",
+        "mutation_class": "patch"
+      }
+    },
+    {
+      "name": "openai-owned-orchestrator",
+      "adapter": "open_ai_orchestrator",
+      "adapter_version": "responses-v1",
+      "native_event": "response.output_item.function_call",
+      "payload": {
+        "session_id": "openai-session",
+        "type": "function_call",
+        "call_id": "openai-call",
+        "name": "write_file",
+        "arguments": {"path": "src/lib.rs", "content": "changed"}
+      },
+      "expected": {
+        "canonical_event": "tool.proposed",
+        "session_id": "openai-session",
+        "tool_call_id": "openai-call",
+        "tool_name": "write_file",
+        "mutation_class": "patch"
+      }
+    },
+    {
+      "name": "xai-owned-orchestrator",
+      "adapter": "xai_orchestrator",
+      "adapter_version": "responses-v1",
+      "native_event": "response.output_item.function_call",
+      "payload": {
+        "session_id": "xai-session",
+        "id": "xai-call",
+        "type": "function",
+        "function": {
+          "name": "write_file",
+          "arguments": "{\"path\":\"src/lib.rs\",\"content\":\"changed\"}"
+        }
+      },
+      "expected": {
+        "canonical_event": "tool.proposed",
+        "session_id": "xai-session",
+        "tool_call_id": "xai-call",
+        "tool_name": "write_file",
+        "mutation_class": "patch"
+      }
+    },
+    {
+      "name": "mcp-tools-call",
+      "adapter": "mcp",
+      "adapter_version": "2025-06-18",
+      "native_event": "tools/call",
+      "payload": {
+        "session_id": "mcp-session",
+        "id": "mcp-call",
+        "method": "tools/call",
+        "params": {"name": "rrflow_data_commit", "arguments": {"request_id": "request-one"}}
+      },
+      "expected": {
+        "canonical_event": "tool.proposed",
+        "session_id": "mcp-session",
+        "tool_call_id": "mcp-call",
+        "tool_name": "rrflow_data_commit",
+        "mutation_class": "external"
+      }
+    },
+    {
+      "name": "proxied-local-runtime",
+      "adapter": "local_runtime",
+      "adapter_version": "rrflow-exact-argv-v1",
+      "native_event": "exec",
+      "payload": {
+        "session_id": "local-session",
+        "request_id": "local-call",
+        "argv": ["cargo", "fmt", "--all"]
+      },
+      "expected": {
+        "canonical_event": "tool.proposed",
+        "session_id": "local-session",
+        "tool_call_id": "local-call",
+        "tool_name": "RRFlowExec",
+        "mutation_class": "shell"
+      }
+    }
+  ]
+}

@@ -1,0 +1,4 @@
+format = 1
+id = "rrflow-instance"
+mode = "dedicated"
+members = ["."]

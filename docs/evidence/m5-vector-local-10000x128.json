@@ -1,5 +1,5 @@
 {
-  "schema": "vyrm.vector-evidence.v1",
+  "schema": "rrflow.vector-evidence.v1",
   "profile": {
     "vectors": 10000,
     "dimensions": 128,

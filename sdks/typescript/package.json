@@ -1,0 +1,33 @@
+{
+  "name": "@rrflow/rrd-client",
+  "version": "0.1.0",
+  "description": "Supported TypeScript client for the RRFlow Durable Runtime v1 API",
+  "type": "module",
+  "private": true,
+  "exports": {
+    ".": "./src/index.ts",
+    "./schema": "./src/generated/rrd-openapi.ts"
+  },
+  "scripts": {
+    "generate": "tsx scripts/generate.ts",
+    "generate:check": "tsx scripts/generate.ts --check",
+    "lint": "biome check .",
+    "typecheck": "tsc --noEmit",
+    "test": "tsx --test tests/*.test.ts",
+    "check": "pnpm generate:check && pnpm lint && pnpm typecheck && pnpm test"
+  },
+  "dependencies": {
+    "arktype": "2.2.3"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.5.10",
+    "@types/node": "24.10.1",
+    "openapi-typescript": "7.13.0",
+    "tsx": "4.23.12",
+    "typescript": "5.9.3"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "packageManager": "pnpm@11.22.0"
+}

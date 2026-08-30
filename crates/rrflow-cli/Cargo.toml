@@ -1,0 +1,32 @@
+[package]
+name = "rrflow-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "rrflow operator surface: explicit, recorded invocation of every trigger."
+
+[dependencies]
+rrd-engine = { path = "../rrd-engine" }
+rrd-contract = { path = "../rrd-contract" }
+rrd-client = { path = "../rrd-client" }
+clap = { version = "4", features = ["derive", "env"] }
+tracing-subscriber = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+toml = { workspace = true }
+sha2 = "0.11"
+tokio = { version = "1", features = ["rt", "time"] }
+
+[dev-dependencies]
+tempfile = "3"
+rrd-core = { path = "../rrd-core" }
+rrd-store = { path = "../rrd-store" }
+rrd-lsm = { path = "../rrd-lsm" }
+rrd-security = { path = "../rrd-security" }
+rrd-estate = { path = "../rrd-estate" }
+rrd-server = { path = "../rrd-server" }
+
+[[bin]]
+name = "rrflow"
+path = "src/main.rs"

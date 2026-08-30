@@ -1,0 +1,22 @@
+{
+  "event_type": "session.opened",
+  "occurred_at_unix_ms": 100,
+  "instance_id": "instance-1",
+  "project_id": "project-1",
+  "session_id": "session-1",
+  "correlation_id": "correlation-1",
+  "actor": "golden-fixture",
+  "adapter_kind": "orchestrator",
+  "adapter_version": "1.0.0",
+  "enforcement_level": "orchestrated",
+  "scope": "project",
+  "payload": {
+    "kind": "session_opened",
+    "resumed": false,
+    "provider_session_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  },
+  "trace": {
+    "trace_id": "11111111111111111111111111111111",
+    "span_id": "2222222222222222"
+  }
+}

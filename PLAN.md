@@ -1,38 +1,153 @@
-# vyrm — Work Plan
+# RRFlow — Work Plan
 
 | Field | Value |
 |-------|-------|
-| Status | Runtime completion plus persisted schema pass landed 2026-08-19; historical execution journal retained below. |
-| Governs | Sequencing and acceptance of work against `SPEC.md` |
-| Does not govern | Contracts, terminology, or requirements. Those are `SPEC.md` only. |
+| Status | Executable board has 30/65 verified; G04-W05 is active on 2026-08-29 |
+| Governs | Historical sequencing plus executable capability work not superseded by the current identity contract |
+| Does not govern | Terminology or product architecture; those are `docs/platform/README.md` and `docs/rrflow-rrd-architecture.md` |
 
-This document sequences work. It does not restate requirements. Where the two
-disagree, `SPEC.md` is authoritative and this document is wrong.
+This document retains substantial implementation history. Current work follows
+the [RRFlow/RRD architecture](docs/rrflow-rrd-architecture.md) and
+[platform canon](docs/platform/README.md). Where historical product boundaries
+or names conflict with them, the canonical documents are authoritative.
+
+## Authoritative executable board — 2026-08-26
+
+[`rrflow.workplan.toml`](rrflow.workplan.toml), installed and replayed from
+`.rrflow/rrd`, is the only active implementation sequence. It contains 13
+dependency gates and 65 evidence-gated work items. All G00, G01, G02, G03, and
+G05 items plus G04-W01 through G04-W04 are persisted as verified (30/65).
+G04-W05 is active. No later engine, provider, Connectome, qualification, or
+competitor-evidence item is actionable until its recorded dependencies verify.
+
+The R0-R7 table below is retained as the recovery analysis that produced the
+executable G00-G12 board. It is not a second scheduler and does not authorize
+parallel work.
+
+## Historical recovery analysis — 2026-08-25
+
+The executable G00-G12 board above is the only active implementation sequence.
+The historical overlays below remain evidence, but they do not authorize
+parallel feature work or a second composition root. RRFlow is the product; RRD
+is its single embedded or daemon engine authority; Connectome, MCP, CLI, SDKs,
+and provider hooks are surfaces over that authority.
+
+| Order | Slice | Current truth | Exit gate |
+|---:|---|---|---|
+| R0 | Verify the in-place RRFlow `0.1.0` alpha identity cutover | Canonical package moves and persisted-marker changes exist; the full same-tree gate is not yet complete | Workspace resolves only the canonical package graph; the no-retired-identity scan, internal-format V1 reopen fixtures, full tests, and strict Clippy pass |
+| R1 | One authoritative capability and tool catalogue | Engine HTTP operations, MCP tools, and Connectome cards are separately enumerated | One engine-owned catalogue generates MCP discovery and Connectome surface data; tests prove every advertised tool is executable and every executable tool is advertised |
+| R2 | Complete the truthful memory MCP foundation | Exact recall, routing, query, reasoning, lifecycle, and preflight exist; memory write/inspect/retire/context and document/vector administration are incomplete | `remember`, `recall`, `context`, `inspect`, and history-preserving `forget` pass persistence/reopen tests; every unavailable tool remains explicitly planned rather than falsely advertised |
+| R3 | Enforce project attunement before planning and mutation | Preflight refreshes routing, but no one-shot planning receipt binds the inspected file tree to a later mutation | A persisted attunement receipt binds project root, source fingerprints, manifests, routing generation, RRD read stamp, and attempt; stale or absent receipts deny mutation across every enforcing adapter |
+| R4 | Surface the same truth in Connectome | Connectome has useful diagnostics and replay UI, but its capability cards are handwritten and can drift | Connectome renders catalogue-derived engine/MCP/HTTP/CLI/UI dispositions, evidence, limitations, and missing entrypoints; UI contract tests consume the same catalogue |
+| R5 | Remove product-surface bypasses | Connectome is client-only and CLI embedded operations use `RrdEngine`; G01-W02 removes the remaining second handle and product-executable store openings | Architecture tests require engine/protocol-only production dependencies and reject any second storage-opening handle |
+| R6 | Qualify the cohesive checkpoint | Targeted local checks have passed at points; the current absorption is not product-green | Format, locked workspace tests, all-target Clippy `-D warnings`, recovery fixtures, architecture gates, and required Linux/macOS/Windows CI all pass on the same commit |
+| R7 | Operable development topology | Connectome is manually launched in embedded direct-store mode; the current browser exposure is an isolated temporary tunnel; no checked-in supervisor owns lifecycle | `rrflow dev doctor` is green, then `rrflow dev up/status/logs/stop` supervises one RRD authority plus client-only Connectome/CLI/MCP, persists a runtime manifest, performs readiness/capability handshakes, and has an end-to-end topology test |
+
+Execution is serial: plan one dependency-critical slice, implement it, test it,
+record exact evidence in `docs/implementation-journal.md`, then advance the
+board. No blanket performance optimization, competitor claim, maintenance UI,
+or additional adapter precedes R0–R6.
+
+Current execution evidence: R1 passes its local catalogue, MCP stdio,
+Connectome contract, and strict-Clippy gates. R2 is partial: remember, exact
+recall, context, inspect, and history-preserving forget are executable; hybrid
+recall, document ingestion, reflection, code search, and collection deletion
+remain explicit planned rows. A1 service discovery and A2 exact-authorized
+atomic multi-model commit plus A3/A4 query-index ensure/list are now locally
+executable; A5-A7 live-query/changefeed reads are also real. MCP discovery is
+serialized from the validated engine catalogue rather than a fixed adapter
+count. A1-A17 are locally executable through the
+engine-owned registry, including named-vector operations and path-closed
+backup/restore, estate, and audit reads. The interactive MCP process suite now
+executes every implemented domain and Connectome consumes the same generated
+catalogues. The remaining A-series gates are credentialed secured-daemon
+allowance and the cohesive workspace/remote matrix. This is not a landed or
+remote-matrix checkpoint yet. R3 now passes local persistence, reopen, source-drift,
+manifest-drift, exact-tool binding, one-outstanding-authorization, post-tool
+consumption, all-engine tests, and strict-Clippy gates. Binding authorization
+to canonical cross-platform argv/environment semantics remains part of the R5
+command-boundary work. The executable G00-G12 board supersedes this recovery
+sequence.
+
+### Immediate worklist
+
+1. Continue D5.1 from `docs/d5-surface-absorption-map.md`: extend the locally
+   implemented coherent RRD diagnostic projection with reasoning/routing/
+   trace, vector-artifact, and cluster sections. Schema/logical model, bounded
+   temporal graph/difference, and verified snapshot-retention sections are now
+   implemented; large-history graph checkpoints remain explicit follow-up
+   work. Then move Connectome reads to the public client without deleting
+   behavior or opening a second database.
+2. Finish R2 in honest increments: document ingestion, collection lifecycle,
+   hybrid retrieval, reflection, semantic code search, native embedding,
+   object upload, discovery, and security administration remain planned until
+   their real engine paths and persistence/reopen evidence exist.
+3. Finish R5 by adding daemon-client modes to Connectome, CLI, and MCP and
+   replacing the architecture test's frozen bypass allowance with a
+   zero-physical-bypass requirement.
+4. Implement the exact-argv command proxy, then the lifecycle supervisor and
+   full-topology smoke test reported by `cargo rrflow-dev doctor --root .`.
+5. Run R6 only once on that cohesive checkpoint. A local subset or an older
+   remote run cannot be described as current product verification.
+
+### Development-environment gate
+
+The canonical integration topology is one `rrd-server` authority with
+Connectome, CLI, MCP, and SDKs attached through the RRD protocol. Embedded mode
+is a separate single-process development profile; it may not be mixed with a
+daemon that opens the same database. Run `cargo rrflow-dev doctor --root .` to
+inspect this contract. The command emits the complete report and exits nonzero
+when a required invariant is blocked. Report version 3 currently identifies
+five blockers: Connectome's physical-crate bypasses, CLI's physical-crate
+bypasses, the absent exact-argv command proxy, the not-yet-implemented lifecycle
+supervisor, and the absent full-topology CI smoke test. Supervisor work is sequenced after the client
+boundaries so it cannot launch multiple authorities against one database.
+
+> **Full-stack sequencing correction (2026-08-23).** The bounded RRD LSM/Fjall
+> optimization and SurrealDB 3.0.5 claim diagnostic were performed before a
+> complete competitor capability inventory. That sequencing was wrong. No
+> further narrow optimization or blanket competitor claim is authorized until
+> the SurrealDB-first, Qdrant-second inventories and row-level gap ledger drive
+> the work. Active order is F0 public contracts, F1 operable persistence and
+> backup/restore, F2 server/session transactions, F3 persistent estate
+> reconciliation, F4 security/audit, F5 SDKs, F6 multi-model/realtime, F7
+> vector/inference, F8 distributed/Kubernetes qualification, and F9 faithful
+> Connectome operations. See [`docs/full-stack-gap-ledger.md`](docs/full-stack-gap-ledger.md),
+> [`docs/surrealdb-capability-inventory.md`](docs/surrealdb-capability-inventory.md),
+> and [`docs/qdrant-capability-inventory.md`](docs/qdrant-capability-inventory.md).
+
+> **F0/F1 execution overlay (2026-08-23).** The initial public RRD contract and
+> current persistence-format verification gate are complete. Logical archive
+> v1 now exports and validates a stable two-log cut, restores exact claim and
+> runtime coordinates into a new native root, verifies reopen, and is retained
+> through an authenticated content-addressed catalogue with explicit coverage.
+> The next dependency-critical slice is the general resumable migration ledger
+> and cross-version recovery matrix; object closure remains an explicit F1
+> follow-up rather than an implied property of catalogue v1.
 
 > **Current-state overlay (2026-08-18).** The original grounding table below is
 > retained as historical evidence and is not the current status board. The
-> completed runtime now includes `vyrm-node`, persisted graph freshness,
-> hash-chained reasoning runs, deny-by-default contract differentials, `vyrmd`
+> completed runtime now includes `rrd-engine`, persisted graph freshness,
+> hash-chained reasoning runs, deny-by-default contract differentials, `rrflow-mcp`
 > MCP, controlled provider evaluations, and CI regression checks. See
 > `STATUS.md` for current state and `eval/results/2026-08-18-summary.json` for
 > measured evaluation evidence.
 
-> **Instance-topology overlay (2026-08-18).** vyrm/connectome is rolled out as
-> an isolated, platform-molded instance for each major platform. Related small
-> projects may use an explicitly configured umbrella instance. There is no
-> implicit estate-wide store. The active follow-on is to enforce this boundary
-> with a versioned instance manifest and scoped runtime state. SurrealDB and
-> Qdrant capability adoption is postponed. See `docs/instance-topology.md`.
+> **Retired instance-topology overlay (2026-08-18).** This historical overlay
+> proposed multi-project instances and is not active. The locked rule is one
+> project plus one environment per instance and one logical RRD authority;
+> estate control manages multiple instances. See `docs/platform/README.md` and
+> `docs/instance-topology.md`.
 
 > **Prompt-flight overlay (2026-08-18).** Connectome now records controlled
 > fresh/pruned/full prompt flights. Fresh means a new provider session with zero
-> injected Vyrm context; it never deletes the authoritative claim or reasoning
+> injected RRFlow context; it never deletes the authoritative claim or reasoning
 > ledgers. Each externally observable micro-event is replayable, and exact
 > prompts form comparison cohorts. The next evidence pass is repeated vague-
 > prompt trials with non-trivial acceptance markers, not additional UI chrome.
 > See `docs/prompt-flight-experiments.md`.
 
-> **Temporal runtime-graph overlay (2026-08-19).** Vyrm now persists typed
+> **Temporal runtime-graph overlay (2026-08-19).** RRFlow now persists typed
 > records, relations, claims, and lifecycle events through one atomic
 > `RuntimeCommit`. Every mutation receives a monotonic global cursor and joins a
 > verified hash chain; stale expected cursors fail rather than overwrite.
@@ -48,15 +163,15 @@ disagree, `SPEC.md` is authoritative and this document is wrong.
 > `docs/runtime-graph.md`.
 
 > **Native-engine decision (2026-08-18).** Fjall is transitional and will be
-> removed in favor of a Vyrm-native substrate. Existing Fjall measurements and
+> removed in favor of a RRFlow-native substrate. Existing Fjall measurements and
 > tests remain comparison evidence, not an architectural veto. The
-> `vyrm_store::Engine` differential is now the migration harness: the native
+> `rrd_store::Engine` differential is now the migration harness: the native
 > engine must preserve wire/temporal/runtime semantics and meet or beat the
 > compatibility adapter on latency, throughput, durability, recovery, and
 > memory. Licensing is not the optimization boundary; measured behavior is.
 
-> **Data-runtime implementation overlay (2026-08-19).** The proposed `vyrmQL`,
-> `vyrmMX`, `vyrmDS`, and native `vyrmKV` names have explicit boundaries; they
+> **Data-runtime implementation overlay (2026-08-19).** The proposed `RRFlowQL`,
+> `RRD query executor`, `RRD storage coordinator`, and native `RRD LSM` names have explicit boundaries; they
 > are not represented as complete subsystems. A pinned primary-source
 > review of Qdrant, SurrealDB, HelixDB, SlateDB, Lance, DataFusion, OpenDAL,
 > cuVS, and TiKV produced an adopt/adapt/reject matrix and milestones M0–M8.
@@ -67,15 +182,32 @@ disagree, `SPEC.md` is authoritative and this document is wrong.
 > M1 is now closed with stamped transaction reads, prospective read-your-writes,
 > same/disjoint global-CAS coverage, repeatable paged replay, and logical
 > retention-pin inventory exposed to Connectome. Physical segment attachment
-> belongs to native M3. M2 is now closed with explicit-time `vyrmQL`, catalog
-> binding, deterministic logical/physical `vyrmMX` plans, exact stamped-log
+> belongs to native M3. M2 is now closed with explicit-time `RRFlowQL`, catalog
+> binding, deterministic logical/physical `RRD query executor` plans, exact stamped-log
 > execution, budgets, diagnostics, backend/direct-API differentials, and a
-> browser-visible Query Lab. Native `vyrmKV` M3 implementation and its first
+> browser-visible Query Lab. Native `RRD LSM` M3 implementation and its first
 > local promotion gate are now closed; repeated CI/broader workload evidence and
 > the backend-default decision remain. Vector, object, and cluster work stay
 > sequenced behind that explicit decision. See
-> `docs/vyrmds-architecture-research.md`.
-> M3 is now active in a standalone `vyrm-kv` crate. Its v1 WAL, atomic mutation
+> `docs/rrflow-mcps-architecture-research.md`.
+> **RRD query executor M2.1 access-path overlay (2026-08-21).** Equality on the built-in
+> event `cursor` now lowers to `authoritative_event_cursor_lookup` instead of a
+> result replay from zero. The operator is still canonical RRFlow truth: it uses the
+> existing global-cursor key, validates the full `ReadStamp` even for an empty
+> result, verifies its physical/logical correspondence before I/O, and falls
+> back to the exact log scan for every unsupported shape. Memory, Fjall, and
+> native return identical rows; a 4,096-event cardinality test proves one result
+> cursor position versus a budget-denied unbound replay. M2.2 adds an RFC
+> 9162-style global-log accumulator: compact frontier and complete subtree nodes
+> are committed atomically by Memory, Fjall, and native RRD LSM; current-head
+> point reads verify one change plus a logarithmic inclusion path; retained
+> prefixes reconstruct proofs but report the still-linear schema-history replay;
+> corrupt roots/nodes fail closed; legacy logs bootstrap in the next
+> authoritative commit. Plans declare proof-or-replay compatibility and results
+> report the actual validation method, change reads, and proof-node count.
+> Schema-history binding,
+> record/relation/claim indexes, and grounded derived projections remain open.
+> M3 is now active in a standalone `rrd-lsm` crate. Its v1 WAL, atomic mutation
 > batch, and immutable-manifest formats are frozen by checked-in vectors.
 > Checksummed replay, explicit torn-tail repair, MVCC allocation, ordered
 > memtables, repeatable snapshots, and reopen are green. Content-addressed
@@ -86,21 +218,30 @@ disagree, `SPEC.md` is authoritative and this document is wrong.
 > WAL sync, content-addressed segment sync, successor-WAL creation, and manifest
 > CAS publication; reopen validates reachable segments and replays only the
 > manifest-declared WAL range. `NativeEngine` now implements the complete
-> semantic port over prefixed native keys and one atomic `vyrmKV` batch per
+> semantic port over prefixed native keys and one atomic `RRD LSM` batch per
 > commit. Memory/Fjall/native differentials cover claims, projections, runtime
 > schemas and hash chains, snapshots, restart, concurrent CAS, and exact query
 > results. Snapshot-aware compaction retains only versions visible at protected
 > physical snapshots; runtime leases create/reconcile manifest checkpoints; GC
 > derives reachability from `CURRENT` plus those pins. Crash and storage-full
 > injection now cover every flush and compaction durability boundary. Native
-> performance proof has a five-trial isolated-process baseline. After segment-v2
-> compression, sparse immutable reads, hardware CRC32C, and fresh steady-state
-> probe processes, native passes correctness and every strict equal-or-better
-> cell: write/read throughput, write/read p95, maintained recovery, steady RSS,
-> and disk. This closes the local M3 gap; Fjall remains live as an oracle until
-> CI and broader workload matrices reproduce the result. A second nine-trial
-> small-batch/standard/read-heavy/sustained matrix now passes every strict cell;
-> the sparse index holds byte ranges into canonical segment storage rather than
+> performance harness now records active, clean-reopen, and maintained states
+> for both engines plus sparse-aware allocated bytes. The former green result
+> used native-only maintenance and apparent file length, so it is retained only
+> as legacy diagnostic evidence. Corrected semantics pass. An ordered bounded
+> memtable walk first closed the read regression. Compact sequence references,
+> prepared batches, inline single-version chains, streaming one-pass recovery,
+> keyspace-local writes, and bounded first-WAL reservation now make the
+> corrected nine-trial local fixture pass every strict performance cell. Fjall
+> remains live as an oracle pending remote reproduction. Format-4 paged verification and a
+> borrowed fallible scan visitor now make read-heavy and sustained green while
+> checking every corpus ordinal. Manifest v2 now authenticates a frozen
+> one-byte native keyspace codec while retaining exact manifest/text-prefix-v1
+> reads. It removes 1,400,004 extended key bytes and moves the nine-trial
+> 70,000-operation row from 1.026× RSS to a passing 0.984×. A fresh read-heavy
+> write-p95 diagnostic is red and remains a remote-reproduction gate. The
+> dedicated eight-profile AI-read matrix passes its bounded gates.
+> The sparse index holds byte ranges into canonical segment storage rather than
 > duplicate heap keys. The deterministic physical mutation gate now adds
 > 20,000 puts/overwrites/deletes across 10 reopens and 8 compactions, with
 > byte-identical Fjall/native/independent-model state. The offline migration
@@ -113,11 +254,11 @@ disagree, `SPEC.md` is authoritative and this document is wrong.
 > The default switch itself is now safe and explicit: `PersistentEngine` creates
 > native stores for missing paths, reopens native by authenticated `CURRENT`,
 > and keeps existing non-native directories on `fjall_compatibility`. CLI,
-> `vyrmd`, and Connectome share that selector and expose its decision.
-> Operators can now run `vyrm storage migrate|status|rollback`; ordinary opens
+> `rrflow-mcp`, and Connectome share that selector and expose its decision.
+> Operators can now run `rrflow storage migrate|status|rollback`; ordinary opens
 > deny active migration markers so a cutover gap cannot initialize empty state.
 > **Package workflow gate (2026-08-20).** Canonical bun/pnpm/npm/yarn event
-> identities now bind to a strict project-owned `.vyrm/workflows.toml` rather
+> identities now bind to a strict project-owned `.rrflow/workflows.toml` rather
 > than merely being journaled after execution. Preflight captures the declared
 > scope's runtime `ReadStamp`; pre-tool combines reasoning authorization,
 > zero-lag routing freshness, exact direct argv, instance scope, and manifest
@@ -134,14 +275,31 @@ disagree, `SPEC.md` is authoritative and this document is wrong.
 > WAL micro-events or inferred private model reasoning. Snapshot-to-delta
 > transport and controlled frontier-provider evaluation remain open.
 > **Fjall/AI physical audit (2026-08-20).** The pinned Fjall 3.1.8 source and
-> current upstream were compared to native `vyrm-kv`. Fjall remains ahead in
+> current upstream were compared to native `rrd-lsm`. Fjall remains ahead in
 > generic background maintenance, backpressure, leveled compaction, filters,
-> per-keyspace tuning, and concurrency. Vyrm's first justified specialization
+> per-keyspace tuning, and concurrency. RRFlow's first justified specialization
 > now resolves current hot memtable point reads and multi-gets before immutable
 > blocks while preserving historical MVCC fallback. A cache-traffic regression
 > and isolated hot-control benchmark are green; the local five-trial cell is
 > 2.261× Fjall throughput and 0.379× Fjall p95. This is not a general database
-> claim. See `docs/vyrmkv-fjall-ai-audit.md` for the ordered remaining gates.
+> claim. See `docs/rrd-lsm-fjall-ai-audit.md` for the ordered remaining gates.
+> **RRD LSM M3.5 maintenance overlay (2026-08-21).** Native compaction no
+> longer materializes every segment into one database-sized map. One step
+> deterministically selects a bounded source/target-level closure, streams a
+> k-way canonical record merge through one decoded block per input, partitions
+> outputs at key boundaries, and publishes them through the existing manifest
+> CAS. Levels above L0 reject overlap. Automatic maintenance retains all MVCC
+> versions because low-level snapshots are not lifetime tracked; explicit
+> compaction alone applies protected-snapshot pruning and preserves tombstones
+> that shadow unselected lower levels. Authenticated v3 validation also derives
+> block-local negative filters that avoid point-miss I/O without changing the
+> wire format. Physical evidence exposes filter probes, L0 debt, compaction
+> byte flow, failures, and peak buffer usage. Unit/failure matrices, the 20,000
+> mixed Fjall/model differential, and the canonical fresh nine-trial standard
+> promotion cell are green; raw evidence is retained at
+> `eval/results/2026-08-21-rrd-lsm-m35-standard.json`. Asynchronous
+> immutable-memtable flush and family-aware maintenance remain open; `RRD query executor`
+> stamped access paths follow this bounded substrate.
 > The product handoff, canonical package-event grammar, alpha release gates,
 > deployment/update tiers, and separate SurrealDB/Qdrant proof protocols are
 > frozen in `docs/clyffy-kernel-alpha.md`.
@@ -151,50 +309,69 @@ disagree, `SPEC.md` is authoritative and this document is wrong.
 > same atomic cursor/hash-chain commit as claims, records, relations, and
 > events. Each accepted commit atomically persists latest-value indexes,
 > deterministic projection work, chained audit, and an idempotent outcome.
-> `vyrmDS::DataRuntime` implements stage → verify → commit visibility over a
+> `RRD storage coordinator::DataRuntime` implements stage → verify → commit visibility over a
 > synced local content-addressed store and a capability-explicit S3-compatible
 > adapter. Three-engine mixed-family rollback/reopen tests, publication/commit
 > fault injection, quarantine, orphan reclamation, and local/S3 semantic
 > differential are green. Live cloud transport certification and automatic
 > retention-aware object GC are deployment work. See
-> `docs/vyrmds-object-contract.md`; the M5 overlay below records the next gate.
+> `docs/rrflow-mcps-object-contract.md`; the M5 overlay below records the next gate.
 
 > **M5 vector/search overlay (2026-08-19).** The local semantic and evidence
-> gate is closed. `vyrm-vector` now supplies the borrowing exact
+> gate is closed. `rrd-vector` now supplies the borrowing exact
 > dense/sparse/multivector oracle, bounded typed filters, immutable exact
 > segments, deterministic dense HNSW with filter-aware admission and exact
 > reranking, a freshness-aware planner/executor, unified CAS generation
-> lifecycle, scalar-quantization experiment, portable fixture, backend
+> lifecycle, portable fixture, backend
 > differential, recall gate, and eight-generation update/delete/reopen/
 > replacement soak. The retained 10k×128 profile reaches 0.98 recall@10 at
 > `ef=256` while exposing a 3.90× JSON-artifact overhead; this is a local
 > baseline, not a Qdrant superiority claim. Compact binary/mmap, SIMD/GPU,
 > sparse/multivector ANN, embeddings, and external comparison remain gated.
-> See `docs/vyrm-vector-search.md`.
+> See `docs/rrd-vector-search.md`.
+> A shared authenticated quantization lifecycle now builds, lists, activates,
+> retires, reopens, and exactly reranks immutable scalar, product 4×–64×,
+> binary, and TurboQuant 4/2/1.5/1-bit artifacts. All codecs have checksummed
+> binary forms, owned/mmap reopen, corruption denial, and scalar/runtime-
+> dispatched SIMD differential evidence. The retained 512×64 matrix reports
+> packed, auxiliary, total-artifact, bias, recall, build, and search evidence;
+> it is a local diagnostic, not a production/Qdrant performance claim. The
+> historical TurboQuant ensure request is now only an idempotent compatibility
+> adapter over this lifecycle; the generic publisher cannot create a parallel
+> quantized catalogue, and lifecycle restore is vector-catalogue revision-
+> neutral. One engine-owned residency authority now makes each named vector's
+> pinned/cached/cold declaration physical: hard-bounded retained pinned bytes,
+> byte-bounded cached LRU, transient verified cold mmap/owned reads,
+> metadata-first active-generation loading, pressure fallback, and empty-cache
+> restart recovery are executable. The paper's residual QJL variant, GPU
+> qualification, independent per-structure tiers, automatic warming, and
+> generated G06 bindings remain gated. See
+> `docs/rrd-quantization-lifecycle-v1.md` and
+> `docs/rrd-vector-memory-tiers-v1.md`.
 
 > **M6 embedding/edge overlay (2026-08-19).** The local kernel gate is closed.
-> `vyrm-embed` now provides source-digest/model/read-stamp-bound jobs, two-read
+> `rrd-inference` now provides source-digest/model/read-stamp-bound jobs, two-read
 > inference race detection, final commit CAS, and a no-network local FastEmbed
 > adapter behind an optional feature. Search requests and projections can bind
 > exact model identity. Compact dense v1 adds authenticated aligned `f32`, true
 > read-only mmap, atomic publication, and scalar/AVX2 parity. Accelerator output
 > is untrusted until byte-identical to the CPU artifact; fallback is explicit.
-> `vyrm-edge` supplies one-call offline embed/search and retained 10k×128
+> `rrflow-edge` supplies one-call offline embed/search and retained 10k×128
 > binary/RSS/artifact/latency evidence. No physical GPU or real-model quality
-> result is claimed. See `docs/vyrm-embedding-edge.md`.
+> result is claimed. See `docs/rrd-inferenceding-edge.md`.
 
 > **M7 cluster-contract overlay (2026-08-19).** The first protocol/simulation
-> slice is executable. `vyrm-cluster` freezes canonical three-zone placement,
+> slice is executable. `rrd-cluster` freezes canonical three-zone placement,
 > consistency requests, partial-order snapshot vectors, route evidence,
 > snapshot-plus-WAL transfer, metadata-indexed resharding, and an explicit M7
 > denial for cross-shard writes. Its deterministic single-term/per-shard model
 > injects partition, delay, duplication, reorder, crash, restart, clock skew,
 > and disk loss, and enumerates quorum paths against every tolerated single
 > disk loss. This is not a production consensus, networking, election, or
-> Multi-AZ claim. See `docs/vyrm-cluster-m7.md`.
+> Multi-AZ claim. See `docs/rrd-cluster-m7.md`.
 
 > **M7 real-consensus overlay (2026-08-19).** OpenRaft `0.9.25` is pinned behind
-> an opt-in feature and adapted to authoritative VyrmKV storage. Votes, logs,
+> an opt-in feature and adapted to authoritative RRD LSM storage. Votes, logs,
 > committed pointers, application state, and snapshots survive the upstream
 > conformance suite. A real four-node in-process run covers election, quorum
 > writes, log-purged snapshot catch-up, majority-side failover, post-failover
@@ -203,7 +380,7 @@ disagree, `SPEC.md` is authoritative and this document is wrong.
 > CAS. Production transport, unified `RuntimeCommit` dispatch, bounded state,
 > independent-process chaos, and Multi-AZ evidence remain open.
 
-> **M7 physical-snapshot prerequisite (2026-08-19).** VyrmKV snapshot-bundle
+> **M7 physical-snapshot prerequisite (2026-08-19).** RRD LSM snapshot-bundle
 > v1 now exports a flush-bounded manifest plus every authenticated immutable
 > segment in a deterministic binary envelope. Installation validates the full
 > closure, syncs content-addressed segments and an empty continuation WAL, then
@@ -214,7 +391,7 @@ disagree, `SPEC.md` is authoritative and this document is wrong.
 > consumed by adapter v3 in the following overlay.
 
 > **M7 transferable-runtime overlay (2026-08-19).** Adapter format `v3` now
-> gives canonical state and node-local Raft history separate VyrmKV ownership
+> gives canonical state and node-local Raft history separate RRD LSM ownership
 > domains. Votes, logs, committed/purged cursors, and the content-addressed
 > current-snapshot cache remain local; the applied cursor and canonical runtime
 > mutations remain atomic in the transferable state database. OpenRaft builds
@@ -249,7 +426,7 @@ disagree, `SPEC.md` is authoritative and this document is wrong.
 > Multi-AZ evidence remain open.
 
 > **M7 process-isolation overlay (2026-08-19).** The feature-gated
-> `vyrm-cluster-node` executable opens one durable shard root, validates its own
+> `rrd-cluster-node` executable opens one durable shard root, validates its own
 > canonical SPIFFE leaf before readiness, and serves the authenticated OpenRaft
 > transport. A bounded/versioned/request-correlated JSON-lines lifecycle
 > protocol stays on inherited stdin/stdout rather than exposing an
@@ -262,7 +439,7 @@ disagree, `SPEC.md` is authoritative and this document is wrong.
 > one host, not independent-host, credential-lifecycle, production telemetry,
 > bounded-memory snapshot, or Multi-AZ certification.
 
-> **M7 credential-lifecycle overlay (2026-08-19).** `VyrmTlsReloader` atomically
+> **M7 credential-lifecycle overlay (2026-08-19).** `RRFlowTlsReloader` atomically
 > replaces one complete leaf/key/trust-root/CRL state at an exact-successor local
 > generation; every new outbound and inbound one-RPC TLS connection snapshots
 > the latest state. CRLs use rustls WebPKI with end-entity checks, unknown status
@@ -280,7 +457,7 @@ disagree, `SPEC.md` is authoritative and this document is wrong.
 > typed `runtime_commit` operation. `NativeEngine` now exposes a validated
 > no-write plan, allowing canonical mutations, audit/outbox work, the Raft
 > applied cursor, response, and idempotency record to publish in one
-> authoritative VyrmKV WAL frame. Reopen, duplicate, stale-cursor denial, and
+> authoritative RRD LSM WAL frame. Reopen, duplicate, stale-cursor denial, and
 > same-frame differentials are green. A real three-voter run reopens identical
 > canonical runtime truth through `NativeEngine` on every voter. Runtime-bearing
 > snapshots are now transferred by adapter v4's physical ownership split and
@@ -288,6 +465,23 @@ disagree, `SPEC.md` is authoritative and this document is wrong.
 > passes through the node runner; hot file-fed credential lifecycle also passes,
 > while independent-host faults, automatic workload issuance, and Multi-AZ
 > evidence remain open.
+
+> **M7 artifact-closure overlay (2026-08-20).** Immutable vector/index bytes
+> remain outside the Raft log and RRD LSM snapshot, but their canonical
+> `ObjectReference` values remain inside runtime truth. A typed transfer
+> manifest now binds one project read to the shard, placement epoch, grounded
+> snapshot, source/target, sorted references, and exact digest set. Verified
+> local streaming is bounded and content-addressed, transfers a duplicate
+> digest once, supports idempotent retry, and leaves only unreachable content
+> on partial failure. Before snapshot activation, the target independently
+> prefix-scans the authenticated physical bundle and requires its scoped
+> `runtime_objects` closure to equal the manifest exactly. Missing/corrupt
+> source bytes, target corruption, manifest substitution, incomplete closure,
+> and forged snapshot bindings deny activation. A causal cluster root plus
+> storage child trace records private transfer evidence identically across
+> Memory, Fjall, and native trace engines. Real cross-host object transport,
+> S3 multipart streaming, resumable chunks, backpressure, and production
+> telemetry remain open.
 
 ## 1 · Grounding result
 
@@ -300,13 +494,13 @@ absence, not recollection.
 | §3 | `append_batch`, `assert` | Implemented | `store.rs` |
 | §3 | `as_of`, `current`, `history` | Implemented | `temporal.rs`, `store.rs` |
 | §3 | `observe` | Implemented | `store.rs` |
-| §3 | `promote`, `gate` | **Missing** | no `vyrm-gate` |
-| §4 | In-process linkage | Implemented | `vyrm-core` is a library crate |
-| §4.1 | napi-rs adapter | **Missing** | no `vyrm-node` |
-| §5 | `vyrm-core`, `vyrm-store` | Implemented | `crates/` |
-| §5 | `vyrm-cli` | Implemented | `crates/vyrm-cli` |
-| §5 | `vyrm-graph` | Implemented | `crates/vyrm-graph`: attunement, tree-sitter extraction, routing, freshness, grounding |
-| §5 | `vyrm-gate`, `vyrm-node`, `vyrmd` | **Missing** | absent |
+| §3 | `promote`, `gate` | **Missing** | no `rrd-engine` |
+| §4 | In-process linkage | Implemented | `rrd-core` is a library crate |
+| §4.1 | napi-rs adapter | **Missing** | no `rrd-engine` |
+| §5 | `rrd-core`, `rrd-store` | Implemented | `crates/` |
+| §5 | `rrflow-cli` | Implemented | `crates/rrflow-cli` |
+| §5 | `rrd-graph` | Implemented | `crates/rrd-graph`: attunement, tree-sitter extraction, routing, freshness, grounding |
+| §5 | `rrd-engine`, `rrd-engine`, `rrflow-mcp` | **Missing** | absent |
 | §5 | Modularity criterion | Verified | `cargo tree`: core depends on `serde` alone |
 | §6 | Claim model, retirement | Implemented | `claim.rs` |
 | §6.1 | Two-timeline key encoding | Implemented | `key.rs`, `tests/bitemporal.rs` |
@@ -327,7 +521,7 @@ absence, not recollection.
 | §11 | Correction 6, bounded accept queue | Not applicable yet | no daemon exists to bound |
 | §12 | Durability, resolution, isolation, throughput, modularity | Verified | 77 tests, `examples/` |
 | §12 | Removal candidacy | Verified | `tests/removal.rs` (8 tests) |
-| §13 | Manual triggers, recorded | Implemented | `invocation.rs`, `vyrm-cli`, `tests/operator_surface.rs` |
+| §13 | Manual triggers, recorded | Implemented | `invocation.rs`, `rrflow-cli`, `tests/operator_surface.rs` |
 | §13.1 | Effectiveness ledger | **Missing** | absent |
 | §13.2 | Content-addressed objects | **Missing** | absent |
 | §14 | Clyffy consumer | **Missing** | absent |
@@ -348,7 +542,7 @@ repeated SIGKILL durability runs cover the boundary.
 and §1.2 does not define **event**. The field carries `#[allow(dead_code)]`.
 
 This is inherited from the prior runtime, where events were the primary record.
-In vyrm the claim is the record. The keyspace is either the sequence index
+In rrflow the claim is the record. The keyspace is either the sequence index
 required by F2, or it is vestigial.
 
 **Resolved as D-3.** The keyspace became the sequence index required by F2 and
@@ -427,7 +621,7 @@ small.
   encoded identically to subject `a` with predicate `b/c`. Attribution would have
   retained the wrong pair. Now `\x00`-separated, matching the claim key.
 
-### Step 3 · Operator surface (`vyrm-cli`) — COMPLETE
+### Step 3 · Operator surface (`rrflow-cli`) — COMPLETE
 
 §13 stage 1 requires explicit operator invocation with every invocation recorded.
 No trigger may be automated before its manual record justifies it, so this
@@ -446,7 +640,7 @@ precedes all automation.
 - Recording wraps execution in one place in `main`, so a command cannot be added
   that forgets to record itself.
 
-### Step R · Routing projection (`vyrm-graph`) — COMPLETE
+### Step R · Routing projection (`rrd-graph`) — COMPLETE
 
 The operator-facing routing layer: attune to a repository, maintain a symbol
 index incrementally, answer a query with a ranked file list read in full.
@@ -518,12 +712,12 @@ but wrong (615 lines, no definer); routing the actual definition site costs
 465 more lines, and the ratio metric cannot see correctness. Budget fill:
 13.87x → 13.88x, unchanged.
 
-- Index persistence through `vyrm-store`: a `projections` keyspace
+- Index persistence through `rrd-store`: a `projections` keyspace
   (Buffered durability — a projection is derivable, so a crash-lost write
   costs a rebuild, never truth) holding the index whole as one blob via
-  `Index::to_bytes`/`from_bytes`. Persistence wiring lives in vyrm-graph
-  tests and `examples/route_persisted.rs` with vyrm-store as a
-  dev-dependency: the library stays substrate-free until vyrm-node exists
+  `Index::to_bytes`/`from_bytes`. Persistence wiring lives in rrd-graph
+  tests and `examples/route_persisted.rs` with rrd-store as a
+  dev-dependency: the library stays substrate-free until rrd-engine exists
   to own the composition. `tests/persistence.rs` (3 tests): a reloaded
   index answers identically with zero re-extraction, an offline change is
   caught by refresh and survives grounding, absence is recovery not error.
@@ -542,7 +736,7 @@ from its source.
 **Step R is complete.** The routing projection attunes, extracts with real
 parsers, ranks with a measured design, routes filename-level entities, and
 persists across processes. Successor work belongs to later steps: recall
-integration (Step 4), projections over claims (Step 5), and the vyrm-node
+integration (Step 4), projections over claims (Step 5), and the rrd-engine
 composition layer that will own persistence wiring in the product.
 
 ### Step T · Enableable developer traces — COMPLETE
@@ -550,7 +744,7 @@ composition layer that will own persistence wiring in the product.
 Observability for the operator and for the effectiveness ledger, off by
 default and free when off. Design decision, recorded before implementation:
 
-- The `tracing` crate with `EnvFilter` (`VYRM_TRACE=vyrm_graph=debug,...`),
+- The `tracing` crate with `EnvFilter` (`RRFLOW_TRACE=rrd_graph=debug,...`),
   the 2026 ecosystem standard: structured spans, zero-cost when no
   subscriber is installed, JSON output available for machine consumption.
 - Spans at subsystem boundaries only — `append_batch`, `refresh`, `ground`,
@@ -560,18 +754,18 @@ default and free when off. Design decision, recorded before implementation:
   baselines before it merges; an unmeasured "zero-cost" claim is still a
   claim.
 
-**Landed (2026-08-14):** `tracing` in vyrm-store (`append_batch`,
+**Landed (2026-08-14):** `tracing` in rrd-store (`append_batch`,
 `record_invocation`, `rebuild_current`, `ground_current` — divergence is a
-`warn`), vyrm-graph (`refresh`, `ground`, `route`, `from_bytes`, each event
-carrying the counts its report computes), and vyrm-node (`hook.handle` with
+`warn`), rrd-graph (`refresh`, `ground`, `route`, `from_bytes`, each event
+carrying the counts its report computes), and rrd-engine (`hook.handle` with
 the event name, `preflight` with stacks/claims/tokens). The kernel is
-untouched: `cargo tree -p vyrm-core` still shows serde alone. The
-subscriber installs only in `vyrm-cli` `main`, only when `VYRM_TRACE` is
+untouched: `cargo tree -p rrd-core` still shows serde alone. The
+subscriber installs only in `rrflow-cli` `main`, only when `RRFLOW_TRACE` is
 set, and writes to **stderr always** — stdout is the answer channel (hook
 injection, JSON gate decisions) and a binary test asserts diagnostics never
-touch it. `VYRM_TRACE_FORMAT=json` emits machine-readable lines (parsed
+touch it. `RRFLOW_TRACE_FORMAT=json` emits machine-readable lines (parsed
 back as JSON in the test) — the feed the Step V observatory's Rerun stage
-will consume. A blanket `VYRM_TRACE=debug` also surfaces Fjall's own spans:
+will consume. A blanket `RRFLOW_TRACE=debug` also surfaces Fjall's own spans:
 substrate visibility for free.
 
 **Measured overhead (2026-08-14, controlled):** the naive comparison was a
@@ -582,7 +776,7 @@ binary against the morning number would have blamed tracing for it. The
 controlled A/B (git-stashed pre-tracing binary vs tracing-compiled binary,
 identical fresh 40-claim stores, 30 runs each): **12.6 ms vs 12.8 ms** —
 +0.2 ms (~1.6%), within run noise, for tracing compiled in but off.
-Enabled (`VYRM_TRACE=debug`, stderr fmt subscriber): **+1.3 ms** on the
+Enabled (`RRFLOW_TRACE=debug`, stderr fmt subscriber): **+1.3 ms** on the
 session-start path. Step R comparators with tracing compiled: projection
 load 205–224 ms against a 205–206 ms baseline, refresh 26–31 ms against
 26–27 ms — run-to-run spread, no attributable regression. The off-path
@@ -593,13 +787,13 @@ Workspace at 134 tests, clippy clean.
 
 Operator decision recorded 2026-08-12: **two surfaces, one kernel.** Shippin
 is the customer surface (a customer attunes and owns their Clyffy instance;
-access into their projects is explicitly scoped); vyrm is the estate — the
+access into their projects is explicitly scoped); rrflow is the estate — the
 operator's full-control memory system. The kernel is never forked: both
-surfaces compose the same crates through vyrm-gate/vyrm-node, because a
+surfaces compose the same crates through rrd-engine/rrd-engine, because a
 forked memory layer would demand shadow-parity verification forever.
 
 Isolation lands on seams that already exist: one Fjall database directory
-per project/tenant (a vyrm store is a directory — process-level isolation is
+per project/tenant (a rrflow store is a directory — process-level isolation is
 free), keyspace-per-scope within a store (adopted at blueprint triage), and
 estate-level claims that point at isolated projects without containing them.
 Gates decide what crosses.
@@ -613,7 +807,7 @@ before any bespoke UI exists:
    timeline in an existing scientific viewer at near-zero UI cost.
 2. **Bespoke estate map** — GPU force-directed graph rendering
    (Cosmograph-class WebGPU/WebGL, millions of nodes) over the routing
-   projection and claim graph, with transaction-time scrubbing: vyrm is
+   projection and claim graph, with transaction-time scrubbing: rrflow is
    bi-temporal, so "watch the estate as it was" is a query the kernel
    already answers (`resolve_as_of`), not a feature the UI must invent.
    Precedent validating the model: Zep/Graphiti ships bi-temporal
@@ -622,7 +816,7 @@ before any bespoke UI exists:
 **Panel decision (operator, 2026-08-12):** the operator panel is built once,
 at a protocol boundary, and becomes Shippin's master panel by embedding —
 neither a separate tool forever nor folded into a customer product that does
-not exist yet. The panel owns no logic: every capability is first a `vyrmd`
+not exist yet. The panel owns no logic: every capability is first a `rrflow-mcp`
 endpoint, which is first a CLI-provable operation, so every pixel displays
 something already measured. Reference model: **Anytype** — local-first with
 the primary copy on-device, typed objects connected by relations forming a
@@ -634,13 +828,13 @@ is the graph view living inside the panel. Anytype's encrypted self-hosted
 sync (any-sync) is the recorded precedent for estate-to-tenant
 synchronization when the master/tenant tiers land — a design to study at
 that step, not to adopt unexamined. Build order: recall ledger (Step 4) →
-traces (Step T) → vyrmd protocol → panel shell (Rust-native) → Shippin
+traces (Step T) → rrflow-mcp protocol → panel shell (Rust-native) → Shippin
 embedding.
 
 ### Step P · Preflight and the runtime experience — COMPLETE (v1)
 
 **The gap this step closes (operator, 2026-08-13):** everything landed so
-far is a library with a CLI — the agent must *know* to call `vyrm recall`,
+far is a library with a CLI — the agent must *know* to call `rrflow recall`,
 *remember* to journal, *volunteer* to wait. The product claim is the
 inverse: the agent lands in a repository and the memory layer is already in
 the loop. Recall arrives before reasoning starts; journaling happens as a
@@ -651,7 +845,7 @@ memory system.
 **Research adopted (2026-08-13, cited in this entry):**
 
 - **Claude Code hooks are the seam, and it is deterministic.** The 2026
-  hook lifecycle covers every moment vyrm needs: `SessionStart` (matchers
+  hook lifecycle covers every moment rrflow needs: `SessionStart` (matchers
   `startup`/`resume`/`compact` — context re-injected *after compaction*),
   `UserPromptSubmit` (stdout injected into model context before reasoning,
   30 s budget), `PreToolUse` (exit 2 / `permissionDecision: deny` blocks a
@@ -661,25 +855,25 @@ memory system.
   *if it must be enforced, use hooks* — prompts hope, hooks guarantee.
   Direct prior art: claude-mem builds session memory entirely on this
   architecture.
-- **The 2026 agent-memory field converged on two lessons vyrm already
+- **The 2026 agent-memory field converged on two lessons rrflow already
   embodies plus one it must adopt.** (1) Letta: the *runtime* places memory
   into context deterministically — do not hope the model reads a file.
   (2) Zep/Graphiti: temporal validity intervals distinguishing current from
-  superseded facts — vyrm's bi-temporal kernel is this, stronger. (3) New:
+  superseded facts — rrflow's bi-temporal kernel is this, stronger. (3) New:
   **async memory writes are the default** — a write that blocks the
-  response pipeline is latency the user feels. vyrm's durability classes
+  response pipeline is latency the user feels. rrflow's durability classes
   map exactly: recall (the read) is the only synchronous path; journaling
   rides Buffered and never blocks the turn.
 - **Portability:** AGENTS.md is the vendor-neutral discovery convention
   (Codex, Cursor, Copilot, Gemini CLI, Zed, et al.); MCP is the
   vendor-neutral tool surface, with rmcp 3.x as the official Rust SDK
   (stdio transport; all logging to stderr — stdout belongs to the
-  protocol). Hooks are the Claude Code fast path; MCP via `vyrmd` is the
+  protocol). Hooks are the Claude Code fast path; MCP via `rrflow-mcp` is the
   same operations for every other harness.
 
 **Design — one dispatch binary, harness wiring as data:**
 
-- `vyrm preflight` — the moment of attunement. Detects the stack from
+- `rrflow preflight` — the moment of attunement. Detects the stack from
   marker files (`Cargo.toml` → cargo profile; `bun.lock`/`package.json` →
   bun profile; extensible), opens or creates the store-per-project
   directory, loads the persisted projection and refreshes it (228 ms load +
@@ -688,7 +882,7 @@ memory system.
   current claims as injected context. Wired to `SessionStart`; the
   `compact` matcher makes memory survive compaction *mechanically* — the
   claim this system was pitched on, enforced by the harness.
-- `vyrm hook <event>` — single entrypoint reading the harness JSON on
+- `rrflow hook <event>` — single entrypoint reading the harness JSON on
   stdin, dispatching by event. Mapping: `UserPromptSubmit` → subject
   extraction + budgeted recall injection; `PostToolUse (Edit|Write)` →
   freshness signal + observed claims; `PostToolUse (Bash, if cargo
@@ -700,13 +894,13 @@ memory system.
   `route_fresh` semantics as `permissionDecision` — refresh-and-allow when
   cheap, deny-with-reason when the projection is quarantined. "The AI
   knows to wait" stops being prose and becomes an exit code.
-- `vyrm init --harness claude-code` — writes the hook wiring
+- `rrflow init --harness claude-code` — writes the hook wiring
   (`.claude/settings.json`) and the AGENTS.md block. Turnkey means the
   preflight installs itself; profiles are TOML data, never code forks.
 - Stack profiles own: build/test/run commands, the extractor set that
   matters, and the journaling rules for application runs. `bun:` and
   `cargo:` are the first two because they are the operator's stacks.
-- `vyrmd` (per Step V) grows an MCP server face (rmcp, stdio) exposing
+- `rrflow-mcp` (per Step V) grows an MCP server face (rmcp, stdio) exposing
   recall/observe/route/ledger to non-Claude harnesses. The hook path and
   the MCP path call the same operations; neither owns logic.
 
@@ -724,7 +918,7 @@ promotion to `accepted` is D-4. Registry acceptance: an adapter whose
 verification claim has expired surfaces the warning at preflight (proven at
 a fixed `as_of` past the interval — the kernel never reads a clock, so the
 test doesn't either), and a harness with a closed interval refuses
-`vyrm init` with the retirement stated.
+`rrflow init` with the retirement stated.
 
 **Harness registry and drift alarm (operator requirement, 2026-08-13):**
 the integration layer is tailored per harness, and it audits itself,
@@ -745,7 +939,7 @@ A hand-written adapter list without an expiry is wrong within a quarter.
 - **The registry is data**: one TOML per harness adapter declaring its
   integration surface (hooks lifecycle? MCP client? MCP server? context
   file convention — CLAUDE.md / AGENTS.md / config.toml), which wiring
-  `vyrm init --harness <name>` writes, and which capabilities degrade when
+  `rrflow init --harness <name>` writes, and which capabilities degrade when
   absent (no hooks → MCP-only → recall is on-demand, not injected; the
   degradation is stated, not silent).
 - **Verification is a bi-temporal claim with an expiry — the noise is
@@ -754,7 +948,7 @@ A hand-written adapter list without an expiry is wrong within a quarter.
   `valid_to = verified_at + 21 days`. Preflight resolves the claim as-of
   now on every session start: expired → a warning surfaces in the injected
   context and the panel ("codex-cli adapter unverified for 34 days —
-  re-audit"). `vyrm harness audit <name>` re-verifies against the vendor's
+  re-audit"). `rrflow harness audit <name>` re-verifies against the vendor's
   current release and writes the fresh claim; a harness that dies gets its
   interval closed and stays in the registry as history. Gemini is the
   registry's first bi-temporal fact: a row with a closed validity
@@ -766,7 +960,7 @@ A hand-written adapter list without an expiry is wrong within a quarter.
   kimi-cli (Kimi K3 coding plan); zcode/GLM (Anthropic-compatible
   endpoint, cheapest subscription backend); gemini-cli (**retired
   mid-2026**, closed interval). MCP went table-stakes across all
-  survivors, which is why vyrmd's MCP face is the portability layer and
+  survivors, which is why rrflow-mcp's MCP face is the portability layer and
   hooks are the Claude Code optimization on top.
 - **The ledger prices both billing modes.** `Effectiveness.provider`
   gains the billing mode, because the same measured 9.58x means two
@@ -779,24 +973,24 @@ A hand-written adapter list without an expiry is wrong within a quarter.
 **Build-order revision (ratified by operator "execute", 2026-08-14):** the
 runtime experience jumps ahead of the panel. Step 5 (grounding over claims)
 → **Step P** → Step T traces (spans begin at hook dispatch, so the trace
-layer lands where the runtime enters) → vyrmd protocol + MCP → panel shell
+layer lands where the runtime enters) → rrflow-mcp protocol + MCP → panel shell
 → Shippin embedding.
 
-**Landed (2026-08-14, `crates/vyrm-node/` + CLI surface):** vyrm-node is the
+**Landed (2026-08-14, `crates/rrd-engine/` + CLI surface):** rrd-engine is the
 runtime layer — the composition Step V reserved the crate name for. Scope
 decision, stated not silent: **v1 is the store-side loop** (claims memory,
-registry, journaling, gate); the vyrm-graph routing composition (routing
-preflight attunement, `route_fresh` as a gate) joins at the traces/vyrmd
+registry, journaling, gate); the rrd-graph routing composition (routing
+preflight attunement, `route_fresh` as a gate) joins at the traces/rrflow-mcp
 step, its figures already measured standalone in Step R.
 
-- **Preflight** (`vyrm preflight`, wired to session-start): detects the
+- **Preflight** (`rrflow preflight`, wired to session-start): detects the
   stack from markers (cargo; bun, whose lockfile outranks `package.json`;
   node), surfaces estate health (a quarantine warns here and gates below)
   and the adapter's drift alarm, then emits a budgeted recall of every
   claim in force, rendered for injection. Subjects come from the
   authoritative claims keyspace (`Store::subjects`), never the projection —
   a quarantined projection cannot silence recall.
-- **Hook dispatch** (`vyrm hook <event>`): session-start → preflight
+- **Hook dispatch** (`rrflow hook <event>`): session-start → preflight
   injection; user-prompt-submit → whole-word subject match against the
   prompt, recall injected only when something matched, *nothing at all*
   otherwise (a stray newline is not an answer); pre-tool-use → the wait
@@ -816,13 +1010,13 @@ step, its figures already measured standalone in Step R.
   automation that cannot forget to record itself.
 - **Registry + drift alarm**: seven embedded TOML rows (claude-code with
   hooks as the fast path; codex-cli; opencode; grok-cli per-usage-only;
-  kimi-cli; zcode; gemini-cli as the closed interval). `vyrm harness
-  audit` writes the 21-day verification claim; `vyrm harness status` reads
+  kimi-cli; zcode; gemini-cli as the closed interval). `rrflow harness
+  audit` writes the 21-day verification claim; `rrflow harness status` reads
   every row's state; preflight surfaces expiry in the injected context.
   Proven at fixed instants: current at TTL−1 ms, expired at TTL (half-open,
   like every interval in this system), "unverified for 13 day(s)" in the
   injected context at day 34.
-- **`vyrm init --harness <name>`**: writes the marker-delimited context
+- **`rrflow init --harness <name>`**: writes the marker-delimited context
   block idempotently (second init replaces, never stacks), writes
   `.claude/settings.json` hook wiring for claude-code (SessionStart
   matcher `startup|resume|compact` — memory survives compaction
@@ -873,7 +1067,7 @@ than erroring. Preflight now announces the full shape — verified live:
 failing `vitest run` journaled as `vitest status = failing (exit 1)`.
 Two-sided note: framework detection reads only the root `package.json`,
 so monorepo workspaces attune as their root until the routing projection
-joins the preflight (Step T/vyrmd); and the census counted primary
+joins the preflight (Step T/rrflow-mcp); and the census counted primary
 language + root manifests, not per-directory reality inside monorepos —
 both recorded as limits of the measurement, not facts about the estate.
 
@@ -906,52 +1100,52 @@ on Fjall, not a repeated slogan.
 **The Fjall position, answered with numbers and tripwires, not
 handwaving.** What has been *measured* so far locates every win and every
 bottleneck **above** the engine: the 0.431 ms that dominates a write is
-the device's fsync — physics no engine rewrite recovers — and vyrm's
+the device's fsync — physics no engine rewrite recovers — and rrflow's
 durability classes are the answer to it; the 9.58x token reduction came
 from the claim model and recall; the 13.9x routing from the projection;
-the one-seek-per-subject recall from the **key encoding** (vyrm's design,
+the one-seek-per-subject recall from the **key encoding** (rrflow's design,
 which any engine executes). Today's footprint measurement says the
 per-store cost is not a mismatch either: **~180 KiB on disk per store**
 (the naive `du -sb` read 67 MB — Fjall's journal is *sparse-preallocated*
 at 64 MiB apparent; apparent-vs-allocated is recorded here as a
 measurement trap) and ~11 ms open — 258 stores ≈ 45 MiB, trivial. So §2's
-rule stands *because* it keeps vyrm honest: the prior runtime's
+rule stands *because* it keeps rrflow honest: the prior runtime's
 "built-from-scratch AI database" was Fjall verbatim under branding, and
-vyrm will not repeat that claim without the work behind it. **This is a
+rrflow will not repeat that claim without the work behind it. **This is a
 current position, not dogma.** The recorded tripwires that would justify
-vyrm-native engine work, each a measurement: (1) per-instance block-cache
+rrflow-native engine work, each a measurement: (1) per-instance block-cache
 ceiling — Fjall reserves 32 MiB cache *capacity* per open store, and a
-vyrmd holding hundreds of stores must measure actual residency and either
+rrflow-mcp holding hundreds of stores must measure actual residency and either
 share or shrink it; (2) compaction pauses appearing in hook-latency tails
 (p99, not means) as stores grow; (3) write amplification measured on
 claim-sized values against the append-only, retirement-never-delete
-workload — an LSM designed for general workloads pays for deletes vyrm
+workload — an LSM designed for general workloads pays for deletes rrflow
 never issues; (4) a temporal-iteration pattern the key encoding cannot
 serve in one seek. Any of these crossing from projected to measured is
 the §2 mismatch, and **the port landed below makes the attempt safe**:
-a vyrm-native engine would implement eight primitives and be proven by
+a rrflow-native engine would implement eight primitives and be proven by
 the same differential and golden vectors as every other backend — an
 experiment, not a rewrite.
 
 **Landed (2026-08-14): the storage port.**
 
-- **`vyrm_store::Engine`** — the fold-in seam. Eight required primitives
+- **`rrd_store::Engine`** — the fold-in seam. Eight required primitives
   (append_batch, sequence, claims_in_range, subjects, observe,
   projection get/put-with-durability, plus the `ClaimSource` reads);
   everything else is **provided by the trait**: assert, current-state
   projection, rebuild with its watermark atomicity, grounding with
   quarantine, reset. An engine implements the primitives and inherits the
   semantic layer — which is the whole argument in one type signature:
-  vyrm is the layer, the engine is a port.
+  rrflow is the layer, the engine is a port.
 - **`MemoryEngine`** — the reference engine (MemoryClaims + primitives).
   The differential (`tests/engine.rs`, standing rule 3): Fjall and the
   reference are indistinguishable through the port — same recall sets
   and content digests, same grounding stamp digest, same quarantine
   behaviour on an induced divergence.
-- **vyrm-node is generic over the port** (`tests/port.rs`): preflight and
+- **rrd-engine is generic over the port** (`tests/port.rs`): preflight and
   prompt-recall run unchanged over `MemoryEngine`, proving the runtime
   consumes `Engine`, not Fjall.
-- **Golden vectors** (`vyrm-core/fixtures/golden-vectors.json` +
+- **Golden vectors** (`rrd-core/fixtures/golden-vectors.json` +
   `tests/golden.rs`): key encodings incl. the inverted-timestamp
   newest-first ordering, prefixes and exclusive ends, canonical claim
   JSON, and the recall digest — regenerated from the kernel on every
@@ -962,11 +1156,11 @@ experiment, not a rewrite.
   single-writer MVCC — the same write discipline Fjall's
   single-writer-tx gives the Rust side), and inherits parity.
 
-**Tiers, designed and recorded (build with vyrmd/Shippin, not before):**
+**Tiers, designed and recorded (build with rrflow-mcp/Shippin, not before):**
 - **T0 · embedded durable (system of record):** Fjall (Rust), bbolt (Go).
   One directory per project; the port above.
 - **T1 · per-instance hot tier:** Moka (in-process, does one job well) in
-  **vyrmd** — recall sets keyed by (store, query digest, as_of), 
+  **rrflow-mcp** — recall sets keyed by (store, query digest, as_of),
   invalidated by sequence watermark; projections cached across sessions.
   Meaningless in one-shot CLI processes, which is why it waits for the
   daemon; its acceptance is a measured hit-rate and latency delta, or it
@@ -978,12 +1172,12 @@ experiment, not a rewrite.
   its fsync, and a cache tier that could disagree with the log would be
   the divergence §8.3 exists to catch.
 
-Two-sided notes: the trait fixes `Error = vyrm_store::Error`, which is
+Two-sided notes: the trait fixes `Error = rrd_store::Error`, which is
 pragmatic and slightly wrong for a pure port (a Go engine obviously
 doesn't share the type; the *contract* is the differential + vectors, the
 Rust trait is one binding of it); invocation recording and gc are not yet
 port methods (CLI main still binds to `Store` concretely) — folded in
-when vyrmd needs a second engine end-to-end. Workspace at 137 tests,
+when rrflow-mcp needs a second engine end-to-end. Workspace at 137 tests,
 clippy clean.
 
 ### Step 4 · Recall and the effectiveness ledger — COMPLETE
@@ -1002,7 +1196,7 @@ comparison with unstructured context on the same query (§13.1).
 
 **Landed (2026-08-12):**
 
-- `vyrm_core::recall` over a new `ClaimSource::subject_versions` port method
+- `rrd_core::recall` over a new `ClaimSource::subject_versions` port method
   (one seek per subject via `key::subject_prefix`, never a store scan).
   Deterministic budget fill, first claim always included, truncation visible;
   content digest per §13.2. Six kernel tests; adapter conformance proven by a
@@ -1012,11 +1206,11 @@ comparison with unstructured context on the same query (§13.1).
   `invocation.rs` already prescribed): `Effectiveness` fields on recall
   invocations, `Store::set_recall_outcome` to judge after the fact —
   refusing to judge a non-recall, since that would poison the evidence base.
-- Operator surface: `vyrm recall` (recorded with its effectiveness fields),
-  `vyrm outcome`, `vyrm ledger` (records plus outcome distribution). Driven
+- Operator surface: `rrflow recall` (recorded with its effectiveness fields),
+  `rrflow outcome`, `rrflow ledger` (records plus outcome distribution). Driven
   end-to-end through the compiled binary in tests.
 
-**Measured outcome of the A/B (2026-08-12, `examples/recall_ab.rs`,
+**Measured outcome of the A/B (2026-08-12, `crates/rrflow-eval/examples/recall_ab.rs`,
 fixtures checked in):** corpus = 32 claims extracted from the frozen
 2026-08-12 PLAN.md snapshot; baseline arm = every journal section mentioning
 a queried subject, stacked whole (mechanical md-stacking); both arms counted
@@ -1043,7 +1237,7 @@ repairing.
   projection emits `grounded` with a digest; a crash mid-rebuild replays the
   interval rather than skipping it.
 
-**Landed (2026-08-14, `vyrm-store/src/projection.rs`):** the current-state
+**Landed (2026-08-14, `rrd-store/src/projection.rs`):** the current-state
 projection — newest version per (subject, predicate) — as the first §8.2/§8.3
 projection over the claim log. The watermark lives in the same serialized
 blob as the entries, so §8.2's atomicity requirement holds by construction:
@@ -1054,14 +1248,14 @@ against recomputation rather than against a hand-written expectation).
 Grounding recomputes at the projection's **own watermark**, not the current
 sequence — it verifies incremental-equals-batch over the same interval,
 while staleness beyond the watermark belongs to rebuild; conflating them
-would report honest lag as divergence. The operator `vyrm ground` reaches
+would report honest lag as divergence. The operator `rrflow ground` reaches
 §8.3's `as_of = now` by rebuilding first. Divergence quarantines with the
 one derived-state write that pays for an fsync, because a quarantine a
 crash could forget would un-halt a diverged projection silently — proven by
 reopening the store with no flush and finding the quarantine held. The only
-exit is the explicit `vyrm reset-projection`; rebuild, read, and re-ground
-all refuse while quarantined. Operator surface: `vyrm rebuild`, `vyrm
-ground`, `vyrm reset-projection`, all invocation-recorded and driven
+exit is the explicit `rrflow reset-projection`; rebuild, read, and re-ground
+all refuse while quarantined. Operator surface: `rrflow rebuild`, `rrflow
+ground`, `rrflow reset-projection`, all invocation-recorded and driven
 end-to-end through the compiled binary in tests.
 
 **Measured outcome (2026-08-14, `examples/ground_cost.rs`, ext4):** rebuild
@@ -1114,7 +1308,7 @@ These apply to every step and are not restated per step.
 3. An adapter is correct if and only if it agrees with the grounding reference
    (§8.3). Conformance tests are differentials against `MemoryClaims`, never
    independently written expectations.
-4. `vyrm-core` MUST NOT acquire a substrate or transport dependency. Verified by
+4. `rrd-core` MUST NOT acquire a substrate or transport dependency. Verified by
    `cargo tree` (§5).
 5. Terminology follows §1.2. The banned-synonym column is enforceable by grep and
    SHOULD be checked before each commit.
@@ -1132,14 +1326,65 @@ These apply to every step and are not restated per step.
   domains into its temporal lanes. Schema repair, concurrent writers,
   initialization, denial, native reopen, visual projection, and all three
   engines have executable coverage.
-- **Next:** emit the contract across `vyrmQL`, `vyrmMX`, VyrmKV,
-  projection/vector/embedding, provider/tool, and cluster boundaries.
-  Connectome must then distinguish complete logical evidence from sampled
-  physical detail and derive causal trees and critical paths.
-- **Then:** implement a project-scoped pgvector operator-knowledge adapter with
-  captured source revision, exact/model-space oracle, filtered ANN controls,
-  stale denial/fallback, and idempotent outbox. It is not a second canonical
-  store and cannot claim a cross-Vyrm/Postgres transaction.
+- **Complete:** promote the explicit `RRFlowQL`/`RRD query executor` operator path. CLI
+  `query` and MCP `rrflow_query` capture a pre-observability read stamp, then
+  persist a parent query span plus paired parse/bind, planning, and execution
+  spans. Plans link their digest and selected/rejected paths; execution records
+  budgets and bounded result metrics; parse errors and budget denials close the
+  causal tree without persisting raw query or parameter values. Connectome's
+  GET Query Lab stays read-only. Observer-effect, privacy, failure, visual, and
+  Memory/Fjall/native differentials are green.
+- **Complete at the local M3–M6 boundary:** query execution contains a bounded
+  storage child with complete logical evidence and native RRD LSM physical
+  counter deltas. Projection publication and sealed vector plan/execution emit
+  causal spans bound to request, read, plan, catalog, and projection stamps.
+  Embedding inference and vector commit share a causal tree; the commit may
+  rebase across trace-only observer mutations but denies any concurrent data or
+  schema change. Raw vectors, filters, and source content are never persisted.
+  Memory/Fjall/native parity, denial paths, native reopen, and Connectome lane
+  projection are green.
+- **Complete for the local provider/tool and causal-analysis slice:** armed
+  prompt flights persist one measured provider boundary, digest-only observable
+  envelope annotations, and causal tool-envelope children. Connectome rebuilds
+  complete/incomplete/summary/invalid span lifecycles from the authoritative
+  log, retains exact cursor/change/audit coordinates, derives a measured
+  longest-root/child candidate without summing nested durations, and exports
+  only control-class evidence by default. Full read/projection link maps now
+  retain every stamp field required for reconstruction. Storage-write and
+  cluster boundary coverage, OTLP translation, and retained trace-regression
+  histories remain open.
+- **Complete for authoritative local vector artifact publication:** codec kind
+  is explicit for exact JSON, compact dense, and HNSW artifacts. Publication
+  stages content-addressed bytes, then commits a strict typed catalog record
+  and its verified object reference in one `RRD storage coordinator` transaction before the
+  serving view changes. Reopen replays contiguous catalog revisions and
+  verifies record/object commit identity, descriptor equality, media type,
+  digest, length, and decoded artifact bytes. Native reopen, missing-object
+  denial, stale-publisher isolation, and Connectome catalog inspection are
+  executable. Cross-node catalog replication remains an M7 deployment gate.
+- **Complete at the portable operator-knowledge gate:** `rrd-operator-knowledge` freezes
+  project/member/config/source/relation/tenant/model bindings, PostgreSQL
+  snapshot plus optional stable-revision evidence, exact/HNSW/IVFFlat controls,
+  explicit fallback, bounded result identities, safe parameterized pgvector SQL
+  shapes, and content-addressed vector-outbox work. Node execution emits paired
+  adapter spans and typed `OperatorKnowledge` links. The idempotency oracle
+  proves a retry returns the same external revision without applying payload a
+  second time. Three-engine, foreign-project, stale-revision, payload,
+  privacy, native-reopen, and Connectome tests are green. This is not a second
+  canonical store and does not claim a cross-RRFlow/Postgres transaction.
+- **Complete at the first live pgvector gate:** the opt-in PostgreSQL transport
+  captures snapshot, WAL-supporting, catalog/column/index, plan, and stable
+  project-revision evidence in repeatable-read transactions. Serializable
+  project-locked synchronization atomically applies typed vector upserts or
+  deletes, advances revision, and records the exact replay receipt. A pinned
+  PostgreSQL 18/pgvector 0.8.6 CI service checks tenant/source/cursor isolation,
+  ordered exact/HNSW/IVFFlat parity, stale revision denial, update/delete,
+  idempotent replay, and reconnect recovery.
+- **Next operator promotion gate:** add typed payload-expression SQL filters,
+  a certificate-backed TLS endpoint test, PostgreSQL process-restart/failure
+  injection, concurrent-writer/serialization retry tests, and retained
+  latency/recall/resource evidence. The live functional gate does not yet prove
+  production security, scale, or competitive performance.
 - **Competitive gate:** publish direct HelixDB fixtures only after the same
   project `init → run → query → inspect`, dynamic query/SDK parity, index
   lifecycle, and trace-completeness surfaces exist.

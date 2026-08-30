@@ -1,0 +1,23 @@
+[package]
+name = "rrflow-eval"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "controlled, paired frontier-runtime evaluation harness"
+
+[dependencies]
+rrd-core = { path = "../rrd-core" }
+rrd-store = { path = "../rrd-store" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+# The controlled recall A/B uses the same public proxy tokenizer for both
+# arms, so the reported ratio remains reproducible.
+tiktoken-rs = "0.12"
+
+[dev-dependencies]
+tempfile = "3"
+
+[[bin]]
+name = "rrflow-eval"
+path = "src/main.rs"

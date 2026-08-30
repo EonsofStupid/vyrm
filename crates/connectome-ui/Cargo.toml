@@ -1,22 +1,25 @@
 [package]
 name = "connectome-ui"
-version = "0.1.0"
+version.workspace = true
 edition.workspace = true
 license.workspace = true
 publish.workspace = true
-description = "Local developer workbench and visualizer for vyrm/connectome instances"
+description = "Client-only developer workbench and visualizer for RRD instances"
 
 [dependencies]
-vyrm-core = { path = "../vyrm-core" }
-vyrm-ql = { path = "../vyrm-ql" }
-vyrm-mx = { path = "../vyrm-mx" }
-vyrm-node = { path = "../vyrm-node" }
-vyrm-store = { path = "../vyrm-store" }
+rrd-contract = { path = "../rrd-contract" }
+rrd-client = { path = "../rrd-client" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tiny_http = "0.12"
+tokio = { version = "1", features = ["net", "rt", "sync", "time"] }
 
 [dev-dependencies]
+rrd-core = { path = "../rrd-core" }
+rrd-engine = { path = "../rrd-engine" }
+rrd-security = { path = "../rrd-security" }
+rrd-server = { path = "../rrd-server" }
+rrd-store = { path = "../rrd-store" }
 tempfile = "3"
 
 [[bin]]

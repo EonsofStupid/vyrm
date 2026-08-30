@@ -1,0 +1,33 @@
+[package]
+name = "rrd-server"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "RRD loopback server lifecycle and persistent session/transaction coordinator."
+
+[dependencies]
+rrd-engine = { path = "../rrd-engine" }
+rrd-contract = { path = "../rrd-contract" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+hmac = "0.13"
+sha2 = "0.11"
+axum = { version = "0.8.9", features = ["ws"] }
+hyper = { version = "1.11.0", features = ["http1", "server"] }
+hyper-util = { version = "0.1.20", features = ["http1", "server", "service", "tokio"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
+rustls-pemfile = "2"
+tokio = { version = "1", features = ["macros", "net", "rt-multi-thread", "signal", "sync", "time"] }
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring"] }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+
+[dev-dependencies]
+rrd-estate = { path = "../rrd-estate" }
+rrd-security = { path = "../rrd-security" }
+rrd-core = { path = "../rrd-core" }
+rrd-store = { path = "../rrd-store" }
+tempfile = "3"
+sysinfo = "0.39.6"
+rcgen = "0.14"

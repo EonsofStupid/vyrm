@@ -1,0 +1,22 @@
+{
+  "apiVersion": "rrflow.io/v1alpha1",
+  "kind": "RrdInstance",
+  "metadata": {
+    "name": "project-a",
+    "namespace": "rrflow-system"
+  },
+  "spec": {
+    "contractVersion": 1,
+    "instanceId": "project-a",
+    "image": "registry.example/rrd@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "storage": {
+      "size": "100Gi",
+      "storageClassName": "fast-rwo",
+      "retainOnDelete": true
+    },
+    "tlsSecret": "project-a-tls",
+    "bootstrapManifestConfigMap": "project-a-bootstrap",
+    "bootstrapCredentialSecret": "project-a-credentials",
+    "bootstrapAtUnixMs": 1787529600000
+  }
+}

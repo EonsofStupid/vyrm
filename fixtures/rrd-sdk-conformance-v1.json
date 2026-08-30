@@ -1,0 +1,184 @@
+{
+  "format_version": 1,
+  "protocol": "rrd",
+  "protocol_version": 1,
+  "incompatible_protocol_version": 2,
+  "required_domains": [
+    "auth",
+    "backup",
+    "cancellation",
+    "crud",
+    "estate",
+    "live_feeds",
+    "query",
+    "retries",
+    "sessions",
+    "transactions",
+    "typed_errors",
+    "vectors",
+    "versions"
+  ],
+  "identity": {
+    "instance": "sdk-conformance",
+    "estate": "sdk-estate",
+    "principal": "sdk-conformance",
+    "api_key": "sdk-conformance-key"
+  },
+  "session": {
+    "create": {
+      "limits": {
+        "idle_timeout_ms": 60000,
+        "absolute_timeout_ms": 300000,
+        "max_open_transactions": 4
+      }
+    },
+    "renew": {},
+    "close": {}
+  },
+  "transaction": {
+    "preview_begin": {
+      "scope": "claims",
+      "timeout_ms": 60000
+    },
+    "preview": {
+      "mutations": [
+        {
+          "mutation": "assert_claim",
+          "subject": "sdk-conformance",
+          "predicate": "qualified",
+          "object": "preview-only",
+          "valid_from": 100,
+          "tx_time": 100,
+          "producer": "sdk-conformance",
+          "confidence": 1.0
+        }
+      ],
+      "valid_at": 100,
+      "max_scanned_changes": 1000
+    },
+    "abort": {},
+    "commit_begin": {
+      "scope": "data",
+      "timeout_ms": 60000
+    },
+    "commit_deadline_timeout_ms": 60000,
+    "commit": {
+      "operation_sha256": "210bae5558003ef6529734ec98c7e1d170e2dcccebb62d879d5bcf519f2e0e88",
+      "mutations": [
+        {
+          "mutation": "put_record",
+          "reference": {
+            "kind": "document",
+            "id": "sdk-conformance"
+          },
+          "valid_from": 100,
+          "properties": {
+            "title": {
+              "type": "string",
+              "value": "one schema six clients"
+            }
+          }
+        },
+        {
+          "mutation": "put_vector",
+          "reference": {
+            "kind": "embedding",
+            "id": "sdk-conformance-title"
+          },
+          "subject": {
+            "kind": "document",
+            "id": "sdk-conformance"
+          },
+          "collection_id": "documents",
+          "vector_name": "title",
+          "field": "title-embedding",
+          "valid_from": 100,
+          "value": {
+            "kind": "dense",
+            "values": [
+              1.0,
+              0.0
+            ]
+          },
+          "properties": {}
+        }
+      ]
+    }
+  },
+  "query": {
+    "scope": "instance:sdk-conformance",
+    "query": "FROM record:document AT VALID 100 KNOWN HEAD WHERE id = \"sdk-conformance\" PROJECT id, title EXPLAIN CONTRACT",
+    "parameters": {},
+    "budget": {
+      "max_scanned_changes": 1000,
+      "max_rows": 10,
+      "max_output_bytes": 4096,
+      "max_batch_rows": 10,
+      "max_memory_bytes": 67108864,
+      "max_spill_bytes": 268435456,
+      "max_elapsed_ms": 30000
+    }
+  },
+  "vector": {
+    "ensure": {
+      "scope": "instance:sdk-conformance",
+      "collection_id": "documents",
+      "vectors": [
+        {
+          "name": "title",
+          "field": "title-embedding",
+          "kind": "dense",
+          "dimensions": 2,
+          "metric": "cosine",
+          "memory_tier": "cached"
+        }
+      ]
+    },
+    "search": {
+      "scope": "instance:sdk-conformance",
+      "valid_at": 100,
+      "collection_id": "documents",
+      "vector_name": "title",
+      "query": {
+        "kind": "dense",
+        "values": [
+          1.0,
+          0.0
+        ]
+      },
+      "top_k": 1,
+      "mode": {
+        "mode": "exact"
+      },
+      "max_scanned_changes": 1000
+    }
+  },
+  "changefeed": {
+    "read": {
+      "scope": "instance:sdk-conformance",
+      "after_cursor": 0,
+      "limit": 128
+    },
+    "follow_wait_timeout_ms": 50,
+    "cancellation_wait_timeout_ms": 5000,
+    "cancel_after_ms": 25
+  },
+  "backup": {
+    "create": {
+      "label": "sdk-conformance",
+      "created_at_unix_ms": 1000
+    },
+    "list": {
+      "verify_archives": true
+    }
+  },
+  "estate": {},
+  "expected": {
+    "endpoint_count": 34,
+    "query_identity": "record:document:sdk-conformance",
+    "vector_reference": "embedding:sdk-conformance-title",
+    "estate_revision": 1,
+    "typed_error": "unauthenticated",
+    "retry_attempts": 2
+  }
+}

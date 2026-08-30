@@ -1,0 +1,165 @@
+{
+  "service": {
+    "protocol": "rrd",
+    "protocol_version": 1,
+    "implementation": "rrflow",
+    "implementation_version": "0.1.0",
+    "deployment_mode": "embedded",
+    "instance": {
+      "kind": "instance",
+      "id": "project-alpha"
+    },
+    "capabilities": [
+      {
+        "name": "logical-archive",
+        "contract_version": 1,
+        "status": "unavailable",
+        "limitation": "F1 implementation gate is not complete"
+      },
+      {
+        "name": "native-persistence",
+        "contract_version": 1,
+        "status": "experimental",
+        "limits": {
+          "max-snapshot-bytes": 1073741824
+        },
+        "limitation": "local alpha; independent-host qualification remains open"
+      }
+    ],
+    "product_capabilities": {
+      "contract_version": 1,
+      "capabilities": [
+        {
+          "id": "backup-create",
+          "label": "Backup Create",
+          "category": "backup",
+          "summary": "Create one authenticated logical backup.",
+          "bindings": [
+            {
+              "surface": "engine",
+              "disposition": "available",
+              "entrypoints": [
+                "rrd-engine:RrdOperation::CreateInstanceBackup"
+              ]
+            },
+            {
+              "surface": "rrflowql",
+              "disposition": "unavailable",
+              "reason": "No RRFlowQL statement maps this fixture operation."
+            },
+            {
+              "surface": "graphql",
+              "disposition": "unavailable",
+              "reason": "No GraphQL field maps this fixture operation."
+            },
+            {
+              "surface": "rrd_http",
+              "disposition": "available",
+              "entrypoints": [
+                "POST /v1/backups/create"
+              ]
+            },
+            {
+              "surface": "websocket",
+              "disposition": "unavailable",
+              "reason": "No WebSocket operation maps this fixture operation."
+            },
+            {
+              "surface": "grpc",
+              "disposition": "unavailable",
+              "reason": "No gRPC method maps this fixture operation."
+            },
+            {
+              "surface": "mcp",
+              "disposition": "unavailable",
+              "reason": "No MCP runtime tool is present in this fixture."
+            },
+            {
+              "surface": "cli",
+              "disposition": "unavailable",
+              "reason": "No CLI command is present in this fixture."
+            },
+            {
+              "surface": "sdk",
+              "disposition": "available",
+              "entrypoints": [
+                "openapi:operation#backup-create"
+              ]
+            },
+            {
+              "surface": "connectome",
+              "disposition": "planned",
+              "reason": "Connectome exposure is planned in this fixture."
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "request": {
+    "protocol": "rrd",
+    "protocol_version": 1,
+    "context": {
+      "request_id": "req-01j5y0h4k7",
+      "operation_id": "op-01j5y0h4k8",
+      "idempotency_key": "idem-01j5y0h4k9",
+      "deadline_unix_ms": 1800000000000
+    },
+    "resource": {
+      "segments": [
+        {
+          "kind": "organization",
+          "id": "local"
+        },
+        {
+          "kind": "estate",
+          "id": "developer"
+        },
+        {
+          "kind": "project",
+          "id": "alpha"
+        },
+        {
+          "kind": "instance",
+          "id": "project-alpha"
+        }
+      ]
+    },
+    "payload": {
+      "action": "backup.create"
+    }
+  },
+  "success": {
+    "protocol": "rrd",
+    "protocol_version": 1,
+    "request_id": "req-01j5y0h4k7",
+    "operation_id": "op-01j5y0h4k8",
+    "outcome": {
+      "status": "ok",
+      "payload": {
+        "action": "backup.created"
+      }
+    }
+  },
+  "failure": {
+    "protocol": "rrd",
+    "protocol_version": 1,
+    "request_id": "req-01j5y0h4k7",
+    "operation_id": "op-01j5y0h4k8",
+    "outcome": {
+      "status": "error",
+      "error": {
+        "code": "failed_precondition",
+        "message": "source read stamp is no longer current",
+        "retryable": true,
+        "details": {
+          "observed-cursor": "42"
+        }
+      }
+    }
+  },
+  "idempotency": {
+    "key": "idem-01j5y0h4k9",
+    "operation_sha256": "3c94150b4ea4f9dcb27d3b602e9f190debe656533c047b99e11367bc6a28017f"
+  }
+}

@@ -1,0 +1,14 @@
+# Re-verified 2026-08-29 against the current google-gemini/gemini-cli hook,
+# skill, and plan-mode references. The earlier retirement claim was false
+# drift and is intentionally corrected rather than preserved as capability.
+name = "gemini-cli"
+display = "Google Gemini CLI"
+hooks = true
+hook_protocol = "gemini"
+mcp_client = true
+mcp_server = false
+context_file = "GEMINI.md"
+config_path = ".gemini/settings.json"
+billing = ["subscription", "per_usage"]
+providers = ["google"]
+notes = "BeforeAgent injects prompt-bound recall; BeforeTool and AfterTool enforce and observe mutations; SessionStart and PreCompress preserve context; .agents/skills is discovered natively."

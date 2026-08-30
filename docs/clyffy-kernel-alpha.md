@@ -1,25 +1,35 @@
-# Vyrm alpha → Clyffy kernel handoff
+# RRFlow alpha → Clyffy kernel handoff
 
-Status: execution contract, 2026-08-19. This document separates what must be
-proved in Vyrm from what belongs in the later, clean Clyffy product repository.
-It is intentionally release-gated rather than calendar-gated.
+Status: historical execution contract aligned to the RRFlow `0.1.0` alpha identity.
+Current product boundaries are authoritative in `rrflow-rrd-architecture.md`.
+This document remains release-gated rather than calendar-gated.
 
 ## Product boundary
 
-The canonical chain remains **Automaton → LFG → Connectome**:
+The canonical product is **RRFlow**:
 
-- Automaton brokers provider sessions and subscription-backed AI surfaces.
-- LFG parses and composes just-in-time context.
-- Connectome records, explains, visualizes, and enforces runtime intelligence.
-- Vyrm is Connectome's embeddable kernel: contracts, persistence, query and
-  execution, projections, lifecycle policy, and evidence.
-- Clyffy will package those capabilities into installable per-platform and
-  umbrella deployments. It consumes versioned Vyrm interfaces; it does not
-  fork Vyrm internals into a second implementation.
+- RRO composes Automaton's provider/session brokerage with LFG's just-in-time
+  context encoding and routing.
+- RRFlow means Reason Ready Flow and is the single product. RRD, the Reason
+  Ready Daemon, is its one native engine/runtime: persistence, transactions,
+  catalogue, query, indexes, reasoning, lifecycle, security, audit, and
+  recovery compose there.
+- RRD LSM/MVCC code is the native persistence implementation, not a separate
+  product boundary. RRD is the actual Fjall competitor; Fjall
+  remains only a compatibility reader and differential oracle. Arrow/DataFusion
+  is target architecture and must not be implied by the current bespoke row
+  executor.
+- Connectome Panel records, explains, visualizes, and controls those contracts.
+- PostgreSQL/pgvector is project-scoped shared operator knowledge behind the
+  external adapter; it is neither RRFlow's canonical persistence nor LFG's JIT
+  compiler.
+- Clyffy will package RRFlow into installable project and estate deployments.
+  It consumes versioned RRFlow/RRD interfaces; it does not fork RRD internals
+  into a second implementation.
 
 The Clyffy repository should not be created by pooling old repositories. It
 starts from a release manifest that pins reviewed versions of Automaton, LFG,
-Connectome/Vyrm, provider adapters, schemas, migrations, and benchmark evidence.
+Connectome/RRFlow, provider adapters, schemas, migrations, and benchmark evidence.
 
 ## Canonical lifecycle event model
 
@@ -60,13 +70,13 @@ differential are documented in `docs/package-workflows.md`.
 
 ## Alpha release gates
 
-Vyrm becomes a firm local alpha only when all of these are machine-verifiable:
+RRFlow becomes a firm local alpha only when all of these are machine-verifiable:
 
 | Gate | Required evidence |
 |---|---|
 | Portable contract | Versioned golden JSON for read, transaction, plan, projection, audit, workflow event, and error envelopes |
 | Transaction semantics | Reference/compatibility/native differential, conflict matrix, read-your-writes, repeatable paging, crash/restart, lease and retention-pin tests |
-| Query/runtime | `vyrmQL` parser corpus and fuzzing; typed-SDK equivalence; deterministic `vyrmMX` plans and budgets |
+| Query/runtime | `RRFlowQL` parser corpus and fuzzing; typed-SDK equivalence; deterministic `RRD query executor` plans and budgets |
 | Native storage | WAL/MVCC/manifest crash matrix, compaction with pinned snapshots, corruption handling, recovery idempotency, and no acknowledged-write loss |
 | Unified data | Atomic record/edge/claim/event/vector/series/geo/blob-reference mutations plus local/S3 object differential |
 | Search | Exact dense/sparse/multivector oracle; ANN recall/latency/memory matrix; filtered update/delete/reopen/compaction soak |
@@ -83,8 +93,8 @@ distributed durability merely because its interfaces reserve shard fields.
 
 | Tier | Shape | Update behavior |
 |---|---|---|
-| Developer | One embedded instance per major checkout; explicit umbrella membership for small related projects | Opt-in stable/beta channel, signed manifest, local migration backup and health rollback |
-| Workstation | `vyrmd` owns multiple isolated instances and provider adapters | Staged daemon restart, schema compatibility check, per-instance rollback |
+| Developer | One embedded instance per project and environment | Opt-in stable/beta channel, signed manifest, local migration backup and health rollback |
+| Workstation | `rrflow-mcp` owns multiple isolated instances and provider adapters | Staged daemon restart, schema compatibility check, per-instance rollback |
 | Team | Authenticated service with explicit tenant/shard placement and object storage | Rolling update only after mixed-version simulation and migration fencing |
 | Edge | Offline, resource-capped exact/ANN search with no required network | Side-loaded signed bundle and atomic slot switch |
 
@@ -97,7 +107,7 @@ reasoning as observed data.
 ## Competitive proof, not a blanket claim
 
 “Beats SurrealDB” and “beats Qdrant” are two separate benchmark hypotheses.
-They become publishable only after the corresponding Vyrm subsystem exists.
+They become publishable only after the corresponding RRFlow subsystem exists.
 
 - Against SurrealDB: fixed hardware and durability; transactional mixed
   record/edge/time queries; conflict rate; p50/p95/p99 latency; throughput;
@@ -105,7 +115,7 @@ They become publishable only after the corresponding Vyrm subsystem exists.
 - Against Qdrant: exact oracle first; dense/sparse/multivector and filtered ANN;
   recall@k/NDCG; p50/p95/p99 latency; build/update/delete/reopen/compaction;
   CPU/GPU build cost; RSS/VRAM/disk; and stale-generation behavior.
-- Vyrm-specific frontier-runtime value is measured separately: task success,
+- RRFlow-specific frontier-runtime value is measured separately: task success,
   stale-action denials, retries/regressions, provider/context/reasoning tokens,
   latency, compaction recovery, and trace completeness.
 
@@ -116,24 +126,26 @@ measured local results, never universal superiority.
 
 ## Immediate execution order
 
-1. **Complete:** exact `vyrmQL`/`vyrmMX` over the frozen M0/M1 port and live
+1. **Complete:** exact `RRFlowQL`/`RRD query executor` over the frozen M0/M1 port and live
    snapshot/retention-pin inspection in Connectome.
 2. **Complete:** atomic hash-chained audit/runtime commits and deny-by-default
    reasoning/lifecycle differentials.
-3. **Local gate passed:** native `vyrmKV` behind the same semantic, query,
+3. **Local gate passed:** native `RRD LSM` behind the same semantic, query,
    crash, storage-full, compaction, and benchmark harness. Its 20,000-operation
    mixed physical mutation differential and resumable/rollback-safe 18-keyspace
    migration rehearsal pass locally. Reproduce the strict Fjall performance
    matrix remotely before retiring the compatibility oracle. New
    CLI/MCP/workbench stores select native; existing non-native directories move
-   only through `vyrm storage migrate`.
+   only through `rrflow storage migrate`.
 4. **Complete at the local M4 gate:** unified vector/series/geo/object
    mutations, verified content-addressed publication, atomic outbox/audit, and
    idempotent retry. Live S3 endpoint certification remains deployment evidence.
 5. **Complete at the local M5 gate:** exact dense/sparse/multivector truth,
    filter-aware dense HNSW with exact reranking, projection lifecycle, and a
-   retained recall/latency/memory/update/delete/reopen baseline. Compact
-   artifacts, SIMD/GPU/edge work, and external Qdrant proof remain open.
+   retained recall/latency/memory/update/delete/reopen baseline. The subsequent
+   G04-W04 engine slice adds scalar/product/binary/TurboQuant lifecycle,
+   checksummed mmap, and SIMD/scalar evidence. Compact HNSW, GPU, and external
+   Qdrant proof remain open.
 6. **Complete at the local M6 kernel gate:** provenance/CAS-bound embedding
    jobs, exact model-space binding, compact dense mmap, scalar/AVX2 parity,
    verified accelerator/fallback policy, local FastEmbed adapter, and offline
@@ -142,11 +154,11 @@ measured local results, never universal superiority.
 7. **M7 protocol and first real-consensus gate complete:** canonical placement,
    consistency, snapshot-vector, route, transfer, and reshard contracts;
    deterministic single-term fault simulation; and a feature-gated OpenRaft
-   adapter over native VyrmKV with storage conformance and real four-node
+   adapter over native RRD LSM with storage conformance and real four-node
    election/failover/snapshot/membership evidence. Typed canonical
    `RuntimeCommit` application now shares one WAL frame with Raft state and is
    reopened identically across three voters. Adapter v4 separates local Raft
-   history from canonical state and uses physical VyrmKV snapshot-bundle v1 to
+   history from canonical state and uses physical RRD LSM snapshot-bundle v1 to
    catch up a fresh learner after log purge with the runtime truth intact. It
    also makes placement epochs explicit/membership-bound, invalidates stale
    bindings after Raft voter identity/zone changes, and deterministically bounds
@@ -160,10 +172,21 @@ measured local results, never universal superiority.
    and corrupt-pointer restart denial on one host. A real-TCP matrix also passes
    two-root overlap and old-root retirement. Snapshot build/receive/install and
    local object publication are now file-backed, hard-capped, crash-cleaned,
-   and regression-gated against whole-bundle RSS growth. Independent-host and
-   hardware chaos, broader disk-resident segment workloads, automatic SPIFFE
-   issuance/streaming, durable supervisor generation, production telemetry,
-   and Multi-AZ evidence remain open.
+   and regression-gated against whole-bundle RSS growth. Project-scoped vector
+   artifacts now cross the real mTLS/process learner path through durable
+   resumable sessions before activation; the target independently verifies the
+   snapshot's complete object closure. Typed fail-closed transfer observations
+   now route bounded causal trace commits through the current Raft leader and
+   prove identical voter/learner trace state after purge and failover. Receiver
+   admission, durable inventory reconstruction, stale-session/receipt GC, and
+   distinct-session concurrency are bounded and tested. Identity-scoped/global
+   transport admission, bounded Raft timing, and reset-explicit transport,
+   artifact-session, and consensus-trace telemetry now ship through project
+   node status.
+   Independent-host and hardware chaos, larger retained closure workloads,
+   automatic SPIFFE issuance/streaming, durable supervisor generation,
+   automatic telemetry collection/export and Multi-AZ evidence remain open;
+   Connectome now retains and replays explicitly submitted control-v4 status.
 8. **Local gate complete:** declared package workflows now bind preflight,
    pre-tool freshness/authorization, and post-tool atomic evidence across the
    shared hook/MCP handler. A durable cross-process authorization lease remains
@@ -172,7 +195,22 @@ measured local results, never universal superiority.
    persisted mutation stream into reasoning, routing, workflow, model/flight,
    search, and storage/data lanes. Freeze, scrub, rewind, forward, and inspection
    retain the exact cursor, scope, mutation digest, full mutation, and available
-   hash-chained audit envelope. Cursor-delta transport and controlled provider
-   evaluations remain open.
-10. Cut the Vyrm alpha manifest; only then scaffold the separate Clyffy master
+   hash-chained audit envelope. Query/storage, projection/vector, and embedding
+   runtime spans now feed those lanes with three-engine and native-reopen proof.
+   Causal lifecycle reconstruction, integrity diagnostics, a non-summed
+   measured critical candidate, control-only default JSON export, and
+   provider/tool-envelope spans are now complete for the local workbench.
+   Cluster spans, cursor-delta transport, OTLP translation, cross-run resource
+   analysis, and controlled provider evaluations remain open.
+10. **Portable and first live operator-knowledge gates complete:** versioned project/member,
+    source/relation/tenant, model, snapshot/revision, path/control, result, and
+    idempotent outbox contracts now have an exact reference adapter, safe
+    pgvector SQL plan, durable search/sync spans, three-engine denial/privacy
+    proof, native reopen, and Connectome visibility. The opt-in live transport
+    adds repeatable-read snapshot/catalog evidence, atomic revision/idempotency
+    controls, typed upsert/delete, ordered exact/HNSW/IVFFlat endpoint parity,
+    and reconnect proof in CI. Payload filters, certificate-backed TLS endpoint,
+    process restart/concurrency failure injection, and retained performance
+    evidence remain required before the pgvector row can be fully promoted.
+11. Cut the RRFlow alpha manifest; only then scaffold the separate Clyffy master
    repository and its signed tier/update system.

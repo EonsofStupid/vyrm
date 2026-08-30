@@ -1,0 +1,6 @@
+# Version changes require the repository owner's explicit review.
+/VERSION @EonsofStupid
+/scripts/check_version.py @EonsofStupid
+/.github/workflows/ci.yml @EonsofStupid
+/.github/CODEOWNERS @EonsofStupid
+/docs/versioning.md @EonsofStupid

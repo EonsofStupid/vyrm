@@ -1,11 +1,30 @@
-# vyrm — Kernel Specification v0
+# RRFlow — kernel semantics
 
 | Field | Value |
 |-------|-------|
-| Status | Draft. Pre-release. Subject to revision without migration guarantees. |
-| Default substrate | Native `vyrmKV`; pre-existing non-native directories reopen through the Fjall 3.1.8 compatibility adapter until explicitly migrated |
-| Scope | Tier 0 only: development-time persistence and recall for a single operator |
-| Supersedes | Nothing. Extends `docs/architecture-journal.md` and `automaton/docs/00-abstract-layer.md`. |
+| Status | Draft semantic specification for the RRFlow `0.1.0` alpha product identity; internal contracts are versioned independently |
+| Current default substrate | Native `RRD LSM`; pre-existing non-native directories reopen through the Fjall 3.1.8 compatibility adapter until explicitly migrated |
+| Scope | Kernel invariants; not the product boundary or naming authority |
+| Target authority | `docs/rrflow-rrd-architecture.md` and `docs/rrflow-rename-ledger.md` |
+
+> **Architecture correction (2026-08-24).** RRFlow means Reason Ready Flow and
+> is the single product. RRD means Reason Ready Daemon and is its native
+> engine/runtime and the actual
+> Fjall competitor. Persistence, transaction, catalogue, query, index,
+> AI-runtime, security, audit, and recovery compose through RRD rather than
+> separate engines. Where this file disagrees about
+> product identity, source organization, or target naming, the target
+> architecture and migration ledger above are authoritative.
+
+> **Full-stack expansion (2026-08-23).** The original Tier-0 kernel remains the
+> inward semantic authority, but it is no longer the complete product scope.
+> [`rrd-contract`](crates/rrd-contract) freezes the transport-neutral public
+> resource, capability, request, operation, idempotency, response, and error
+> vocabulary without exposing substrate types. The dependency-ordered product
+> requirements and promotion gates are authoritative in
+> [`docs/full-stack-gap-ledger.md`](docs/full-stack-gap-ledger.md). The closed
+> kernel API below remains closed; new server, estate, SDK, query, vector, and
+> operations surfaces compose above it rather than widening it accidentally.
 
 ## 1 · Conventions
 
@@ -18,7 +37,7 @@ not normative.
 ### 1.2 Terminology
 
 This vocabulary is controlled. Each concept has exactly one term. Synonyms listed
-under "Not" MUST NOT appear in vyrm source, documentation, or API surface.
+under "Not" MUST NOT appear in rrflow source, documentation, or API surface.
 
 | Term | Definition | Not |
 |------|------------|-----|
@@ -40,7 +59,7 @@ under "Not" MUST NOT appear in vyrm source, documentation, or API surface.
 | **promotion** | A claim crossing a tier boundary by satisfying a gate. | publish, sync, escalation |
 | **recall** | Retrieval of claims for supply to a model context. | retrieval, lookup, fetch, search |
 | **recall set** | The result of a recall: claims plus provenance and a content digest. | context block, payload |
-| **substrate** | The persistence implementation behind the Vyrm storage port; native `vyrmKV` is the default and Fjall is the existing-store compatibility adapter/oracle. | engine, backend, database, wrapper, store |
+| **substrate** | The persistence implementation behind the RRFlow storage port; native `RRD LSM` is the default and Fjall is the existing-store compatibility adapter/oracle. | engine, backend, database, wrapper, store |
 | **keyspace** | A logical isolated ordered key-value space. The compatibility adapter maps it to a Fjall 3.x keyspace. | table, column family, bucket |
 | **durability class** | The persistence policy assigned to a keyspace. | sync mode, flush policy |
 | **port** | A trait the kernel defines for an external implementation. | interface, hook |
@@ -58,8 +77,9 @@ MUST cite the date and host on which they were obtained.
 
 ## 2 · Position
 
-vyrm owns both its semantic contract and persistence architecture. New runtime
-stores use native `vyrmKV` behind the canonical `PersistentEngine` selector.
+The current implementation owns both the legacy semantic contract and
+persistence architecture that RRD must preserve while migrating. New runtime
+stores currently use native `RRD LSM` behind the `PersistentEngine` selector.
 Directories carrying native's authenticated `CURRENT` pointer reopen as native;
 other existing directories remain on the Fjall compatibility adapter until an
 explicit migration. Selection MUST fail closed and MUST NOT reinterpret bytes.
@@ -77,7 +97,7 @@ The compatibility substrate accounts for 4 µs of a 135 µs read in this histori
 point-read measurement. That result remains a baseline for the native engine; it
 does not veto workloads or structures optimized for AI runtime persistence.
 
-The Vyrm-native engine MUST preserve the cross-adapter conformance differential
+The RRFlow-native engine MUST preserve the cross-adapter conformance differential
 and MUST meet or beat the compatibility substrate on representative runtime
 workloads: latency distribution, throughput, durability, crash recovery, and
 memory use. Performance claims require retained measurements.
@@ -116,11 +136,11 @@ the kernel. The recall and claim-write paths MUST NOT incur it.
 
 ```text
                         ┌──────────────────────────────┐
-  latency-sensitive     │  vyrm-core (Rust, in-process)│   ~4 µs
+  latency-sensitive     │  rrd-core (Rust, in-process)│   ~4 µs
   Clyffy / automaton ───┤  linked directly             │
                         └──────────────────────────────┘
                                      │
-  tooling and inspection    vyrmd over Unix domain socket   ~131 µs
+  tooling and inspection    rrflow-mcp over Unix domain socket   ~131 µs
   (npm scripts, CLI)        non-latency-sensitive only
 ```
 
@@ -132,7 +152,7 @@ cross-process tooling, cross-tier promotion, and inspection.
 
 `automaton/PLAN.md` records **D1: Node ESM (`.mjs`) in `engine/`**. D1 stands and
 is not superseded. The adapter is napi-rs: automaton retains its Node engine and
-calls `vyrm-core` in-process through a native module.
+calls `rrd-core` in-process through a native module.
 
 A Unix-domain-socket daemon remains the fallback should napi-rs prove
 incompatible with Zellij pane supervision. TCP with newline-delimited JSON is
@@ -141,20 +161,20 @@ excluded from this path.
 ## 5 · Module structure
 
 ```text
-vyrm-core     claims, key encoding, bi-temporal resolution, supersession
+rrd-core     claims, key encoding, bi-temporal resolution, supersession
    ▲
-vyrm-store    substrate adapter: keyspaces, durability classes, batch commit
+rrd-store    substrate adapter: keyspaces, durability classes, batch commit
    ▲
-vyrm-graph    projection, incremental rebuild, grounding, differentials
+rrd-graph    projection, incremental rebuild, grounding, differentials
    ▲
-vyrm-gate     tier policy, promotion, change-set signing
+rrd-engine     tier policy, promotion, change-set signing
    ▲
-   ├── vyrm-node   napi-rs adapter for automaton
-   ├── vyrm-cli    operator surface
-   └── vyrmd       daemon: socket tooling and cross-tier promotion
+   ├── rrd-engine   napi-rs adapter for automaton
+   ├── rrflow-cli    operator surface
+   └── rrflow-mcp       daemon: socket tooling and cross-tier promotion
 ```
 
-Dependencies MUST point inward only. `vyrm-core` MUST NOT depend on a transport,
+Dependencies MUST point inward only. `rrd-core` MUST NOT depend on a transport,
 a tier policy, or the substrate, and MUST NOT expose substrate types in its public
 API. This is the law `automaton/docs/00-abstract-layer.md` already applies at the
 session layer — the abstract layer is SSOT and adapters are never SSOT — applied
@@ -255,15 +275,13 @@ NOT incur that cost.
 | `access` | Buffered, periodic flush | Telemetry. Loss on crash is acceptable. |
 | `meta` | `SyncAll` | Watermarks and idempotency keys. |
 
-The sequence index maps an append sequence to the claim key written at that
-sequence, and is what makes §8.2 and §8.4 answerable. Its entry MUST be written
-in the transaction that writes the claim, so that the index cannot diverge from
-the watermark under termination. Native Vyrm values additionally carry the
-canonical claim bytes in a versioned `VYRNSI01` envelope. The typed bytes
-deterministically define the claim key, so a bounded replay needs one contiguous
-range scan without storing that identity twice.
-Legacy native key-only values remain readable through an explicit compatibility
-branch; the Fjall adapter retains its key-only representation.
+The sequence index maps an append sequence to the canonical claim key written
+at that sequence, and is what makes §8.2 and §8.4 answerable. Its entry MUST be
+written in the transaction that writes the claim, so that the index cannot
+diverge from the watermark under termination. Current native and Fjall writes
+store the compact key reference. Native also reads the former inline
+`RRDNSI01` claim envelope so existing native stores remain replayable; new
+writes do not duplicate the claim body in the WAL and recovered memtable.
 
 Fjall persists writes across keyspaces in a single database-level journal, so
 writes requiring mutual atomicity retain it across durability classes.
@@ -469,7 +487,7 @@ asserted in an API response unless a test verifies it.
 | Prefix isolation | Adversarial subject and predicate neighbours |
 | Throughput | Recorded load measurement, so stated figures are measurements |
 | Removal candidacy | A predicate with a recent access record is never a candidate |
-| Modularity | `cargo tree` shows no substrate or transport dependency in `vyrm-core` |
+| Modularity | `cargo tree` shows no substrate or transport dependency in `rrd-core` |
 
 ## 13 · Trigger promotion
 
@@ -522,7 +540,7 @@ Object bytes MUST be staged, durably published at a canonical SHA-256 key, and
 read-verified before their `ObjectReference` can enter a data transaction. The
 reference MUST bind digest, length, media type, backend, key, and available
 version/ETag evidence. A remote object service is not the transaction
-coordinator: Vyrm guarantees atomic visibility of the verified reference, audit,
+coordinator: RRFlow guarantees atomic visibility of the verified reference, audit,
 and projection work. An upload abandoned by a failed commit is an inventoried
 orphan and MUST NOT become reachable implicitly. Reclamation MUST delete only an
 explicitly proven unreachable digest. Backend ETags MUST NOT be treated as
@@ -552,13 +570,13 @@ The first consumer is Clyffy, acting as task executor.
 operator ──> Clyffy ──> frontier model
                 │       (terminal, browser, or application)
                 │
-                └── vyrm-core, linked in-process
+                └── rrd-core, linked in-process
                     writes: decisions, findings, task state, provenance
                     reads:  current(), as_of(), history()
 ```
 
 Clyffy reaches frontier models through automaton's adapter layer, in which the
-abstract session and event API is SSOT and provider CLIs are adapters. vyrm is the
+abstract session and event API is SSOT and provider CLIs are adapters. rrflow is the
 claim store those sessions read from and write to.
 
 Clyffy writes claims continuously during task execution, which is why §4 excludes

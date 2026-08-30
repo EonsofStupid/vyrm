@@ -1,0 +1,18 @@
+replicaCount: 1
+
+image:
+  repository: ghcr.io/actions/gha-runner-scale-set-controller
+  tag: "0.14.2@sha256:32f89ba454a42398f0b46f7271e2885d8ec976f155a3a3b1c50329f8d38f8e6f"
+  pullPolicy: IfNotPresent
+
+resources:
+  requests:
+    cpu: 250m
+    memory: 256Mi
+  limits:
+    cpu: "1"
+    memory: 1Gi
+
+flags:
+  logLevel: info
+  logFormat: json

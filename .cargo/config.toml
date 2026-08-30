@@ -1,0 +1,2 @@
+[alias]
+rrflow-dev = ["run", "--locked", "-p", "rrflow-cli", "--", "dev"]

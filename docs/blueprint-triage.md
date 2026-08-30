@@ -2,7 +2,7 @@
 
 > **Superseded architecture decision (2026-08-18).** The measurements and
 > capability comparisons below remain historical evidence, but Fjall is no
-> longer the permanent substrate decision. Vyrm will replace it with a native
+> longer the permanent substrate decision. RRFlow will replace it with a native
 > engine behind the existing conformance port. Compatibility behavior is a
 > baseline to meet or beat, not a reason to discard AI-specific storage gains.
 
@@ -14,7 +14,7 @@
 
 ## 1 · Framing correction — the "built-from-scratch" substrate already exists
 
-The blueprint describes Vyrm as "a built-from-scratch, AI-optimized LSM engine
+The blueprint describes RRFlow as "a built-from-scratch, AI-optimized LSM engine
 inspired by Fjall." Every substrate capability it attributes to that engine is a
 shipped Fjall 3.x feature:
 
@@ -22,15 +22,15 @@ shipped Fjall 3.x feature:
 |---|---|---|
 | "highly tuned byteview-based memory model", "German string" `Slice` | `fjall-rs/byteview`: thin immutable zero-copy byte slice, Umbra-style German strings, ≤20-byte inlining | [byteview repo](https://github.com/fjall-rs/byteview), [Fjall 2.6 announcement](https://fjall-rs.github.io/post/fjall-2-6-byteview/) |
 | "custom block format featuring sparse indexing, AI-native prefix truncation" | Fjall 3.0 block format: sparse indexing, prefix truncation, optional hash indexes | [Fjall 3.0 release](https://fjall-rs.github.io/post/fjall-3/), [block format post](https://fjall-rs.github.io/post/block-format/) |
-| "isolated keyspaces … as column families", "cross-keyspace atomic WriteBatch" | Fjall keyspaces (3.x rename of partitions); single database-level journal makes cross-keyspace writes atomic | Verified in-session 2026-08-09 (docs fetch); relied on by `vyrm-store` §7.1 |
-| "optimistic and single-writer concurrency models" | `OptimisticTxDatabase` / `SingleWriterTxDatabase` — the exact two types this project already chose between | In use in `vyrm-store/src/store.rs` |
+| "isolated keyspaces … as column families", "cross-keyspace atomic WriteBatch" | Fjall keyspaces (3.x rename of partitions); single database-level journal makes cross-keyspace writes atomic | Verified in-session 2026-08-09 (docs fetch); relied on by `rrd-store` §7.1 |
+| "optimistic and single-writer concurrency models" | `OptimisticTxDatabase` / `SingleWriterTxDatabase` — the exact two types this project already chose between | In use in `rrd-store/src/store.rs` |
 | "key-value separation" for blob payloads | Fjall 3.0 integrated key-value separation with GC | [Fjall 3.0 release](https://fjall-rs.github.io/post/fjall-3/) |
 
 Conclusion: the blueprint, read accurately, endorses the measured decision in
 `SPEC.md` §2. The substrate accounts for 4 µs of a 135 µs read; there is no
 measured deficiency; building the described engine would mean re-implementing
 Fjall feature-for-feature. The fork condition stands as written: a measured
-workload mismatch, per the Qdrant/Gridstore precedent. Until then, vyrm is the
+workload mismatch, per the Qdrant/Gridstore precedent. Until then, rrflow is the
 semantic layer and Fjall is the substrate.
 
 ## 2 · Adopted
@@ -38,8 +38,8 @@ semantic layer and Fjall is the substrate.
 | Item | Where it lands | Why |
 |---|---|---|
 | Scope isolation: one keyspace per scope (`sys_global`, `proj_X`), surfaced to DataFusion as Catalog → Schema → Table | §9 tier/gate work; Clyffy multi-project | Context contamination is the memory-layer failure mode; physical keyspace isolation plus a per-request session context is the right enforcement shape. Read-only-ness of the global scope is enforced by the gate layer, not the substrate — Fjall has no read-only keyspace mode. |
-| `spawn_blocking` + `RecordBatchStreamAdapter` + bounded mpsc for bridging synchronous iterators into async streams | `vyrmd` | Correct and standard; blocking the async executor on LSM I/O is a real failure mode. |
-| Snapshot-retention and block-pinning contention warnings | Operational constraints, recorded when `vyrmd` lands | Real risks: a long-lived snapshot blocks GC; an `Arc`-pinned block shrinks effective cache. Route long analytical scans to Vortex segments; copy batches flagged for prolonged retention. |
+| `spawn_blocking` + `RecordBatchStreamAdapter` + bounded mpsc for bridging synchronous iterators into async streams | `rrflow-mcp` | Correct and standard; blocking the async executor on LSM I/O is a real failure mode. |
+| Snapshot-retention and block-pinning contention warnings | Operational constraints, recorded when `rrflow-mcp` lands | Real risks: a long-lived snapshot blocks GC; an `Arc`-pinned block shrinks effective cache. Route long analytical scans to Vortex segments; copy batches flagged for prolonged retention. |
 | Routing stable ranges to Vortex + DataFusion rather than live keyspaces | Already running | This is the architecture journal's 2026-08-03 split (Fjall hot / Vortex derived / DataFusion compute), live on :4388/:4389 since 2026-08-04. The blueprint independently re-derives it. |
 
 ## 3 · Deferred, with triggers

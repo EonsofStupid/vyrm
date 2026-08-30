@@ -1,0 +1,41 @@
+{
+  "format_version": 2,
+  "generation": 1,
+  "parent": null,
+  "created_at": 100,
+  "durable_sequence": 4,
+  "wal_start_sequence": 5,
+  "segments": [
+    {
+      "id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "level": 0,
+      "first_key": [
+        97
+      ],
+      "last_key": [
+        108
+      ],
+      "minimum_sequence": 1,
+      "maximum_sequence": 2,
+      "entries": 2,
+      "bytes": 128,
+      "checksum": "2222222222222222222222222222222222222222222222222222222222222222"
+    },
+    {
+      "id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "level": 0,
+      "first_key": [
+        109
+      ],
+      "last_key": [
+        122
+      ],
+      "minimum_sequence": 3,
+      "maximum_sequence": 4,
+      "entries": 2,
+      "bytes": 128,
+      "checksum": "2222222222222222222222222222222222222222222222222222222222222222"
+    }
+  ],
+  "digest": "5cb9a39d92a3739d76fb8872742300d527d5d3c92a93dab111a8781cfe0d6204"
+}

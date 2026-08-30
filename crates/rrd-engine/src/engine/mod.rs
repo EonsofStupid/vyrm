@@ -1,0 +1,233 @@
+//! Authoritative RRFlow engine composition and operations.
+
+use hmac::{Hmac, KeyInit, Mac};
+use rrd_contract::{
+    transaction_operation_sha256, AbortTransaction, ActivateVectorQuantizationArtifact,
+    ActivateVectorQuantizationArtifactResult, AuditDecision, AuditExport, AuditPage, AuditPhase,
+    AuditRecordSnapshot, AutomationCatalogue, BeginTransaction, BuildVectorQuantizationArtifact,
+    BuildVectorQuantizationArtifactResult, CanonicalId, ChangeMutationSnapshot,
+    ChangefeedFollowResult, ChangefeedPage, ChangefeedValidation, ClaimChangeSnapshot,
+    ClaimPromotionSnapshot, ClaimTierSnapshot, CloseSession, CloseSubscription,
+    CloseSubscriptionResult, CommitReceipt, CommitTransaction, CorrelationId, CreateInstanceBackup,
+    CreateInstanceBackupResult, CreateSession, DataCatalogueIdentity, DataEmbeddingProvenance,
+    DataEventSchema, DataGeoPoint, DataGeoValue, DataLogicalModel, DataObjectReceipt,
+    DataProperties, DataPropertySchema, DataRecordSchema, DataReference, DataRelationSchema,
+    DataSchemaMode, DataSchemaRegistry, DataSeriesValue, DataSnapshot, DataSnapshotEntry,
+    DataTableSchema, DataTarget, DataValueType, DataVectorNormalization, DataVectorValue,
+    DeleteVectorCollection, DeleteVectorCollectionResult, DeleteVectorPayloadIndex,
+    DeleteVectorPayloadIndexResult, DeploymentMode, DiagnosticAuthority, DiagnosticCoverage,
+    DiagnosticGraphDifference, DiagnosticGraphRecordChange, DiagnosticGraphRecordSnapshot,
+    DiagnosticGraphRelationChange, DiagnosticGraphRelationSnapshot, DiagnosticGraphSnapshot,
+    DiagnosticModelCatalogueSnapshot, DiagnosticModelKind, DiagnosticModelSnapshot,
+    DiagnosticReadStamp, DiagnosticRetentionPin, DiagnosticRetentionSnapshot,
+    DiagnosticRuntimeReference, DiagnosticSectionSnapshot, DiagnosticSnapshot,
+    DiagnosticSnapshotLease, DiagnosticVectorArtifactCatalogueSnapshot,
+    DiagnosticVectorArtifactKind, DiagnosticVectorArtifactSnapshot, EnsureQueryIndex,
+    EnsureQueryIndexResult, EnsureVectorCollection, EnsureVectorCollectionResult,
+    EnsureVectorIndex, EnsureVectorIndexResult, EnsureVectorPayloadIndex,
+    EnsureVectorPayloadIndexResult, ExecuteFunction, ExecuteQuery, ExecuteQueryTransaction,
+    ExecuteRetrievalQuery, ExportAudit, FollowChangefeed, ForwardRollbackCounts,
+    ForwardRollbackPlan, ForwardRollbackRequest, FunctionDefinition, FunctionExecutionResult,
+    FunctionRuntime, FunctionTrigger, FunctionTriggerEffect, FunctionTriggerMutation, HybridFusion,
+    HybridSearchHit, HybridSearchResult, InstanceBackupCatalogueSnapshot, InstanceBackupSnapshot,
+    ListInstanceBackups, ListQueryIndexes, ListVectorCollections, ListVectorPayloadIndexes,
+    ListVectorQuantizationArtifacts, ListVectorQuantizationArtifactsResult, LiveQueryDeltaResult,
+    LiveQueryRowChange, LogicalArchiveSnapshot, NamedVectorDefinition, OpenSubscription,
+    OpenSubscriptionResult, PollLiveQuery, PreviewTransaction, QueryExecutionAnalysisSnapshot,
+    QueryExecutionSnapshot, QueryFullTextConfiguration, QueryIndexCatalogueSnapshot,
+    QueryIndexKind, QueryIndexMaintenanceSnapshot, QueryIndexSnapshot, QueryIndexState,
+    QueryPlanCandidate, QueryPlanSnapshot, QueryResult, QueryRowSnapshot, QueryTextAnalyzer,
+    QueryTextStemmer, QueryTextTokenizer, QueryTransactionResult, QueryValue, ReadAudit,
+    ReadChangefeed, ReadDataSnapshot, ReadDiagnosticSnapshot, Readiness, RenewSession,
+    ReplaceAutomationCatalogue, RequestContext, ResourceId, ResourceKind, ResourcePath,
+    RestoreInstanceBackup, RestoreInstanceBackupResult, RetireVectorQuantizationArtifact,
+    RetireVectorQuantizationArtifactResult, RetrievalContextPair, RetrievalContribution,
+    RetrievalFacet, RetrievalFusion, RetrievalGroup, RetrievalHit, RetrievalMatrixCell,
+    RetrievalOutput, RetrievalPrefetch, RetrievalQuery, RetrievalQueryResult,
+    RetrievalRecommendStrategy, RetrievalRerankStage, RetrievalResultShape, RetrievalStageEvidence,
+    RetrievalVectorExample, RetrieveVectorPoints, RuntimeChangeSnapshot, ScrollVectorPoints,
+    SearchHybrid, SearchVectors, SecurityAction, SessionEndState, SessionLease, SessionLimits,
+    SessionTermination, SubscriptionClientFrame, SubscriptionServerFrame, SubscriptionSnapshot,
+    SubscriptionStatus, SubscriptionStream, TransactionLease, TransactionMutation,
+    TransactionPreview, TransactionState, VectorCollectionCatalogueSnapshot,
+    VectorCollectionSnapshot, VectorEmbeddingModel, VectorIndexBuildEvidence,
+    VectorIndexBuildPolicy, VectorIndexBuildResourceEvidence, VectorIndexBuildTarget,
+    VectorIndexConfiguration, VectorIndexDifferentialStatus, VectorIndexMaintenanceMode,
+    VectorIndexMaintenanceSnapshot, VectorIndexSnapshot, VectorMemoryTier, VectorPayloadFilter,
+    VectorPayloadIndexCatalogueSnapshot, VectorPayloadIndexKind, VectorPayloadIndexSnapshot,
+    VectorPayloadOperator, VectorPointBatch, VectorPointPage, VectorPointSnapshot,
+    VectorProductCompression, VectorQuantizationArtifactSnapshot, VectorQuantizationArtifactState,
+    VectorQuantizationBits, VectorQuantizationMethod, VectorSearchHit, VectorSearchMetric,
+    VectorSearchMode, VectorSearchQuery, VectorSearchResourceEvidence, VectorSearchResult,
+    VectorValueKind, DIAGNOSTIC_SNAPSHOT_FORMAT_VERSION,
+};
+use rrd_contract::{
+    EmbedAndSearchVectors, EmbedAndSearchVectorsResult, EmbeddingBackendSnapshot,
+    EmbeddingExecutionTarget, EmbeddingModelCatalogue, EmbeddingNetworkPolicy,
+    EmbeddingResourceLimits, EmbeddingTrustBoundary, GenerateEmbeddings, GenerateEmbeddingsResult,
+    GeneratedEmbedding, ListEmbeddingModels,
+};
+use rrd_core::{
+    digest, Claim, DataTransaction, EmbeddingProvenance, GeoPoint, GeoValue, ObjectReceipt,
+    ObjectReference, Predicate, Producer, ProjectionId, ProjectionState, PromotionState, ReadStamp,
+    RetentionPin, RuntimeCatalogueIdentity, RuntimeChange, RuntimeCommit, RuntimeDataSnapshot,
+    RuntimeEvent, RuntimeEventSchema, RuntimeGeo, RuntimeGraphSnapshot, RuntimeLogicalModel,
+    RuntimeMutation, RuntimeProperties, RuntimePropertySchema, RuntimeRecord, RuntimeRecordSchema,
+    RuntimeRef, RuntimeRelation, RuntimeRelationSchema, RuntimeSchemaMode, RuntimeSchemaRegistry,
+    RuntimeSeriesSample, RuntimeTableSchema, RuntimeType, RuntimeValue, RuntimeValueType,
+    RuntimeVector, ScopeId, SeriesValue, Subject, Tier, VectorNormalization, VectorValue,
+};
+use rrd_query::{ComparisonOperator, CursorExpr, Filter, Projection, TimeExpr, ValueExpr};
+use rrd_store::{
+    ControlTransition, Engine, EngineBox, MemoryObjectStore, ObjectStoreBox, PersistentEngine,
+};
+use serde::{Deserialize, Serialize};
+use sha2::Sha256;
+use std::collections::BTreeMap;
+use std::fmt;
+use std::path::{Path, PathBuf};
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
+
+mod automation;
+mod backup;
+mod changefeed;
+mod control;
+mod core;
+mod data;
+mod diagnostic;
+mod error;
+mod estate;
+mod estate_control;
+mod inference;
+mod invocation;
+mod model;
+mod query;
+mod query_transaction;
+mod retrieval;
+mod retrieval_query;
+mod rollback;
+mod security;
+mod security_bootstrap;
+mod session;
+mod subscription;
+mod token_key;
+mod transaction;
+mod vector;
+
+use control::*;
+pub use core::RrdEngine;
+use data::public_data_snapshot;
+pub use error::{Result, ServiceError, ServiceErrorKind};
+pub use estate_control::{
+    EstateAdminAction, EstateAdminResult, EstateBackupReconcileOutcome, EstateReconcileOutcome,
+};
+pub use invocation::{
+    AuthorizedInvocation, Invocation, InvocationCompletion, InvocationCredential, RrdOperation,
+};
+use model::*;
+pub use security::{MAX_AUDIT_PAGE_RECORDS, MAX_JWT_CREDENTIAL_BYTES};
+pub use security_bootstrap::SecurityBootstrapOutcome;
+use session::*;
+pub use token_key::{
+    load_or_create_api_key, load_or_create_token_key, API_KEY_HEX_BYTES, TOKEN_KEY_BYTES,
+};
+
+const SESSION_STATE_FORMAT: u16 = 2;
+const MAX_SESSION_RENEWALS: usize = 64;
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SessionState {
+    format_version: u16,
+    session_id: CorrelationId,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    principal_id: Option<CanonicalId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    principal_credential_revision: Option<u64>,
+    status: SessionStatus,
+    issued_at_unix_ms: u64,
+    idle_expires_at_unix_ms: u64,
+    absolute_expires_at_unix_ms: u64,
+    limits: SessionLimits,
+    creation_idempotency_key: CorrelationId,
+    creation_operation_sha256: String,
+    creation_idle_expires_at_unix_ms: u64,
+    token_sha256: String,
+    token_generation: u64,
+    renewals: BTreeMap<CorrelationId, RenewalRecord>,
+    closure: Option<ClosureRecord>,
+    transactions: BTreeMap<CorrelationId, TransactionRecord>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum SessionStatus {
+    Active,
+    Expired,
+    Closed,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RenewalRecord {
+    operation_sha256: String,
+    previous_token_sha256: String,
+    token_generation: u64,
+    idle_expires_at_unix_ms: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ClosureRecord {
+    idempotency_key: CorrelationId,
+    operation_sha256: String,
+    previous_token_sha256: String,
+    ended_at_unix_ms: u64,
+    affected_open_transactions: u16,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct TransactionRecord {
+    lease: TransactionLease,
+    read: ReadStamp,
+    begin_idempotency_key: CorrelationId,
+    begin_operation_sha256: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    prepared: Option<PreparedRecord>,
+    commit_intent: Option<CommitIntent>,
+    commit_receipt: Option<CommitReceipt>,
+    abort: Option<AbortRecord>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PreparedRecord {
+    idempotency_key: CorrelationId,
+    operation_sha256: String,
+    runtime_at_unix_ms: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CommitIntent {
+    idempotency_key: CorrelationId,
+    operation_sha256: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    runtime_at_unix_ms: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    runtime_commit_sha256: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    automation_revision: Option<u64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct AbortRecord {
+    idempotency_key: CorrelationId,
+    operation_sha256: String,
+}
+
+#[cfg(test)]
+mod tests;

@@ -1,0 +1,2921 @@
+//! Native `RRD LSM` implementation of the semantic [`Engine`] port.
+//!
+//! Logical keyspaces are encoded as stable byte prefixes inside one atomic
+//! native database. One semantic commit becomes one `RRD LSM` write batch; the
+//! database's physical MVCC sequence is deliberately independent of claim and
+//! runtime cursors stored in the batch.
+
+use crate::control::{
+    validate_control_batch, validate_control_key, verify_control_page, verify_control_tail,
+    ControlJournalEntry, ControlTransition,
+};
+use crate::engine::{validate_idempotency, Engine, PhysicalStoreEvidence};
+use crate::error::{Error, Result};
+use crate::gc::{build_report, RemovalReport, Tally};
+use crate::invocation::{self, Invocation, InvocationInput, RecallOutcome};
+use crate::keyspaces::{self, Durability};
+use crate::store::{AppendOutcome, IdempotentAppendOutcome};
+use rrd_core::{
+    key, projection_family, AuditEnvelope, Claim, ClaimSource, Millis, ObjectReference, Predicate,
+    ProjectionWork, ReadStamp, Reader, RetentionPin, RuntimeChange, RuntimeChangePage,
+    RuntimeCommit, RuntimeCommitOutcome, RuntimeLogAccumulator, RuntimeMerkleNode, RuntimeMutation,
+    RuntimeRecord, RuntimeRef, RuntimeRelation, RuntimeSchemaRegistry, ScopeId, SnapshotHandle,
+    SnapshotId, Subject,
+};
+use rrd_lsm::{
+    CompactionOutcome, Database, DatabaseOptions, GarbageCollectionReport, Manifest, Mutation,
+    Snapshot, SnapshotBundleFile, WriteBatch,
+};
+use serde::de::DeserializeOwned;
+use std::collections::{BTreeMap, BTreeSet};
+use std::path::{Path, PathBuf};
+use std::sync::{Mutex, MutexGuard};
+
+const RUNTIME_CHECKPOINT_PREFIX: &str = "runtime-";
+const NATIVE_SEQUENCE_VALUE_MAGIC: &[u8; 8] = b"RRDNSI01";
+
+pub struct NativeEngine {
+    path: PathBuf,
+    database: Mutex<Database>,
+}
+
+impl NativeEngine {
+    /// Opens an existing native database or creates one when `path` is absent.
+    /// An existing but invalid directory fails closed rather than being
+    /// silently reinitialized.
+    pub fn open(path: &Path) -> Result<Self> {
+        Self::open_with_options(path, DatabaseOptions::default())
+    }
+
+    /// Opens with explicit native cache and mutable-state bounds. Persistent
+    /// format identity is unchanged; these are process-local operating limits.
+    pub fn open_with_options(path: &Path, options: DatabaseOptions) -> Result<Self> {
+        if !path.exists() {
+            if let Some(parent) = path.parent() {
+                std::fs::create_dir_all(parent)
+                    .map_err(|error| Error::Substrate(error.to_string()))?;
+            }
+        }
+        let empty = path.exists()
+            && path.is_dir()
+            && std::fs::read_dir(path)
+                .map_err(|error| Error::Substrate(error.to_string()))?
+                .next()
+                .is_none();
+        let mut database = if !path.exists() || empty {
+            Database::create_with_application_format(
+                path,
+                options,
+                keyspaces::NATIVE_KEYSPACE_TAG_FORMAT_V2,
+            )?
+        } else {
+            Database::open_with_options(path, options).map_err(|error| {
+                Error::Substrate(format!(
+                    "cannot open native database {}: {error}",
+                    path.display()
+                ))
+            })?
+        };
+        let _codec = keyspaces::NativeKeyCodec::from_application_format(
+            database.manifest().application_format,
+        )
+        .ok_or_else(|| {
+            Error::Substrate(format!(
+                "unsupported native application format {:?}",
+                database.manifest().application_format
+            ))
+        })?;
+        reconcile_runtime_checkpoints(&mut database, None, 0).map_err(|error| {
+            Error::Substrate(format!(
+                "cannot reconcile runtime checkpoints while opening {}: {error}",
+                path.display()
+            ))
+        })?;
+        let path = database.root().to_owned();
+        Ok(Self {
+            path,
+            database: Mutex::new(database),
+        })
+    }
+
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
+    /// Publishes the current native memtable as an immutable segment.
+    pub fn flush(&self, at: Millis) -> Result<Option<Manifest>> {
+        self.lock()?.flush_memtable(at).map_err(Error::from)
+    }
+
+    pub fn manifest(&self) -> Result<Manifest> {
+        Ok(self.lock()?.manifest().clone())
+    }
+
+    /// Compacts native state after reconciling physical manifest pins with the
+    /// authoritative logical snapshot catalog.
+    pub fn compact(&self, now: Millis, at: Millis) -> Result<Option<CompactionOutcome>> {
+        let mut database = self.lock()?;
+        reconcile_runtime_checkpoints(&mut database, Some(now), at)?;
+        database.compact(&[], at).map_err(Error::from)
+    }
+
+    /// Reclaims only objects unreachable from `CURRENT` or a live runtime
+    /// snapshot's physical checkpoint.
+    pub fn garbage_collect(&self, now: Millis, at: Millis) -> Result<GarbageCollectionReport> {
+        let mut database = self.lock()?;
+        reconcile_runtime_checkpoints(&mut database, Some(now), at)?;
+        database.garbage_collect().map_err(Error::from)
+    }
+
+    /// Derives the same evidence-backed removal report as the compatibility
+    /// adapter from native claim and access keyspaces.
+    pub fn removal_report(&self, since: Millis, evaluated_at: Millis) -> Result<RemovalReport> {
+        let database = self.lock()?;
+        let snapshot = database.snapshot();
+        let mut tallies = BTreeMap::<(String, String), Tally>::new();
+        for (stored_key, _) in scan_space(&database, snapshot, keyspaces::CLAIMS, &[])? {
+            let (subject, predicate) = key::parse_claim_key(strip_space(
+                database_codec(&database)?,
+                keyspaces::CLAIMS,
+                &stored_key,
+            )?)?;
+            tallies
+                .entry((subject.to_string(), predicate.to_string()))
+                .or_default()
+                .claim_count += 1;
+        }
+        for (stored_key, _) in scan_space_from(
+            &database,
+            snapshot,
+            keyspaces::ACCESS,
+            &key::access_bound(since),
+        )? {
+            let (at, reader, subject, predicate) = key::parse_access_key(strip_space(
+                database_codec(&database)?,
+                keyspaces::ACCESS,
+                &stored_key,
+            )?)?;
+            if at > evaluated_at {
+                break;
+            }
+            let tally = tallies
+                .entry((subject.to_string(), predicate.to_string()))
+                .or_default();
+            tally.access_count += 1;
+            if tally.last_access.is_none_or(|previous| at >= previous) {
+                tally.last_access = Some(at);
+                tally.last_reader = Some(reader);
+            }
+        }
+        Ok(build_report(tallies, since, evaluated_at)?)
+    }
+
+    /// Exact native access-record count. The compatibility adapter exposes an
+    /// approximate count because that is all its keyspace API promises.
+    pub fn access_count(&self) -> Result<usize> {
+        let database = self.lock()?;
+        Ok(scan_space(&database, database.snapshot(), keyspaces::ACCESS, &[])?.len())
+    }
+
+    /// Persists one authoritative operator invocation and its ordinal in one
+    /// native batch.
+    #[tracing::instrument(level = "debug", skip_all, fields(command = input.command))]
+    pub fn record_invocation(&self, input: InvocationInput<'_>) -> Result<Invocation> {
+        let mut database = self.lock()?;
+        let previous = read_sequence(
+            &database,
+            database.snapshot(),
+            keyspaces::INVOCATION_WATERMARK,
+        )?;
+        let ordinal = previous.checked_add(1).ok_or(Error::SequenceOverflow)?;
+        let record = Invocation {
+            ordinal,
+            at: input.at,
+            trigger: input.trigger,
+            command: input.command.to_owned(),
+            arguments: input.arguments.to_vec(),
+            outcome: input.outcome,
+            duration_ms: input.duration_ms,
+            detail: input.detail,
+            effectiveness: input.effectiveness,
+        };
+        let mut operations = Vec::with_capacity(2);
+        put(
+            &mut operations,
+            keyspaces::INVOCATIONS,
+            &invocation::invocation_key(input.at, ordinal),
+            serde_json::to_vec(&record)?,
+        );
+        put_sequence(&mut operations, keyspaces::INVOCATION_WATERMARK, ordinal);
+        write(&mut database, operations, Durability::Authoritative)?;
+        tracing::debug!(ordinal, "invocation recorded");
+        Ok(record)
+    }
+
+    pub fn set_recall_outcome(&self, ordinal: u64, outcome: RecallOutcome) -> Result<Invocation> {
+        let mut database = self.lock()?;
+        let snapshot = database.snapshot();
+        let mut found = None;
+        for (stored_key, value) in scan_space(&database, snapshot, keyspaces::INVOCATIONS, &[])? {
+            let record: Invocation = serde_json::from_slice(&value)?;
+            if record.ordinal == ordinal {
+                found = Some((
+                    strip_space(
+                        database_codec(&database)?,
+                        keyspaces::INVOCATIONS,
+                        &stored_key,
+                    )?
+                    .to_vec(),
+                    record,
+                ));
+                break;
+            }
+        }
+        let Some((invocation_key, mut record)) = found else {
+            return Err(Error::Substrate(format!(
+                "no invocation with ordinal {ordinal}"
+            )));
+        };
+        let Some(effectiveness) = record.effectiveness.as_mut() else {
+            return Err(Error::Substrate(format!(
+                "invocation {ordinal} is `{}`, not a recall — refusing to judge it",
+                record.command
+            )));
+        };
+        effectiveness.outcome = outcome;
+        write(
+            &mut database,
+            vec![Mutation::Put {
+                key: storage_key(keyspaces::INVOCATIONS, &invocation_key),
+                value: serde_json::to_vec(&record)?,
+            }],
+            Durability::Authoritative,
+        )?;
+        Ok(record)
+    }
+
+    pub fn invocations_since(&self, since: Millis) -> Result<Vec<Invocation>> {
+        let database = self.lock()?;
+        scan_space_from(
+            &database,
+            database.snapshot(),
+            keyspaces::INVOCATIONS,
+            &invocation::invocation_bound(since),
+        )?
+        .into_iter()
+        .map(|(_, value)| serde_json::from_slice(&value).map_err(Error::from))
+        .collect()
+    }
+
+    pub fn invocation_count(&self) -> Result<u64> {
+        let database = self.lock()?;
+        read_sequence(
+            &database,
+            database.snapshot(),
+            keyspaces::INVOCATION_WATERMARK,
+        )
+    }
+
+    /// Replays one already-authenticated logical-archive commit while
+    /// preserving its original audit envelope. This is deliberately crate
+    /// private: ordinary callers must use the live Engine transaction path,
+    /// which validates a read stamp against the current database state.
+    pub(crate) fn restore_runtime_commit(
+        &self,
+        commit: &RuntimeCommit,
+        audit: &AuditEnvelope,
+    ) -> Result<RuntimeCommitOutcome> {
+        let mut database = self.lock()?;
+        let plan = prepare_native_runtime_commit_at_read(&database, commit, None, Some(audit))?;
+        let (outcome, operations) = plan.into_parts();
+        write(&mut database, operations, Durability::Authoritative)?;
+        Ok(outcome)
+    }
+
+    fn lock(&self) -> Result<MutexGuard<'_, Database>> {
+        self.database
+            .lock()
+            .map_err(|_| Error::Substrate("native database mutex poisoned".into()))
+    }
+}
+
+impl ClaimSource for NativeEngine {
+    type Error = Error;
+
+    fn versions_at_or_before(
+        &self,
+        subject: &Subject,
+        predicate: &Predicate,
+        as_of: Millis,
+    ) -> Result<Vec<Claim>> {
+        let database = self.lock()?;
+        scan_claims(
+            &database,
+            key::version_prefix(subject, predicate),
+            key::seek_key(subject, predicate, as_of),
+        )
+    }
+
+    fn all_versions(&self, subject: &Subject, predicate: &Predicate) -> Result<Vec<Claim>> {
+        let database = self.lock()?;
+        let prefix = key::version_prefix(subject, predicate);
+        scan_claims(&database, prefix.clone(), prefix)
+    }
+
+    fn subject_versions(&self, subject: &Subject) -> Result<Vec<Claim>> {
+        let database = self.lock()?;
+        let prefix = key::subject_prefix(subject);
+        scan_claims(&database, prefix.clone(), prefix)
+    }
+}
+
+impl Engine for NativeEngine {
+    fn physical_store_evidence(&self) -> Result<PhysicalStoreEvidence> {
+        let database = self.lock()?;
+        let manifest = database.manifest();
+        let cache = database.block_cache_stats();
+        let segment_io = database.segment_io_stats();
+        let maintenance = database.maintenance_policy();
+        let compaction = database.compaction_policy();
+        let maintenance_stats = database.maintenance_stats();
+        let memtable = database.memtable().profile();
+        Ok(PhysicalStoreEvidence {
+            backend: "rrd_lsm".into(),
+            evidence_level: "native_counters".into(),
+            physical_sequence: Some(database.snapshot().sequence),
+            manifest_generation: Some(manifest.generation),
+            durable_sequence: Some(manifest.durable_sequence),
+            memtable_versions: Some(database.memtable().version_count() as u64),
+            memtable_bytes: Some(database.memtable().approximate_bytes() as u64),
+            memtable_keys: Some(memtable.key_count as u64),
+            memtable_key_payload_bytes: Some(memtable.key_payload_bytes as u64),
+            memtable_value_payload_bytes: Some(memtable.value_payload_bytes as u64),
+            memtable_tombstones: Some(memtable.tombstones as u64),
+            memtable_spilled_chains: Some(memtable.spilled_chains as u64),
+            memtable_spilled_version_capacity: Some(memtable.spilled_version_capacity as u64),
+            memtable_version_record_bytes: Some(memtable.version_record_bytes as u64),
+            memtable_owned_bytes_lower_bound: Some(memtable.owned_bytes_lower_bound as u64),
+            memtable_max_versions: Some(maintenance.memtable_max_versions as u64),
+            wal_payload_bytes: Some(database.wal_payload_bytes() as u64),
+            wal_payload_max_bytes: Some(maintenance.wal_payload_max_bytes as u64),
+            automatic_flushes: Some(maintenance_stats.automatic_flushes),
+            maintenance_write_stalls: Some(maintenance_stats.write_stalls),
+            failed_maintenance_flushes: Some(maintenance_stats.failed_flushes),
+            oversized_batches: Some(maintenance_stats.oversized_batches),
+            automatic_compactions: Some(maintenance_stats.automatic_compactions),
+            failed_compactions: Some(maintenance_stats.failed_compactions),
+            compaction_input_bytes: Some(maintenance_stats.compaction_input_bytes),
+            compaction_output_bytes: Some(maintenance_stats.compaction_output_bytes),
+            peak_compaction_buffer_bytes: Some(
+                maintenance_stats.peak_compaction_buffer_bytes as u64,
+            ),
+            l0_segment_count: Some(database.l0_segment_count() as u64),
+            l0_compaction_trigger: Some(compaction.l0_compaction_trigger as u64),
+            compaction_debt_segments: Some(database.compaction_debt_segments() as u64),
+            compaction_target_segment_bytes: Some(compaction.target_segment_bytes as u64),
+            segment_count: Some(manifest.segments.len() as u64),
+            segment_bytes: Some(manifest.segments.iter().map(|segment| segment.bytes).sum()),
+            cache_capacity_bytes: Some(cache.capacity_bytes as u64),
+            cache_resident_bytes: Some(cache.resident_bytes as u64),
+            cache_entries: Some(cache.entries as u64),
+            cache_hits: Some(cache.hits),
+            cache_misses: Some(cache.misses),
+            cache_evictions: Some(cache.evictions),
+            block_loads: Some(cache.loads),
+            block_bytes_loaded: Some(cache.bytes_loaded),
+            block_bytes_decoded: Some(cache.bytes_decoded),
+            filter_checks: Some(cache.filter_checks),
+            filter_negatives: Some(cache.filter_negatives),
+            segment_io_requested_mode: Some(segment_io.requested_mode.as_str().into()),
+            segment_io_mmap_segments: Some(segment_io.mmap_segments),
+            segment_io_uring_segments: Some(segment_io.io_uring_segments),
+            segment_io_bounded_segments: Some(segment_io.bounded_segments),
+            segment_io_fallbacks: Some(segment_io.fallback_count),
+            segment_io_last_fallback: segment_io.last_fallback_reason,
+            segment_io_read_operations: Some(segment_io.read_operations),
+            segment_io_mmap_reads: Some(segment_io.mmap_read_operations),
+            segment_io_uring_reads: Some(segment_io.io_uring_read_operations),
+            segment_io_bounded_reads: Some(segment_io.bounded_read_operations),
+            segment_io_bytes_read: Some(segment_io.bytes_read),
+            segment_io_max_request_bytes: Some(segment_io.configured_max_request_bytes as u64),
+            segment_io_peak_request_bytes: Some(segment_io.peak_request_bytes as u64),
+        })
+    }
+
+    #[tracing::instrument(level = "debug", skip_all, fields(claims = claims.len()))]
+    fn append_batch(&self, claims: &[Claim]) -> Result<AppendOutcome> {
+        for claim in claims {
+            claim.validate()?;
+        }
+        let mut database = self.lock()?;
+        let snapshot = database.snapshot();
+        let start = read_sequence(&database, snapshot, keyspaces::SEQUENCE_WATERMARK)?;
+        if claims.is_empty() {
+            return Ok(AppendOutcome {
+                first_sequence: start,
+                last_sequence: start,
+                count: 0,
+            });
+        }
+        let mut sequence = start;
+        let mut operations = Vec::with_capacity(claims.len() * 2 + 1);
+        let mut sequence_operations = Vec::with_capacity(claims.len());
+        for claim in claims {
+            sequence = sequence.checked_add(1).ok_or(Error::SequenceOverflow)?;
+            let claim_key = key::claim_key(
+                &claim.subject,
+                &claim.predicate,
+                claim.valid_from,
+                claim.tx_time,
+            );
+            let encoded_claim = serde_json::to_vec(claim)?;
+            put(
+                &mut sequence_operations,
+                keyspaces::SEQUENCE_INDEX,
+                &key::sequence_key(sequence),
+                claim_key.clone(),
+            );
+            put(
+                &mut operations,
+                keyspaces::CLAIMS,
+                &claim_key,
+                encoded_claim,
+            );
+        }
+        // Keep writes for each logical keyspace adjacent. The physical commit
+        // remains atomic, while the ordered memtable avoids bouncing between
+        // distant tree ranges for every claim in the batch.
+        operations.extend(sequence_operations);
+        put_sequence(&mut operations, keyspaces::SEQUENCE_WATERMARK, sequence);
+        write(&mut database, operations, Durability::Authoritative)?;
+        tracing::debug!(first = start + 1, last = sequence, "append committed");
+        Ok(AppendOutcome {
+            first_sequence: start + 1,
+            last_sequence: sequence,
+            count: claims.len(),
+        })
+    }
+
+    fn append_batch_idempotent(
+        &self,
+        idempotency_key: &str,
+        operation_sha256: &str,
+        claims: &[Claim],
+    ) -> Result<IdempotentAppendOutcome> {
+        validate_idempotency(idempotency_key, operation_sha256)?;
+        if claims.is_empty() {
+            return Err(Error::Substrate(
+                "idempotent claim append must not be empty".into(),
+            ));
+        }
+        for claim in claims {
+            claim.validate()?;
+        }
+        let mut database = self.lock()?;
+        let snapshot = database.snapshot();
+        let receipt_key = keyspaces::accepted_append_key(idempotency_key);
+        if let Some(bytes) = get(&database, snapshot, keyspaces::META, &receipt_key)? {
+            let mut outcome: IdempotentAppendOutcome = serde_json::from_slice(&bytes)?;
+            if outcome.operation_sha256 != operation_sha256 {
+                return Err(Error::IdempotencyConflict(idempotency_key.into()));
+            }
+            outcome.idempotent_replay = true;
+            return Ok(outcome);
+        }
+        let start = read_sequence(&database, snapshot, keyspaces::SEQUENCE_WATERMARK)?;
+        let mut sequence = start;
+        let mut operations = Vec::with_capacity(claims.len() * 2 + 2);
+        let mut sequence_operations = Vec::with_capacity(claims.len());
+        for claim in claims {
+            sequence = sequence.checked_add(1).ok_or(Error::SequenceOverflow)?;
+            let claim_key = key::claim_key(
+                &claim.subject,
+                &claim.predicate,
+                claim.valid_from,
+                claim.tx_time,
+            );
+            put(
+                &mut sequence_operations,
+                keyspaces::SEQUENCE_INDEX,
+                &key::sequence_key(sequence),
+                claim_key.clone(),
+            );
+            put(
+                &mut operations,
+                keyspaces::CLAIMS,
+                &claim_key,
+                serde_json::to_vec(claim)?,
+            );
+        }
+        operations.extend(sequence_operations);
+        put_sequence(&mut operations, keyspaces::SEQUENCE_WATERMARK, sequence);
+        let outcome = IdempotentAppendOutcome {
+            operation_sha256: operation_sha256.into(),
+            append: AppendOutcome {
+                first_sequence: start + 1,
+                last_sequence: sequence,
+                count: claims.len(),
+            },
+            idempotent_replay: false,
+        };
+        put(
+            &mut operations,
+            keyspaces::META,
+            &receipt_key,
+            serde_json::to_vec(&outcome)?,
+        );
+        write(&mut database, operations, Durability::Authoritative)?;
+        Ok(outcome)
+    }
+
+    fn control_record(&self, key: &str) -> Result<Option<Vec<u8>>> {
+        validate_control_key(key)?;
+        let database = self.lock()?;
+        get(
+            &database,
+            database.snapshot(),
+            keyspaces::META,
+            key.as_bytes(),
+        )
+    }
+
+    fn commit_control_transition(
+        &self,
+        transition: &ControlTransition,
+    ) -> Result<ControlJournalEntry> {
+        commit_native_control_transition(self, transition, None).map(|(_, entry)| entry)
+    }
+
+    fn commit_control_batch(
+        &self,
+        transitions: &[ControlTransition],
+    ) -> Result<Vec<ControlJournalEntry>> {
+        commit_native_control_batch(self, transitions)
+    }
+
+    fn commit_catalog_transition(
+        &self,
+        scope: &ScopeId,
+        transition: &ControlTransition,
+    ) -> Result<(u64, ControlJournalEntry)> {
+        let (revision, entry) = commit_native_control_transition(self, transition, Some(scope))?;
+        Ok((
+            revision.expect("catalogue transition assigns a revision"),
+            entry,
+        ))
+    }
+
+    fn control_journal_since(&self, after: u64, limit: usize) -> Result<Vec<ControlJournalEntry>> {
+        if limit == 0 {
+            return Err(Error::Substrate(
+                "control journal limit must be non-zero".into(),
+            ));
+        }
+        let database = self.lock()?;
+        let anchor_digest = if after == 0 {
+            None
+        } else {
+            get(
+                &database,
+                database.snapshot(),
+                keyspaces::META,
+                &keyspaces::control_journal_key(after),
+            )?
+            .map(|bytes| serde_json::from_slice::<ControlJournalEntry>(&bytes))
+            .transpose()?
+            .map(|entry| {
+                if !entry.verify() || entry.sequence != after {
+                    return Err(Error::Substrate("control journal anchor is corrupt".into()));
+                }
+                Ok(entry.digest)
+            })
+            .transpose()?
+        };
+        let entries = scan_space_from(
+            &database,
+            database.snapshot(),
+            keyspaces::META,
+            &keyspaces::control_journal_key(after.saturating_add(1)),
+        )?
+        .into_iter()
+        .take_while(|(key, _)| {
+            database_codec(&database)
+                .ok()
+                .and_then(|codec| codec.strip(keyspaces::META, key))
+                .is_some_and(|logical| logical.starts_with(b"server/journal/entries/"))
+        })
+        .take(limit)
+        .map(|(_, bytes)| serde_json::from_slice(&bytes).map_err(Error::from))
+        .collect::<Result<Vec<ControlJournalEntry>>>()?;
+        verify_control_page(after, anchor_digest, &entries)?;
+        Ok(entries)
+    }
+
+    fn control_sequence(&self) -> Result<u64> {
+        let database = self.lock()?;
+        read_sequence(
+            &database,
+            database.snapshot(),
+            keyspaces::CONTROL_JOURNAL_SEQUENCE,
+        )
+    }
+
+    fn sequence(&self) -> Result<u64> {
+        let database = self.lock()?;
+        read_sequence(
+            &database,
+            database.snapshot(),
+            keyspaces::SEQUENCE_WATERMARK,
+        )
+    }
+
+    fn claims_in_range(&self, from: u64, to: u64) -> Result<Vec<Claim>> {
+        if from >= to {
+            return Ok(Vec::new());
+        }
+        let database = self.lock()?;
+        let snapshot = database.snapshot();
+        let head = read_sequence(&database, snapshot, keyspaces::SEQUENCE_WATERMARK)?;
+        let last = to.min(head);
+        if from >= last {
+            return Ok(Vec::new());
+        }
+        let start = encoded_storage_key(
+            &database,
+            keyspaces::SEQUENCE_INDEX,
+            &key::sequence_key(from.saturating_add(1)),
+        )?;
+        let inclusive_end = encoded_storage_key(
+            &database,
+            keyspaces::SEQUENCE_INDEX,
+            &key::sequence_key(last),
+        )?;
+        let end = prefix_end(&inclusive_end)
+            .ok_or_else(|| Error::Substrate("native sequence range has no upper bound".into()))?;
+        let expected = usize::try_from(last - from)
+            .map_err(|_| Error::Substrate("native sequence range exceeds usize".into()))?;
+        let mut claims = Vec::with_capacity(expected);
+        database.scan_each(
+            &start,
+            Some(&end),
+            snapshot,
+            |_, sequence_value| -> Result<()> {
+                if let Some(encoded) = decode_native_sequence_value(sequence_value)? {
+                    claims.push(serde_json::from_slice(encoded)?);
+                    return Ok(());
+                }
+                let encoded = database
+                    .get(
+                        &encoded_storage_key(&database, keyspaces::CLAIMS, sequence_value)?,
+                        snapshot,
+                    )?
+                    .ok_or_else(|| {
+                        Error::Substrate(format!(
+                            "native sequence index references an absent claim in ({from}, {last}]"
+                        ))
+                    })?;
+                claims.push(serde_json::from_slice(&encoded)?);
+                Ok(())
+            },
+        )?;
+        if claims.len() != expected {
+            return Err(Error::Substrate(format!(
+                "native sequence index returned {} rows for expected interval ({from}, {last}]",
+                claims.len()
+            )));
+        }
+        Ok(claims)
+    }
+
+    fn subjects(&self) -> Result<Vec<Subject>> {
+        let database = self.lock()?;
+        let snapshot = database.snapshot();
+        let mut subjects = Vec::new();
+        for (stored_key, _) in scan_space(&database, snapshot, keyspaces::CLAIMS, &[])? {
+            let claim_key =
+                strip_space(database_codec(&database)?, keyspaces::CLAIMS, &stored_key)?;
+            let (subject, _) = key::parse_claim_key(claim_key)?;
+            if subjects
+                .last()
+                .is_none_or(|prior: &Subject| prior.as_str() != subject.as_str())
+            {
+                subjects.push(subject);
+            }
+        }
+        Ok(subjects)
+    }
+
+    fn observe(
+        &self,
+        reader: &Reader,
+        subject: &Subject,
+        predicate: &Predicate,
+        at: Millis,
+    ) -> Result<()> {
+        let mut database = self.lock()?;
+        write(
+            &mut database,
+            vec![Mutation::Put {
+                key: storage_key(
+                    keyspaces::ACCESS,
+                    &key::access_key(at, reader, subject, predicate),
+                ),
+                value: Vec::new(),
+            }],
+            Durability::Buffered,
+        )?;
+        Ok(())
+    }
+
+    fn get_projection(&self, name: &str) -> Result<Option<Vec<u8>>> {
+        let database = self.lock()?;
+        get(
+            &database,
+            database.snapshot(),
+            keyspaces::PROJECTIONS,
+            name.as_bytes(),
+        )
+    }
+
+    fn put_projection_with(&self, name: &str, bytes: &[u8], durability: Durability) -> Result<()> {
+        let mut database = self.lock()?;
+        write(
+            &mut database,
+            vec![Mutation::Put {
+                key: storage_key(keyspaces::PROJECTIONS, name.as_bytes()),
+                value: bytes.to_vec(),
+            }],
+            durability,
+        )?;
+        Ok(())
+    }
+
+    fn runtime_cursor(&self) -> Result<u64> {
+        let database = self.lock()?;
+        read_sequence(&database, database.snapshot(), keyspaces::RUNTIME_CURSOR)
+    }
+
+    fn runtime_schema(&self, scope: &ScopeId) -> Result<Option<RuntimeSchemaRegistry>> {
+        let database = self.lock()?;
+        get_json(
+            &database,
+            database.snapshot(),
+            keyspaces::RUNTIME_SCHEMAS,
+            scope.as_str().as_bytes(),
+        )
+    }
+
+    fn runtime_read_stamp(&self, scope: &ScopeId) -> Result<ReadStamp> {
+        let database = self.lock()?;
+        native_read_stamp(&database, database.snapshot(), scope)
+    }
+
+    fn open_runtime_snapshot(
+        &self,
+        scope: &ScopeId,
+        owner: &str,
+        now: Millis,
+        ttl: Millis,
+    ) -> Result<SnapshotHandle> {
+        let mut database = self.lock()?;
+        let handle = SnapshotHandle::new(
+            native_read_stamp(&database, database.snapshot(), scope)?,
+            owner,
+            now,
+            ttl,
+        )?;
+        if let Some(persisted) = get_json::<SnapshotHandle>(
+            &database,
+            database.snapshot(),
+            keyspaces::RUNTIME_SNAPSHOTS,
+            handle.id.as_str().as_bytes(),
+        )? {
+            if persisted != handle {
+                return Err(Error::SnapshotMismatch(handle.id.to_string()));
+            }
+            ensure_runtime_checkpoint(&mut database, &handle, now)?;
+            return Ok(handle);
+        }
+        write(
+            &mut database,
+            vec![Mutation::Put {
+                key: storage_key(keyspaces::RUNTIME_SNAPSHOTS, handle.id.as_str().as_bytes()),
+                value: serde_json::to_vec(&handle)?,
+            }],
+            Durability::Authoritative,
+        )?;
+        if let Err(error) = ensure_runtime_checkpoint(&mut database, &handle, now) {
+            write(
+                &mut database,
+                vec![Mutation::Delete {
+                    key: storage_key(keyspaces::RUNTIME_SNAPSHOTS, handle.id.as_str().as_bytes()),
+                }],
+                Durability::Authoritative,
+            )?;
+            return Err(error);
+        }
+        Ok(handle)
+    }
+
+    fn runtime_snapshot_changes(
+        &self,
+        handle: &SnapshotHandle,
+        after: u64,
+        limit: usize,
+        now: Millis,
+    ) -> Result<RuntimeChangePage> {
+        handle.validate()?;
+        let database = self.lock()?;
+        let snapshot = database.snapshot();
+        let persisted: SnapshotHandle = get_json(
+            &database,
+            snapshot,
+            keyspaces::RUNTIME_SNAPSHOTS,
+            handle.id.as_str().as_bytes(),
+        )?
+        .ok_or_else(|| Error::SnapshotNotFound(handle.id.to_string()))?;
+        if &persisted != handle {
+            return Err(Error::SnapshotMismatch(handle.id.to_string()));
+        }
+        if handle.is_expired(now) {
+            return Err(Error::SnapshotExpired {
+                id: handle.id.to_string(),
+                expired_at: handle.expires_at,
+            });
+        }
+        native_change_page(
+            &database,
+            snapshot,
+            handle.read.commit_cursor,
+            after,
+            limit,
+            Some(&handle.read.scope),
+        )
+    }
+
+    fn release_runtime_snapshot(&self, id: &SnapshotId) -> Result<bool> {
+        let mut database = self.lock()?;
+        let stored_key = encoded_storage_key(
+            &database,
+            keyspaces::RUNTIME_SNAPSHOTS,
+            id.as_str().as_bytes(),
+        )?;
+        if database.get(&stored_key, database.snapshot())?.is_none() {
+            return Ok(false);
+        }
+        write(
+            &mut database,
+            vec![Mutation::Delete {
+                key: storage_key(keyspaces::RUNTIME_SNAPSHOTS, id.as_str().as_bytes()),
+            }],
+            Durability::Authoritative,
+        )?;
+        database.release_checkpoint(&runtime_checkpoint_name(id))?;
+        Ok(true)
+    }
+
+    fn runtime_snapshots(&self, now: Millis) -> Result<Vec<SnapshotHandle>> {
+        let database = self.lock()?;
+        let snapshot = database.snapshot();
+        let mut handles = scan_space(&database, snapshot, keyspaces::RUNTIME_SNAPSHOTS, &[])?
+            .into_iter()
+            .map(|(_, bytes)| serde_json::from_slice::<SnapshotHandle>(&bytes).map_err(Error::from))
+            .collect::<Result<Vec<_>>>()?;
+        for handle in &handles {
+            handle.validate()?;
+        }
+        handles.retain(|handle| !handle.is_expired(now));
+        handles.sort_by(|left, right| left.id.cmp(&right.id));
+        Ok(handles)
+    }
+
+    fn runtime_retention_pins(&self, now: Millis) -> Result<Vec<RetentionPin>> {
+        self.runtime_snapshots(now)?
+            .iter()
+            .map(RetentionPin::from_snapshot)
+            .collect::<rrd_core::Result<Vec<_>>>()
+            .map_err(Error::from)
+    }
+
+    fn runtime_read_changes(
+        &self,
+        read: &ReadStamp,
+        after: u64,
+        limit: usize,
+    ) -> Result<RuntimeChangePage> {
+        let database = self.lock()?;
+        let snapshot = database.snapshot();
+        let validation = validate_native_read_stamp(&database, snapshot, read)?;
+        if limit == 1 && after < read.commit_cursor && read.accumulator_root.is_some() {
+            let mut page = native_authenticated_point_page(&database, snapshot, read, after + 1)?;
+            if validation.method == "full_hash_chain_replay" {
+                page.validation.method = "full_hash_chain_replay_then_rfc9162_inclusion".into();
+                page.validation.change_reads = page
+                    .validation
+                    .change_reads
+                    .saturating_add(validation.change_reads);
+            }
+            return Ok(page);
+        }
+        let mut page = native_change_page(
+            &database,
+            snapshot,
+            read.commit_cursor,
+            after,
+            limit,
+            Some(&read.scope),
+        )?;
+        page.validation = validation;
+        Ok(page)
+    }
+
+    fn commit_runtime_at_read(
+        &self,
+        commit: &RuntimeCommit,
+        read: Option<&ReadStamp>,
+    ) -> Result<RuntimeCommitOutcome> {
+        commit.validate()?;
+        crate::engine::validate_retirement_targets(self, commit)?;
+        let mut database = self.lock()?;
+        let plan = prepare_native_runtime_commit_at_read(&database, commit, read, None)?;
+        let (outcome, operations) = plan.into_parts();
+        write(&mut database, operations, Durability::Authoritative)?;
+        Ok(outcome)
+    }
+
+    fn runtime_changes_since(
+        &self,
+        after: u64,
+        limit: usize,
+        scope: Option<&ScopeId>,
+    ) -> Result<RuntimeChangePage> {
+        let database = self.lock()?;
+        let snapshot = database.snapshot();
+        let head = read_sequence(&database, snapshot, keyspaces::RUNTIME_CURSOR)?;
+        native_change_page(&database, snapshot, head, after, limit, scope)
+    }
+
+    fn runtime_outbox_since(&self, after: u64, limit: usize) -> Result<Vec<ProjectionWork>> {
+        if limit == 0 {
+            return Err(Error::Substrate(
+                "runtime outbox page limit must be greater than zero".into(),
+            ));
+        }
+        let database = self.lock()?;
+        let snapshot = database.snapshot();
+        let start = after
+            .checked_add(1)
+            .ok_or(Error::SequenceOverflow)?
+            .to_be_bytes();
+        scan_space_from(&database, snapshot, keyspaces::RUNTIME_OUTBOX, &start)?
+            .into_iter()
+            .take(limit)
+            .map(|(_, bytes)| {
+                let work: ProjectionWork = serde_json::from_slice(&bytes)?;
+                work.validate()?;
+                Ok(work)
+            })
+            .collect()
+    }
+
+    fn runtime_audit(&self, commit_id: &str) -> Result<Option<AuditEnvelope>> {
+        let database = self.lock()?;
+        let audit: Option<AuditEnvelope> = get_json(
+            &database,
+            database.snapshot(),
+            keyspaces::RUNTIME_AUDIT,
+            commit_id.as_bytes(),
+        )?;
+        if let Some(value) = &audit {
+            value.validate()?;
+        }
+        Ok(audit)
+    }
+
+    fn runtime_commit_outcome(&self, commit_id: &str) -> Result<Option<RuntimeCommitOutcome>> {
+        let database = self.lock()?;
+        get_json(
+            &database,
+            database.snapshot(),
+            keyspaces::RUNTIME_COMMITS,
+            commit_id.as_bytes(),
+        )
+    }
+}
+
+#[cfg(test)]
+fn encode_native_sequence_value(encoded_claim: &[u8]) -> Vec<u8> {
+    let mut value = Vec::with_capacity(NATIVE_SEQUENCE_VALUE_MAGIC.len() + encoded_claim.len());
+    value.extend_from_slice(NATIVE_SEQUENCE_VALUE_MAGIC);
+    value.extend_from_slice(encoded_claim);
+    value
+}
+
+fn decode_native_sequence_value(value: &[u8]) -> Result<Option<&[u8]>> {
+    let Some(encoded) = value.strip_prefix(NATIVE_SEQUENCE_VALUE_MAGIC) else {
+        return Ok(None);
+    };
+    if encoded.is_empty() {
+        return Err(Error::Substrate("empty native sequence envelope".into()));
+    }
+    Ok(Some(encoded))
+}
+
+/// A validated native runtime transaction that has not yet crossed the WAL
+/// durability boundary. The caller may append metadata operations and publish
+/// the combined vector as one RRD LSM [`WriteBatch`].
+///
+/// Planning reads the supplied database's current snapshot. Correct callers
+/// therefore hold the database's exclusive writer guard from planning through
+/// publication; `NativeEngine` does this internally and the Raft adapter uses
+/// the same discipline.
+#[derive(Debug)]
+pub struct NativeRuntimeCommitPlan {
+    outcome: RuntimeCommitOutcome,
+    operations: Vec<Mutation>,
+}
+
+/// Reads the exact native cursor/schema pair needed to prepare a runtime
+/// transaction outside `NativeEngine` while retaining one database snapshot.
+/// Coordinators use this before submitting the resulting commit through their
+/// own durability boundary (for example, a Raft log).
+pub fn native_runtime_commit_context(
+    database: &Database,
+    scope: &ScopeId,
+) -> Result<(ReadStamp, Option<RuntimeSchemaRegistry>)> {
+    let snapshot = database.snapshot();
+    let read = native_read_stamp(database, snapshot, scope)?;
+    let schema = get_json(
+        database,
+        snapshot,
+        keyspaces::RUNTIME_SCHEMAS,
+        scope.as_str().as_bytes(),
+    )?;
+    if schema
+        .as_ref()
+        .map(|value: &RuntimeSchemaRegistry| value.revision)
+        != read.schema_revision
+    {
+        return Err(Error::Substrate(
+            "native runtime schema differs from its read stamp".into(),
+        ));
+    }
+    Ok((read, schema))
+}
+
+impl NativeRuntimeCommitPlan {
+    pub fn outcome(&self) -> &RuntimeCommitOutcome {
+        &self.outcome
+    }
+
+    fn into_parts(self) -> (RuntimeCommitOutcome, Vec<Mutation>) {
+        (self.outcome, self.operations)
+    }
+
+    /// Lowers the staged canonical mutations to the authenticated key format
+    /// of `database` before an external coordinator combines them with its own
+    /// metadata in one write batch.
+    pub fn into_parts_for(
+        self,
+        database: &Database,
+    ) -> Result<(RuntimeCommitOutcome, Vec<Mutation>)> {
+        let mut operations = self.operations;
+        transcode_operations(database, &mut operations)?;
+        Ok((self.outcome, operations))
+    }
+}
+
+/// Validates and lowers one canonical [`RuntimeCommit`] into native RRD LSM
+/// mutations without writing them. This is the composition boundary used when
+/// a coordinator must atomically include its own durable metadata.
+pub fn prepare_native_runtime_commit(
+    database: &Database,
+    commit: &RuntimeCommit,
+) -> Result<NativeRuntimeCommitPlan> {
+    prepare_native_runtime_commit_at_read(database, commit, None, None)
+}
+
+fn prepare_native_runtime_commit_at_read(
+    database: &Database,
+    commit: &RuntimeCommit,
+    read: Option<&ReadStamp>,
+    archived_audit: Option<&AuditEnvelope>,
+) -> Result<NativeRuntimeCommitPlan> {
+    commit.validate()?;
+    let snapshot = database.snapshot();
+    if read.is_some() && archived_audit.is_some() {
+        return Err(Error::Archive(
+            "archive replay cannot also supply a live read stamp".into(),
+        ));
+    }
+    if let Some(audit) = archived_audit {
+        audit.validate()?;
+        if let Some(read) = &audit.read {
+            read.validate()?;
+        }
+    } else if let Some(read) = read {
+        validate_native_read_stamp(database, snapshot, read)?;
+    }
+    let commit_id = commit.digest();
+    let start = read_sequence(database, snapshot, keyspaces::RUNTIME_CURSOR)?;
+    if start != commit.expected_cursor {
+        return Err(Error::RuntimeConflict {
+            expected: commit.expected_cursor,
+            actual: start,
+        });
+    }
+    let (mut accumulator, bootstrap_nodes) =
+        native_runtime_accumulator_with(database, snapshot, start)?;
+
+    let previous_schema: Option<RuntimeSchemaRegistry> = get_json(
+        database,
+        snapshot,
+        keyspaces::RUNTIME_SCHEMAS,
+        commit.scope.as_str().as_bytes(),
+    )?;
+    let proposed_schema = commit.mutations.iter().find_map(|mutation| match mutation {
+        RuntimeMutation::Schema { registry } => Some(registry),
+        _ => None,
+    });
+    let schema_free_claims = previous_schema.is_none()
+        && proposed_schema.is_none()
+        && commit
+            .mutations
+            .iter()
+            .all(|mutation| matches!(mutation, RuntimeMutation::Claim { .. }));
+    if !schema_free_claims {
+        let effective_schema = match (previous_schema.as_ref(), proposed_schema) {
+            (None, Some(registry)) if registry.revision == 1 => registry,
+            (None, Some(registry)) => {
+                return Err(Error::RuntimeSchemaConflict {
+                    expected: 1,
+                    actual: registry.revision,
+                });
+            }
+            (Some(previous), Some(registry))
+                if registry.revision == previous.revision.saturating_add(1) =>
+            {
+                registry
+            }
+            (Some(previous), Some(registry)) => {
+                return Err(Error::RuntimeSchemaConflict {
+                    expected: previous.revision.saturating_add(1),
+                    actual: registry.revision,
+                });
+            }
+            (Some(previous), None) => previous,
+            (None, None) => {
+                return Err(Error::RuntimeSchemaMissing(commit.scope.to_string()));
+            }
+        };
+        let existing_records = if effective_schema
+            .records
+            .values()
+            .any(|schema| !schema.unique_properties.is_empty())
+        {
+            native_values_for_scope::<RuntimeRecord>(
+                database,
+                snapshot,
+                keyspaces::RUNTIME_RECORDS,
+                &commit.scope,
+            )?
+        } else {
+            Vec::new()
+        };
+        let existing_relations = if effective_schema.relations.values().any(|schema| {
+            schema.unique_pair || schema.max_outgoing.is_some() || schema.max_incoming.is_some()
+        }) {
+            native_values_for_scope::<RuntimeRelation>(
+                database,
+                snapshot,
+                keyspaces::RUNTIME_RELATIONS,
+                &commit.scope,
+            )?
+        } else {
+            Vec::new()
+        };
+        effective_schema.validate_objects(
+            &commit.mutations,
+            &existing_records,
+            &existing_relations,
+        )?;
+    }
+
+    let new_records = commit
+        .mutations
+        .iter()
+        .filter_map(|mutation| match mutation {
+            RuntimeMutation::Record { record } => Some(record.reference.clone()),
+            _ => None,
+        })
+        .collect::<BTreeSet<_>>();
+    for mutation in &commit.mutations {
+        let references: Vec<&RuntimeRef> = match mutation {
+            RuntimeMutation::Relation { relation } => vec![&relation.from, &relation.to],
+            RuntimeMutation::Event { event } => event.subject.iter().collect(),
+            RuntimeMutation::Vector { vector } => vec![&vector.subject],
+            RuntimeMutation::SeriesSample { sample } => vec![&sample.series],
+            RuntimeMutation::Geo { geo } => vec![&geo.subject],
+            RuntimeMutation::Object { object } => object.subject.iter().collect(),
+            RuntimeMutation::Claim { .. }
+            | RuntimeMutation::Schema { .. }
+            | RuntimeMutation::Record { .. }
+            | RuntimeMutation::Retire { .. } => Vec::new(),
+        };
+        for reference in references {
+            if !new_records.contains(reference)
+                && get(
+                    database,
+                    snapshot,
+                    keyspaces::RUNTIME_RECORDS,
+                    &runtime_identity_key(&commit.scope, reference),
+                )?
+                .is_none()
+            {
+                return Err(Error::DanglingRuntimeReference(format!(
+                    "{}/{} in scope {}",
+                    reference.kind, reference.id, commit.scope
+                )));
+            }
+        }
+    }
+
+    let claim_count = commit
+        .mutations
+        .iter()
+        .filter(|mutation| matches!(mutation, RuntimeMutation::Claim { .. }))
+        .count();
+    let claim_start = read_sequence(database, snapshot, keyspaces::SEQUENCE_WATERMARK)?;
+    let mut claim_sequence = claim_start;
+    let mut cursor = start;
+    let mut previous_digest = get(
+        database,
+        snapshot,
+        keyspaces::META,
+        keyspaces::RUNTIME_LAST_DIGEST,
+    )?
+    .map(String::from_utf8)
+    .transpose()
+    .map_err(|error| Error::CorruptWatermark(error.to_string()))?
+    .filter(|digest| !digest.is_empty());
+    let previous_audit_digest = get(
+        database,
+        snapshot,
+        keyspaces::META,
+        keyspaces::RUNTIME_LAST_AUDIT_DIGEST,
+    )?
+    .map(String::from_utf8)
+    .transpose()
+    .map_err(|error| Error::CorruptWatermark(error.to_string()))?
+    .filter(|digest| !digest.is_empty());
+    let mut operations = Vec::new();
+    for node in bootstrap_nodes {
+        put(
+            &mut operations,
+            keyspaces::META,
+            &keyspaces::runtime_accumulator_node_key(node.level, node.index),
+            node.digest.into_bytes(),
+        );
+    }
+    let mut outbox_count = 0;
+
+    for (ordinal, mutation) in commit.mutations.iter().cloned().enumerate() {
+        if let RuntimeMutation::Claim { claim } = &mutation {
+            claim.validate()?;
+            claim_sequence = claim_sequence
+                .checked_add(1)
+                .ok_or(Error::SequenceOverflow)?;
+            let claim_key = key::claim_key(
+                &claim.subject,
+                &claim.predicate,
+                claim.valid_from,
+                claim.tx_time,
+            );
+            put(
+                &mut operations,
+                keyspaces::SEQUENCE_INDEX,
+                &key::sequence_key(claim_sequence),
+                claim_key.clone(),
+            );
+            put(
+                &mut operations,
+                keyspaces::CLAIMS,
+                &claim_key,
+                serde_json::to_vec(claim)?,
+            );
+        }
+
+        cursor = cursor.checked_add(1).ok_or(Error::SequenceOverflow)?;
+        let change = RuntimeChange::committed(
+            cursor,
+            commit,
+            &commit_id,
+            ordinal as u64,
+            mutation.clone(),
+            previous_digest.clone(),
+        );
+        put(
+            &mut operations,
+            keyspaces::RUNTIME_CHANGES,
+            &cursor.to_be_bytes(),
+            serde_json::to_vec(&change)?,
+        );
+        for node in accumulator.append_change(&change)? {
+            put(
+                &mut operations,
+                keyspaces::META,
+                &keyspaces::runtime_accumulator_node_key(node.level, node.index),
+                node.digest.into_bytes(),
+            );
+        }
+        if let Some(family) = projection_family(&mutation) {
+            let work = ProjectionWork::for_change(
+                commit.scope.clone(),
+                cursor,
+                commit_id.clone(),
+                ordinal as u64,
+                family,
+            )?;
+            put(
+                &mut operations,
+                keyspaces::RUNTIME_OUTBOX,
+                &cursor.to_be_bytes(),
+                serde_json::to_vec(&work)?,
+            );
+            outbox_count += 1;
+        }
+        match mutation {
+            RuntimeMutation::Schema { registry } => put(
+                &mut operations,
+                keyspaces::RUNTIME_SCHEMAS,
+                commit.scope.as_str().as_bytes(),
+                serde_json::to_vec(&registry)?,
+            ),
+            RuntimeMutation::Record { record } => put(
+                &mut operations,
+                keyspaces::RUNTIME_RECORDS,
+                &runtime_identity_key(&commit.scope, &record.reference),
+                serde_json::to_vec(&record)?,
+            ),
+            RuntimeMutation::Relation { relation } => put(
+                &mut operations,
+                keyspaces::RUNTIME_RELATIONS,
+                &runtime_identity_key(&commit.scope, &relation.reference),
+                serde_json::to_vec(&relation)?,
+            ),
+            RuntimeMutation::Vector { vector } => put(
+                &mut operations,
+                keyspaces::RUNTIME_VECTORS,
+                &runtime_identity_key(&commit.scope, &vector.reference),
+                serde_json::to_vec(&vector)?,
+            ),
+            RuntimeMutation::SeriesSample { sample } => put(
+                &mut operations,
+                keyspaces::RUNTIME_SERIES,
+                &runtime_identity_key(&commit.scope, &sample.reference),
+                serde_json::to_vec(&sample)?,
+            ),
+            RuntimeMutation::Geo { geo } => put(
+                &mut operations,
+                keyspaces::RUNTIME_GEO,
+                &runtime_identity_key(&commit.scope, &geo.reference),
+                serde_json::to_vec(&geo)?,
+            ),
+            RuntimeMutation::Object { object } => put(
+                &mut operations,
+                keyspaces::RUNTIME_OBJECTS,
+                &runtime_identity_key(&commit.scope, &object.reference),
+                serde_json::to_vec(&object)?,
+            ),
+            RuntimeMutation::Retire { retirement } => {
+                let key = runtime_identity_key(&commit.scope, &retirement.reference);
+                let space = if retirement.model.is_record_like() {
+                    Some(keyspaces::RUNTIME_RECORDS)
+                } else {
+                    match retirement.model {
+                        rrd_core::RuntimeLogicalModel::GraphRelation => {
+                            Some(keyspaces::RUNTIME_RELATIONS)
+                        }
+                        rrd_core::RuntimeLogicalModel::Vector => Some(keyspaces::RUNTIME_VECTORS),
+                        rrd_core::RuntimeLogicalModel::TimeSeries => {
+                            Some(keyspaces::RUNTIME_SERIES)
+                        }
+                        rrd_core::RuntimeLogicalModel::Geo => Some(keyspaces::RUNTIME_GEO),
+                        rrd_core::RuntimeLogicalModel::Object => Some(keyspaces::RUNTIME_OBJECTS),
+                        rrd_core::RuntimeLogicalModel::ReasoningClaim
+                        | rrd_core::RuntimeLogicalModel::Document
+                        | rrd_core::RuntimeLogicalModel::Relational
+                        | rrd_core::RuntimeLogicalModel::GraphNode
+                        | rrd_core::RuntimeLogicalModel::KeyValue
+                        | rrd_core::RuntimeLogicalModel::Event
+                        | rrd_core::RuntimeLogicalModel::ReasoningRecord
+                        | rrd_core::RuntimeLogicalModel::ReasoningEvent
+                        | rrd_core::RuntimeLogicalModel::LifecycleRecord
+                        | rrd_core::RuntimeLogicalModel::LifecycleEvent => None,
+                    }
+                };
+                if let Some(space) = space {
+                    delete(&mut operations, space, &key);
+                }
+            }
+            RuntimeMutation::Claim { .. } | RuntimeMutation::Event { .. } => {}
+        }
+        previous_digest = Some(change.digest);
+    }
+    if claim_count > 0 {
+        put_sequence(
+            &mut operations,
+            keyspaces::SEQUENCE_WATERMARK,
+            claim_sequence,
+        );
+    }
+    put_sequence(&mut operations, keyspaces::RUNTIME_CURSOR, cursor);
+    put(
+        &mut operations,
+        keyspaces::META,
+        keyspaces::RUNTIME_LAST_DIGEST,
+        previous_digest.as_deref().unwrap_or("").as_bytes().to_vec(),
+    );
+    put(
+        &mut operations,
+        keyspaces::META,
+        keyspaces::RUNTIME_ACCUMULATOR_STATE,
+        serde_json::to_vec(&accumulator)?,
+    );
+    let audit_read = archived_audit
+        .and_then(|audit| audit.read.as_ref())
+        .or(read);
+    let audit = AuditEnvelope::accepted_commit_at_read(
+        commit,
+        audit_read,
+        &commit_id,
+        cursor,
+        previous_audit_digest,
+    )?;
+    if archived_audit.is_some_and(|expected| expected != &audit) {
+        return Err(Error::Archive(format!(
+            "runtime commit {commit_id} audit envelope differs from its archive"
+        )));
+    }
+    put(
+        &mut operations,
+        keyspaces::RUNTIME_AUDIT,
+        commit_id.as_bytes(),
+        serde_json::to_vec(&audit)?,
+    );
+    put(
+        &mut operations,
+        keyspaces::META,
+        keyspaces::RUNTIME_LAST_AUDIT_DIGEST,
+        audit.digest.as_bytes().to_vec(),
+    );
+    let outcome = RuntimeCommitOutcome {
+        commit_id,
+        first_cursor: start + 1,
+        last_cursor: cursor,
+        count: commit.mutations.len(),
+        first_claim_sequence: (claim_count > 0).then_some(claim_start + 1),
+        last_claim_sequence: (claim_count > 0).then_some(claim_sequence),
+        outbox_count,
+    };
+    put(
+        &mut operations,
+        keyspaces::RUNTIME_COMMITS,
+        outcome.commit_id.as_bytes(),
+        serde_json::to_vec(&outcome)?,
+    );
+    Ok(NativeRuntimeCommitPlan {
+        outcome,
+        operations,
+    })
+}
+
+/// Reads a previously accepted native runtime outcome from a caller-held
+/// database snapshot. Coordinators use this before planning so content-addressed
+/// retries remain idempotent even when the transport request id changes.
+pub fn native_runtime_commit_outcome(
+    database: &Database,
+    commit_id: &str,
+) -> Result<Option<RuntimeCommitOutcome>> {
+    let outcome: Option<RuntimeCommitOutcome> = get_json(
+        database,
+        database.snapshot(),
+        keyspaces::RUNTIME_COMMITS,
+        commit_id.as_bytes(),
+    )?;
+    if outcome
+        .as_ref()
+        .is_some_and(|outcome| outcome.commit_id != commit_id)
+    {
+        return Err(Error::Substrate(
+            "runtime commit outcome key does not match its content identity".into(),
+        ));
+    }
+    Ok(outcome)
+}
+
+fn scan_claims(database: &Database, prefix: Vec<u8>, from: Vec<u8>) -> Result<Vec<Claim>> {
+    let snapshot = database.snapshot();
+    let start = encoded_storage_key(database, keyspaces::CLAIMS, &from)?;
+    let full_prefix = encoded_storage_key(database, keyspaces::CLAIMS, &prefix)?;
+    let end = prefix_end(&full_prefix)
+        .ok_or_else(|| Error::Substrate("native claim prefix has no upper bound".into()))?;
+    database
+        .scan(&start, Some(&end), snapshot)?
+        .into_iter()
+        .map(|(_, value)| serde_json::from_slice(&value).map_err(Error::from))
+        .collect()
+}
+
+fn ensure_runtime_checkpoint(
+    database: &mut Database,
+    handle: &SnapshotHandle,
+    at: Millis,
+) -> Result<()> {
+    let name = runtime_checkpoint_name(&handle.id);
+    if database
+        .checkpoints()?
+        .iter()
+        .any(|checkpoint| checkpoint.name == name)
+    {
+        return Ok(());
+    }
+    let created_at = at.max(database.manifest().created_at);
+    database.flush_memtable(created_at)?;
+    database.checkpoint(&name, created_at)?;
+    Ok(())
+}
+
+fn reconcile_runtime_checkpoints(
+    database: &mut Database,
+    now: Option<Millis>,
+    at: Millis,
+) -> Result<()> {
+    let snapshot = database.snapshot();
+    let handles = scan_space(database, snapshot, keyspaces::RUNTIME_SNAPSHOTS, &[])?
+        .into_iter()
+        .map(|(_, bytes)| serde_json::from_slice::<SnapshotHandle>(&bytes).map_err(Error::from))
+        .collect::<Result<Vec<_>>>()?;
+    for handle in &handles {
+        handle.validate()?;
+    }
+    let desired = handles
+        .iter()
+        .filter(|handle| now.is_none_or(|now| !handle.is_expired(now)))
+        .map(|handle| runtime_checkpoint_name(&handle.id))
+        .collect::<BTreeSet<_>>();
+    let checkpoints = database.checkpoints()?;
+    let existing = checkpoints
+        .iter()
+        .filter(|checkpoint| checkpoint.name.starts_with(RUNTIME_CHECKPOINT_PREFIX))
+        .map(|checkpoint| checkpoint.name.clone())
+        .collect::<BTreeSet<_>>();
+    let missing = desired.difference(&existing).cloned().collect::<Vec<_>>();
+    if !missing.is_empty() {
+        let created_at = at.max(database.manifest().created_at);
+        database.flush_memtable(created_at)?;
+        for name in missing {
+            database.checkpoint(&name, created_at)?;
+        }
+    }
+    for name in existing.difference(&desired) {
+        database.release_checkpoint(name)?;
+    }
+    Ok(())
+}
+
+fn runtime_checkpoint_name(id: &SnapshotId) -> String {
+    format!("{RUNTIME_CHECKPOINT_PREFIX}{}", id.as_str())
+}
+
+fn commit_native_control_transition(
+    engine: &NativeEngine,
+    transition: &ControlTransition,
+    catalog_scope: Option<&ScopeId>,
+) -> Result<(Option<u64>, ControlJournalEntry)> {
+    transition.validate()?;
+    let mut database = engine.lock()?;
+    let snapshot = database.snapshot();
+    let current = get(
+        &database,
+        snapshot,
+        keyspaces::META,
+        transition.key.as_bytes(),
+    )?;
+    if current.as_deref() != transition.expected.as_deref() {
+        return Err(Error::ControlConflict(transition.key.clone()));
+    }
+
+    let current_sequence = read_sequence(&database, snapshot, keyspaces::CONTROL_JOURNAL_SEQUENCE)?;
+    let previous_digest = get(
+        &database,
+        snapshot,
+        keyspaces::META,
+        keyspaces::CONTROL_JOURNAL_LAST_DIGEST,
+    )?
+    .map(String::from_utf8)
+    .transpose()
+    .map_err(|error| Error::CorruptWatermark(error.to_string()))?;
+    let previous_entry = if current_sequence == 0 {
+        None
+    } else {
+        get(
+            &database,
+            snapshot,
+            keyspaces::META,
+            &keyspaces::control_journal_key(current_sequence),
+        )?
+        .map(|bytes| serde_json::from_slice(&bytes))
+        .transpose()?
+    };
+    verify_control_tail(
+        current_sequence,
+        previous_digest.as_deref(),
+        previous_entry.as_ref(),
+    )?;
+    let sequence = current_sequence
+        .checked_add(1)
+        .ok_or(Error::SequenceOverflow)?;
+    let catalog_revision = catalog_scope
+        .map(|scope| {
+            read_sequence(
+                &database,
+                snapshot,
+                &keyspaces::catalog_revision_key(scope.as_str()),
+            )?
+            .checked_add(1)
+            .ok_or(Error::SequenceOverflow)
+        })
+        .transpose()?;
+    let entry = ControlJournalEntry::committed(sequence, transition, previous_digest);
+    let mut operations = Vec::with_capacity(if catalog_revision.is_some() { 5 } else { 4 });
+    match &transition.replacement {
+        Some(value) => put(
+            &mut operations,
+            keyspaces::META,
+            transition.key.as_bytes(),
+            value.clone(),
+        ),
+        None => operations.push(Mutation::Delete {
+            key: encoded_storage_key(&database, keyspaces::META, transition.key.as_bytes())?,
+        }),
+    }
+    put(
+        &mut operations,
+        keyspaces::META,
+        &keyspaces::control_journal_key(sequence),
+        serde_json::to_vec(&entry)?,
+    );
+    put_sequence(
+        &mut operations,
+        keyspaces::CONTROL_JOURNAL_SEQUENCE,
+        sequence,
+    );
+    put(
+        &mut operations,
+        keyspaces::META,
+        keyspaces::CONTROL_JOURNAL_LAST_DIGEST,
+        entry.digest.as_bytes().to_vec(),
+    );
+    if let (Some(scope), Some(revision)) = (catalog_scope, catalog_revision) {
+        put_sequence(
+            &mut operations,
+            &keyspaces::catalog_revision_key(scope.as_str()),
+            revision,
+        );
+    }
+    write(&mut database, operations, Durability::Authoritative)?;
+    Ok((catalog_revision, entry))
+}
+
+fn commit_native_control_batch(
+    engine: &NativeEngine,
+    transitions: &[ControlTransition],
+) -> Result<Vec<ControlJournalEntry>> {
+    validate_control_batch(transitions)?;
+    let mut database = engine.lock()?;
+    let snapshot = database.snapshot();
+    for transition in transitions {
+        let current = get(
+            &database,
+            snapshot,
+            keyspaces::META,
+            transition.key.as_bytes(),
+        )?;
+        if current.as_deref() != transition.expected.as_deref() {
+            return Err(Error::ControlConflict(transition.key.clone()));
+        }
+    }
+    let current_sequence = read_sequence(&database, snapshot, keyspaces::CONTROL_JOURNAL_SEQUENCE)?;
+    let mut previous_digest = get(
+        &database,
+        snapshot,
+        keyspaces::META,
+        keyspaces::CONTROL_JOURNAL_LAST_DIGEST,
+    )?
+    .map(String::from_utf8)
+    .transpose()
+    .map_err(|error| Error::CorruptWatermark(error.to_string()))?;
+    let previous_entry = if current_sequence == 0 {
+        None
+    } else {
+        get(
+            &database,
+            snapshot,
+            keyspaces::META,
+            &keyspaces::control_journal_key(current_sequence),
+        )?
+        .map(|bytes| serde_json::from_slice(&bytes))
+        .transpose()?
+    };
+    verify_control_tail(
+        current_sequence,
+        previous_digest.as_deref(),
+        previous_entry.as_ref(),
+    )?;
+    let mut entries = Vec::with_capacity(transitions.len());
+    for (offset, transition) in transitions.iter().enumerate() {
+        let sequence = current_sequence
+            .checked_add(offset as u64 + 1)
+            .ok_or(Error::SequenceOverflow)?;
+        let entry = ControlJournalEntry::committed(sequence, transition, previous_digest.clone());
+        previous_digest = Some(entry.digest.clone());
+        entries.push(entry);
+    }
+    let mut operations = Vec::with_capacity(transitions.len() * 2 + 2);
+    for (transition, entry) in transitions.iter().zip(&entries) {
+        match &transition.replacement {
+            Some(value) => put(
+                &mut operations,
+                keyspaces::META,
+                transition.key.as_bytes(),
+                value.clone(),
+            ),
+            None => operations.push(Mutation::Delete {
+                key: encoded_storage_key(&database, keyspaces::META, transition.key.as_bytes())?,
+            }),
+        }
+        put(
+            &mut operations,
+            keyspaces::META,
+            &keyspaces::control_journal_key(entry.sequence),
+            serde_json::to_vec(entry)?,
+        );
+    }
+    let last = entries.last().expect("validated non-empty control batch");
+    put_sequence(
+        &mut operations,
+        keyspaces::CONTROL_JOURNAL_SEQUENCE,
+        last.sequence,
+    );
+    put(
+        &mut operations,
+        keyspaces::META,
+        keyspaces::CONTROL_JOURNAL_LAST_DIGEST,
+        last.digest.as_bytes().to_vec(),
+    );
+    write(&mut database, operations, Durability::Authoritative)?;
+    Ok(entries)
+}
+
+fn native_read_stamp(
+    database: &Database,
+    snapshot: Snapshot,
+    scope: &ScopeId,
+) -> Result<ReadStamp> {
+    let commit_cursor = read_sequence(database, snapshot, keyspaces::RUNTIME_CURSOR)?;
+    let schema_revision = get_json::<RuntimeSchemaRegistry>(
+        database,
+        snapshot,
+        keyspaces::RUNTIME_SCHEMAS,
+        scope.as_str().as_bytes(),
+    )?
+    .map(|schema| schema.revision);
+    let catalog_revision = read_sequence(
+        database,
+        snapshot,
+        &keyspaces::catalog_revision_key(scope.as_str()),
+    )?;
+    let head_digest = get(
+        database,
+        snapshot,
+        keyspaces::META,
+        keyspaces::RUNTIME_LAST_DIGEST,
+    )?
+    .map(String::from_utf8)
+    .transpose()
+    .map_err(|error| Error::CorruptWatermark(error.to_string()))?
+    .filter(|digest| !digest.is_empty());
+    match load_native_runtime_accumulator(database, snapshot, commit_cursor)? {
+        Some(accumulator) => ReadStamp::authenticated(
+            scope.clone(),
+            schema_revision,
+            catalog_revision,
+            commit_cursor,
+            head_digest,
+            accumulator.root,
+        ),
+        None => ReadStamp::new(
+            scope.clone(),
+            schema_revision,
+            catalog_revision,
+            commit_cursor,
+            head_digest,
+        ),
+    }
+    .map_err(Error::from)
+}
+
+fn validate_native_read_stamp(
+    database: &Database,
+    snapshot: Snapshot,
+    read: &ReadStamp,
+) -> Result<rrd_core::RuntimeReadValidation> {
+    read.validate()?;
+    let current = read_sequence(database, snapshot, keyspaces::RUNTIME_CURSOR)?;
+    if read.commit_cursor > current {
+        return Err(Error::ReadStampUnavailable(read.manifest_id.clone()));
+    }
+    if read.commit_cursor == current && read.accumulator_root.is_some() {
+        let accumulator = load_native_runtime_accumulator(database, snapshot, current)?
+            .ok_or_else(|| Error::ReadStampMismatch(read.manifest_id.clone()))?;
+        let head_digest = get(
+            database,
+            snapshot,
+            keyspaces::META,
+            keyspaces::RUNTIME_LAST_DIGEST,
+        )?
+        .map(String::from_utf8)
+        .transpose()
+        .map_err(|error| Error::CorruptWatermark(error.to_string()))?
+        .filter(|digest| !digest.is_empty());
+        let schema_revision = get_json::<RuntimeSchemaRegistry>(
+            database,
+            snapshot,
+            keyspaces::RUNTIME_SCHEMAS,
+            read.scope.as_str().as_bytes(),
+        )?
+        .map(|schema| schema.revision);
+        let catalog_revision = read_sequence(
+            database,
+            snapshot,
+            &keyspaces::catalog_revision_key(read.scope.as_str()),
+        )?;
+        if read.catalog_revision != catalog_revision
+            || read.head_digest != head_digest
+            || read.schema_revision != schema_revision
+            || read.accumulator_root.as_deref() != Some(accumulator.root.as_str())
+        {
+            return Err(Error::ReadStampMismatch(read.manifest_id.clone()));
+        }
+        return Ok(rrd_core::RuntimeReadValidation::new(
+            "authenticated_current_head",
+            0,
+            0,
+        ));
+    }
+    let retained_head = if read.commit_cursor == 0 {
+        None
+    } else {
+        let change: RuntimeChange = get_json(
+            database,
+            snapshot,
+            keyspaces::RUNTIME_CHANGES,
+            &read.commit_cursor.to_be_bytes(),
+        )?
+        .ok_or_else(|| Error::ReadStampUnavailable(read.manifest_id.clone()))?;
+        if !change.verify_digest() {
+            return Err(Error::Substrate(format!(
+                "runtime change {} failed digest verification",
+                read.commit_cursor
+            )));
+        }
+        Some(change.digest)
+    };
+    let page = native_change_page(
+        database,
+        snapshot,
+        read.commit_cursor,
+        0,
+        usize::MAX,
+        Some(&read.scope),
+    )?;
+    let schema_revision = page
+        .changes
+        .iter()
+        .filter_map(|change| match &change.mutation {
+            RuntimeMutation::Schema { registry } => Some(registry.revision),
+            _ => None,
+        })
+        .next_back();
+    let catalog_revision = read_sequence(
+        database,
+        snapshot,
+        &keyspaces::catalog_revision_key(read.scope.as_str()),
+    )?;
+    if let Some(root) = read.accumulator_root.as_deref() {
+        RuntimeLogAccumulator::from_nodes(read.commit_cursor, root, |level, index| {
+            read_native_accumulator_node(database, snapshot, level, index)
+        })?;
+    }
+    if read.catalog_revision != catalog_revision
+        || read.head_digest != retained_head
+        || read.schema_revision != schema_revision
+    {
+        return Err(Error::ReadStampMismatch(read.manifest_id.clone()));
+    }
+    Ok(rrd_core::RuntimeReadValidation::new(
+        "full_hash_chain_replay",
+        read.commit_cursor,
+        0,
+    ))
+}
+
+fn load_native_runtime_accumulator(
+    database: &Database,
+    snapshot: Snapshot,
+    expected_size: u64,
+) -> Result<Option<RuntimeLogAccumulator>> {
+    let stored: Option<RuntimeLogAccumulator> = get_json(
+        database,
+        snapshot,
+        keyspaces::META,
+        keyspaces::RUNTIME_ACCUMULATOR_STATE,
+    )?;
+    match stored {
+        Some(accumulator) => {
+            accumulator.validate()?;
+            if accumulator.tree_size != expected_size {
+                return Err(Error::Substrate(format!(
+                    "runtime accumulator size {} differs from cursor {expected_size}",
+                    accumulator.tree_size
+                )));
+            }
+            Ok(Some(accumulator))
+        }
+        None if expected_size == 0 => Ok(Some(RuntimeLogAccumulator::new())),
+        None => Ok(None),
+    }
+}
+
+fn native_runtime_accumulator_with(
+    database: &Database,
+    snapshot: Snapshot,
+    expected_size: u64,
+) -> Result<(RuntimeLogAccumulator, Vec<RuntimeMerkleNode>)> {
+    if let Some(accumulator) = load_native_runtime_accumulator(database, snapshot, expected_size)? {
+        return Ok((accumulator, Vec::new()));
+    }
+    let page = native_change_page(database, snapshot, expected_size, 0, usize::MAX, None)?;
+    let mut accumulator = RuntimeLogAccumulator::new();
+    let mut nodes = Vec::new();
+    for change in &page.changes {
+        nodes.extend(accumulator.append_change(change)?);
+    }
+    if accumulator.tree_size != expected_size {
+        return Err(Error::Substrate(
+            "runtime accumulator bootstrap did not cover the full log".into(),
+        ));
+    }
+    Ok((accumulator, nodes))
+}
+
+fn native_authenticated_point_page(
+    database: &Database,
+    snapshot: Snapshot,
+    read: &ReadStamp,
+    cursor: u64,
+) -> Result<RuntimeChangePage> {
+    let root = read
+        .accumulator_root
+        .as_deref()
+        .ok_or_else(|| Error::ReadStampMismatch(read.manifest_id.clone()))?;
+    let accumulator = match load_native_runtime_accumulator(database, snapshot, read.commit_cursor)
+    {
+        Ok(Some(accumulator)) if accumulator.root == root => accumulator,
+        Ok(_) | Err(_) => {
+            RuntimeLogAccumulator::from_nodes(read.commit_cursor, root, |level, index| {
+                read_native_accumulator_node(database, snapshot, level, index)
+            })?
+        }
+    };
+    let change: RuntimeChange = get_json(
+        database,
+        snapshot,
+        keyspaces::RUNTIME_CHANGES,
+        &cursor.to_be_bytes(),
+    )?
+    .ok_or_else(|| Error::ReadStampUnavailable(read.manifest_id.clone()))?;
+    let proof = accumulator.inclusion_proof(cursor - 1, |level, index| {
+        read_native_accumulator_node(database, snapshot, level, index)
+    })?;
+    let proof_nodes = proof.path.len();
+    proof.verify_change(&change, root)?;
+    let selected = (change.scope == read.scope).then_some(change);
+    Ok(RuntimeChangePage {
+        requested_after: cursor - 1,
+        through_cursor: cursor,
+        head_cursor: read.commit_cursor,
+        validation: rrd_core::RuntimeReadValidation::new("rfc9162_inclusion_proof", 1, proof_nodes),
+        changes: selected.into_iter().collect(),
+    })
+}
+
+fn read_native_accumulator_node(
+    database: &Database,
+    snapshot: Snapshot,
+    level: u8,
+    index: u64,
+) -> rrd_core::Result<Option<String>> {
+    get(
+        database,
+        snapshot,
+        keyspaces::META,
+        &keyspaces::runtime_accumulator_node_key(level, index),
+    )
+    .map_err(|error| rrd_core::Error::InvalidRuntime {
+        reason: format!("cannot read runtime accumulator node: {error}"),
+    })?
+    .map(String::from_utf8)
+    .transpose()
+    .map_err(|error| rrd_core::Error::InvalidRuntime {
+        reason: format!("runtime accumulator node is not UTF-8: {error}"),
+    })
+}
+
+fn native_change_page(
+    database: &Database,
+    snapshot: Snapshot,
+    head: u64,
+    after: u64,
+    limit: usize,
+    scope: Option<&ScopeId>,
+) -> Result<RuntimeChangePage> {
+    if limit == 0 {
+        return Err(Error::Substrate(
+            "runtime change page limit must be greater than zero".into(),
+        ));
+    }
+    if after == u64::MAX || after >= head {
+        return Ok(RuntimeChangePage {
+            requested_after: after,
+            through_cursor: after,
+            head_cursor: head,
+            validation: rrd_core::RuntimeReadValidation::new("bounded_hash_chain_page", 0, 0),
+            changes: Vec::new(),
+        });
+    }
+    let mut previous_digest = if after == 0 {
+        None
+    } else {
+        let prior: RuntimeChange = get_json(
+            database,
+            snapshot,
+            keyspaces::RUNTIME_CHANGES,
+            &after.to_be_bytes(),
+        )?
+        .ok_or_else(|| Error::Substrate(format!("runtime log is missing cursor {after}")))?;
+        if !prior.verify_digest() {
+            return Err(Error::Substrate(format!(
+                "runtime change {after} failed digest verification"
+            )));
+        }
+        Some(prior.digest)
+    };
+    let mut through = after;
+    let mut selected = Vec::new();
+    for expected in after + 1..=head {
+        if through.saturating_sub(after) as usize >= limit {
+            break;
+        }
+        let change: RuntimeChange = get_json(
+            database,
+            snapshot,
+            keyspaces::RUNTIME_CHANGES,
+            &expected.to_be_bytes(),
+        )?
+        .ok_or_else(|| Error::Substrate(format!("runtime log is missing cursor {expected}")))?;
+        if change.cursor != expected
+            || change.previous_digest != previous_digest
+            || !change.verify_digest()
+        {
+            return Err(Error::Substrate(format!(
+                "runtime change {expected} failed cursor/hash-chain verification"
+            )));
+        }
+        through = expected;
+        previous_digest = Some(change.digest.clone());
+        if scope.is_none_or(|scope| scope == &change.scope) {
+            selected.push(change);
+        }
+    }
+    Ok(RuntimeChangePage {
+        requested_after: after,
+        through_cursor: through,
+        head_cursor: head,
+        validation: rrd_core::RuntimeReadValidation::new(
+            "bounded_hash_chain_page",
+            through.saturating_sub(after),
+            0,
+        ),
+        changes: selected,
+    })
+}
+
+fn native_values_for_scope<T: DeserializeOwned>(
+    database: &Database,
+    snapshot: Snapshot,
+    space: &str,
+    scope: &ScopeId,
+) -> Result<Vec<T>> {
+    let mut prefix = scope.as_str().as_bytes().to_vec();
+    prefix.push(0);
+    scan_space(database, snapshot, space, &prefix)?
+        .into_iter()
+        .map(|(_, value)| serde_json::from_slice(&value).map_err(Error::from))
+        .collect()
+}
+
+/// Reads the exact immutable-object closure for one scope from an authenticated
+/// physical snapshot before that snapshot is installed on a replica.
+pub fn native_snapshot_object_references(
+    bundle: &SnapshotBundleFile,
+    scope: &ScopeId,
+) -> Result<Vec<ObjectReference>> {
+    native_snapshot_artifact_view(bundle, scope).map(|(_, objects)| objects)
+}
+
+/// Reads the exact project read stamp and immutable-object closure directly
+/// from an authenticated physical snapshot.
+pub fn native_snapshot_artifact_view(
+    bundle: &SnapshotBundleFile,
+    scope: &ScopeId,
+) -> Result<(ReadStamp, Vec<ObjectReference>)> {
+    let codec = snapshot_codec(bundle)?;
+    let cursor_key = codec
+        .encode(keyspaces::META, keyspaces::RUNTIME_CURSOR)
+        .expect("canonical keyspace");
+    let digest_key = codec
+        .encode(keyspaces::META, keyspaces::RUNTIME_LAST_DIGEST)
+        .expect("canonical keyspace");
+    let accumulator_key = codec
+        .encode(keyspaces::META, keyspaces::RUNTIME_ACCUMULATOR_STATE)
+        .expect("canonical keyspace");
+    let schema_key = codec
+        .encode(keyspaces::RUNTIME_SCHEMAS, scope.as_str().as_bytes())
+        .expect("canonical keyspace");
+    let values = bundle
+        .get_many(&[&cursor_key, &digest_key, &accumulator_key, &schema_key])
+        .map_err(Error::from)?;
+    let commit_cursor = values[0]
+        .as_deref()
+        .map(decode_sequence)
+        .transpose()?
+        .unwrap_or_default();
+    let head_digest = values[1]
+        .clone()
+        .map(String::from_utf8)
+        .transpose()
+        .map_err(|error| Error::CorruptWatermark(error.to_string()))?
+        .filter(|digest| !digest.is_empty());
+    let accumulator = values[2]
+        .as_deref()
+        .map(serde_json::from_slice::<RuntimeLogAccumulator>)
+        .transpose()?;
+    if let Some(accumulator) = &accumulator {
+        accumulator.validate()?;
+        if accumulator.tree_size != commit_cursor {
+            return Err(Error::Substrate(format!(
+                "snapshot runtime accumulator size {} differs from cursor {commit_cursor}",
+                accumulator.tree_size
+            )));
+        }
+    }
+    let schema_revision = values[3]
+        .as_deref()
+        .map(serde_json::from_slice::<RuntimeSchemaRegistry>)
+        .transpose()?
+        .map(|schema| schema.revision);
+    let read = match accumulator {
+        Some(accumulator) => ReadStamp::authenticated(
+            scope.clone(),
+            schema_revision,
+            0,
+            commit_cursor,
+            head_digest,
+            accumulator.root,
+        )?,
+        None if commit_cursor == 0 => ReadStamp::authenticated(
+            scope.clone(),
+            schema_revision,
+            0,
+            commit_cursor,
+            head_digest,
+            RuntimeLogAccumulator::new().root,
+        )?,
+        None => ReadStamp::new(
+            scope.clone(),
+            schema_revision,
+            0,
+            commit_cursor,
+            head_digest,
+        )?,
+    };
+    let objects = native_snapshot_objects(bundle, Some(scope))?;
+    Ok((read, objects))
+}
+
+/// Reads the project artifact view from a live native database snapshot. This
+/// is used by the cluster adapter without reopening a second database handle.
+pub fn native_database_artifact_view(
+    database: &Database,
+    scope: &ScopeId,
+) -> Result<(ReadStamp, Vec<ObjectReference>)> {
+    let snapshot = database.snapshot();
+    let read = native_read_stamp(database, snapshot, scope)?;
+    let rows = scan_space(database, snapshot, keyspaces::RUNTIME_OBJECTS, &[])?;
+    let objects = decode_snapshot_objects(database_codec(database)?, rows, Some(scope))?;
+    Ok((read, objects))
+}
+
+/// Reads every immutable reference in a physical snapshot. Unlike the
+/// project-specific transfer view, this permits multiple scopes and is the
+/// final target-side activation gate.
+pub fn native_snapshot_all_object_references(
+    bundle: &SnapshotBundleFile,
+) -> Result<Vec<ObjectReference>> {
+    native_snapshot_objects(bundle, None)
+}
+
+fn native_snapshot_objects(
+    bundle: &SnapshotBundleFile,
+    required_scope: Option<&ScopeId>,
+) -> Result<Vec<ObjectReference>> {
+    let codec = snapshot_codec(bundle)?;
+    let start = codec
+        .encode(keyspaces::RUNTIME_OBJECTS, &[])
+        .expect("canonical keyspace");
+    let end = prefix_end(&start);
+    let values = bundle.scan(&start, end.as_deref()).map_err(Error::from)?;
+    decode_snapshot_objects(codec, values, required_scope)
+}
+
+fn decode_snapshot_objects(
+    codec: keyspaces::NativeKeyCodec,
+    values: Vec<(Vec<u8>, Vec<u8>)>,
+    required_scope: Option<&ScopeId>,
+) -> Result<Vec<ObjectReference>> {
+    if values.len() > 1_000_000 {
+        return Err(Error::Substrate(
+            "native snapshot object-reference limit exceeded".into(),
+        ));
+    }
+    let mut objects = values
+        .into_iter()
+        .map(|(stored_key, value)| {
+            let object: ObjectReference = serde_json::from_slice(&value)?;
+            object.validate()?;
+            let logical = strip_space(codec, keyspaces::RUNTIME_OBJECTS, &stored_key)?;
+            let split = logical.iter().position(|byte| *byte == 0).ok_or_else(|| {
+                Error::Substrate("native snapshot object key has no scope boundary".into())
+            })?;
+            let encoded_scope = std::str::from_utf8(&logical[..split])
+                .map_err(|error| Error::Substrate(error.to_string()))?;
+            let encoded_scope = ScopeId::new(encoded_scope)?;
+            if required_scope.is_some_and(|scope| scope != &encoded_scope) {
+                return Err(Error::Substrate(
+                    "native snapshot object project scope differs from the transfer".into(),
+                ));
+            }
+            let expected = codec
+                .encode(
+                    keyspaces::RUNTIME_OBJECTS,
+                    &runtime_identity_key(&encoded_scope, &object.reference),
+                )
+                .expect("canonical keyspace");
+            if stored_key != expected {
+                return Err(Error::Substrate(
+                    "native snapshot object key/value identity differs from its canonical reference"
+                        .into(),
+                ));
+            }
+            Ok(object)
+        })
+        .collect::<Result<Vec<_>>>()?;
+    objects.sort_by(|left, right| left.reference.cmp(&right.reference));
+    if required_scope.is_some()
+        && objects
+            .windows(2)
+            .any(|pair| pair[0].reference >= pair[1].reference)
+    {
+        return Err(Error::Substrate(
+            "native snapshot contains duplicate object references".into(),
+        ));
+    }
+    Ok(objects)
+}
+
+fn runtime_identity_key(scope: &ScopeId, reference: &RuntimeRef) -> Vec<u8> {
+    let mut key = Vec::with_capacity(
+        scope.as_str().len() + reference.kind.as_str().len() + reference.id.as_str().len() + 2,
+    );
+    key.extend_from_slice(scope.as_str().as_bytes());
+    key.push(0);
+    key.extend_from_slice(reference.kind.as_str().as_bytes());
+    key.push(0);
+    key.extend_from_slice(reference.id.as_str().as_bytes());
+    key
+}
+
+fn write(
+    database: &mut Database,
+    mut operations: Vec<Mutation>,
+    durability: Durability,
+) -> Result<()> {
+    transcode_operations(database, &mut operations)?;
+    database.write_owned(
+        WriteBatch::new(operations)?,
+        match durability {
+            Durability::Authoritative => rrd_lsm::Durability::Authoritative,
+            Durability::Buffered => rrd_lsm::Durability::Buffered,
+        },
+    )?;
+    Ok(())
+}
+
+fn transcode_operations(database: &Database, operations: &mut [Mutation]) -> Result<()> {
+    let codec = database_codec(database)?;
+    if codec == keyspaces::NativeKeyCodec::TagV2 {
+        return Ok(());
+    }
+    for operation in operations {
+        let key = match operation {
+            Mutation::Put { key, .. } | Mutation::Delete { key } => key,
+        };
+        *key = transcode_staged_key(codec, std::mem::take(key))?;
+    }
+    Ok(())
+}
+
+fn transcode_staged_key(codec: keyspaces::NativeKeyCodec, staged: Vec<u8>) -> Result<Vec<u8>> {
+    let (&tag, logical) = staged
+        .split_first()
+        .ok_or_else(|| Error::Substrate("staged native key is empty".into()))?;
+    let space = keyspaces::native_keyspace_for_tag(tag)
+        .ok_or_else(|| Error::Substrate(format!("unknown staged native keyspace tag {tag}")))?;
+    match codec {
+        keyspaces::NativeKeyCodec::TextV1 => keyspaces::NativeKeyCodec::TextV1
+            .encode(space, logical)
+            .ok_or_else(|| Error::Substrate(format!("unknown native keyspace {space:?}"))),
+        keyspaces::NativeKeyCodec::TagV2 => Ok(staged),
+    }
+}
+
+fn put(operations: &mut Vec<Mutation>, space: &str, key: &[u8], value: Vec<u8>) {
+    operations.push(Mutation::Put {
+        key: storage_key(space, key),
+        value,
+    });
+}
+
+fn delete(operations: &mut Vec<Mutation>, space: &str, key: &[u8]) {
+    operations.push(Mutation::Delete {
+        key: storage_key(space, key),
+    });
+}
+
+fn put_sequence(operations: &mut Vec<Mutation>, key: &[u8], sequence: u64) {
+    put(
+        operations,
+        keyspaces::META,
+        key,
+        sequence.to_string().into_bytes(),
+    );
+}
+
+fn read_sequence(database: &Database, snapshot: Snapshot, key: &[u8]) -> Result<u64> {
+    get(database, snapshot, keyspaces::META, key)?
+        .as_deref()
+        .map(decode_sequence)
+        .transpose()
+        .map(Option::unwrap_or_default)
+}
+
+fn decode_sequence(value: &[u8]) -> Result<u64> {
+    std::str::from_utf8(value)
+        .map_err(|error| Error::CorruptWatermark(error.to_string()))?
+        .parse::<u64>()
+        .map_err(|error| Error::CorruptWatermark(error.to_string()))
+}
+
+fn get(
+    database: &Database,
+    snapshot: Snapshot,
+    space: &str,
+    key: &[u8],
+) -> Result<Option<Vec<u8>>> {
+    database
+        .get(&encoded_storage_key(database, space, key)?, snapshot)
+        .map_err(Error::from)
+}
+
+fn get_json<T: DeserializeOwned>(
+    database: &Database,
+    snapshot: Snapshot,
+    space: &str,
+    key: &[u8],
+) -> Result<Option<T>> {
+    get(database, snapshot, space, key)?
+        .map(|bytes| serde_json::from_slice(&bytes).map_err(Error::from))
+        .transpose()
+}
+
+fn scan_space(
+    database: &Database,
+    snapshot: Snapshot,
+    space: &str,
+    prefix: &[u8],
+) -> Result<Vec<(Vec<u8>, Vec<u8>)>> {
+    let start = encoded_storage_key(database, space, prefix)?;
+    let end = prefix_end(&start);
+    database
+        .scan(&start, end.as_deref(), snapshot)
+        .map_err(Error::from)
+}
+
+fn scan_space_from(
+    database: &Database,
+    snapshot: Snapshot,
+    space: &str,
+    from: &[u8],
+) -> Result<Vec<(Vec<u8>, Vec<u8>)>> {
+    let start = encoded_storage_key(database, space, from)?;
+    let end = prefix_end(&encoded_storage_key(database, space, &[])?);
+    database
+        .scan(&start, end.as_deref(), snapshot)
+        .map_err(Error::from)
+}
+
+fn storage_key(space: &str, key: &[u8]) -> Vec<u8> {
+    keyspaces::NativeKeyCodec::TagV2
+        .encode(space, key)
+        .expect("native mutations use a canonical keyspace")
+}
+
+#[cfg(test)]
+fn legacy_storage_key(space: &str, key: &[u8]) -> Vec<u8> {
+    keyspaces::NativeKeyCodec::TextV1
+        .encode(space, key)
+        .expect("native tests use a canonical keyspace")
+}
+
+fn database_codec(database: &Database) -> Result<keyspaces::NativeKeyCodec> {
+    keyspaces::NativeKeyCodec::from_application_format(database.manifest().application_format)
+        .ok_or_else(|| {
+            Error::Substrate(format!(
+                "unsupported native application format {:?}",
+                database.manifest().application_format
+            ))
+        })
+}
+
+fn snapshot_codec(bundle: &SnapshotBundleFile) -> Result<keyspaces::NativeKeyCodec> {
+    keyspaces::NativeKeyCodec::from_application_format(bundle.source_manifest.application_format)
+        .ok_or_else(|| {
+            Error::Substrate(format!(
+                "unsupported native snapshot application format {:?}",
+                bundle.source_manifest.application_format
+            ))
+        })
+}
+
+fn encoded_storage_key(database: &Database, space: &str, key: &[u8]) -> Result<Vec<u8>> {
+    database_codec(database)?
+        .encode(space, key)
+        .ok_or_else(|| Error::Substrate(format!("unknown native keyspace {space:?}")))
+}
+
+fn strip_space<'a>(
+    codec: keyspaces::NativeKeyCodec,
+    space: &str,
+    stored: &'a [u8],
+) -> Result<&'a [u8]> {
+    codec
+        .strip(space, stored)
+        .ok_or_else(|| Error::Substrate(format!("key escaped native keyspace {space}")))
+}
+
+fn prefix_end(prefix: &[u8]) -> Option<Vec<u8>> {
+    let mut end = prefix.to_vec();
+    for index in (0..end.len()).rev() {
+        if end[index] != u8::MAX {
+            end[index] += 1;
+            end.truncate(index + 1);
+            return Some(end);
+        }
+    }
+    None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rrd_core::{
+        DataTransaction, ObjectReceipt, Producer, RuntimeEvent, RuntimeEventSchema,
+        RuntimeProperties, RuntimeRecordSchema, RuntimeType,
+    };
+    use rrd_lsm::{FailureMode, WriteBoundary};
+
+    fn claim() -> Claim {
+        Claim::new(
+            rrd_core::Subject::new("legacy-subject").unwrap(),
+            rrd_core::Predicate::new("legacy-predicate").unwrap(),
+            "legacy-value",
+            10,
+            11,
+            Producer {
+                actor: "native-test".into(),
+                on_behalf_of: None,
+                session: None,
+            },
+        )
+    }
+
+    fn failure_transaction(database: &Database) -> DataTransaction {
+        let scope = ScopeId::new("instance:native-failure").unwrap();
+        let read = native_read_stamp(database, database.snapshot(), &scope).unwrap();
+        let item_kind = RuntimeType::new("item").unwrap();
+        let item = RuntimeRef::new("item", "one").unwrap();
+        let mut registry = RuntimeSchemaRegistry::empty(1, "native failure matrix");
+        registry
+            .records
+            .insert(item_kind.clone(), RuntimeRecordSchema::default());
+        registry.events.insert(
+            RuntimeType::new("pulse").unwrap(),
+            RuntimeEventSchema {
+                subject_required: true,
+                subject_types: BTreeSet::from([item_kind]),
+                properties: BTreeMap::new(),
+                allow_additional_properties: false,
+            },
+        );
+        DataTransaction::new(
+            read,
+            RuntimeCommit {
+                scope,
+                at: 100,
+                actor: "agent:native-failure".into(),
+                expected_cursor: 0,
+                mutations: vec![
+                    RuntimeMutation::Schema { registry },
+                    RuntimeMutation::Record {
+                        record: RuntimeRecord {
+                            reference: item.clone(),
+                            valid_from: 100,
+                            valid_to: None,
+                            properties: RuntimeProperties::new(),
+                        },
+                    },
+                    RuntimeMutation::Event {
+                        event: RuntimeEvent {
+                            kind: RuntimeType::new("pulse").unwrap(),
+                            subject: Some(item),
+                            properties: RuntimeProperties::new(),
+                        },
+                    },
+                    RuntimeMutation::Claim {
+                        claim: Claim::new(
+                            Subject::new("item:one").unwrap(),
+                            Predicate::new("status").unwrap(),
+                            "ready",
+                            100,
+                            100,
+                            Producer {
+                                actor: "agent:native-failure".into(),
+                                on_behalf_of: None,
+                                session: Some("native-failure".into()),
+                            },
+                        ),
+                    },
+                ],
+            },
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn native_multi_family_transaction_recovers_all_or_none_at_every_wal_boundary() {
+        for mode in [FailureMode::Crash, FailureMode::StorageFull] {
+            for boundary in [WriteBoundary::BeforeWalAppend, WriteBoundary::WalSynced] {
+                let directory = tempfile::tempdir().unwrap();
+                let root = directory.path().join("native-failure");
+                let mut database = Database::create_with_application_format(
+                    &root,
+                    DatabaseOptions::default(),
+                    keyspaces::NATIVE_KEYSPACE_TAG_FORMAT_V2,
+                )
+                .unwrap();
+                let transaction = failure_transaction(&database);
+                let plan = prepare_native_runtime_commit_at_read(
+                    &database,
+                    &transaction.commit,
+                    Some(&transaction.read),
+                    None,
+                )
+                .unwrap();
+                let expected = plan.outcome().clone();
+                let (_, mut operations) = plan.into_parts();
+                transcode_operations(&database, &mut operations).unwrap();
+                let error = database
+                    .write_owned_with_failure(
+                        WriteBatch::new(operations).unwrap(),
+                        rrd_lsm::Durability::Authoritative,
+                        boundary,
+                        mode,
+                    )
+                    .unwrap_err();
+                assert!(matches!(error, rrd_lsm::Error::InjectedFailure { .. }));
+                drop(database);
+
+                let mut recovered = Database::open(&root).unwrap();
+                let snapshot = recovered.snapshot();
+                let published = boundary == WriteBoundary::WalSynced;
+                let expected_runtime_cursor = if published { 4 } else { 0 };
+                let expected_claim_sequence = if published { 1 } else { 0 };
+                assert_eq!(
+                    read_sequence(&recovered, snapshot, keyspaces::RUNTIME_CURSOR).unwrap(),
+                    expected_runtime_cursor,
+                    "mode={mode:?} boundary={boundary:?}"
+                );
+                assert_eq!(
+                    read_sequence(&recovered, snapshot, keyspaces::SEQUENCE_WATERMARK).unwrap(),
+                    expected_claim_sequence,
+                    "mode={mode:?} boundary={boundary:?}"
+                );
+                assert_eq!(
+                    scan_space(&recovered, snapshot, keyspaces::RUNTIME_CHANGES, &[])
+                        .unwrap()
+                        .len(),
+                    expected_runtime_cursor as usize
+                );
+                assert_eq!(
+                    scan_space(&recovered, snapshot, keyspaces::RUNTIME_OUTBOX, &[])
+                        .unwrap()
+                        .len(),
+                    if published { 2 } else { 0 }
+                );
+                assert_eq!(
+                    scan_space(&recovered, snapshot, keyspaces::CLAIMS, &[])
+                        .unwrap()
+                        .len(),
+                    expected_claim_sequence as usize
+                );
+
+                let outcome: Option<RuntimeCommitOutcome> = get_json(
+                    &recovered,
+                    snapshot,
+                    keyspaces::RUNTIME_COMMITS,
+                    expected.commit_id.as_bytes(),
+                )
+                .unwrap();
+                assert_eq!(outcome.as_ref(), published.then_some(&expected));
+                let audit: Option<AuditEnvelope> = get_json(
+                    &recovered,
+                    snapshot,
+                    keyspaces::RUNTIME_AUDIT,
+                    expected.commit_id.as_bytes(),
+                )
+                .unwrap();
+                assert_eq!(
+                    audit.as_ref().and_then(|value| value.read.as_ref()),
+                    published.then_some(&transaction.read)
+                );
+                assert_eq!(
+                    audit.as_ref().and_then(|value| value.outcome_cursor),
+                    published.then_some(4)
+                );
+                let schema: Option<RuntimeSchemaRegistry> = get_json(
+                    &recovered,
+                    snapshot,
+                    keyspaces::RUNTIME_SCHEMAS,
+                    transaction.commit.scope.as_str().as_bytes(),
+                )
+                .unwrap();
+                assert_eq!(schema.is_some(), published);
+                let record: Option<RuntimeRecord> = get_json(
+                    &recovered,
+                    snapshot,
+                    keyspaces::RUNTIME_RECORDS,
+                    &runtime_identity_key(
+                        &transaction.commit.scope,
+                        &RuntimeRef::new("item", "one").unwrap(),
+                    ),
+                )
+                .unwrap();
+                assert_eq!(record.is_some(), published);
+
+                recovered
+                    .write_owned(
+                        WriteBatch::new(vec![Mutation::Put {
+                            key: b"post-reopen".to_vec(),
+                            value: b"accepted".to_vec(),
+                        }])
+                        .unwrap(),
+                        rrd_lsm::Durability::Authoritative,
+                    )
+                    .unwrap();
+            }
+        }
+    }
+
+    #[test]
+    fn legacy_inline_sequence_envelope_remains_strict_and_readable() {
+        let claim = claim();
+        let claim_key = key::claim_key(
+            &claim.subject,
+            &claim.predicate,
+            claim.valid_from,
+            claim.tx_time,
+        );
+        let encoded = serde_json::to_vec(&claim).unwrap();
+        let envelope = encode_native_sequence_value(&encoded);
+        assert_eq!(
+            decode_native_sequence_value(&envelope).unwrap(),
+            Some(encoded.as_slice())
+        );
+        assert_eq!(decode_native_sequence_value(&claim_key).unwrap(), None);
+        assert!(decode_native_sequence_value(NATIVE_SEQUENCE_VALUE_MAGIC).is_err());
+    }
+
+    #[test]
+    fn native_replay_reads_compact_key_reference_sequence_values() {
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path().join("legacy-native");
+        let claim = claim();
+        let claim_key = key::claim_key(
+            &claim.subject,
+            &claim.predicate,
+            claim.valid_from,
+            claim.tx_time,
+        );
+        let mut database = Database::create(&root).unwrap();
+        database
+            .write_owned(
+                WriteBatch::new(vec![
+                    Mutation::Put {
+                        key: legacy_storage_key(keyspaces::SEQUENCE_INDEX, &key::sequence_key(1)),
+                        value: claim_key.clone(),
+                    },
+                    Mutation::Put {
+                        key: legacy_storage_key(keyspaces::CLAIMS, &claim_key),
+                        value: serde_json::to_vec(&claim).unwrap(),
+                    },
+                    Mutation::Put {
+                        key: legacy_storage_key(keyspaces::META, keyspaces::SEQUENCE_WATERMARK),
+                        value: b"1".to_vec(),
+                    },
+                ])
+                .unwrap(),
+                rrd_lsm::Durability::Authoritative,
+            )
+            .unwrap();
+        drop(database);
+
+        let engine = NativeEngine::open(&root).unwrap();
+        assert_eq!(Engine::claims_in_range(&engine, 0, 1).unwrap(), vec![claim]);
+    }
+
+    #[test]
+    fn new_native_database_authenticates_and_reopens_compact_keyspace_tags() {
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path().join("compact-native");
+        let expected = claim();
+        let engine = NativeEngine::open(&root).unwrap();
+        assert_eq!(
+            engine.manifest().unwrap().application_format,
+            Some(keyspaces::NATIVE_KEYSPACE_TAG_FORMAT_V2)
+        );
+        Engine::append_batch(&engine, std::slice::from_ref(&expected)).unwrap();
+        {
+            let database = engine.lock().unwrap();
+            let rows = database
+                .scan(&[1], Some(&[2]), database.snapshot())
+                .unwrap();
+            assert_eq!(rows.len(), 1);
+            assert_eq!(rows[0].0.first(), Some(&1));
+            assert!(database
+                .get(
+                    &legacy_storage_key(
+                        keyspaces::CLAIMS,
+                        &key::claim_key(
+                            &expected.subject,
+                            &expected.predicate,
+                            expected.valid_from,
+                            expected.tx_time,
+                        )
+                    ),
+                    database.snapshot(),
+                )
+                .unwrap()
+                .is_none());
+        }
+        engine.flush(12).unwrap();
+        drop(engine);
+
+        let reopened = NativeEngine::open(&root).unwrap();
+        assert_eq!(
+            reopened.manifest().unwrap().application_format,
+            Some(keyspaces::NATIVE_KEYSPACE_TAG_FORMAT_V2)
+        );
+        assert_eq!(
+            Engine::claims_in_range(&reopened, 0, 1).unwrap(),
+            vec![expected]
+        );
+    }
+
+    #[test]
+    fn native_open_denies_unknown_authenticated_application_format() {
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path().join("unknown-native-format");
+        drop(
+            Database::create_with_application_format(&root, DatabaseOptions::default(), 7).unwrap(),
+        );
+        assert!(matches!(
+            NativeEngine::open(&root),
+            Err(Error::Substrate(reason)) if reason.contains("unsupported native application format")
+        ));
+    }
+
+    #[test]
+    fn compact_write_transcoder_denies_malformed_or_unknown_staged_keys() {
+        assert!(transcode_staged_key(keyspaces::NativeKeyCodec::TagV2, Vec::new()).is_err());
+        assert!(
+            transcode_staged_key(keyspaces::NativeKeyCodec::TagV2, b"\x13logical".to_vec())
+                .is_err()
+        );
+        assert_eq!(
+            transcode_staged_key(keyspaces::NativeKeyCodec::TagV2, b"\x01logical".to_vec(),)
+                .unwrap(),
+            b"\x01logical"
+        );
+        assert_eq!(
+            transcode_staged_key(keyspaces::NativeKeyCodec::TextV1, b"\x01logical".to_vec(),)
+                .unwrap(),
+            b"claims\0logical"
+        );
+    }
+
+    #[test]
+    fn snapshot_object_closure_denies_foreign_project_references() {
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path().join("multi-project-native");
+        let mut database = Database::create(&root).unwrap();
+        let first_scope = ScopeId::new("project:first").unwrap();
+        let second_scope = ScopeId::new("project:second").unwrap();
+        let object = |id: &str, bytes: &[u8]| {
+            let sha256 = rrd_core::digest::sha256_hex(bytes);
+            ObjectReference::for_bytes(
+                id,
+                None,
+                "application/octet-stream",
+                bytes,
+                ObjectReceipt {
+                    backend: "fixture".into(),
+                    key: ObjectReference::canonical_key(&sha256).unwrap(),
+                    version: None,
+                    etag: None,
+                },
+            )
+            .unwrap()
+        };
+        let first = object("first:bytes", b"first");
+        let second = object("second:bytes", b"second");
+        database
+            .write_owned(
+                WriteBatch::new(vec![
+                    Mutation::Put {
+                        key: legacy_storage_key(
+                            keyspaces::RUNTIME_OBJECTS,
+                            &runtime_identity_key(&first_scope, &first.reference),
+                        ),
+                        value: serde_json::to_vec(&first).unwrap(),
+                    },
+                    Mutation::Put {
+                        key: legacy_storage_key(
+                            keyspaces::RUNTIME_OBJECTS,
+                            &runtime_identity_key(&second_scope, &second.reference),
+                        ),
+                        value: serde_json::to_vec(&second).unwrap(),
+                    },
+                ])
+                .unwrap(),
+                rrd_lsm::Durability::Authoritative,
+            )
+            .unwrap();
+        let spool = directory.path().join("multi-project.snapshot");
+        let bundle = database.export_snapshot_file(1, &spool).unwrap();
+
+        let error = native_snapshot_object_references(&bundle, &first_scope).unwrap_err();
+        assert!(error.to_string().contains("project scope"));
+    }
+}

@@ -1,0 +1,350 @@
+name: reusable ci
+
+on:
+  workflow_call:
+    inputs:
+      linux-standard-runner:
+        description: JSON runs-on value for a trusted standard Linux runner
+        required: true
+        type: string
+      linux-heavy-runner:
+        description: JSON runs-on value for a trusted heavy Linux runner
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  CARGO_INCREMENTAL: "0"
+  CARGO_TERM_COLOR: always
+
+jobs:
+  topology-smoke:
+    name: supervised RRD + Connectome topology
+    runs-on: ${{ fromJSON(inputs.linux-standard-runner) }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@f8be11a05b1d4f3fcebe6410cc16743212b999b0 # 1.98.0
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          shared-key: linux-topology
+          cache-on-failure: true
+      - name: Build supervisor and service processes
+        run: cargo build --locked -p rrflow-cli -p rrd-server -p connectome-ui -p rrd-security
+      - name: rrflow dev up full-topology smoke
+        run: |
+          set -euo pipefail
+          smoke_root="$RUNNER_TEMP/rrflow-topology-smoke"
+          mkdir -p "$smoke_root"
+          rrflow_path="${CARGO_TARGET_DIR:-target}/debug/rrflow"
+          cleanup() {
+            "$rrflow_path" dev stop --root "$smoke_root" --timeout-ms 5000 >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+          "$rrflow_path" dev up --root "$smoke_root" --instance ci-topology --rrd-bind 127.0.0.1:19477 --connectome-bind 127.0.0.1:14387 --no-build
+          "$rrflow_path" dev status --root "$smoke_root"
+          curl --fail --silent --show-error http://127.0.0.1:19477/v1/health/ready
+          curl --fail --silent --show-error http://127.0.0.1:14387/api/snapshot >/dev/null
+          "$rrflow_path" dev stop --root "$smoke_root" --timeout-ms 5000
+          trap - EXIT
+
+  estate-portability:
+    name: estate process (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - windows-latest
+          - macos-latest
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@f8be11a05b1d4f3fcebe6410cc16743212b999b0 # 1.98.0
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          shared-key: estate-process-${{ matrix.os }}
+          cache-on-failure: true
+      - name: Test persistent estate authority and commands
+        run: cargo test -p rrd-estate --all-targets --locked
+      - name: Test RRD daemon process contract
+        run: cargo test -p rrd-server --bin rrd-server --locked
+      - name: Build cross-package controller fixture
+        run: cargo build -p rrflow-cli --bin rrd-estate-controller --locked
+      - name: Test real child and controller recovery
+        run: cargo test -p rrd-server --test local_estate_driver --locked -- --nocapture
+      - name: Deny process-boundary warnings
+        run: cargo clippy -p rrd-estate -p rrd-server --all-targets --locked -- -D warnings
+
+  verify:
+    name: verify
+    runs-on: ${{ fromJSON(inputs.linux-heavy-runner) }}
+    # Repository-wide policy and evidence checks run separately from package
+    # test binaries so their target graph cannot exhaust the hosted fallback.
+    timeout-minutes: 60
+    env:
+      CARGO_BUILD_JOBS: "2"
+      CARGO_PROFILE_TEST_DEBUG: "0"
+      RUSTFLAGS: "-C link-arg=-Wl,--threads=1"
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@f8be11a05b1d4f3fcebe6410cc16743212b999b0 # 1.98.0
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          shared-key: linux-policy-jobs2-test-debug0-lld1
+          cache-on-failure: false
+      - name: Check Rust formatting
+        run: cargo fmt --all -- --check
+      - name: Enforce owner-controlled release version
+        run: python3 scripts/check_version.py
+      - name: Enforce repository CI policy
+        run: python3 scripts/ci/check_workflow.py
+      - name: Enforce generated product-surface parity
+        run: python3 scripts/ci/check_generated_surfaces.py
+      - name: Enforce RRFlow engine ownership
+        run: cargo test -p rrd-engine --test workspace_architecture --locked
+      - name: Verify controlled evaluation evidence
+        run: cargo run --locked -p rrflow-eval -- verify eval/results/2026-08-18-summary.json
+      - name: Enforce kernel dependency boundary
+        run: |
+          tree="$(cargo tree --locked -p rrd-core --edges normal --depth 1)"
+          printf '%s\n' "$tree"
+          test "$(printf '%s\n' "$tree" | tail -n +2 | wc -l)" -eq 1
+          printf '%s\n' "$tree" | tail -n 1 | grep -q 'serde v'
+      - name: Enforce offline edge dependency and binary budgets
+        run: |
+          tree="$(cargo tree --locked -p rrflow-edge --edges normal)"
+          printf '%s\n' "$tree"
+          ! printf '%s\n' "$tree" | grep -Eiq 'reqwest|hyper|tokio|rustls|openssl|ureq|curl|quinn|tonic'
+          local_model_tree="$(cargo tree --locked -p rrd-inference --features fastembed-local --edges normal)"
+          printf '%s\n' "$local_model_tree"
+          ! printf '%s\n' "$local_model_tree" | grep -Eiq 'reqwest|hyper|tokio|rustls|openssl|ureq|curl|quinn|tonic|hf-hub'
+          cargo build --locked --release -p rrflow-edge
+          binary="${CARGO_TARGET_DIR:-target}/release/rrflow-edge"
+          test "$(stat -c '%s' "$binary")" -le 2097152
+
+  engine-suites:
+    name: engine suite (${{ matrix.name }})
+    runs-on: ${{ fromJSON(inputs.linux-heavy-runner) }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: kernel-storage
+            packages: "-p rrd-core -p rrd-lsm -p rrd-store -p rrd-maintenance"
+          - name: query-retrieval
+            packages: "-p rrd-query -p rrd-graph -p rrd-vector -p rrd-inference -p rrd-operator-knowledge"
+          - name: engine-authority
+            packages: "-p rrd-contract -p rrd-cluster -p rrd-engine -p rrd-estate -p rrd-security"
+          - name: service-protocol
+            packages: "-p rrd-server -p rrd-client -p rrflow-mcp -p rrflow-cli"
+          - name: product-operations
+            packages: "-p connectome-ui -p rrd-kubernetes -p rrflow-edge -p rrflow-eval"
+    env:
+      CARGO_BUILD_JOBS: "2"
+      CARGO_PROFILE_TEST_DEBUG: "0"
+      PACKAGE_SELECTION: ${{ matrix.packages }}
+      RUSTFLAGS: "-C link-arg=-Wl,--threads=1"
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@f8be11a05b1d4f3fcebe6410cc16743212b999b0 # 1.98.0
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          shared-key: linux-engine-${{ matrix.name }}-test-debug0-lld1
+          cache-on-failure: false
+      - name: Build cross-package controller fixture
+        if: ${{ matrix.name == 'service-protocol' }}
+        run: cargo build -p rrflow-cli --bin rrd-estate-controller --locked
+      - name: Test cohesive engine subsystem
+        run: cargo test $PACKAGE_SELECTION --all-targets --locked
+      - name: Deny cohesive engine subsystem warnings
+        run: cargo clippy $PACKAGE_SELECTION --all-targets --locked -- -D warnings
+
+  sdk-conformance:
+    name: supported SDK conformance
+    runs-on: ${{ fromJSON(inputs.linux-heavy-runner) }}
+    timeout-minutes: 60
+    env:
+      CARGO_BUILD_JOBS: "2"
+      CARGO_PROFILE_TEST_DEBUG: "0"
+      RUSTFLAGS: "-C link-arg=-Wl,--threads=1"
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@f8be11a05b1d4f3fcebe6410cc16743212b999b0 # 1.98.0
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          shared-key: linux-sdk-conformance-test-debug0-lld1
+          cache-on-failure: false
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+        with:
+          version: 11.22.0
+          run_install: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 24.20.0
+          cache: pnpm
+          cache-dependency-path: sdks/typescript/pnpm-lock.yaml
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: 3.11.16
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
+        with:
+          version: 0.11.21
+          enable-cache: true
+          cache-dependency-glob: sdks/python/uv.lock
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version: 1.24.13
+          cache: false
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
+        with:
+          distribution: temurin
+          java-version: 21.0.12.1+1
+          cache: maven
+          cache-dependency-path: sdks/java/pom.xml
+      - uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5
+        with:
+          dotnet-version: 10.0.111
+          cache: true
+          cache-dependency-path: |
+            sdks/dotnet/src/Rrflow.Rrd.Client/packages.lock.json
+            sdks/dotnet/tests/Rrflow.Rrd.Client.Tests/packages.lock.json
+      - name: Install checksum-pinned Maven
+        env:
+          MAVEN_VERSION: 3.9.12
+          MAVEN_SHA512: 0a1be79f02466533fc1a80abbef8796e4f737c46c6574ede5658b110899942a94db634477dfd3745501c80aef9aac0d4f841d38574373f7e2d24cce89d694f7084f
+        run: |
+          archive="$RUNNER_TEMP/apache-maven-$MAVEN_VERSION-bin.tar.gz"
+          maven_root="$RUNNER_TEMP/apache-maven-$MAVEN_VERSION"
+          curl --fail --silent --show-error --location \
+            --output "$archive" \
+            "https://archive.apache.org/dist/maven/maven-3/3.9.12/binaries/apache-maven-$MAVEN_VERSION-bin.tar.gz"
+          printf '%s  %s\n' "$MAVEN_SHA512" "$archive" | sha512sum --check --strict
+          tar -xzf "$archive" -C "$RUNNER_TEMP"
+          printf '%s\n' "$maven_root/bin" >> "$GITHUB_PATH"
+      - name: Qualify all supported SDKs against one live corpus
+        run: python3 scripts/ci/run_sdk_conformance.py
+
+  optional-features:
+    name: optional feature (${{ matrix.package }})
+    runs-on: ${{ fromJSON(inputs.linux-heavy-runner) }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        package:
+          - rrd-cluster
+          - rrd-engine
+          - rrd-inference
+          - rrd-vector
+    env:
+      CARGO_BUILD_JOBS: "2"
+      CARGO_PROFILE_TEST_DEBUG: "0"
+      RUSTFLAGS: "-C link-arg=-Wl,--threads=1"
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@f8be11a05b1d4f3fcebe6410cc16743212b999b0 # 1.98.0
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          shared-key: linux-feature-${{ matrix.package }}-test-debug0-lld1
+          cache-on-failure: false
+      - name: Test package optional features
+        run: cargo test -p ${{ matrix.package }} --all-targets --all-features --locked
+      - name: Deny package optional-feature warnings
+        run: cargo clippy -p ${{ matrix.package }} --all-targets --all-features --locked -- -D warnings
+
+  pgvector-feature:
+    name: optional feature (rrd-operator-knowledge)
+    runs-on: ${{ fromJSON(inputs.linux-heavy-runner) }}
+    timeout-minutes: 30
+    env:
+      CARGO_BUILD_JOBS: "2"
+      CARGO_PROFILE_TEST_DEBUG: "0"
+      RUSTFLAGS: "-C link-arg=-Wl,--threads=1"
+    services:
+      pgvector:
+        image: pgvector/pgvector@sha256:1d50c689b0a6511b9ea0a15615281c81a59fd04a08eb35057ec8646fb3a2118a
+        env:
+          POSTGRES_USER: rrflow_test
+          POSTGRES_PASSWORD: rrflow_test_password
+          POSTGRES_DB: rrd_operator_knowledge_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U rrflow_test -d rrd_operator_knowledge_test"
+          --health-interval 2s
+          --health-timeout 5s
+          --health-retries 20
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@f8be11a05b1d4f3fcebe6410cc16743212b999b0 # 1.98.0
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          shared-key: linux-feature-rrd-operator-knowledge-test-debug0-lld1
+          cache-on-failure: false
+      - name: Test PostgreSQL operator-knowledge feature
+        env:
+          RRFLOW_PGVECTOR_TEST_URL: postgresql://rrflow_test:rrflow_test_password@127.0.0.1:5432/rrd_operator_knowledge_test?sslmode=disable
+          RRFLOW_PGVECTOR_TEST_DISPOSABLE: "1"
+        run: cargo test -p rrd-operator-knowledge --all-targets --all-features --locked
+      - name: Deny PostgreSQL operator-knowledge warnings
+        run: cargo clippy -p rrd-operator-knowledge --all-targets --all-features --locked -- -D warnings
+
+  ci-gate:
+    name: ci-gate
+    if: ${{ always() }}
+    needs:
+      - topology-smoke
+      - estate-portability
+      - verify
+      - engine-suites
+      - sdk-conformance
+      - optional-features
+      - pgvector-feature
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require every CI partition
+        env:
+          TOPOLOGY_RESULT: ${{ needs.topology-smoke.result }}
+          PORTABILITY_RESULT: ${{ needs.estate-portability.result }}
+          VERIFY_RESULT: ${{ needs.verify.result }}
+          ENGINE_SUITES_RESULT: ${{ needs.engine-suites.result }}
+          SDK_CONFORMANCE_RESULT: ${{ needs.sdk-conformance.result }}
+          OPTIONAL_FEATURES_RESULT: ${{ needs.optional-features.result }}
+          PGVECTOR_FEATURE_RESULT: ${{ needs.pgvector-feature.result }}
+        run: |
+          test "$TOPOLOGY_RESULT" = success
+          test "$PORTABILITY_RESULT" = success
+          test "$VERIFY_RESULT" = success
+          test "$ENGINE_SUITES_RESULT" = success
+          test "$SDK_CONFORMANCE_RESULT" = success
+          test "$OPTIONAL_FEATURES_RESULT" = success
+          test "$PGVECTOR_FEATURE_RESULT" = success
