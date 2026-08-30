@@ -5,8 +5,12 @@
 //! capture; it never parses a shell program.
 
 use crate::command::Execution;
-use rrd_engine::{digest, Reader, RrdEngine};
-use serde::Serialize;
+use rrd_engine::{
+    digest, ExactExecutionObservationV1, ExactExecutionRepositoryV1, ExactExecutionRequestV1,
+    ExactExecutionStreamV1, Reader, RrdEngine, EXACT_EXECUTION_CONTRACT, MAX_EXACT_EXECUTION_ARGV,
+    MAX_EXACT_EXECUTION_ARG_BYTES, MAX_EXACT_EXECUTION_OUTPUT_BYTES,
+    MAX_EXACT_EXECUTION_TIMEOUT_MS,
+};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::ffi::OsStr;
@@ -26,43 +30,9 @@ pub struct ExactCommandRequest<'a> {
     pub max_output_bytes: usize,
 }
 
-#[derive(Debug, Serialize)]
 struct StreamEvidence {
-    sha256: String,
-    bytes: u64,
-    retained_bytes: usize,
-    truncated: bool,
-    utf8: Option<String>,
-    #[serde(skip)]
+    identity: ExactExecutionStreamV1,
     retained: Vec<u8>,
-}
-
-#[derive(Debug, Serialize)]
-struct RepositoryEvidence {
-    revision: String,
-    worktree_sha256: String,
-    changed_paths: Vec<String>,
-}
-
-#[derive(Debug, Serialize)]
-struct ExactCommandReport {
-    request_sha256: String,
-    executable: String,
-    executable_sha256: String,
-    exact_argv_sha256: String,
-    cwd: String,
-    environment_sha256: String,
-    environment_entries: usize,
-    repository_before: RepositoryEvidence,
-    repository_after: RepositoryEvidence,
-    exit_code: Option<i32>,
-    signal: Option<i32>,
-    success: bool,
-    timed_out: bool,
-    duration_ms: u64,
-    spawn_error: Option<String>,
-    stdout: StreamEvidence,
-    stderr: StreamEvidence,
 }
 
 pub fn execute(
@@ -81,11 +51,19 @@ pub fn execute(
         max_output_bytes,
     } = request;
     validate_argv(exact_argv)?;
-    if timeout_ms == 0 {
-        return Err("exec timeout must be greater than zero".into());
+    if timeout_ms == 0 || timeout_ms > MAX_EXACT_EXECUTION_TIMEOUT_MS {
+        return Err(format!(
+            "exec timeout must be in 1..={MAX_EXACT_EXECUTION_TIMEOUT_MS} milliseconds"
+        )
+        .into());
     }
-    if max_output_bytes == 0 {
-        return Err("exec output evidence limit must be greater than zero".into());
+    if max_output_bytes == 0
+        || u64::try_from(max_output_bytes).unwrap_or(u64::MAX) > MAX_EXACT_EXECUTION_OUTPUT_BYTES
+    {
+        return Err(format!(
+            "exec output evidence limit must be in 1..={MAX_EXACT_EXECUTION_OUTPUT_BYTES} bytes"
+        )
+        .into());
     }
 
     let root = std::fs::canonicalize(root)?;
@@ -102,23 +80,26 @@ pub fn execute(
     let (environment_sha256, environment_entries) = inherited_environment_identity();
     let repository_before = repository_evidence(&root)?;
 
-    let tool_input = json!({
-        "contract": "rrflow-exact-argv-v1",
-        "project_root": root,
-        "cwd": cwd,
-        "invoked_as": exact_argv[0],
-        "executable": executable,
-        "executable_sha256": executable_sha256,
-        "exact_argv": exact_argv,
-        "exact_argv_sha256": exact_argv_sha256,
-        "environment_sha256": environment_sha256,
-        "environment_entries": environment_entries,
-        "repository_revision": repository_before.revision,
-        "worktree_sha256": repository_before.worktree_sha256,
-        "timeout_ms": timeout_ms,
-        "max_output_bytes": max_output_bytes,
-        "verification_policy": "checked_in_work_plan",
-    });
+    let mut execution_request = ExactExecutionRequestV1 {
+        contract: EXACT_EXECUTION_CONTRACT.into(),
+        project_root_sha256: digest::sha256_hex(&os_bytes(root.as_os_str())),
+        cwd: cwd.to_string_lossy().into_owned(),
+        invoked_as: exact_argv[0].clone(),
+        executable: executable.to_string_lossy().into_owned(),
+        executable_sha256,
+        exact_argv: exact_argv.to_vec(),
+        exact_argv_sha256,
+        environment_sha256,
+        environment_entries: u32::try_from(environment_entries)
+            .map_err(|_| "inherited environment entry count exceeds u32")?,
+        repository_before,
+        timeout_ms,
+        max_output_bytes: u64::try_from(max_output_bytes)?,
+        verification_policy: "checked_in_work_plan".into(),
+        request_sha256: String::new(),
+    };
+    execution_request.seal()?;
+    let tool_input = serde_json::to_value(&execution_request)?;
     let mut lifecycle_input = json!({
         "tool_name": EXEC_TOOL,
         "tool_input": tool_input,
@@ -147,6 +128,23 @@ pub fn execute(
             .into());
     }
 
+    let authorization_sha256 = match (
+        authorization.lifecycle_context.as_ref(),
+        authorization.lifecycle_authorization.as_ref(),
+    ) {
+        (Some(_), Some(lifecycle_authorization)) => lifecycle_authorization.decision_sha256.clone(),
+        (None, None) => digest::sha256_hex(
+            [
+                b"rrflow-attuned-exec-authorization-v1\0".as_slice(),
+                request_sha256.as_bytes(),
+            ]
+            .concat()
+            .as_slice(),
+        ),
+        _ => return Err("lifecycle gate returned a partial authorization".into()),
+    };
+    revalidate_authorized_request(&execution_request, &root, &cwd)?;
+
     // The engine CAS occurs after every policy check and immediately before
     // spawn. Governed projects consume the canonical lifecycle authorization;
     // projects without a checked-in work plan retain the legacy attunement
@@ -165,7 +163,7 @@ pub fn execute(
         (None, None) => {
             store.consume_attuned_authorization(&root, &request_sha256, now, "cli:rrflow-exec")?;
         }
-        _ => return Err("lifecycle gate returned a partial authorization".into()),
+        _ => unreachable!("authorization shape was validated above"),
     }
 
     let started = Instant::now();
@@ -177,20 +175,15 @@ pub fn execute(
         max_output_bytes,
     );
     let duration_ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
-    let repository_after = repository_evidence(&root).unwrap_or_else(|error| RepositoryEvidence {
-        revision: repository_before.revision.clone(),
-        worktree_sha256: digest::sha256_hex(error.to_string().as_bytes()),
-        changed_paths: vec!["<repository evidence unavailable>".into()],
-    });
-    let mut report = ExactCommandReport {
-        request_sha256,
-        executable: executable.to_string_lossy().into_owned(),
-        executable_sha256,
-        exact_argv_sha256,
-        cwd: cwd.to_string_lossy().into_owned(),
-        environment_sha256,
-        environment_entries,
-        repository_before,
+    let repository_after =
+        repository_evidence(&root).unwrap_or_else(|error| ExactExecutionRepositoryV1 {
+            revision: execution_request.repository_before.revision.clone(),
+            worktree_sha256: digest::sha256_hex(error.to_string().as_bytes()),
+            changed_paths: vec!["<repository evidence unavailable>".into()],
+        });
+    let mut report = ExactExecutionObservationV1 {
+        request: execution_request,
+        authorization_sha256,
         repository_after,
         exit_code: process.status.as_ref().and_then(ExitStatus::code),
         signal: exit_signal(process.status.as_ref()),
@@ -200,9 +193,11 @@ pub fn execute(
         timed_out: process.timed_out,
         duration_ms,
         spawn_error: process.spawn_error,
-        stdout: process.stdout,
-        stderr: process.stderr,
+        stdout: process.stdout.identity.clone(),
+        stderr: process.stderr.identity.clone(),
+        observation_sha256: String::new(),
     };
+    report.seal()?;
 
     let tool_response = serde_json::to_value(&report)?;
     let mut post_input = json!({
@@ -235,10 +230,10 @@ pub fn execute(
         serde_json::to_string_pretty(&report)?
     } else {
         let mut stdout = std::io::stdout().lock();
-        stdout.write_all(&report.stdout.retained)?;
+        stdout.write_all(&process.stdout.retained)?;
         stdout.flush()?;
         let mut stderr = std::io::stderr().lock();
-        stderr.write_all(&report.stderr.retained)?;
+        stderr.write_all(&process.stderr.retained)?;
         if report.stdout.truncated || report.stderr.truncated {
             writeln!(
                 stderr,
@@ -250,18 +245,13 @@ pub fn execute(
     };
     let detail = Some(format!(
         "exact argv {} exit={:?} signal={:?} timeout={} stdout={} stderr={}",
-        report.request_sha256,
+        report.request.request_sha256,
         report.exit_code,
         report.signal,
         report.timed_out,
         report.stdout.sha256,
         report.stderr.sha256,
     ));
-    // Retained bytes are no longer needed once they have been rendered. Clear
-    // them so a caller retaining the report path cannot accidentally duplicate
-    // potentially sensitive output in memory.
-    report.stdout.retained.clear();
-    report.stderr.retained.clear();
     Ok(Execution {
         text,
         effectiveness: None,
@@ -360,22 +350,26 @@ fn capture_stream<R: Read>(mut input: R, retain_limit: usize) -> StreamEvidence 
     let utf8 = std::str::from_utf8(&retained).ok().map(str::to_owned);
     let sha256 = lowercase_hex(&hasher.finalize());
     StreamEvidence {
-        sha256,
-        bytes,
-        retained_bytes: retained.len(),
-        truncated: bytes > retained.len() as u64,
-        utf8,
+        identity: ExactExecutionStreamV1 {
+            sha256,
+            bytes,
+            retained_bytes: retained.len() as u64,
+            truncated: bytes > retained.len() as u64,
+            retained_utf8: utf8,
+        },
         retained,
     }
 }
 
 fn empty_stream_evidence() -> StreamEvidence {
     StreamEvidence {
-        sha256: digest::sha256_hex(&[]),
-        bytes: 0,
-        retained_bytes: 0,
-        truncated: false,
-        utf8: Some(String::new()),
+        identity: ExactExecutionStreamV1 {
+            sha256: digest::sha256_hex(&[]),
+            bytes: 0,
+            retained_bytes: 0,
+            truncated: false,
+            retained_utf8: Some(String::new()),
+        },
         retained: Vec::new(),
     }
 }
@@ -386,6 +380,11 @@ fn validate_argv(argv: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     }
     if argv.iter().any(|argument| argument.contains('\0')) {
         return Err("exec argv cannot contain NUL bytes".into());
+    }
+    if argv.len() > MAX_EXACT_EXECUTION_ARGV
+        || argv.iter().map(String::len).sum::<usize>() > MAX_EXACT_EXECUTION_ARG_BYTES
+    {
+        return Err("exec argv exceeds its item or byte bound".into());
     }
     Ok(())
 }
@@ -522,7 +521,9 @@ fn os_bytes(value: &OsStr) -> Vec<u8> {
     value.to_string_lossy().as_bytes().to_vec()
 }
 
-fn repository_evidence(root: &Path) -> Result<RepositoryEvidence, Box<dyn std::error::Error>> {
+fn repository_evidence(
+    root: &Path,
+) -> Result<ExactExecutionRepositoryV1, Box<dyn std::error::Error>> {
     let head = git_output(root, &["rev-parse", "--verify", "HEAD"])?;
     let revision = if head.status.success() {
         format!("git:{}", String::from_utf8_lossy(&head.stdout).trim())
@@ -541,12 +542,13 @@ fn repository_evidence(root: &Path) -> Result<RepositoryEvidence, Box<dyn std::e
     identity.extend_from_slice(&head.stdout);
     identity.extend_from_slice(&status.stdout);
     identity.extend_from_slice(&diff.stdout);
-    let changed_paths = status
+    let mut changed_paths = status
         .stdout
         .split(|byte| *byte == 0)
         .filter(|entry| entry.len() > 3)
         .map(|entry| String::from_utf8_lossy(&entry[3..]).into_owned())
         .collect::<Vec<_>>();
+    changed_paths.sort();
     for path in changed_paths.iter().filter(|path| {
         status
             .stdout
@@ -561,11 +563,41 @@ fn repository_evidence(root: &Path) -> Result<RepositoryEvidence, Box<dyn std::e
             identity.extend_from_slice(&bytes);
         }
     }
-    Ok(RepositoryEvidence {
+    Ok(ExactExecutionRepositoryV1 {
         revision,
         worktree_sha256: digest::sha256_hex(&identity),
         changed_paths,
     })
+}
+
+fn revalidate_authorized_request(
+    request: &ExactExecutionRequestV1,
+    root: &Path,
+    cwd: &Path,
+) -> Result<(), Box<dyn std::error::Error>> {
+    request.verify()?;
+    if request.project_root_sha256 != digest::sha256_hex(&os_bytes(root.as_os_str()))
+        || request.cwd != cwd.to_string_lossy()
+    {
+        return Err("authorized project root or cwd changed before spawn".into());
+    }
+    let executable = resolve_executable(&request.invoked_as, cwd)?;
+    let executable_sha256 = digest::sha256_hex(&std::fs::read(&executable)?);
+    if request.executable != executable.to_string_lossy()
+        || request.executable_sha256 != executable_sha256
+    {
+        return Err("authorized executable identity changed before spawn".into());
+    }
+    let (environment_sha256, environment_entries) = inherited_environment_identity();
+    if request.environment_sha256 != environment_sha256
+        || request.environment_entries != u32::try_from(environment_entries)?
+    {
+        return Err("authorized inherited environment changed before spawn".into());
+    }
+    if request.repository_before != repository_evidence(root)? {
+        return Err("authorized repository revision or worktree changed before spawn".into());
+    }
+    Ok(())
 }
 
 fn git_output(
@@ -660,5 +692,84 @@ mod tests {
             exact_argv,
             ["printf", "%s", "one argument; not shell syntax"]
         );
+    }
+
+    #[test]
+    fn stream_capture_retains_a_bound_but_hashes_the_complete_output() {
+        let captured = capture_stream(&b"0123456789"[..], 4);
+        assert_eq!(captured.retained, b"0123");
+        assert_eq!(captured.identity.bytes, 10);
+        assert_eq!(captured.identity.retained_bytes, 4);
+        assert!(captured.identity.truncated);
+        assert_eq!(captured.identity.sha256, digest::sha256_hex(b"0123456789"));
+    }
+
+    #[test]
+    fn authorized_executable_drift_is_denied_before_spawn() {
+        let root = tempfile::tempdir().unwrap();
+        std::process::Command::new("git")
+            .args(["init", "--quiet"])
+            .current_dir(root.path())
+            .status()
+            .unwrap();
+        let executable = root.path().join("runner");
+        std::fs::write(&executable, b"version-one").unwrap();
+        let root_path = std::fs::canonicalize(root.path()).unwrap();
+        let cwd = root_path.clone();
+        let exact_argv = vec![
+            executable.to_string_lossy().into_owned(),
+            "one argument".into(),
+        ];
+        let (environment_sha256, environment_entries) = inherited_environment_identity();
+        let mut request = ExactExecutionRequestV1 {
+            contract: EXACT_EXECUTION_CONTRACT.into(),
+            project_root_sha256: digest::sha256_hex(&os_bytes(root_path.as_os_str())),
+            cwd: cwd.to_string_lossy().into_owned(),
+            invoked_as: exact_argv[0].clone(),
+            executable: std::fs::canonicalize(&executable)
+                .unwrap()
+                .to_string_lossy()
+                .into_owned(),
+            executable_sha256: digest::sha256_hex(b"version-one"),
+            exact_argv_sha256: digest::sha256_hex(&serde_json::to_vec(&exact_argv).unwrap()),
+            exact_argv,
+            environment_sha256,
+            environment_entries: u32::try_from(environment_entries).unwrap(),
+            repository_before: repository_evidence(&root_path).unwrap(),
+            timeout_ms: 1_000,
+            max_output_bytes: 1_024,
+            verification_policy: "checked_in_work_plan".into(),
+            request_sha256: String::new(),
+        };
+        request.seal().unwrap();
+        revalidate_authorized_request(&request, &root_path, &cwd).unwrap();
+        std::fs::write(executable, b"version-two").unwrap();
+        assert!(revalidate_authorized_request(&request, &root_path, &cwd)
+            .unwrap_err()
+            .to_string()
+            .contains("executable identity changed"));
+    }
+
+    #[test]
+    fn cargo_and_javascript_vectors_are_distinct_without_shell_retokenization() {
+        let cargo = vec![
+            "cargo".to_owned(),
+            "test".to_owned(),
+            "one filter".to_owned(),
+        ];
+        let javascript = vec![
+            "npm".to_owned(),
+            "test".to_owned(),
+            "--".to_owned(),
+            "one spec".to_owned(),
+        ];
+        validate_argv(&cargo).unwrap();
+        validate_argv(&javascript).unwrap();
+        assert_ne!(
+            digest::sha256_hex(&serde_json::to_vec(&cargo).unwrap()),
+            digest::sha256_hex(&serde_json::to_vec(&javascript).unwrap())
+        );
+        assert_eq!(cargo[2], "one filter");
+        assert_eq!(javascript[3], "one spec");
     }
 }

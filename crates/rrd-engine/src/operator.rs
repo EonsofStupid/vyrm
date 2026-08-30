@@ -266,6 +266,13 @@ impl RrdEngine {
         crate::consume_lifecycle_tool_authorization(&self.storage, context, authorization, now)
     }
 
+    pub fn exact_execution_observation(
+        &self,
+        request_sha256: &str,
+    ) -> OperatorResult<Option<crate::ExactExecutionObservationV1>> {
+        crate::load_exact_execution_observation(&self.storage, request_sha256)
+    }
+
     pub fn consume_attuned_authorization(
         &self,
         root: &Path,

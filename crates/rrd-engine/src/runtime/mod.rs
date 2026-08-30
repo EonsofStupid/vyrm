@@ -23,6 +23,7 @@ mod attunement;
 pub mod cluster_transfer;
 pub mod context;
 pub mod data_plane;
+pub mod execution;
 pub mod hook;
 pub mod init;
 pub mod instance;
@@ -70,6 +71,13 @@ pub use context::{
 pub use data_plane::{
     execute_traced_embedding, execute_traced_vector_search, TracedEmbeddingExecution,
     TracedVectorSearch,
+};
+pub use execution::{
+    load_exact_execution_observation, record_exact_execution_observation,
+    ExactExecutionObservationV1, ExactExecutionRepositoryV1, ExactExecutionRequestV1,
+    ExactExecutionStreamV1, EXACT_EXECUTION_CONTRACT, MAX_EXACT_EXECUTION_ARGV,
+    MAX_EXACT_EXECUTION_ARG_BYTES, MAX_EXACT_EXECUTION_CHANGED_PATHS,
+    MAX_EXACT_EXECUTION_OUTPUT_BYTES, MAX_EXACT_EXECUTION_TIMEOUT_MS,
 };
 pub use hook::{handle, HookContext, HookEvent, HookResponse};
 pub use init::{init, InitReport, STORE_DIR};

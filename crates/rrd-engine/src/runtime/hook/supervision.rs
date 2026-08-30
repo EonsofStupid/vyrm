@@ -3,7 +3,8 @@ use super::super::{
     authorize_planned_lifecycle_tool, complete_planned_lifecycle_tool,
     consume_lifecycle_tool_authorization, ensure_routing_fresh,
     load_active_lifecycle_tool_authorization, load_active_work_item_plan,
-    record_attunement_receipt, refresh_lifecycle_projection, require_fresh_attunement,
+    record_attunement_receipt, record_exact_execution_observation, refresh_lifecycle_projection,
+    require_fresh_attunement, ExactExecutionObservationV1, ExactExecutionRequestV1,
     InstanceBinding, LifecycleEnforcementLevelV1, LifecycleProjectionRefreshV1,
     LifecycleSupervisorContextV1, LifecycleToolAuthorizationV1, LifecycleToolCompletionV1,
     LifecycleToolRequestV1, ProjectAttunementReceipt, Registry, WorkPlanSnapshot, REASONING_SCOPE,
@@ -78,8 +79,31 @@ pub(super) fn complete<E: Engine>(
     let authorization = load_active_lifecycle_tool_authorization(store, &context, &request)?;
     let plan = load_active_work_item_plan(store, &snapshot.plan_id)?
         .ok_or("post-tool observation has no active work-item plan")?;
-    let encoded = serde_json::to_vec(input)?;
-    let observation_sha256 = digest::sha256_hex(&encoded);
+    let exact_observation = if request.tool_name == "RRFlowExec" {
+        let exact_request: ExactExecutionRequestV1 =
+            serde_json::from_value(input.get("tool_input").cloned().unwrap_or(Value::Null))?;
+        exact_request.verify()?;
+        let observation: ExactExecutionObservationV1 = serde_json::from_value(
+            input
+                .get("tool_response")
+                .cloned()
+                .ok_or("RRFlowExec post-tool input has no typed response")?,
+        )?;
+        observation.verify()?;
+        if observation.request != exact_request
+            || observation.authorization_sha256 != authorization.decision_sha256
+        {
+            return Err("RRFlowExec observation substituted its request or authorization".into());
+        }
+        Some(observation)
+    } else {
+        None
+    };
+    let observation_sha256 = if let Some(observation) = &exact_observation {
+        observation.observation_sha256.clone()
+    } else {
+        digest::sha256_hex(&serde_json::to_vec(input)?)
+    };
     let success = tool_succeeded(input);
 
     let refreshed = ensure_routing_fresh(store, root).and_then(|ready| {
@@ -151,6 +175,9 @@ pub(super) fn complete<E: Engine>(
             },
             now,
         )?;
+    }
+    if let Some(observation) = &exact_observation {
+        record_exact_execution_observation(store, observation)?;
     }
     Ok(PlannedHookCompletion {
         work_item_id: plan.work_item_id,

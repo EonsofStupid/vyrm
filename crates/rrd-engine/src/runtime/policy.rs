@@ -224,6 +224,30 @@ mod tests {
     }
 
     #[test]
+    fn every_patch_shell_generated_code_and_external_mutation_class_is_governed() {
+        for tool in [
+            "Edit",
+            "Write",
+            "NotebookEdit",
+            "Bash",
+            "apply_patch",
+            "write_file",
+            "replace",
+            "run_shell_command",
+            "RRFlowExec",
+            "mcp__rrflow__rrflow_data_commit",
+        ] {
+            assert!(
+                matches!(
+                    evaluate_tool(None, &serde_json::json!({"tool_name":tool})),
+                    ToolPolicy::Deny { .. }
+                ),
+                "{tool} escaped the full permit chain"
+            );
+        }
+    }
+
+    #[test]
     fn a_declared_attempt_allows_execution_and_control_commands_cannot_deadlock() {
         let mut run = planned();
         run.append(

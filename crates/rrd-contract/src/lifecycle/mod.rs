@@ -1,6 +1,7 @@
 mod architecture;
 mod envelope;
 mod event;
+mod execution;
 mod payload;
 mod snapshot;
 mod supervision;
@@ -22,6 +23,12 @@ pub use envelope::{
 pub use event::{
     LifecycleEnforcementLevelV1, LifecycleEventTypeV1, LifecyclePhaseV1, LIFECYCLE_SPEC_VERSION,
     MAX_LIFECYCLE_EVENT_BYTES,
+};
+pub use execution::{
+    ExactExecutionObservationV1, ExactExecutionRepositoryV1, ExactExecutionRequestV1,
+    ExactExecutionStreamV1, EXACT_EXECUTION_CONTRACT, MAX_EXACT_EXECUTION_ARGV,
+    MAX_EXACT_EXECUTION_ARG_BYTES, MAX_EXACT_EXECUTION_CHANGED_PATHS,
+    MAX_EXACT_EXECUTION_OUTPUT_BYTES, MAX_EXACT_EXECUTION_TIMEOUT_MS,
 };
 pub use payload::{
     LifecyclePayloadV1, LifecycleRiskV1, LifecycleTaskKindV1, LifecycleTurnStatusV1,
