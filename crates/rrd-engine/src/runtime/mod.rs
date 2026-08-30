@@ -18,6 +18,7 @@
 //! model's discipline. Writes ride Buffered durability and never block the
 //! turn; recall is the only synchronous path.
 
+pub mod architecture;
 mod attunement;
 pub mod cluster_transfer;
 pub mod context;
@@ -41,6 +42,17 @@ pub mod vector_residency;
 pub mod workflow;
 pub mod workplan;
 
+pub use architecture::{
+    load_architecture_review, review_architecture, reviewed_golden_patterns, ArchitectureAnswerV1,
+    ArchitectureAssessmentV1, ArchitectureBoundaryDecisionV1, ArchitectureBoundaryKindV1,
+    ArchitectureEvidenceKindV1, ArchitectureEvidenceV1, ArchitectureImpactDispositionV1,
+    ArchitectureImplicationV1, ArchitectureReview, BoundaryChoiceAnswerV1,
+    CapabilityOwnershipAnswerV1, CrossBoundaryImplicationsAnswerV1, GoldenPatternSelectionV1,
+    PathOwnershipAnswerV1, PatternChoiceAnswerV1, PublicContractAnswerV1, RejectedGoldenPatternV1,
+    ReviewedGoldenPattern, SelectedGoldenPatternV1, VerificationMatrixAnswerV1,
+    ARCHITECTURE_ASSESSMENT_FORMAT_VERSION, ARCHITECTURE_REVIEW_FORMAT,
+    GOLDEN_PATTERN_REGISTRY_REVISION, GOLDEN_PATTERN_SELECTION_PROJECTION,
+};
 pub use attunement::{
     authorize_attuned_tool, complete_attuned_tool, consume_attuned_tool_authorization,
     load_attunement_receipt, record_attunement_receipt, require_attuned_tool_authorization,
@@ -52,8 +64,8 @@ pub use cluster_transfer::{
 };
 pub use context::{
     classify_task, load_task_preflight_receipt, ContextSourceRoute, EvidenceDisposition,
-    NamedReadStamp, TaskClassification, TaskPreflightReceipt, GOLDEN_PATTERN_SELECTION_PROJECTION,
-    TASK_PREFLIGHT_RECEIPT_FORMAT, TASK_PREFLIGHT_RECEIPT_PROJECTION,
+    NamedReadStamp, TaskClassification, TaskPreflightReceipt, TASK_PREFLIGHT_RECEIPT_FORMAT,
+    TASK_PREFLIGHT_RECEIPT_PROJECTION,
 };
 pub use data_plane::{
     execute_traced_embedding, execute_traced_vector_search, TracedEmbeddingExecution,

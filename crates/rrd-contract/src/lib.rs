@@ -46,12 +46,19 @@ pub use inference::{
     MAX_EMBEDDING_BATCH_INPUTS, MAX_EMBEDDING_INPUT_BYTES,
 };
 pub use lifecycle::{
+    ArchitectureAnswerV1, ArchitectureAssessmentV1, ArchitectureBoundaryDecisionV1,
+    ArchitectureBoundaryKindV1, ArchitectureEvidenceKindV1, ArchitectureEvidenceV1,
+    ArchitectureImpactDispositionV1, ArchitectureImplicationV1, BoundaryChoiceAnswerV1,
+    CapabilityOwnershipAnswerV1, CrossBoundaryImplicationsAnswerV1, GoldenPatternSelectionV1,
     LifecycleEnforcementLevelV1, LifecycleEventCommandV1, LifecycleEventEnvelopeV1,
     LifecycleEventTypeV1, LifecyclePayloadV1, LifecyclePhaseV1, LifecycleProjectionRefreshV1,
     LifecycleReadStampV1, LifecycleRiskV1, LifecycleSessionSnapshotV1,
     LifecycleSupervisorContextV1, LifecycleTaskKindV1, LifecycleToolAuthorizationV1,
     LifecycleToolCompletionV1, LifecycleToolRequestV1, LifecycleTraceContextV1,
-    LifecycleTurnStatusV1, LIFECYCLE_SPEC_VERSION, MAX_LIFECYCLE_EVENT_BYTES,
+    LifecycleTurnStatusV1, PathOwnershipAnswerV1, PatternChoiceAnswerV1, PublicContractAnswerV1,
+    RejectedGoldenPatternV1, SelectedGoldenPatternV1, VerificationMatrixAnswerV1,
+    ARCHITECTURE_ASSESSMENT_FORMAT_VERSION, GOLDEN_PATTERN_REGISTRY_REVISION,
+    LIFECYCLE_SPEC_VERSION, MAX_LIFECYCLE_EVENT_BYTES,
 };
 pub use platform::{PlatformTermDefinition, PlatformTermRole, PLATFORM_TERMS};
 pub use runtime_tool::{

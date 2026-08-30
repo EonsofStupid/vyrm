@@ -5,8 +5,9 @@
 //! projection state, not another project model or storage authority.
 
 use super::{
-    load_project_artifacts, load_routing, LifecycleRiskV1, LifecycleTaskKindV1,
-    ProjectAttunementReceipt, RoutingReady, WorkflowPreflight, REASONING_SCOPE,
+    load_architecture_review, load_project_artifacts, load_routing, LifecycleRiskV1,
+    LifecycleTaskKindV1, ProjectAttunementReceipt, RoutingReady, WorkflowPreflight,
+    REASONING_SCOPE,
 };
 use rrd_core::{digest, Claim, ReadStamp, RecallSet, ScopeId, Subject};
 use rrd_graph::{EvidenceKind, RoutedFile};
@@ -17,7 +18,6 @@ use std::path::Path;
 
 pub const TASK_PREFLIGHT_RECEIPT_FORMAT: u16 = 1;
 pub const TASK_PREFLIGHT_RECEIPT_PROJECTION: &str = "task-preflight-receipt-v1";
-pub const GOLDEN_PATTERN_SELECTION_PROJECTION: &str = "golden-pattern-selection-v1";
 pub const DEFAULT_SOURCE_LINE_BUDGET: usize = 2_000;
 const MAX_TASK_SUBJECTS: usize = 64;
 const RECEIPT_TTL_MS: u64 = 15 * 60 * 1_000;
@@ -308,21 +308,27 @@ pub(crate) fn assemble_task_context<E: Engine>(
         &(&profile.digest, &policies),
     );
 
-    let (pattern_sha256, pattern_disposition) =
-        match store.get_projection(GOLDEN_PATTERN_SELECTION_PROJECTION)? {
-            Some(bytes) if !bytes.is_empty() => (
-                sealed_digest(b"rrflow-pattern-selection-binding-v1\0", &bytes),
+    let (pattern_sha256, pattern_disposition) = match load_architecture_review(store)? {
+        Some(review)
+            if review.assessment.task_sha256 == task_sha256
+                && review.assessment.topology_sha256 == topology.digest
+                && review.assessment.profile_sha256 == profile.digest
+                && review.assessment.source_tree_sha256 == attunement.source_tree_sha256 =>
+        {
+            (
+                review.selection.selection_sha256,
                 EvidenceDisposition::Current,
-            ),
-            Some(_) => (
-                sealed_digest(b"rrflow-pattern-selection-binding-v1\0", &"empty"),
-                EvidenceDisposition::Stale,
-            ),
-            None => (
-                sealed_digest(b"rrflow-pattern-selection-binding-v1\0", &"unavailable"),
-                EvidenceDisposition::Unavailable,
-            ),
-        };
+            )
+        }
+        Some(review) => (
+            review.selection.selection_sha256,
+            EvidenceDisposition::Stale,
+        ),
+        None => (
+            sealed_digest(b"rrflow-pattern-selection-binding-v1\0", &"unavailable"),
+            EvidenceDisposition::Unavailable,
+        ),
+    };
 
     let projection = store.current_projection()?;
     let claim_sequence = store.sequence()?;

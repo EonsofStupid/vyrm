@@ -229,6 +229,16 @@ impl RrdEngine {
         crate::preflight_task(&self.storage, root, harness, reader, now, budget, task)
     }
 
+    pub fn runtime_review_architecture(
+        &self,
+        root: &Path,
+        task: &str,
+        assessment: crate::ArchitectureAssessmentV1,
+        now: Millis,
+    ) -> OperatorResult<crate::ArchitectureReview> {
+        crate::review_architecture(&self.storage, root, task, assessment, now)
+    }
+
     pub fn handle_runtime_hook(
         &self,
         request: RuntimeHookRequest<'_>,

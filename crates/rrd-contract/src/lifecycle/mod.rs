@@ -1,3 +1,4 @@
+mod architecture;
 mod envelope;
 mod event;
 mod payload;
@@ -5,6 +6,15 @@ mod snapshot;
 mod supervision;
 mod validation;
 
+pub use architecture::{
+    ArchitectureAnswerV1, ArchitectureAssessmentV1, ArchitectureBoundaryDecisionV1,
+    ArchitectureBoundaryKindV1, ArchitectureEvidenceKindV1, ArchitectureEvidenceV1,
+    ArchitectureImpactDispositionV1, ArchitectureImplicationV1, BoundaryChoiceAnswerV1,
+    CapabilityOwnershipAnswerV1, CrossBoundaryImplicationsAnswerV1, GoldenPatternSelectionV1,
+    PathOwnershipAnswerV1, PatternChoiceAnswerV1, PublicContractAnswerV1, RejectedGoldenPatternV1,
+    SelectedGoldenPatternV1, VerificationMatrixAnswerV1, ARCHITECTURE_ASSESSMENT_FORMAT_VERSION,
+    GOLDEN_PATTERN_REGISTRY_REVISION,
+};
 pub use envelope::{
     LifecycleEventCommandV1, LifecycleEventEnvelopeV1, LifecycleReadStampV1,
     LifecycleTraceContextV1,
