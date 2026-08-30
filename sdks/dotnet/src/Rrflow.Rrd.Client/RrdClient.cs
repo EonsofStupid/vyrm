@@ -266,12 +266,18 @@ public sealed partial class RrdClient : IDisposable
             {
                 RequireFields(outcome, "status", "error");
                 JsonElement error = outcome.GetProperty("error");
-                RequireFields(error, "code", "message", "retryable", "details");
-                Dictionary<string, string> details = error.GetProperty("details")
-                    .EnumerateObject().ToDictionary(
-                        property => property.Name,
-                        property => property.Value.GetString() ?? string.Empty,
-                        StringComparer.Ordinal);
+                bool hasDetails = error.TryGetProperty("details", out JsonElement detailsElement);
+                RequireFields(
+                    error,
+                    hasDetails
+                        ? new[] { "code", "message", "retryable", "details" }
+                        : new[] { "code", "message", "retryable" });
+                Dictionary<string, string> details = hasDetails
+                    ? detailsElement.EnumerateObject().ToDictionary(
+                            property => property.Name,
+                            property => property.Value.GetString() ?? string.Empty,
+                            StringComparer.Ordinal)
+                    : new(StringComparer.Ordinal);
                 throw new RrdApiException(
                     status,
                     error.GetProperty("code").GetString() ?? string.Empty,

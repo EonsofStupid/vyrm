@@ -12,6 +12,7 @@ mod inference;
 mod lifecycle;
 mod platform;
 mod runtime_tool;
+mod sdk_conformance;
 mod workplan;
 
 pub use capability_surface::{
@@ -58,6 +59,11 @@ pub use runtime_tool::{
     RuntimeToolAuthorization, RuntimeToolCatalogue, RuntimeToolDescriptor, RuntimeToolInvocation,
     RuntimeToolInvocationResult, RuntimeToolLifecyclePolicy, MAX_RUNTIME_TOOL_ARGUMENT_BYTES,
     MAX_RUNTIME_TOOL_RESULT_BYTES, RUNTIME_TOOL_CATALOGUE_VERSION,
+};
+pub use sdk_conformance::{
+    SdkConformanceBackup, SdkConformanceChangefeed, SdkConformanceCorpus, SdkConformanceExpected,
+    SdkConformanceIdentity, SdkConformanceSession, SdkConformanceTransaction, SdkConformanceVector,
+    SDK_CONFORMANCE_FORMAT_VERSION,
 };
 pub use workplan::{
     WorkGateDefinition, WorkItemDefinition, WorkItemStatus, WorkItemStatusSnapshot,

@@ -4497,6 +4497,7 @@ dependencies = [
  "rrd-contract",
  "rrd-core",
  "rrd-engine",
+ "rrd-estate",
  "rrd-security",
  "rrd-server",
  "rrd-store",

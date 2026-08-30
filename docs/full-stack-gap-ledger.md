@@ -586,10 +586,14 @@ resolve from the same endpoint templates, while the WebSocket router obtains its
 path from the catalogue. Each checked-in generated SDK artifact carries that
 OpenAPI digest, and CI compares TypeScript, Python, Go, Java, and .NET endpoint
 metadata against the contract export without requiring their build toolchains.
-Rust, TypeScript, Python, Go, Java, and .NET have executable walking skeletons;
-shared black-box conformance and release qualification remain open. The Rust
-client owns the current WebSocket client path; language-appropriate WebSocket
-surfaces remain later G06 work and are not counted as G03-W06 transport evidence.
+Rust, TypeScript, Python, Go, Java, and .NET now pass one versioned black-box
+corpus through their public clients against one real, bound, authenticated local
+RRD daemon. The same fixture proves auth, sessions, transactions, query, CRUD,
+vectors, live feeds, backup, estate reads, retries, cancellation/deadlines,
+version rejection, and typed errors. One bounded `sdk-conformance` CI job owns
+the complete toolchain path and the final reducer requires it. The Rust client
+owns the current WebSocket client path; language-appropriate WebSocket surfaces
+remain later G06 work and are not counted as G03-W06 transport evidence.
 
 The first Rust client is now implemented in `rrd-client` and specified by
 [`rrd-rust-client-v1.md`](rrd-rust-client-v1.md). It is async, depends only on
@@ -600,9 +604,9 @@ Its methods cover the entire current endpoint catalogue. A hermetic real-server
 test drops the first TCP connection, proves bounded recovery and negotiation,
 then exercises authentication, exact query, deadline denial, transaction
 begin/preview/abort, changefeed and protected audit. A second real-server test
-proves mTLS success plus anonymous-client and wrong-server-name denial. Broader method rows,
-released-version compatibility, packaging/reference generation, and the other
-language clients keep F5 open.
+proves mTLS success plus anonymous-client and wrong-server-name denial. Broader
+method rows, package publication/reference generation, and distributed-deployment
+qualification keep F5 open.
 
 The TypeScript walking skeleton is implemented in `sdks/typescript` and
 specified by [`rrd-typescript-client-v1.md`](rrd-typescript-client-v1.md).
@@ -610,9 +614,9 @@ OpenAPI TypeScript generates the complete request/response surface and the
 closed runtime endpoint map, ArkType validates untrusted response envelopes,
 and Biome 2 plus strict TypeScript gate the package. Mock-transport tests cover
 bounded retry, API-key session creation, bearer query, identity, deadline,
-remote-cleartext and typed-error behavior. Shared real-server conformance,
-package publication, and generated per-payload runtime validators keep this
-client at walking-skeleton status.
+remote-cleartext and typed-error behavior. The shared corpus now adds real-server
+semantic and incompatible-version qualification. Package publication and
+generated per-payload runtime validators remain open.
 
 The Python walking skeleton is implemented in `sdks/python` and specified by
 [`rrd-python-client-v1.md`](rrd-python-client-v1.md). Its shell-free generator
@@ -622,8 +626,9 @@ bounded responses, correlation, resource identity, mutation idempotency,
 absolute/per-attempt deadlines, safe retry, API-key/session authentication,
 typed errors, and loopback-only cleartext. Pydantic validates response
 envelopes; uv, Ruff, strict mypy, pytest, generation drift, and distribution
-builds gate the package. Async transport, generated per-payload models, shared
-real-server conformance, and publication remain open.
+builds gate the package. The shared corpus adds real-server semantics and
+incompatible-version rejection. Async transport, generated per-payload models,
+and publication remain open.
 
 The Go walking skeleton is implemented in `sdks/go` and specified by
 [`rrd-go-client-v1.md`](rrd-go-client-v1.md). Its shell-free generator emits a
@@ -633,8 +638,8 @@ contexts, bounded response reads, strict envelopes, correlated identities,
 resource validation, mutation idempotency, combined deadlines, safe transport
 retry, API-key/session authentication, redirect denial, and loopback-only
 cleartext. Generation drift, `gofmt`, `go vet`, behavioral tests, and the race
-detector gate it. Generated payload types, shared real-server/version
-conformance, and publication remain open.
+detector gate it. The shared corpus adds real-server semantics and explicit
+version rejection. Generated payload types and publication remain open.
 
 The Java walking skeleton is implemented in `sdks/java` and specified by
 [`rrd-java-client-v1.md`](rrd-java-client-v1.md). Its generator emits a closed
@@ -643,8 +648,9 @@ HTTP client plus Jackson 3.2 enforce bounded reads, exact envelopes, correlation
 resources, mutation idempotency, combined deadlines, safe I/O retry,
 authentication, redirect denial, and loopback-only cleartext. Maven/Java 21
 warnings-as-errors compilation, generator drift, packaging, and real-loopback
-JUnit 6 tests gate it. Async/caller cancellation, generated payload types,
-dependency verification, shared conformance, and publication remain open.
+JUnit 6 tests gate it. The shared corpus adds real-server semantics,
+cancellation/deadline behavior, and explicit version rejection. Async APIs,
+generated payload types, dependency verification, and publication remain open.
 
 The asynchronous .NET walking skeleton is implemented in `sdks/dotnet` and
 specified by [`rrd-dotnet-client-v1.md`](rrd-dotnet-client-v1.md). Its generator
@@ -654,8 +660,9 @@ runtime with caller cancellation, bounded streaming, exact envelopes,
 correlation, resources, mutation idempotency, combined deadlines, safe retry,
 authentication, redirect denial, and loopback-only cleartext. .NET 10 nullable
 analysis/warnings-as-errors, formatting, locked restore, xUnit v3 behavioral
-tests, drift detection, and NuGet packing gate it. Generated payload types,
-shared real-server/version conformance, and publication remain open.
+tests, drift detection, and NuGet packing gate it. The shared corpus adds
+real-server semantics and incompatible-version rejection. Generated payload
+types and publication remain open.
 
 **Deliverables**
 

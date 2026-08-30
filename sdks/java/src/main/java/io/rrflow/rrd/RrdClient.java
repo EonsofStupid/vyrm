@@ -236,16 +236,23 @@ public final class RrdClient {
         if (outcomeStatus.equals("error")) {
             requireExactFields(outcome, Set.of("status", "error"));
             JsonNode error = outcome.path("error");
-            requireExactFields(error, Set.of("code", "message", "retryable", "details"));
+            boolean hasDetails = error.has("details");
+            requireExactFields(
+                    error,
+                    hasDetails
+                            ? Set.of("code", "message", "retryable", "details")
+                            : Set.of("code", "message", "retryable"));
             if (error.path("code").asString().isEmpty()
                     || error.path("message").asString().isEmpty()
                     || !error.path("retryable").isBoolean()
-                    || !error.path("details").isObject()) {
+                    || (hasDetails && !error.path("details").isObject())) {
                 throw new RrdClientException("RRD error outcome is incomplete");
             }
             Map<String, String> details = new HashMap<>();
-            error.path("details").properties().forEach(entry ->
-                    details.put(entry.getKey(), entry.getValue().asString()));
+            if (hasDetails) {
+                error.path("details").properties().forEach(entry ->
+                        details.put(entry.getKey(), entry.getValue().asString()));
+            }
             throw new RrdApiException(
                     status, error.path("code").asString(), error.path("message").asString(),
                     error.path("retryable").asBoolean(), details);

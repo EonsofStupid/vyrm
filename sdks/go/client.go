@@ -336,9 +336,11 @@ func decodeResponse(
 		if envelope.Outcome.Error == nil || envelope.Outcome.Payload != nil {
 			return nil, errors.New("RRD error outcome is missing its error")
 		}
-		if envelope.Outcome.Error.Code == "" || envelope.Outcome.Error.Message == "" ||
-			envelope.Outcome.Error.Details == nil {
+		if envelope.Outcome.Error.Code == "" || envelope.Outcome.Error.Message == "" {
 			return nil, errors.New("RRD error outcome is incomplete")
+		}
+		if envelope.Outcome.Error.Details == nil {
+			envelope.Outcome.Error.Details = map[string]string{}
 		}
 		envelope.Outcome.Error.Status = status
 		return nil, envelope.Outcome.Error

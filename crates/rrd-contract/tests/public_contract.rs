@@ -289,6 +289,25 @@ fn deployment_modes_and_shared_conformance_corpus_are_versioned_and_strict() {
 }
 
 #[test]
+fn supported_sdks_share_one_strict_semantic_corpus() {
+    let corpus: rrd_contract::SdkConformanceCorpus = serde_json::from_str(include_str!(
+        "../../../fixtures/rrd-sdk-conformance-v1.json"
+    ))
+    .unwrap();
+    corpus.validate().unwrap();
+    assert_eq!(corpus.required_domains.len(), 13);
+    assert_eq!(corpus.expected.endpoint_count, 34);
+    assert_eq!(
+        rrd_contract::transaction_operation_sha256(&corpus.transaction.commit.mutations),
+        corpus.transaction.commit.operation_sha256
+    );
+
+    let mut unknown = serde_json::to_value(&corpus).unwrap();
+    unknown["unexpected"] = serde_json::json!(true);
+    assert!(serde_json::from_value::<rrd_contract::SdkConformanceCorpus>(unknown).is_err());
+}
+
+#[test]
 fn malformed_identifiers_and_unknown_fields_fail_during_decode() {
     assert!(serde_json::from_str::<CanonicalId>(r#""Not Canonical""#).is_err());
     assert!(CorrelationId::new("request/id").is_err());

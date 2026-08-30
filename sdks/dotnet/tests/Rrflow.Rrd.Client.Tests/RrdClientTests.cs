@@ -172,7 +172,6 @@ public sealed class RrdClientTests
                         ["code"] = "permission_denied",
                         ["message"] = "policy denied",
                         ["retryable"] = false,
-                        ["details"] = new Dictionary<string, string>(),
                     },
                 },
             });
@@ -190,6 +189,7 @@ public sealed class RrdClientTests
             },
             TestContext.Current.CancellationToken));
         Assert.Equal("permission_denied", denied.Code);
+        Assert.Empty(denied.Details);
         RrdClientException expired = await Assert.ThrowsAsync<RrdClientException>(() => client.CallAsync(
             OperationId.AuditRead,
             new Dictionary<string, object?> { ["after_sequence"] = 0, ["limit"] = 10 },

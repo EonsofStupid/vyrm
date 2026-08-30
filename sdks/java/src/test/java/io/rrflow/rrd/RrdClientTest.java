@@ -135,8 +135,7 @@ final class RrdClientTest {
                             "error", Map.of(
                                     "code", "permission_denied",
                                     "message", "policy denied",
-                                    "retryable", false,
-                                    "details", Map.of()))));
+                                    "retryable", false))));
         });
         try {
             RrdClient client = new RrdClient(baseUrl(server), "sdk-test");
@@ -151,6 +150,7 @@ final class RrdClientTest {
                                     "request-audit", "operation-audit", null, null,
                                     Map.of(), null, session, null)));
             assertEquals("permission_denied", error.code());
+            assertTrue(error.details().isEmpty());
             RrdClientException expired = assertThrows(
                     RrdClientException.class,
                     () -> client.call(

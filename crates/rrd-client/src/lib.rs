@@ -160,6 +160,12 @@ pub struct Session {
     pub lease: SessionLease,
 }
 
+#[derive(serde::Deserialize)]
+struct ResponseProtocol {
+    protocol: String,
+    protocol_version: u16,
+}
+
 #[derive(Debug, Clone)]
 pub struct ClientConfig {
     pub request_timeout: Duration,
@@ -1062,6 +1068,15 @@ impl RrdClient {
                 }
                 bytes.put_slice(data);
             }
+        }
+        let response_protocol: ResponseProtocol = serde_json::from_slice(&bytes).map_err(decode)?;
+        if response_protocol.protocol != PROTOCOL
+            || response_protocol.protocol_version != PROTOCOL_VERSION
+        {
+            return Err(Error::UnsupportedProtocol {
+                protocol: response_protocol.protocol,
+                version: response_protocol.protocol_version,
+            });
         }
         let decoded: ResponseEnvelope<O> = serde_json::from_slice(&bytes).map_err(decode)?;
         if status.is_success() != matches!(decoded.outcome, ResponseOutcome::Ok { .. }) {

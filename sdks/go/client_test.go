@@ -146,7 +146,7 @@ func TestSecurityDeadlinesErrorsAndGeneratedCoverage(t *testing.T) {
 				"protocol": "rrd", "protocol_version": 1,
 				"request_id": requestContext["request_id"], "operation_id": requestContext["operation_id"],
 				"outcome": map[string]any{"status": "error", "error": map[string]any{
-					"code": "permission_denied", "message": "policy denied", "retryable": false, "details": map[string]string{},
+					"code": "permission_denied", "message": "policy denied", "retryable": false,
 				}},
 			}), nil
 		}),
@@ -159,7 +159,7 @@ func TestSecurityDeadlinesErrorsAndGeneratedCoverage(t *testing.T) {
 		RequestID: "request-audit", OperationID: "operation-audit", Session: session,
 	})
 	var apiError *APIError
-	if !errors.As(err, &apiError) || apiError.Code != "permission_denied" {
+	if !errors.As(err, &apiError) || apiError.Code != "permission_denied" || len(apiError.Details) != 0 {
 		t.Fatalf("unexpected API error: %v", err)
 	}
 	_, err = client.Call(context.Background(), OperationAuditRead, map[string]any{"after_sequence": 0, "limit": 10}, RequestOptions{

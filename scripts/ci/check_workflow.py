@@ -186,6 +186,36 @@ def verify_optional_features(optional: str, pgvector: str) -> int:
     return len(expected)
 
 
+def verify_sdk_conformance(block: str) -> None:
+    required = [
+        "uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1",
+        "uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38",
+        "uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1",
+        "uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78",
+        "uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16",
+        "uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961",
+        "uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1",
+        "python3 scripts/ci/run_sdk_conformance.py",
+        "node-version: 24.20.0",
+        "version: 11.22.0",
+        "python-version: 3.11.16",
+        "version: 0.11.21",
+        "go-version: 1.24.13",
+        "cache: false",
+        "java-version: 21.0.12.1+1",
+        "dotnet-version: 10.0.111",
+        "MAVEN_VERSION: 3.9.12",
+        "MAVEN_SHA512: 0a1be79f02466533fc1a80abbef8796e4f737c46c6574ede5658b110899942a94db634477dfd3745501c80aef9aac0d4f841d38574373f7e2d24cce89d694f7084f",
+        "sha512sum --check --strict",
+    ]
+    missing = [fragment for fragment in required if fragment not in block]
+    require(not missing, f"SDK conformance toolchain or runner contract is incomplete: {missing}")
+    require(
+        block.count("python3 scripts/ci/run_sdk_conformance.py") == 1,
+        "SDK qualification must execute through one cohesive orchestrator",
+    )
+
+
 def main() -> None:
     caller = CALLER.read_text()
     reusable = REUSABLE.read_text()
@@ -219,6 +249,7 @@ def main() -> None:
         "estate-portability",
         "verify",
         "engine-suites",
+        "sdk-conformance",
         "optional-features",
         "pgvector-feature",
         "ci-gate",
@@ -243,7 +274,13 @@ def main() -> None:
         "ci-gate must require success for every reduced result",
     )
 
-    heavy_jobs = ["verify", "engine-suites", "optional-features", "pgvector-feature"]
+    heavy_jobs = [
+        "verify",
+        "engine-suites",
+        "sdk-conformance",
+        "optional-features",
+        "pgvector-feature",
+    ]
     for job in heavy_jobs:
         block = jobs[job]
         require(
@@ -268,6 +305,7 @@ def main() -> None:
     )
 
     suite_count, package_count = verify_engine_suites(jobs["engine-suites"])
+    verify_sdk_conformance(jobs["sdk-conformance"])
     feature_count = verify_optional_features(jobs["optional-features"], jobs["pgvector-feature"])
     require(
         reusable.count("cargo build -p rrflow-cli --bin rrd-estate-controller --locked") == 2,

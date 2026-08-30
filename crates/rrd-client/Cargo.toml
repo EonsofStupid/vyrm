@@ -22,6 +22,7 @@ tokio-tungstenite = { version = "0.29", default-features = false, features = ["c
 
 [dev-dependencies]
 rrd-engine = { path = "../rrd-engine" }
+rrd-estate = { path = "../rrd-estate" }
 rrd-security = { path = "../rrd-security" }
 rrd-server = { path = "../rrd-server" }
 rrd-core = { path = "../rrd-core" }
