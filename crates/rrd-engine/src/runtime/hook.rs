@@ -10,6 +10,7 @@
 
 mod supervision;
 
+use super::normalize_hook_input;
 use super::policy::{is_project_mutation_tool, tool_request_digest};
 use super::preflight::{preflight, preflight_task, Preflight};
 use super::reasoning::active_reasoning_run;
@@ -194,6 +195,18 @@ fn handle_inner<E: Engine>(
         now,
         budget,
     } = *ctx;
+    let normalized_input = match normalize_hook_input(harness, event.name(), input) {
+        Ok(input) => input,
+        Err(error) if event == HookEvent::PreToolUse => {
+            return Ok(deny(
+                harness,
+                format!("rrflow: unknown or malformed mutation payload. Wait: {error}"),
+                "denied: adapter payload is not covered",
+            ))
+        }
+        Err(error) => return Err(error.into()),
+    };
+    let input = &normalized_input;
     match event {
         HookEvent::SessionStart => {
             let Preflight {
@@ -739,6 +752,11 @@ fn superseding_claim_mutations<E: Engine>(
 fn deny(harness: Option<&str>, reason: String, detail: &str) -> HookResponse {
     let decision = if harness == Some("gemini-cli") {
         serde_json::json!({"decision": "deny", "reason": reason})
+    } else if harness == Some("github-copilot") {
+        serde_json::json!({
+            "permissionDecision": "deny",
+            "permissionDecisionReason": reason
+        })
     } else {
         serde_json::json!({
             "hookSpecificOutput": {
@@ -757,7 +775,13 @@ fn deny(harness: Option<&str>, reason: String, detail: &str) -> HookResponse {
 }
 
 fn context_output(harness: Option<&str>, event: HookEvent, context: String) -> String {
-    if context.is_empty() || harness != Some("gemini-cli") {
+    if context.is_empty() {
+        return context;
+    }
+    if harness == Some("github-copilot") {
+        return serde_json::json!({"additionalContext": context}).to_string();
+    }
+    if harness != Some("gemini-cli") {
         return context;
     }
     let native_event = match event {
@@ -846,6 +870,12 @@ mod adapter_tests {
         assert_eq!(gemini["decision"], "deny");
         assert_eq!(gemini["reason"], "wait");
         assert!(gemini.get("hookSpecificOutput").is_none());
+
+        let copilot: Value =
+            serde_json::from_str(&deny(Some("github-copilot"), "wait".into(), "denied").stdout)
+                .unwrap();
+        assert_eq!(copilot["permissionDecision"], "deny");
+        assert_eq!(copilot["permissionDecisionReason"], "wait");
     }
 
     #[test]
@@ -869,5 +899,16 @@ mod adapter_tests {
             ),
             "recalled"
         );
+    }
+
+    #[test]
+    fn copilot_context_uses_its_native_additional_context_shape() {
+        let copilot: Value = serde_json::from_str(&context_output(
+            Some("github-copilot"),
+            HookEvent::UserPromptSubmit,
+            "recalled".into(),
+        ))
+        .unwrap();
+        assert_eq!(copilot["additionalContext"], "recalled");
     }
 }

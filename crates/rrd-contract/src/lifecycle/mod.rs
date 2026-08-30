@@ -1,3 +1,4 @@
+mod adapter;
 mod architecture;
 mod envelope;
 mod event;
@@ -7,6 +8,11 @@ mod snapshot;
 mod supervision;
 mod validation;
 
+pub use adapter::{
+    AdapterCoverageEntryV1, AdapterCoveragePointV1, AdapterCoverageStateV1,
+    AdapterCoverageVectorV1, AdapterKindV1, AdapterMutationClassV1, CanonicalAdapterEventV1,
+    ADAPTER_CONFORMANCE_FORMAT_VERSION,
+};
 pub use architecture::{
     ArchitectureAnswerV1, ArchitectureAssessmentV1, ArchitectureBoundaryDecisionV1,
     ArchitectureBoundaryKindV1, ArchitectureEvidenceKindV1, ArchitectureEvidenceV1,

@@ -1,0 +1,14 @@
+# Verified 2026-08-30 against docs.github.com/en/copilot/reference/hooks-reference.
+# Command preToolUse can deny and crashes fail closed, but timeouts are explicitly
+# fail-open; the adapter coverage vector therefore never overstates readiness.
+name = "github-copilot"
+display = "GitHub Copilot CLI"
+hooks = true
+hook_protocol = "copilot"
+mcp_client = true
+mcp_server = false
+context_file = "AGENTS.md"
+config_path = ".github/copilot/settings.json"
+billing = ["subscription"]
+providers = ["github-copilot"]
+notes = "Native preToolUse/postToolUse and lifecycle hooks normalize through RRFlow. Command-hook timeout remains an explicit uncovered mutation path, so proxied execution is required for full enforcement."

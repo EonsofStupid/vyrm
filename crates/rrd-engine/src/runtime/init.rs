@@ -91,6 +91,12 @@ pub fn init<E: Engine>(
                     .into(),
             );
         }
+        if protocol == HookProtocol::Copilot {
+            report.notes.push(
+                "Copilot command-hook timeouts are fail-open; use rrflow exec for full mutation enforcement"
+                    .into(),
+            );
+        }
     } else {
         for degradation in harness.degradations() {
             report.notes.push(degradation);
@@ -230,7 +236,9 @@ fn merge_hook_settings(
 fn hook_settings(protocol: HookProtocol, harness: &str) -> serde_json::Value {
     let root = match protocol {
         HookProtocol::ClaudeCode => "$CLAUDE_PROJECT_DIR".to_owned(),
-        HookProtocol::Codex | HookProtocol::Gemini => "$(git rev-parse --show-toplevel)".to_owned(),
+        HookProtocol::Codex | HookProtocol::Gemini | HookProtocol::Copilot => {
+            "$(git rev-parse --show-toplevel)".to_owned()
+        }
     };
     let rrflow = format!("{} --db \"{root}/{STORE_DIR}\"", hook_executable());
     let command =
@@ -251,6 +259,13 @@ fn hook_settings(protocol: HookProtocol, harness: &str) -> serde_json::Value {
             "timeout": timeout_ms,
             "name": name,
             "description": "RRFlow provider-neutral lifecycle enforcement"
+        })
+    };
+    let copilot_handler = |event: &str, timeout_sec: u64| {
+        serde_json::json!({
+            "type": "command",
+            "bash": command(event),
+            "timeoutSec": timeout_sec
         })
     };
     match protocol {
@@ -280,6 +295,15 @@ fn hook_settings(protocol: HookProtocol, harness: &str) -> serde_json::Value {
             "AfterAgent": [{"hooks": [gemini_handler("stop", "rrflow-after-agent", 30_000)]}],
             "PreCompress": [{"hooks": [gemini_handler("pre-compact", "rrflow-pre-compress", 30_000)]}],
             "SessionEnd": [{"hooks": [gemini_handler("session-end", "rrflow-session-end", 3_000)]}]
+        }}),
+        HookProtocol::Copilot => serde_json::json!({"hooks": {
+            "sessionStart": [copilot_handler("session-start", 90)],
+            "userPromptSubmitted": [copilot_handler("user-prompt-submit", 60)],
+            "preToolUse": [{"type": "command", "matcher": ".*", "bash": command("pre-tool-use"), "timeoutSec": 60}],
+            "postToolUse": [{"type": "command", "matcher": ".*", "bash": command("post-tool-use"), "timeoutSec": 90}],
+            "agentStop": [copilot_handler("stop", 30)],
+            "preCompact": [copilot_handler("pre-compact", 30)],
+            "sessionEnd": [copilot_handler("session-end", 3)]
         }}),
     }
 }

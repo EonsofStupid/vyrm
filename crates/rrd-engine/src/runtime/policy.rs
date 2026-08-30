@@ -4,7 +4,7 @@ use rrd_core::{ReasoningRun, ReasoningState};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use super::{runtime_tool_catalogue, RuntimeToolLifecyclePolicy};
+use super::{classify_adapter_tool, AdapterToolClass};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ContractDifferential {
@@ -40,8 +40,25 @@ pub fn evaluate_tool(run: Option<&ReasoningRun>, input: &Value) -> ToolPolicy {
         .get("tool_name")
         .and_then(Value::as_str)
         .unwrap_or("unknown");
-    if !is_project_mutation_tool(tool) {
-        return ToolPolicy::ReadOnly;
+    match classify_adapter_tool(tool) {
+        AdapterToolClass::ReadOnly => return ToolPolicy::ReadOnly,
+        AdapterToolClass::Unknown => {
+            return ToolPolicy::Deny {
+                differential: ContractDifferential {
+                    run_id: run.map(|run| run.id().to_owned()),
+                    state: run.map(ReasoningRun::state),
+                    actual: format!("unknown tool payload {tool:?}"),
+                    expected: vec![
+                        "a registered read-only tool or mutation class with canonical coverage"
+                            .into(),
+                    ],
+                    differences: vec![
+                        "unknown payloads cannot be proven read-only and fail closed".into(),
+                    ],
+                },
+            }
+        }
+        AdapterToolClass::Mutation(_) => {}
     }
     if is_shell_tool(tool)
         && input
@@ -123,27 +140,14 @@ pub fn evaluate_tool(run: Option<&ReasoningRun>, input: &Value) -> ToolPolicy {
 }
 
 pub(super) fn is_project_mutation_tool(tool: &str) -> bool {
-    matches!(
-        tool,
-        "Edit"
-            | "Write"
-            | "NotebookEdit"
-            | "Bash"
-            | "apply_patch"
-            | "write_file"
-            | "replace"
-            | "run_shell_command"
-            | "RRFlowExec"
-    ) || runtime_tool_catalogue().iter().any(|definition| {
-        definition.lifecycle == RuntimeToolLifecyclePolicy::PlannedMutation
-            && (definition.name == tool
-                || tool.ends_with(&format!("__{}", definition.name))
-                || tool.ends_with(&format!("_{}", definition.name)))
-    })
+    matches!(classify_adapter_tool(tool), AdapterToolClass::Mutation(_))
 }
 
 fn is_shell_tool(tool: &str) -> bool {
-    matches!(tool, "Bash" | "run_shell_command")
+    matches!(
+        tool,
+        "Bash" | "bash" | "powershell" | "run_shell_command" | "RRFlowExec"
+    )
 }
 
 pub(super) fn tool_request_digest(input: &Value) -> Result<String, serde_json::Error> {
@@ -221,6 +225,30 @@ mod tests {
                 ToolPolicy::Deny { .. }
             ));
         }
+    }
+
+    #[test]
+    fn unknown_tool_payloads_never_degrade_to_read_only() {
+        for tool in ["future_mutator", "mcp__foreign__unknown_write", ""] {
+            assert!(matches!(
+                evaluate_tool(None, &serde_json::json!({"tool_name":tool,"tool_input":{}})),
+                ToolPolicy::Deny { .. }
+            ));
+        }
+        assert!(matches!(
+            evaluate_tool(
+                Some(&planned()),
+                &serde_json::json!({"tool_name":"future_mutator","tool_input":{}})
+            ),
+            ToolPolicy::Deny { .. }
+        ));
+        assert!(matches!(
+            evaluate_tool(
+                None,
+                &serde_json::json!({"tool_name":"Read","tool_input":{}})
+            ),
+            ToolPolicy::ReadOnly
+        ));
     }
 
     #[test]

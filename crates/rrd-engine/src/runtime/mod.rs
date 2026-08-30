@@ -18,6 +18,7 @@
 //! model's discipline. Writes ride Buffered durability and never block the
 //! turn; recall is the only synchronous path.
 
+pub mod adapters;
 pub mod architecture;
 mod attunement;
 pub mod cluster_transfer;
@@ -43,6 +44,14 @@ pub mod vector_residency;
 pub mod workflow;
 pub mod workplan;
 
+pub use adapters::{
+    adapter_conformance_fixtures, adapter_coverage, classify_adapter_tool,
+    normalize_adapter_fixture, normalize_hook_input, normalize_tool_proposal,
+    AdapterCoverageEntryV1, AdapterCoveragePointV1, AdapterCoverageStateV1,
+    AdapterCoverageVectorV1, AdapterFixtureDocumentV1, AdapterFixtureExpectedV1, AdapterFixtureV1,
+    AdapterKindV1, AdapterMutationClassV1, AdapterToolClass, CanonicalAdapterEventV1,
+    ADAPTER_CONFORMANCE_FORMAT_VERSION,
+};
 pub use architecture::{
     load_architecture_review, review_architecture, reviewed_golden_patterns, ArchitectureAnswerV1,
     ArchitectureAssessmentV1, ArchitectureBoundaryDecisionV1, ArchitectureBoundaryKindV1,

@@ -926,11 +926,27 @@ fn init_writes_and_merges_current_native_wiring_idempotently() {
         3_000
     );
 
+    // Copilot uses camel-case native events and states its fail-open timeout.
+    let (ok, out, err) = rrflow(
+        &db,
+        &["init", "--harness", "github-copilot", "--root", root_str],
+        None,
+    );
+    assert!(ok, "Copilot init failed: stdout={out} stderr={err}");
+    assert!(out.contains("timeouts are fail-open"), "{out}");
+    let copilot = std::fs::read_to_string(root.join(".github/copilot/settings.json")).unwrap();
+    for expected in ["sessionStart", "preToolUse", "postToolUse", "timeoutSec"] {
+        assert!(copilot.contains(expected), "{expected} missing:\n{copilot}");
+    }
+    let copilot_json: serde_json::Value = serde_json::from_str(&copilot).unwrap();
+    assert_eq!(copilot_json["hooks"]["preToolUse"][0]["timeoutSec"], 60);
+
     // And the status board states every axis.
     let (ok, out, err) = rrflow(&db, &["harness", "status"], None);
     assert!(ok, "status failed: {err}");
     assert!(out.contains("codex-cli    hooks=true"));
     assert!(out.contains("gemini-cli   hooks=true"));
+    assert!(out.contains("github-copilot hooks=true"));
     assert!(
         out.contains("per_usage") && out.contains("subscription"),
         "billing axes missing: {out}"

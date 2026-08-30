@@ -27,6 +27,7 @@ pub enum HookProtocol {
     ClaudeCode,
     Codex,
     Gemini,
+    Copilot,
 }
 
 /// How long a verification claim stays in force: 21 days, in milliseconds.
@@ -118,6 +119,7 @@ impl Registry {
             include_str!("registry/kimi-cli.toml"),
             include_str!("registry/zcode.toml"),
             include_str!("registry/gemini-cli.toml"),
+            include_str!("registry/github-copilot.toml"),
         ]
         .into_iter()
         .map(|raw| toml::from_str(raw).expect("embedded registry row parses"))
@@ -197,7 +199,7 @@ mod tests {
     #[test]
     fn every_embedded_row_parses_and_axes_are_populated() {
         let registry = Registry::builtin();
-        assert_eq!(registry.all().len(), 7);
+        assert_eq!(registry.all().len(), 8);
         for harness in registry.all() {
             assert!(
                 !harness.billing.is_empty(),
@@ -223,5 +225,6 @@ mod tests {
         );
         assert!(registry.get("codex-cli").unwrap().hooks);
         assert!(registry.get("gemini-cli").unwrap().hooks);
+        assert!(registry.get("github-copilot").unwrap().hooks);
     }
 }
