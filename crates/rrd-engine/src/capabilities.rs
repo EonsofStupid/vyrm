@@ -122,6 +122,10 @@ pub fn product_capability_catalogue() -> ProductCapabilityCatalogue {
             );
             expose(binding(capability, ProductSurface::Mcp), tool.name);
             expose(
+                binding(capability, ProductSurface::Cli),
+                format!("rrflow runtime call --tool {}", tool.name),
+            );
+            expose(
                 binding(capability, ProductSurface::Sdk),
                 format!("openapi:runtime-tool-invoke#{}", tool.name),
             );
@@ -146,9 +150,6 @@ pub fn product_capability_catalogue() -> ProductCapabilityCatalogue {
             category: "ai_runtime".into(),
             summary: tool.description.into(),
             bindings: {
-                let operation = WorkPlanOperation::ALL
-                    .into_iter()
-                    .find(|operation| operation.runtime_tool_name() == tool.name);
                 surface_bindings(
                     unavailable(NO_SURFACE_BINDING_REASON),
                     [
@@ -163,10 +164,7 @@ pub fn product_capability_catalogue() -> ProductCapabilityCatalogue {
                         (ProductSurface::Mcp, available(tool.name)),
                         (
                             ProductSurface::Cli,
-                            operation.map_or_else(
-                                || unavailable("No RRFlow CLI command maps this runtime tool."),
-                                |operation| available(operation.cli_command()),
-                            ),
+                            available(format!("rrflow runtime call --tool {}", tool.name)),
                         ),
                         (
                             ProductSurface::Sdk,
@@ -180,6 +178,18 @@ pub fn product_capability_catalogue() -> ProductCapabilityCatalogue {
                 )
             },
         });
+        if let Some(operation) = WorkPlanOperation::ALL
+            .into_iter()
+            .find(|operation| operation.runtime_tool_name() == tool.name)
+        {
+            let capability = capabilities
+                .last_mut()
+                .expect("runtime capability was appended");
+            expose(
+                binding(capability, ProductSurface::Cli),
+                operation.cli_command(),
+            );
+        }
     }
 
     let mut embedded_functions = ProductCapability {

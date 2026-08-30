@@ -109,6 +109,33 @@ fn every_http_operation_and_runtime_tool_has_one_authoritative_surface_row() {
 }
 
 #[test]
+fn every_runtime_tool_has_the_generated_cli_entrypoint() {
+    let catalogue = rrd_engine::product_capability_catalogue();
+    for tool in rrd_engine::runtime_tool_catalogue() {
+        let id = tool.capability_id.map(str::to_owned).unwrap_or_else(|| {
+            format!(
+                "runtime-{}",
+                tool.name.trim_start_matches("rrflow_").replace('_', "-")
+            )
+        });
+        let capability = catalogue
+            .capabilities
+            .iter()
+            .find(|capability| capability.id == id)
+            .unwrap_or_else(|| panic!("missing runtime capability {id}"));
+        let cli = capability
+            .bindings
+            .iter()
+            .find(|binding| binding.surface == ProductSurface::Cli)
+            .unwrap_or_else(|| panic!("missing CLI binding for {}", tool.name));
+        assert_eq!(cli.disposition, SurfaceDisposition::Available);
+        assert!(cli.entrypoints.iter().any(|entrypoint| {
+            entrypoint == &format!("rrflow runtime call --tool {}", tool.name)
+        }));
+    }
+}
+
+#[test]
 fn required_unimplemented_foundation_is_visible_and_not_falsely_available() {
     let catalogue = rrd_engine::product_capability_catalogue();
     for id in [
@@ -170,12 +197,11 @@ fn required_unimplemented_foundation_is_visible_and_not_falsely_available() {
         .iter()
         .find(|binding| binding.surface == ProductSurface::Cli)
         .unwrap();
-    assert_eq!(cli.disposition, SurfaceDisposition::Unavailable);
-    assert!(cli.entrypoints.is_empty());
+    assert_eq!(cli.disposition, SurfaceDisposition::Available);
     assert!(cli
-        .reason
-        .as_deref()
-        .is_some_and(|reason| !reason.is_empty()));
+        .entrypoints
+        .iter()
+        .any(|entrypoint| entrypoint == "rrflow runtime call --tool rrflow_data_rollback"));
 
     let functions = catalogue
         .capabilities

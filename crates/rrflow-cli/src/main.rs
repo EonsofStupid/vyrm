@@ -13,10 +13,11 @@
 mod command;
 mod command_proxy;
 mod dev;
+mod runtime;
 mod workplan;
 
 use clap::Parser;
-use command::Cli;
+use command::{Cli, Command};
 use rrd_engine::{OperatorInvocationInput, Reader, RrdEngine};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
@@ -52,29 +53,29 @@ fn main() -> std::process::ExitCode {
     let cli = Cli::parse();
     let now = now_millis();
 
-    if let Some(result) = command::execute_offline(&cli.db, &cli.command, now, cli.json) {
-        return match result {
-            Ok(execution) => {
-                if !execution.text.is_empty() {
-                    println!("{}", execution.text);
-                }
-                if execution.success {
-                    std::process::ExitCode::SUCCESS
-                } else {
-                    std::process::ExitCode::FAILURE
-                }
-            }
-            Err(error) => {
-                eprintln!("error: {error}");
-                std::process::ExitCode::FAILURE
-            }
-        };
+    if let Command::Runtime { authority, action } = &cli.command {
+        return finish_unrecorded(runtime::execute(
+            cli.db.as_deref(),
+            authority,
+            action,
+            now,
+            cli.json,
+        ));
     }
 
-    let store = match RrdEngine::open_project_store(&cli.db) {
+    let db = cli
+        .db
+        .clone()
+        .unwrap_or_else(|| std::path::PathBuf::from(".rrflow/rrd"));
+
+    if let Some(result) = command::execute_offline(&db, &cli.command, now, cli.json) {
+        return finish_unrecorded(result);
+    }
+
+    let store = match RrdEngine::open_project_store(&db) {
         Ok(store) => store,
         Err(error) => {
-            eprintln!("cannot open database at {}: {error}", cli.db.display());
+            eprintln!("cannot open database at {}: {error}", db.display());
             return std::process::ExitCode::from(2);
         }
     };
@@ -118,6 +119,27 @@ fn main() -> std::process::ExitCode {
         Ok(execution) => {
             // An empty answer prints nothing at all: hook stdout is injected
             // into model context, and a stray newline is not an answer.
+            if !execution.text.is_empty() {
+                println!("{}", execution.text);
+            }
+            if execution.success {
+                std::process::ExitCode::SUCCESS
+            } else {
+                std::process::ExitCode::FAILURE
+            }
+        }
+        Err(error) => {
+            eprintln!("error: {error}");
+            std::process::ExitCode::FAILURE
+        }
+    }
+}
+
+fn finish_unrecorded(
+    result: Result<command::Execution, Box<dyn std::error::Error>>,
+) -> std::process::ExitCode {
+    match result {
+        Ok(execution) => {
             if !execution.text.is_empty() {
                 println!("{}", execution.text);
             }

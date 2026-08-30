@@ -211,6 +211,37 @@ pub fn doctor(root: &Path) -> Result<DevDoctorReport, Box<dyn std::error::Error>
         "implement mutually exclusive embedded and daemon MCP modes; daemon mode must use authenticated rrd-client runtime invocation and must never open the database",
     ));
 
+    let cli_runtime_path = root.join("crates/rrflow-cli/src/runtime.rs");
+    let cli_runtime_test = root.join("crates/rrflow-cli/tests/runtime_modes.rs");
+    let cli_runtime = std::fs::read_to_string(&cli_runtime_path).unwrap_or_default();
+    let cli_package = packages.iter().find(|package| package.name == "rrflow-cli");
+    let cli_has_runtime_modes = cli_package
+        .is_some_and(|package| package.dependencies.contains("rrd-client"))
+        && cli_runtime.contains("RuntimeMode::Embedded")
+        && cli_runtime.contains("RuntimeMode::Daemon")
+        && cli_runtime.contains("RrdClient")
+        && cli_runtime.contains("RrdEngine::open_bound")
+        && cli_runtime.contains("daemon runtime mode does not accept --db or --root")
+        && cli_runtime_test.is_file();
+    checks.push(check(
+        "surface.cli-daemon-mode",
+        cli_has_runtime_modes,
+        "the generated CLI catalogue uses one explicit embedded or authenticated daemon authority",
+        if cli_has_runtime_modes {
+            format!(
+                "{}, {}: strict embedded/daemon modes, authenticated rrd-client, and black-box parity test",
+                relative(&root, &cli_runtime_path),
+                relative(&root, &cli_runtime_test)
+            )
+        } else {
+            format!(
+                "{} lacks a complete mutually exclusive embedded/daemon runtime boundary",
+                relative(&root, &cli_runtime_path)
+            )
+        },
+        "implement generated runtime list/call commands with strict embedded and authenticated daemon modes, plus a black-box parity test",
+    ));
+
     let router = root.join("crates/rrd-server/src/http/router.rs");
     let router_source = std::fs::read_to_string(&router)?;
     let endpoint_catalogue = rrd_contract::endpoint_catalogue();
@@ -652,6 +683,11 @@ mod tests {
             check.id == "surface.mcp-daemon-mode"
                 && check.status == CheckStatus::Passed
                 && check.evidence.contains("black-box daemon test")
+        }));
+        assert!(report.checks.iter().any(|check| {
+            check.id == "surface.cli-daemon-mode"
+                && check.status == CheckStatus::Passed
+                && check.evidence.contains("black-box parity test")
         }));
     }
 }

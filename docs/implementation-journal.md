@@ -3713,3 +3713,21 @@ index.
   proving the same principal is allowed `ServiceInspect`, denied
   `MemoryContextRead`, and preserved with both granular decisions in durable
   audit. A separate process test rejects an unsecured daemon at startup.
+
+## 2026-08-30 — G06-W04 generated CLI runtime candidate
+
+- Added one typed `rrflow runtime list|call` family generated from the
+  engine-owned runtime catalogue. Every executable runtime tool now has the
+  generic CLI entrypoint; specialized work-plan commands remain additional
+  bindings rather than a second operation registry.
+- Embedded mode discovers the project binding, verifies the exact store, and
+  invokes the public engine boundary. Daemon mode accepts no database or root,
+  negotiates initialized security, authenticates an owner-only API-key session,
+  requires exact catalogue parity, and invokes only through `rrd-client`.
+- Kept migration, format, archive, backup, and restore recovery operations in
+  their separately typed offline `storage` family. Parser and runtime checks
+  prove those commands cannot be composed with daemon authority coordinates.
+- Added process-level parity evidence for exact catalogue equality and stable
+  service-status fields while the daemon is sole writer. Reopen evidence proves
+  the CLI principal and `ServiceInspect` decision persist in the structured
+  audit journal. The development doctor now enforces the same topology.

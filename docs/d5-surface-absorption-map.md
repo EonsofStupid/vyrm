@@ -2,8 +2,8 @@
 
 **Status:** authoritative implementation map as of 2026-08-27. This is derived
 from the active workspace sources after D4. D5.1a through D5.1c, the D5.2a
-client-only Connectome cutover, D5.4a embedded CLI boundary, D5.5 zero-bypass
-gate, and D5.6 supervised topology are implemented. D5.1 through D5.4 remain
+client-only Connectome cutover, D5.4 CLI runtime boundary, D5.5 zero-bypass
+gate, and D5.6 supervised topology are implemented. D5.1 through D5.3 remain
 incomplete and this is not a cohesive-checkpoint claim.
 
 ## Invariant
@@ -20,10 +20,11 @@ No file or capability is deleted merely to make the dependency test green.
 ### RRFlow CLI
 
 The CLI's physical-store bypass is closed: production code depends on
-`rrd-engine` and uses `RrdEngine` for bounded embedded and offline
-administration. There is no second embedded handle or physical-store escape.
-The remaining gap is authenticated daemon-mode selection and
-embedded/daemon behavior parity for runtime commands.
+`rrd-engine`, `rrd-contract`, and `rrd-client`. Generated runtime commands
+select either one bound embedded `RrdEngine` or one authenticated daemon
+session; daemon mode accepts no database or project-root coordinate. Exclusive
+offline recovery remains a separate typed command family. There is no second
+embedded handle or physical-store escape.
 
 Required absorption:
 
@@ -148,7 +149,7 @@ remain D5.1/D5.3 work. The canonical changefeed and temporal graph remain
 renderable through `/api/snapshot`. This closes the zero-bypass architecture
 gate for Connectome, not the complete Connectome feature-parity gate.
 
-### D5.4a progress
+### D5.4 progress
 
 `rrflow-cli` no longer has production dependencies on `rrd-core` or
 `rrd-store`. Ordinary embedded commands open the canonical project-bound
@@ -164,12 +165,20 @@ all local authority openings live inside typed `RrdEngine` operations. The
 estate and security crates expose physical/domain behavior but declare no
 product authority executables.
 
-The complete pre-cutover CLI suite passes unchanged: four binary unit tests,
-two fixture tests, sixteen operator-surface tests, and nine runtime-experience
-tests. The workspace architecture suite now enforces zero physical dependencies
-for both Connectome and CLI. This closes the embedded CLI dependency boundary;
-authenticated daemon-mode selection and embedded/daemon behavior parity remain
-part of D5.4/G06-W04 rather than being inferred from this refactor.
+The generated `rrflow runtime list|call` family resolves every executable tool
+from the engine-owned runtime catalogue. Embedded calls use the public
+`RrdEngine::invoke_runtime_tool` boundary. Daemon calls require a loopback URL,
+canonical instance and principal, an owner-only API-key file, initialized
+security, a bounded session, and exact server/local catalogue equality before
+invocation through `rrd-client`.
+
+A process-level qualification runs the same catalogue and service-status call
+through both modes. It proves exact catalogue equality and stable logical
+status parity while the daemon retains sole write ownership, then reopens the
+store and verifies the CLI principal's completed `ServiceInspect` audit record.
+Parser evidence rejects database/project coordinates in daemon mode and rejects
+runtime topology flags on the separately typed offline storage family. The
+workspace architecture suite and development doctor enforce this boundary.
 
 ### D5.6 progress
 
@@ -187,7 +196,7 @@ for diagnosis instead of silently claiming success.
 The CI `topology-smoke` job builds the same binaries, runs `rrflow dev up`,
 probes both endpoints, checks supervisor status, and runs `rrflow dev stop`.
 A local black-box run passed the same sequence. `rrflow dev doctor` is now
-20 passed, zero blocked, zero warnings. This closes D5.5/D5.6 infrastructure;
+21 passed, zero blocked, zero warnings. This closes D5.5/D5.6 infrastructure;
 it does not close the remaining diagnostic/write parity or daemon-mode CLI
 work in D5.1 through D5.4, and it does not change the CAP-01–CAP-20 audit.
 
@@ -202,8 +211,8 @@ work in D5.1 through D5.4, and it does not change the CAP-01–CAP-20 audit.
 - The existing UI behavior and recorded history survive absorption; a green
   dependency test alone is insufficient.
 - Supervised-topology evidence includes the private credential reopen test,
-  Connectome unit and real-socket tests, 33 CLI tests, a real RRD + Connectome
-  up/status/logs/stop run, and the checked-in CI black-box smoke. The doctor is
-  green at 20/0/0; that means the canonical development topology is runnable,
+  Connectome unit and real-socket tests, CLI runtime parity and recovery
+  exclusivity tests, a real RRD + Connectome up/status/logs/stop run, and the
+  checked-in CI black-box smoke. The doctor is green at 21/0/0; that means the canonical development topology is runnable,
   not that the remaining D5 behavior parity or twenty engine capabilities are
   complete.

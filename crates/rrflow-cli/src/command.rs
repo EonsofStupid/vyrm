@@ -5,7 +5,7 @@
 //! through a parallel test-only entry point.
 
 use crate::workplan::WorkPlanAction;
-use clap::{Parser, Subcommand};
+use clap::{Args, Parser, Subcommand, ValueEnum};
 use rrd_engine::{
     digest, Claim, CoreResult, Effectiveness, GroundingReport, Millis, Outcome, Predicate,
     Producer, Reader, ReasoningPayload, RecallOutcome, RecallQuery, RrdEngine, ScopeId, Subject,
@@ -44,8 +44,8 @@ impl From<String> for Execution {
 )]
 pub struct Cli {
     /// Database directory.
-    #[arg(long, short = 'd', env = "RRFLOW_DB", default_value = ".rrflow/rrd")]
-    pub db: std::path::PathBuf,
+    #[arg(long, short = 'd', env = "RRFLOW_DB")]
+    pub db: Option<std::path::PathBuf>,
 
     /// Emit JSON instead of rendered text.
     #[arg(long, global = true)]
@@ -71,6 +71,14 @@ pub enum Command {
     WorkPlan {
         #[command(subcommand)]
         action: WorkPlanAction,
+    },
+    /// List or invoke the generated runtime catalogue through one explicit
+    /// embedded engine or authenticated daemon authority.
+    Runtime {
+        #[command(flatten)]
+        authority: RuntimeAuthorityArgs,
+        #[command(subcommand)]
+        action: RuntimeAction,
     },
     /// Record a claim.
     Assert {
@@ -276,6 +284,57 @@ pub enum Command {
     },
 }
 
+#[derive(Args, Debug, Clone)]
+pub struct RuntimeAuthorityArgs {
+    /// Runtime authority. Embedded owns the bound store; daemon owns no
+    /// storage and authenticates to rrd-server through rrd-client.
+    #[arg(long, value_enum, default_value_t = RuntimeMode::Embedded)]
+    pub mode: RuntimeMode,
+    /// Project root for embedded authority discovery.
+    #[arg(long)]
+    pub root: Option<std::path::PathBuf>,
+    /// Loopback HTTP URL for daemon authority.
+    #[arg(long)]
+    pub url: Option<String>,
+    /// Canonical instance identifier for daemon authority.
+    #[arg(long)]
+    pub instance: Option<String>,
+    /// Canonical security principal for daemon authority.
+    #[arg(long)]
+    pub principal: Option<String>,
+    /// Absolute owner-only API-key file for daemon authentication.
+    #[arg(long)]
+    pub api_key_file: Option<std::path::PathBuf>,
+}
+
+#[derive(ValueEnum, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RuntimeMode {
+    Embedded,
+    Daemon,
+}
+
+impl RuntimeMode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Embedded => "embedded",
+            Self::Daemon => "daemon",
+        }
+    }
+}
+
+#[derive(Subcommand, Debug, Clone)]
+pub enum RuntimeAction {
+    /// Emit the exact generated runtime-tool catalogue.
+    List,
+    /// Invoke one generated runtime tool with a JSON object argument.
+    Call {
+        #[arg(long)]
+        tool: String,
+        #[arg(long, default_value = "{}")]
+        arguments: String,
+    },
+}
+
 #[derive(Subcommand, Debug, Clone)]
 pub enum DevAction {
     /// Emit every development-topology invariant and fail when a required
@@ -427,6 +486,14 @@ impl Command {
                 action: DevAction::Stop { .. },
             } => "dev-stop",
             Command::WorkPlan { action } => action.name(),
+            Command::Runtime {
+                action: RuntimeAction::List,
+                ..
+            } => "runtime-list",
+            Command::Runtime {
+                action: RuntimeAction::Call { .. },
+                ..
+            } => "runtime-call",
             Command::Assert { .. } => "assert",
             Command::AsOf { .. } => "as-of",
             Command::History { .. } => "history",
@@ -766,6 +833,39 @@ impl Command {
                 format!("timeout_ms={timeout_ms}"),
             ],
             Command::WorkPlan { action } => action.arguments(),
+            Command::Runtime { authority, action } => {
+                let mut arguments = vec![format!("mode={}", authority.mode.as_str())];
+                if let Some(root) = &authority.root {
+                    arguments.push(format!("root={}", root.display()));
+                }
+                if let Some(url) = &authority.url {
+                    arguments.push(format!("url={url}"));
+                }
+                if let Some(instance) = &authority.instance {
+                    arguments.push(format!("instance={instance}"));
+                }
+                if let Some(principal) = &authority.principal {
+                    arguments.push(format!("principal={principal}"));
+                }
+                if let Some(api_key_file) = &authority.api_key_file {
+                    arguments.push(format!("api_key_file={}", api_key_file.display()));
+                }
+                match action {
+                    RuntimeAction::List => arguments.push("action=list".into()),
+                    RuntimeAction::Call {
+                        tool,
+                        arguments: input,
+                    } => {
+                        arguments.push("action=call".into());
+                        arguments.push(format!("tool={tool}"));
+                        arguments.push(format!(
+                            "arguments_sha256={}",
+                            digest::sha256_hex(input.as_bytes())
+                        ));
+                    }
+                }
+                arguments
+            }
         }
     }
 }
@@ -1049,6 +1149,9 @@ pub fn execute(
     json: bool,
 ) -> Result<Execution, Box<dyn std::error::Error>> {
     match command {
+        Command::Runtime { .. } => {
+            return Err("runtime commands require the selected runtime authority".into());
+        }
         Command::WorkPlan { action } => {
             return crate::workplan::execute(store, action, reader, now, json);
         }
@@ -1351,6 +1454,7 @@ pub fn execute(
             | Command::Exec { .. }
             | Command::Dev { .. }
             | Command::WorkPlan { .. }
+            | Command::Runtime { .. }
             | Command::Storage { .. } => {
                 unreachable!("handled above with an early return")
             }

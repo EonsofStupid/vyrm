@@ -99,7 +99,7 @@ fn outward_consumers_cannot_bypass_the_engine_boundary() {
     assert_exact(
         &forbidden_edges(&metadata, "rrflow-cli", &internal_components),
         BTreeSet::new(),
-        "CLI must use only the public embedded engine boundary",
+        "CLI must use only the public embedded engine or daemon client boundary",
     );
     assert_exact(
         &forbidden_edges(&metadata, "rrflow-mcp", &internal_components),
@@ -765,16 +765,27 @@ fn collect_identity_violations(root: &Path, violations: &mut Vec<PathBuf>, forbi
             .unwrap_or_else(|error| panic!("cannot read {}: {error}", path.display()));
         let lowercase_bytes = bytes.iter().map(u8::to_ascii_lowercase).collect::<Vec<_>>();
         if forbidden.iter().any(|value| {
-            contains_bytes(path_bytes.as_bytes(), value) || contains_bytes(&lowercase_bytes, value)
+            contains_identity(path_bytes.as_bytes(), value)
+                || contains_identity(&lowercase_bytes, value)
         }) {
             violations.push(relative);
         }
     }
 }
 
-fn contains_bytes(haystack: &[u8], needle: &[u8]) -> bool {
-    !needle.is_empty()
-        && haystack
-            .windows(needle.len())
-            .any(|window| window == needle)
+fn contains_identity(haystack: &[u8], needle: &[u8]) -> bool {
+    if needle.is_empty() {
+        return false;
+    }
+    let skill_prefix = [b"rrflow".as_slice(), b"-engine".as_slice()].concat();
+    haystack
+        .windows(needle.len())
+        .enumerate()
+        .any(|(offset, window)| {
+            if window != needle {
+                return false;
+            }
+            needle != skill_prefix
+                || !haystack[offset + needle.len()..].starts_with(b"-development")
+        })
 }
