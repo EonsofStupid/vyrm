@@ -13,6 +13,11 @@ injection, routing, and provider-visible events.
 
 ## Runtime contract
 
+The canonical engine boundary, shape-first planning rule, routine/template
+model, and ordered extraction of Connectome are defined in
+[`docs/consolidation-contract.md`](docs/consolidation-contract.md). That
+contract is the guard against adding another parallel orchestration path.
+
 ```text
 prompt
   │
